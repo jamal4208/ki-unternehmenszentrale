@@ -5986,6 +5986,74 @@ select {
 
 .demo-cockpit-output {
   margin-top: 16px;
+  display: grid;
+  gap: 14px;
+}
+
+.demo-cockpit-hero {
+  padding: 16px 18px;
+  border: 1px solid #e0d7c8;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #fff9ef 0%, #f3ebdd 100%);
+}
+
+.demo-cockpit-hero-kicker {
+  margin: 0 0 6px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #7a6f61;
+}
+
+.demo-cockpit-hero-quote {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #3f372f;
+}
+
+.demo-cockpit-hero-note {
+  margin: 8px 0 0;
+  font-size: 0.9rem;
+  color: #6a6258;
+}
+
+.demo-cockpit-quicknav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.demo-cockpit-quicknav-chip {
+  padding: 8px 12px;
+  border: 1px solid #ddd4c6;
+  border-radius: 999px;
+  background: #fff;
+  color: #4a433b;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.demo-cockpit-quicknav-chip:hover {
+  background: #faf6ef;
+  border-color: #c9bca8;
+}
+
+.demo-cockpit-card--hr {
+  border-color: #e6ddd0;
+  background: linear-gradient(180deg, #fffdf9 0%, #faf5ec 100%);
+}
+
+.demo-cockpit-tagesfuehrung,
+.demo-cockpit-codex {
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  border: 1px solid #e8e2d8;
+  border-radius: 14px;
+  background: #fcfaf6;
 }
 
 .demo-cockpit-grid {
@@ -6135,6 +6203,12 @@ select {
   display: grid;
   gap: 18px;
   margin-top: 14px;
+}
+
+@media (min-width: 1100px) {
+  .demo-cockpit-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 900px) {

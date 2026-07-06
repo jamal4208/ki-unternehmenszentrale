@@ -15639,12 +15639,22 @@ function buildPluginCommandCenter(projectContext, workRequest, analysis, agentRu
 }
 
 const DEMO_COCKPIT_VERSION = "V6.34.3";
+const DEMO_UI_UX_FINISH_VERSION = "V6.35.0";
 
 function getDemoCockpit() {
   return {
     demoCockpitVersion: DEMO_COCKPIT_VERSION,
     demoCockpitReady: true,
     demoCockpitMode: "compact-read-only-demo",
+    demoUiUxFinishVersion: DEMO_UI_UX_FINISH_VERSION,
+    demoUiUxFinishReady: true,
+    demoUiUxFinishMode: "demo-presentation-ready",
+    demoQuickNav: [
+      { label: "Plugin-Leitstand", view: "agents", anchor: "plugin-leitstand-demo-anchor" },
+      { label: "Produktivbereich", view: "agents", anchor: "demo-productive-anchor" },
+      { label: "HR-Tagesvorschlag", view: "cockpit", anchor: "hr-agent-daily-suggestion" },
+      { label: "Agenten-Zentrale", view: "agents", anchor: "agent-plugin-readiness" },
+    ],
     demoStatus: {
       label: "Intern vorführbar",
       pluginLeitstandVersion: PLUGIN_COMMAND_CENTER_VERSION,
@@ -15695,7 +15705,29 @@ function renderDemoCockpit() {
   if (!output) return;
 
   const demo = getDemoCockpit();
+  const hrSuggestion = getHrDailyAgentSuggestion();
   output.innerHTML = `
+    <aside class="demo-cockpit-hero" aria-label="Demo-Pflichtsatz">
+      <p class="demo-cockpit-hero-kicker">Demo-Präsentation · ${escapeHtml(demo.demoUiUxFinishVersion)}</p>
+      <blockquote class="demo-cockpit-hero-quote">verbunden heißt nicht ausführend</blockquote>
+      <p class="demo-cockpit-hero-note">Alle Plugin-Verbindungen sind read-only. Keine Ausführung ohne Jamals Bestätigung.</p>
+    </aside>
+
+    <nav class="demo-cockpit-quicknav" aria-label="Demo-Schnellnavigation">
+      ${demo.demoQuickNav
+        .map(
+          (item) => `
+        <button
+          class="demo-cockpit-quicknav-chip"
+          type="button"
+          data-view-jump="${escapeHtml(item.view)}"
+          ${item.anchor ? `data-view-anchor="${escapeHtml(item.anchor)}"` : ""}
+        >${escapeHtml(item.label)}</button>
+      `,
+        )
+        .join("")}
+    </nav>
+
     <div class="demo-cockpit-grid">
       <article class="demo-cockpit-card">
         <header class="demo-cockpit-card-head">
@@ -15703,7 +15735,7 @@ function renderDemoCockpit() {
           ${renderDemoCockpitBadge("bestanden", demo.demoStatus.label)}
         </header>
         <dl class="demo-cockpit-facts">
-          <div><dt>Version</dt><dd>${escapeHtml(demo.demoStatus.pluginLeitstandVersion)} / Demo-Cockpit ${escapeHtml(demo.demoCockpitVersion)}</dd></div>
+          <div><dt>Version</dt><dd>UI/UX ${escapeHtml(demo.demoUiUxFinishVersion)} · Cockpit ${escapeHtml(demo.demoCockpitVersion)} · Plugin ${escapeHtml(demo.demoStatus.pluginLeitstandVersion)}</dd></div>
           <div><dt>Modus</dt><dd>${escapeHtml(demo.demoStatus.mode)}</dd></div>
           <div><dt>Ergebnis</dt><dd>${escapeHtml(demo.demoStatus.result)}</dd></div>
         </dl>
@@ -15720,7 +15752,7 @@ function renderDemoCockpit() {
           <li>${renderDemoCockpitBadge("offen", "Canva")} briefing-ready, nicht production-ready</li>
         </ul>
         <div class="demo-cockpit-actions">
-          <button class="secondary-button" type="button" data-view-jump="agents">Plugin-Leitstand öffnen</button>
+          <button class="secondary-button" type="button" data-view-jump="agents" data-view-anchor="plugin-leitstand-demo-anchor">Plugin-Leitstand öffnen</button>
         </div>
       </article>
 
@@ -15734,7 +15766,21 @@ function renderDemoCockpit() {
           <div><dt>Modus</dt><dd>projektbezogen aktiv · read-only</dd></div>
         </dl>
         <div class="demo-cockpit-actions">
-          <button class="secondary-button" type="button" data-view-jump="agents">Agenten-Zentrale</button>
+          <button class="secondary-button" type="button" data-view-jump="agents" data-view-anchor="agent-plugin-readiness">Agenten-Zentrale</button>
+        </div>
+      </article>
+
+      <article class="demo-cockpit-card demo-cockpit-card--hr">
+        <header class="demo-cockpit-card-head">
+          <h4>HR-Tagesvorschlag</h4>
+          ${renderDemoCockpitBadge("vorbereitet", "read-only")}
+        </header>
+        <dl class="demo-cockpit-facts">
+          <div><dt>Heute trainieren</dt><dd>${escapeHtml(hrSuggestion.targetName)}</dd></div>
+          <div><dt>1%-Verbesserung</dt><dd>${escapeHtml(hrSuggestion.improvement)}</dd></div>
+        </dl>
+        <div class="demo-cockpit-actions">
+          <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="hr-agent-daily-suggestion">Vollständig öffnen</button>
         </div>
       </article>
 
@@ -15756,6 +15802,9 @@ function renderDemoCockpit() {
           ${demo.nextDemoSteps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}
         </ol>
         <p class="demo-cockpit-quote"><strong>Pflichtsatz:</strong> verbunden heißt nicht ausführend</p>
+        <div class="demo-cockpit-actions">
+          <button class="secondary-button" type="button" data-view-jump="agents" data-view-anchor="demo-productive-anchor">Produktivbereich öffnen</button>
+        </div>
       </article>
 
       <article class="demo-cockpit-card demo-cockpit-card--wide">
@@ -15765,9 +15814,6 @@ function renderDemoCockpit() {
         <ul class="demo-cockpit-list demo-cockpit-list--compact">
           ${demo.openPoints.map((item) => `<li>${renderDemoCockpitBadge("offen", "beobachten")} ${escapeHtml(item)}</li>`).join("")}
         </ul>
-        <div class="demo-cockpit-actions">
-          <a class="secondary-button demo-cockpit-link" href="#hr-agent-daily-suggestion">HR-Tagesvorschlag</a>
-        </div>
       </article>
     </div>
   `;
@@ -30480,7 +30526,7 @@ function pluginReadinessMarkup() {
         <div><dt>Ergebnismodus</dt><dd>${escapeHtml(productiveManualHealthDayWork.resultMode)}</dd></div>
         <div><dt>Ergebnisbereit</dt><dd>${productiveManualHealthDayWork.resultReady ? "ja" : "nein"}</dd></div>
       </dl>
-      <h6>Produktiv-Ergebnisblock</h6>
+      <h6 id="demo-productive-anchor">Produktiv-Ergebnisblock</h6>
       <div class="productive-work-input">
         <label for="productive-work-project-select">Projekt</label>
         <select id="productive-work-project-select">
@@ -45154,7 +45200,39 @@ function showToast(message) {
   window.setTimeout(() => toast.classList.remove("is-visible"), 2400);
 }
 
-function switchView(viewName) {
+function openDetailsAncestors(element) {
+  let node = element?.parentElement;
+  while (node) {
+    if (node.tagName === "DETAILS") {
+      node.open = true;
+    }
+    node = node.parentElement;
+  }
+}
+
+function scrollToDemoAnchor(anchorId) {
+  if (!anchorId) return;
+  const target = document.getElementById(anchorId);
+  if (!target) return;
+  openDetailsAncestors(target);
+  target.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+const DEMO_HASH_ANCHOR_VIEWS = {
+  "hr-agent-daily-suggestion": "cockpit",
+  "plugin-leitstand-demo-anchor": "agents",
+  "demo-productive-anchor": "agents",
+  "agent-plugin-readiness": "agents",
+};
+
+function handleDemoAnchorFromHash() {
+  const anchorId = window.location.hash.replace(/^#/, "");
+  const viewName = DEMO_HASH_ANCHOR_VIEWS[anchorId];
+  if (!viewName) return;
+  switchView(viewName, anchorId);
+}
+
+function switchView(viewName, anchorId) {
   document.querySelectorAll(".view").forEach((view) => {
     view.classList.toggle("is-active", view.id === `${viewName}-view`);
   });
@@ -45165,7 +45243,12 @@ function switchView(viewName) {
 
   const currentView = document.querySelector(`#${viewName}-view`);
   byId("view-title").textContent = currentView?.dataset.title || "Cockpit";
-  window.scrollTo({ top: 0, behavior: "smooth" });
+
+  if (anchorId) {
+    requestAnimationFrame(() => scrollToDemoAnchor(anchorId));
+  } else {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 }
 
 function openProjectDetail(projectId) {
@@ -45205,6 +45288,7 @@ function openProjectFromUrl() {
 
 window.addEventListener("hashchange", () => {
   openProjectFromUrl();
+  handleDemoAnchorFromHash();
 });
 
 function airtableLiveCheckLabel(payload) {
@@ -46924,7 +47008,9 @@ function setupNavigation() {
   });
 
   document.querySelectorAll("[data-view-jump]").forEach((button) => {
-    button.addEventListener("click", () => switchView(button.dataset.viewJump));
+    button.addEventListener("click", () => {
+      switchView(button.dataset.viewJump, button.dataset.viewAnchor || null);
+    });
   });
 }
 
@@ -47492,7 +47578,10 @@ function setupForms() {
 
     const dynamicViewJumpButton = clickedElement?.closest("[data-view-jump]");
     if (dynamicViewJumpButton) {
-      switchView(dynamicViewJumpButton.dataset.viewJump);
+      switchView(
+        dynamicViewJumpButton.dataset.viewJump,
+        dynamicViewJumpButton.dataset.viewAnchor || null,
+      );
       return;
     }
 
@@ -47867,6 +47956,7 @@ setupNavigation();
 setupForms();
 renderAll();
 refreshAirtablePilotStatus();
+handleDemoAnchorFromHash();
 let openedInitialProject = false;
 try {
   openedInitialProject = openProjectFromUrl();

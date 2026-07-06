@@ -6566,12 +6566,22 @@ function buildPluginCommandCenter(projectContext, workRequest, analysis, agentRu
 }
 
 const DEMO_COCKPIT_VERSION = "V6.34.3";
+const DEMO_UI_UX_FINISH_VERSION = "V6.35.0";
 
 function getDemoCockpit() {
   return {
     demoCockpitVersion: DEMO_COCKPIT_VERSION,
     demoCockpitReady: true,
     demoCockpitMode: "compact-read-only-demo",
+    demoUiUxFinishVersion: DEMO_UI_UX_FINISH_VERSION,
+    demoUiUxFinishReady: true,
+    demoUiUxFinishMode: "demo-presentation-ready",
+    demoQuickNav: [
+      { label: "Plugin-Leitstand", view: "agents", anchor: "plugin-leitstand-demo-anchor" },
+      { label: "Produktivbereich", view: "agents", anchor: "demo-productive-anchor" },
+      { label: "HR-Tagesvorschlag", view: "cockpit", anchor: "hr-agent-daily-suggestion" },
+      { label: "Agenten-Zentrale", view: "agents", anchor: "agent-plugin-readiness" },
+    ],
     demoStatus: {
       label: "Intern vorführbar",
       pluginLeitstandVersion: PLUGIN_COMMAND_CENTER_VERSION,
@@ -18193,6 +18203,9 @@ function getPluginReadiness(requestUrl) {
     demoCockpitVersion: getDemoCockpit().demoCockpitVersion,
     demoCockpitReady: getDemoCockpit().demoCockpitReady,
     demoCockpitMode: getDemoCockpit().demoCockpitMode,
+    demoUiUxFinishVersion: getDemoCockpit().demoUiUxFinishVersion,
+    demoUiUxFinishReady: getDemoCockpit().demoUiUxFinishReady,
+    demoUiUxFinishMode: getDemoCockpit().demoUiUxFinishMode,
     demoCockpit: getDemoCockpit(),
     pluginReadyAgentCount: agentPluginReadiness.length,
     availablePluginCategories,
