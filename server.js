@@ -6070,12 +6070,12 @@ const PRODUCTIVE_PROJECT_REGISTRY = [
   {
     id: "health-upgrade-kompass",
     name: "Health Upgrade Kompass",
-    status: "active-read-only",
+    status: "demo-ready-read-only",
     projectType: "product",
     description:
-      "Erstes reales Produktfeld mit sicherem Orientierungs- und Gesprächsvorbereitungsflow (Bereich 1–4 demo-tauglich).",
+      "Erstes reales Produktfeld mit sicherem Orientierungs- und Gesprächsvorbereitungsflow.",
     primaryGoal:
-      "Demo-tauglichen Health-Kompass in sicheren Produktbereichen ausarbeiten – ohne Diagnose, Messwerte oder automatische Empfehlung.",
+      "Demo-tauglichen Health-Kompass mit Bereich 1–4 vorführen; Körperanalysewaage bleibt Phase 2.",
     safetyProfile: "health-orientation-no-diagnosis",
     recommendedAgents: [
       "health-compass-agent",
@@ -6089,6 +6089,7 @@ const PRODUCTIVE_PROJECT_REGISTRY = [
       "diagnosis",
       "medical-recommendation",
       "healing-claims",
+      "body-measurement-interpretation",
       "write-operation",
       "external-request",
       "persistence",
@@ -8045,6 +8046,7 @@ function getProductiveManualHealthDayWork(options = {}) {
         projectRecommendedAgents: projectContext.project?.recommendedAgents,
         projectStatus: projectContext.project?.status,
         projectDescription: projectContext.project?.description,
+        projectPrimaryGoal: projectContext.project?.primaryGoal,
       }
     : {};
 
