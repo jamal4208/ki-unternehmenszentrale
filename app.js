@@ -4455,6 +4455,7 @@ function assignAgents(idea) {
 }
 
 function renderAll() {
+  renderDemoCockpit();
   renderExecutiveMode();
   renderMetrics();
   renderDailyFocus();
@@ -15635,6 +15636,141 @@ function buildPluginCommandCenter(projectContext, workRequest, analysis, agentRu
     nextPluginDemoStep:
       "Ersten echten read-only Plugin-Test mit einem Plugin manuell vorbereiten – keine Schreibrechte, keine Aktion ohne Freigabe.",
   };
+}
+
+const DEMO_COCKPIT_VERSION = "V6.34.3";
+
+function getDemoCockpit() {
+  return {
+    demoCockpitVersion: DEMO_COCKPIT_VERSION,
+    demoCockpitReady: true,
+    demoCockpitMode: "compact-read-only-demo",
+    demoStatus: {
+      label: "Intern vorführbar",
+      pluginLeitstandVersion: PLUGIN_COMMAND_CENTER_VERSION,
+      mode: "read-only",
+      result: "GitHub + Airtable live bestätigt",
+    },
+    pluginLiveStatus: {
+      github: { status: "bestanden", note: "live read-only" },
+      airtable: { status: "bestanden", note: "live read-only sanitisiert" },
+      vercel: { status: "vorbereitet", note: "nicht live" },
+      canva: { status: "briefing-ready", note: "nicht production-ready" },
+    },
+    agentStatus: {
+      agentCount: 25,
+      projectMode: "projektbezogen aktiv",
+      mode: "read-only",
+      newAgents: false,
+    },
+    safetyStatus: [
+      "keine GitHub-Commits",
+      "keine Airtable-Feldwerte",
+      "keine Vercel-Deployments",
+      "keine Canva-Produktion",
+      "keine automatische Plugin-Ausführung",
+    ],
+    nextDemoSteps: [
+      "Projekt „KI-Unternehmenszentrale“ auswählen",
+      "Plugin-Leitstand zeigen",
+      "GitHub live zeigen",
+      "Airtable sanitisiert zeigen",
+      "Pflichtsatz sagen: „verbunden heißt nicht ausführend“",
+    ],
+    openPoints: [
+      "GitHub aktuell öffentlich",
+      "Vercel read-only noch ausstehend",
+      "Canva erst nach Design-/Visual-Agent",
+      "Airtable Stufe 2 nicht freigegeben",
+    ],
+  };
+}
+
+function renderDemoCockpitBadge(kind, label) {
+  return `<span class="demo-cockpit-badge demo-cockpit-badge--${escapeHtml(kind)}">${escapeHtml(label)}</span>`;
+}
+
+function renderDemoCockpit() {
+  const output = byId("demo-cockpit-output");
+  if (!output) return;
+
+  const demo = getDemoCockpit();
+  output.innerHTML = `
+    <div class="demo-cockpit-grid">
+      <article class="demo-cockpit-card">
+        <header class="demo-cockpit-card-head">
+          <h4>Demo-Status</h4>
+          ${renderDemoCockpitBadge("bestanden", demo.demoStatus.label)}
+        </header>
+        <dl class="demo-cockpit-facts">
+          <div><dt>Version</dt><dd>${escapeHtml(demo.demoStatus.pluginLeitstandVersion)} / Demo-Cockpit ${escapeHtml(demo.demoCockpitVersion)}</dd></div>
+          <div><dt>Modus</dt><dd>${escapeHtml(demo.demoStatus.mode)}</dd></div>
+          <div><dt>Ergebnis</dt><dd>${escapeHtml(demo.demoStatus.result)}</dd></div>
+        </dl>
+      </article>
+
+      <article class="demo-cockpit-card">
+        <header class="demo-cockpit-card-head">
+          <h4>Plugin-Live-Status</h4>
+        </header>
+        <ul class="demo-cockpit-list">
+          <li>${renderDemoCockpitBadge("bestanden", "GitHub")} live read-only bestanden</li>
+          <li>${renderDemoCockpitBadge("bestanden", "Airtable")} live read-only sanitisiert bestanden</li>
+          <li>${renderDemoCockpitBadge("vorbereitet", "Vercel")} vorbereitet, nicht live</li>
+          <li>${renderDemoCockpitBadge("offen", "Canva")} briefing-ready, nicht production-ready</li>
+        </ul>
+        <div class="demo-cockpit-actions">
+          <button class="secondary-button" type="button" data-view-jump="agents">Plugin-Leitstand öffnen</button>
+        </div>
+      </article>
+
+      <article class="demo-cockpit-card">
+        <header class="demo-cockpit-card-head">
+          <h4>Agentenstatus</h4>
+          ${renderDemoCockpitBadge("bestanden", "25 Agenten")}
+        </header>
+        <dl class="demo-cockpit-facts">
+          <div><dt>Anzahl</dt><dd>25 – keine neuen Agenten</dd></div>
+          <div><dt>Modus</dt><dd>projektbezogen aktiv · read-only</dd></div>
+        </dl>
+        <div class="demo-cockpit-actions">
+          <button class="secondary-button" type="button" data-view-jump="agents">Agenten-Zentrale</button>
+        </div>
+      </article>
+
+      <article class="demo-cockpit-card">
+        <header class="demo-cockpit-card-head">
+          <h4>Sicherheitsstatus</h4>
+          ${renderDemoCockpitBadge("blockiert", "geschützt")}
+        </header>
+        <ul class="demo-cockpit-list demo-cockpit-list--compact">
+          ${demo.safetyStatus.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ul>
+      </article>
+
+      <article class="demo-cockpit-card demo-cockpit-card--wide">
+        <header class="demo-cockpit-card-head">
+          <h4>Nächster Demo-Schritt</h4>
+        </header>
+        <ol class="demo-cockpit-steps">
+          ${demo.nextDemoSteps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}
+        </ol>
+        <p class="demo-cockpit-quote"><strong>Pflichtsatz:</strong> verbunden heißt nicht ausführend</p>
+      </article>
+
+      <article class="demo-cockpit-card demo-cockpit-card--wide">
+        <header class="demo-cockpit-card-head">
+          <h4>Offene Punkte</h4>
+        </header>
+        <ul class="demo-cockpit-list demo-cockpit-list--compact">
+          ${demo.openPoints.map((item) => `<li>${renderDemoCockpitBadge("offen", "beobachten")} ${escapeHtml(item)}</li>`).join("")}
+        </ul>
+        <div class="demo-cockpit-actions">
+          <a class="secondary-button demo-cockpit-link" href="#hr-agent-daily-suggestion">HR-Tagesvorschlag</a>
+        </div>
+      </article>
+    </div>
+  `;
 }
 
 const PRODUCTIVE_AGENT_REGISTRY = [
@@ -30374,7 +30510,7 @@ function pluginReadinessMarkup() {
       <div id="productive-work-project-run">
         ${renderProductiveProjectWorkBlock(productiveManualHealthDayWork)}
       </div>
-      <h6>Plugin-Leitstand</h6>
+      <h6 id="plugin-leitstand-demo-anchor">Plugin-Leitstand</h6>
       <div id="productive-work-plugin-command-center">
         ${renderProductivePluginCommandCenterBlock(productiveManualHealthDayWork)}
       </div>
@@ -34108,6 +34244,9 @@ function renderExecutiveMode() {
   `;
 
   output.innerHTML = `
+    <details class="demo-cockpit-longform">
+      <summary>Technische Langfassung / Cockpit-Details anzeigen</summary>
+      <div class="demo-cockpit-longform-body">
     ${compactWorkModeMarkup()}
 
     ${pluginRolloutCenterMarkup()}
@@ -38033,6 +38172,8 @@ function renderExecutiveMode() {
 
       <p class="form-note">Keine GitHub- oder Vercel-Anbindung, keine API, kein OAuth, kein Login, kein GitHub-Token, kein Vercel-Token, keine Tokens, keine Credentials, keine Cloud, kein Repository-Zugriff, keine Commits, keine Pull Requests, keine Issues, keine GitHub Actions, keine Vercel-Projekte, keine Deployments, keine Domains, keine Environment Variables, keine Logs, keine Synchronisierung und keine Automatisierung.</p>
     </section>
+      </div>
+    </details>
 
     <section class="v5-hr-suggestion" id="hr-agent-daily-suggestion" aria-labelledby="hr-agent-daily-suggestion-title">
       <div class="decision-overview-top">
@@ -38062,6 +38203,9 @@ function renderExecutiveMode() {
       <p class="form-note">${escapeHtml(hrSuggestion.manualStep)} Keine echten externen Aktionen.</p>
     </section>
 
+    <details class="demo-cockpit-longform">
+      <summary>Weitere Führungskarten / Arbeitsmodus</summary>
+      <div class="demo-cockpit-longform-body">
     <section class="executive-hero executive-legacy-focus" aria-label="Bestehender Tagesfokus">
       <p class="executive-greeting">Heute wichtig</p>
       <h4>${escapeHtml(primaryFocusLine)}</h4>
@@ -38240,6 +38384,8 @@ function renderExecutiveMode() {
       <a href="#analysis-details-title">Detailbereiche ansehen</a>
     </div>
     <p class="executive-mode-note">Nur Orientierung aus vorhandenen Daten. Keine neue Priorisierung, keine Entscheidung, keine Freigabe, keine Agentenausführung.</p>
+      </div>
+    </details>
   `;
 }
 

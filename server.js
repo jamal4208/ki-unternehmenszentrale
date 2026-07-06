@@ -6565,6 +6565,54 @@ function buildPluginCommandCenter(projectContext, workRequest, analysis, agentRu
   };
 }
 
+const DEMO_COCKPIT_VERSION = "V6.34.3";
+
+function getDemoCockpit() {
+  return {
+    demoCockpitVersion: DEMO_COCKPIT_VERSION,
+    demoCockpitReady: true,
+    demoCockpitMode: "compact-read-only-demo",
+    demoStatus: {
+      label: "Intern vorführbar",
+      pluginLeitstandVersion: PLUGIN_COMMAND_CENTER_VERSION,
+      mode: "read-only",
+      result: "GitHub + Airtable live bestätigt",
+    },
+    pluginLiveStatus: {
+      github: { status: "bestanden", note: "live read-only" },
+      airtable: { status: "bestanden", note: "live read-only sanitisiert" },
+      vercel: { status: "vorbereitet", note: "nicht live" },
+      canva: { status: "briefing-ready", note: "nicht production-ready" },
+    },
+    agentStatus: {
+      agentCount: 25,
+      projectMode: "projektbezogen aktiv",
+      mode: "read-only",
+      newAgents: false,
+    },
+    safetyStatus: [
+      "keine GitHub-Commits",
+      "keine Airtable-Feldwerte",
+      "keine Vercel-Deployments",
+      "keine Canva-Produktion",
+      "keine automatische Plugin-Ausführung",
+    ],
+    nextDemoSteps: [
+      "Projekt „KI-Unternehmenszentrale“ auswählen",
+      "Plugin-Leitstand zeigen",
+      "GitHub live zeigen",
+      "Airtable sanitisiert zeigen",
+      "Pflichtsatz sagen: „verbunden heißt nicht ausführend“",
+    ],
+    openPoints: [
+      "GitHub aktuell öffentlich",
+      "Vercel read-only noch ausstehend",
+      "Canva erst nach Design-/Visual-Agent",
+      "Airtable Stufe 2 nicht freigegeben",
+    ],
+  };
+}
+
 const PRODUCTIVE_AGENT_REGISTRY = [
   { id: "strategy-agent", name: "Strategie-Agent", role: "Bewertet Ziel, Richtung und Priorität", category: "strategy", active: true, readOnly: true },
   { id: "product-agent", name: "Produkt-Agent", role: "Ordnet Auftrag produktlogisch ein", category: "product", active: true, readOnly: true },
@@ -18142,6 +18190,10 @@ function getPluginReadiness(requestUrl) {
     pluginCommandCenterBlockers:
       productiveManualHealthDayWork.pluginCommandCenter?.pluginCommandCenterBlockers,
     nextPluginDemoStep: productiveManualHealthDayWork.pluginCommandCenter?.nextPluginDemoStep,
+    demoCockpitVersion: getDemoCockpit().demoCockpitVersion,
+    demoCockpitReady: getDemoCockpit().demoCockpitReady,
+    demoCockpitMode: getDemoCockpit().demoCockpitMode,
+    demoCockpit: getDemoCockpit(),
     pluginReadyAgentCount: agentPluginReadiness.length,
     availablePluginCategories,
     agentPluginReadiness,

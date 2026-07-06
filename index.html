@@ -69,6 +69,17 @@
         </header>
 
         <section class="view is-active" id="cockpit-view" data-title="Cockpit">
+          <section class="demo-cockpit-section" id="demo-cockpit-section" aria-labelledby="demo-cockpit-title">
+            <div class="demo-cockpit-head">
+              <div>
+                <p class="eyebrow">V6.34.3 Kompaktes Demo-Cockpit</p>
+                <h3 id="demo-cockpit-title">Demo-Cockpit V6.34.3</h3>
+                <p>Übersicht statt Textwand – read-only Demo auf einen Blick.</p>
+              </div>
+            </div>
+            <div id="demo-cockpit-output" class="demo-cockpit-output"></div>
+          </section>
+
           <section class="executive-mode-section" aria-labelledby="executive-mode-title">
             <div class="executive-mode-head">
               <div>
@@ -148,7 +159,7 @@
             <p>Die bestehenden Kacheln bleiben erhalten und sind jetzt nach Entscheidung, Risiko, Arbeitsauftrag und Archiv sortiert.</p>
           </section>
 
-          <details class="cockpit-detail-group" open>
+          <details class="cockpit-detail-group">
             <summary>
               <span>Entscheidung</span>
               <small>Tagesfokus, offene Entscheidungen und Entscheidungsdruck</small>
@@ -236,7 +247,7 @@
             </div>
           </details>
 
-          <details class="cockpit-detail-group" open>
+          <details class="cockpit-detail-group">
             <summary>
               <span>Risiko</span>
               <small>Risikohinweise, fehlende Risikostufen und Checklisten</small>
@@ -322,7 +333,7 @@
             </div>
           </details>
 
-          <details class="cockpit-detail-group" open>
+          <details class="cockpit-detail-group">
             <summary>
               <span>Arbeitsauftrag</span>
               <small>Manuelle Klärung, Arbeitsbriefe und Umsetzungsauftrag</small>
