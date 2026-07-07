@@ -6834,6 +6834,63 @@ const PRODUCTIVE_CENTRAL_AGENT_CENTER_UX_FINISH_PREPARED = true;
 const NEXT_PRODUCTIVE_CENTRAL_AGENT_CENTER_UX_STEP =
   "Agenten-Zentrale in der externen Demo kurz erklären und HR-Tagesvorschlag als konkretes Beispiel zeigen.";
 
+function getProductiveCentralPluginControlUxFinish() {
+  return {
+    version: "V6.36.4",
+    title: "Plugin-Leitstand",
+    subtitle:
+      "Welche Verbindungen sind vorbereitet, was bleibt gesperrt, und welche Freigabe wäre später nötig?",
+    guidanceLine:
+      "Fokus: Erst sicher verstehen, dann gezielt freigeben — keine automatische Aktivierung.",
+    summary: {
+      readOnlyActive: true,
+      noExternalRequests: true,
+      noWriteRights: true,
+      noSecretsVisible: true,
+      approvalOpen: true,
+    },
+    areaNowSafe: {
+      title: "Jetzt sicher",
+      question: "Was passiert heute wirklich?",
+      points: [
+        "Die KI-Unternehmenszentrale zeigt vorbereitete Plugin-/Tool-Stufen nur read-only.",
+        "Es werden keine externen Systeme beschrieben.",
+        "Es werden keine echten Daten übertragen.",
+        "Es werden keine Schreibaktionen ausgeführt.",
+      ],
+    },
+    areaLaterPossible: {
+      title: "Später möglich",
+      question: "Was könnte nach Freigabe kommen?",
+      points: [
+        "Airtable lesen",
+        "Canva/Design-Entwürfe vorbereiten",
+        "Vercel read-only prüfen",
+        "strukturierte Freigaben je Plugin",
+        "Schreibrechte nur nach manueller Entscheidung",
+      ],
+    },
+    areaJamalDecision: {
+      title: "Jamals Entscheidung",
+      question: "Was muss Jamal bewusst festlegen?",
+      points: [
+        "Welche Plugin-Stufe darf zuerst getestet werden?",
+        "Bleibt es read-only?",
+        "Welche Daten dürfen sichtbar sein?",
+        "Welche Aktion bleibt ausdrücklich verboten?",
+      ],
+    },
+    noApprovalWithoutJamal:
+      "Keine Freigabe ohne Jamal: Plugins bleiben vorbereitet, bis Jamal eine konkrete Stufe freigibt.",
+    recommendation:
+      "Plugin-Leitstand als Sicherheits- und Freigabeübersicht führen, nicht als Automatisierungsversprechen.",
+  };
+}
+
+const PRODUCTIVE_CENTRAL_PLUGIN_CONTROL_UX_FINISH_PREPARED = true;
+const NEXT_PRODUCTIVE_CENTRAL_PLUGIN_CONTROL_UX_STEP =
+  "Erste Plugin-Stufe mit Jamal bewusst als read-only Test freigeben oder bewusst zurückstellen.";
+
 const PRODUCTIVE_AGENT_REGISTRY = [
   { id: "strategy-agent", name: "Strategie-Agent", role: "Bewertet Ziel, Richtung und Priorität", category: "strategy", active: true, readOnly: true },
   { id: "product-agent", name: "Produkt-Agent", role: "Ordnet Auftrag produktlogisch ein", category: "product", active: true, readOnly: true },
@@ -18439,6 +18496,9 @@ function getPluginReadiness(requestUrl) {
     productiveCentralAgentCenterUxFinish: getProductiveCentralAgentCenterUxFinish(),
     productiveCentralAgentCenterUxFinishPrepared: PRODUCTIVE_CENTRAL_AGENT_CENTER_UX_FINISH_PREPARED,
     nextProductiveCentralAgentCenterUxStep: NEXT_PRODUCTIVE_CENTRAL_AGENT_CENTER_UX_STEP,
+    productiveCentralPluginControlUxFinish: getProductiveCentralPluginControlUxFinish(),
+    productiveCentralPluginControlUxFinishPrepared: PRODUCTIVE_CENTRAL_PLUGIN_CONTROL_UX_FINISH_PREPARED,
+    nextProductiveCentralPluginControlUxStep: NEXT_PRODUCTIVE_CENTRAL_PLUGIN_CONTROL_UX_STEP,
     demoCockpit: getDemoCockpit(),
     pluginReadyAgentCount: agentPluginReadiness.length,
     availablePluginCategories,

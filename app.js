@@ -16038,6 +16038,124 @@ const PRODUCTIVE_CENTRAL_AGENT_CENTER_UX_FINISH_PREPARED = true;
 const NEXT_PRODUCTIVE_CENTRAL_AGENT_CENTER_UX_STEP =
   "Agenten-Zentrale in der externen Demo kurz erklären und HR-Tagesvorschlag als konkretes Beispiel zeigen.";
 
+function getProductiveCentralPluginControlUxFinish() {
+  return {
+    version: "V6.36.4",
+    title: "Plugin-Leitstand",
+    subtitle:
+      "Welche Verbindungen sind vorbereitet, was bleibt gesperrt, und welche Freigabe wäre später nötig?",
+    guidanceLine:
+      "Fokus: Erst sicher verstehen, dann gezielt freigeben — keine automatische Aktivierung.",
+    summary: {
+      readOnlyActive: true,
+      noExternalRequests: true,
+      noWriteRights: true,
+      noSecretsVisible: true,
+      approvalOpen: true,
+    },
+    areaNowSafe: {
+      title: "Jetzt sicher",
+      question: "Was passiert heute wirklich?",
+      points: [
+        "Die KI-Unternehmenszentrale zeigt vorbereitete Plugin-/Tool-Stufen nur read-only.",
+        "Es werden keine externen Systeme beschrieben.",
+        "Es werden keine echten Daten übertragen.",
+        "Es werden keine Schreibaktionen ausgeführt.",
+      ],
+    },
+    areaLaterPossible: {
+      title: "Später möglich",
+      question: "Was könnte nach Freigabe kommen?",
+      points: [
+        "Airtable lesen",
+        "Canva/Design-Entwürfe vorbereiten",
+        "Vercel read-only prüfen",
+        "strukturierte Freigaben je Plugin",
+        "Schreibrechte nur nach manueller Entscheidung",
+      ],
+    },
+    areaJamalDecision: {
+      title: "Jamals Entscheidung",
+      question: "Was muss Jamal bewusst festlegen?",
+      points: [
+        "Welche Plugin-Stufe darf zuerst getestet werden?",
+        "Bleibt es read-only?",
+        "Welche Daten dürfen sichtbar sein?",
+        "Welche Aktion bleibt ausdrücklich verboten?",
+      ],
+    },
+    noApprovalWithoutJamal:
+      "Keine Freigabe ohne Jamal: Plugins bleiben vorbereitet, bis Jamal eine konkrete Stufe freigibt.",
+    recommendation:
+      "Plugin-Leitstand als Sicherheits- und Freigabeübersicht führen, nicht als Automatisierungsversprechen.",
+  };
+}
+
+const PRODUCTIVE_CENTRAL_PLUGIN_CONTROL_UX_FINISH_PREPARED = true;
+const NEXT_PRODUCTIVE_CENTRAL_PLUGIN_CONTROL_UX_STEP =
+  "Erste Plugin-Stufe mit Jamal bewusst als read-only Test freigeben oder bewusst zurückstellen.";
+
+function renderPluginControlSummary() {
+  return `
+    <section class="plugin-control-ux-summary" aria-label="Plugin-Sicherheitsübersicht">
+      <div class="plugin-control-ux-summary-grid">
+        <article class="plugin-control-ux-summary-card"><p class="plugin-control-ux-summary-label">Modus</p><p class="plugin-control-ux-summary-value">Read-only aktiv</p></article>
+        <article class="plugin-control-ux-summary-card"><p class="plugin-control-ux-summary-label">Requests</p><p class="plugin-control-ux-summary-value">Keine externen Requests</p></article>
+        <article class="plugin-control-ux-summary-card"><p class="plugin-control-ux-summary-label">Schreibrechte</p><p class="plugin-control-ux-summary-value">Keine Schreibrechte</p></article>
+        <article class="plugin-control-ux-summary-card"><p class="plugin-control-ux-summary-label">Secrets</p><p class="plugin-control-ux-summary-value">Keine Secrets sichtbar</p></article>
+        <article class="plugin-control-ux-summary-card"><p class="plugin-control-ux-summary-label">Freigabe</p><p class="plugin-control-ux-summary-value">Freigabe noch offen</p></article>
+      </div>
+    </section>
+  `;
+}
+
+function renderPluginControlArea(area) {
+  return `
+    <section class="plugin-control-ux-area">
+      <header class="plugin-control-ux-area-head">
+        <p class="plugin-control-ux-area-kicker">${escapeHtml(area.title)}</p>
+        <h5 class="plugin-control-ux-area-question">${escapeHtml(area.question)}</h5>
+      </header>
+      <ul class="plugin-control-ux-list">
+        ${area.points.map((point) => `<li>${escapeHtml(point)}</li>`).join("")}
+      </ul>
+    </section>
+  `;
+}
+
+function getPluginControlModeLabel(plugin) {
+  if (plugin.status === "briefing-ready") return "briefing-ready · vorbereitet";
+  if (String(plugin.status).includes("read-only")) return "read-only · vorbereitet";
+  if (plugin.status === "future-read-only") return "später · vorbereitet";
+  return `${plugin.status} · vorbereitet`;
+}
+
+function renderPluginControlUxCard(plugin) {
+  return `
+    <article class="plugin-control-ux-card">
+      <header class="plugin-control-ux-card-head">
+        <h5>${escapeHtml(plugin.name)}</h5>
+        <span class="plugin-control-ux-mode">${escapeHtml(getPluginControlModeLabel(plugin))}</span>
+      </header>
+      <p class="plugin-control-ux-purpose"><strong>Zweck:</strong> ${escapeHtml(plugin.purpose)}</p>
+      <p class="plugin-control-ux-boundary"><strong>Grenze:</strong> ${escapeHtml(plugin.safetyBoundary)}</p>
+      <p class="plugin-control-ux-next"><strong>Nächste Freigabe:</strong> ${escapeHtml(plugin.nextSafeStep)}</p>
+      ${renderDemoCockpitDetails(
+        "Technische Details",
+        `
+        <dl class="plugin-rollout-facts">
+          <div><dt>Kategorie</dt><dd>${escapeHtml(plugin.category)}</dd></div>
+          <div><dt>Status</dt><dd>${escapeHtml(plugin.status)}</dd></div>
+          <div><dt>Demo-Priorität</dt><dd>${escapeHtml(plugin.demoPriority)}</dd></div>
+          <div><dt>Read-only erlaubt</dt><dd>${plugin.readOnlyAllowedActions.map((item) => escapeHtml(item)).join("<br>")}</dd></div>
+          <div><dt>Blockiert</dt><dd>${plugin.blockedActions.map((item) => escapeHtml(item)).join("<br>")}</dd></div>
+        </dl>
+      `,
+      )}
+    </article>
+  `;
+}
+
 const AGENT_CENTER_DEMO_NAMES = new Set([
   "Geschäftsführer-Agent",
   "Morgenbriefing-Agent",
@@ -29864,50 +29982,72 @@ function renderProductivePluginCommandCenterBlock(productiveManualHealthDayWork)
     return `<p class="form-note">Plugin-Leitstand ist noch nicht verfügbar.</p>`;
   }
 
-  const pluginRows = (center.pluginRegistry || [])
-    .map(
-      (plugin) => `
-        <div>
-          <strong>${escapeHtml(plugin.name)}</strong> · ${escapeHtml(plugin.category)} · ${escapeHtml(plugin.status)} · Demo-Priorität: ${escapeHtml(plugin.demoPriority)}<br>
-          <em>Zweck:</em> ${escapeHtml(plugin.purpose)}<br>
-          <em>Read-only erlaubt:</em> ${plugin.readOnlyAllowedActions.map((item) => escapeHtml(item)).join("; ")}<br>
-          <em>Blockiert:</em> ${plugin.blockedActions.map((item) => escapeHtml(item)).join("; ")}<br>
-          <em>Sicherheitsgrenze:</em> ${escapeHtml(plugin.safetyBoundary)}<br>
-          <em>Nächster sicherer Schritt:</em> ${escapeHtml(plugin.nextSafeStep)}
-        </div>
-      `,
-    )
-    .join("<br>");
+  const pluginUx = getProductiveCentralPluginControlUxFinish();
+  const priorityOrder = { high: 0, medium: 1, low: 2 };
+  const sortedPlugins = [...(center.pluginRegistry || PRODUCTIVE_PLUGIN_REGISTRY)].sort(
+    (left, right) => (priorityOrder[left.demoPriority] ?? 9) - (priorityOrder[right.demoPriority] ?? 9),
+  );
 
-  const safetyRuleRows = (center.pluginSafetyRules || [])
+  const safetyRuleRows = (center.pluginSafetyRules || PLUGIN_SAFETY_RULES || [])
     .map((rule) => escapeHtml(rule))
     .join("<br>");
-
   const blockedActionRows = (center.blockedPluginActions || [])
     .map((action) => escapeHtml(action))
     .join("<br>");
-
   const blockerRows = (center.pluginCommandCenterBlockers || []).length
     ? center.pluginCommandCenterBlockers.map((item) => escapeHtml(item)).join("<br>")
     : "keine";
 
   return `
-    <dl class="plugin-rollout-facts">
-      <div><dt>Leitstand-Status</dt><dd>${center.pluginCommandCenterReady ? "bereit" : "nicht bereit"}</dd></div>
-      <div><dt>Version</dt><dd>${escapeHtml(center.pluginCommandCenterVersion || "—")}</dd></div>
-      <div><dt>Modus</dt><dd>${escapeHtml(center.pluginCommandCenterMode || "—")}</dd></div>
-      <div><dt>Anzahl Plugins</dt><dd>${center.pluginCount ?? "—"}</dd></div>
-      <div><dt>Demo-prioritär</dt><dd>${Array.isArray(center.highPriorityPlugins) && center.highPriorityPlugins.length ? center.highPriorityPlugins.map((item) => escapeHtml(item)).join(", ") : "—"}</dd></div>
-      <div><dt>Vorbereitete Aktionskarten</dt><dd>${center.pluginActionCardsReady ? `${center.pluginActionCards.length} Karte(n)` : "keine (kein projektbezogener Lauf aktiv)"}</dd></div>
-      <div><dt>Nächster sicherer Demo-Schritt</dt><dd>${escapeHtml(center.nextPluginDemoStep || "—")}</dd></div>
-      <div><dt>Blocker</dt><dd>${blockerRows}</dd></div>
-    </dl>
-    <h6>Pluginliste</h6>
-    <div class="productive-plugin-registry">${pluginRows || "<p class=\"form-note\">Keine Plugins registriert.</p>"}</div>
-    <h6>Sicherheitsregeln</h6>
-    <div class="productive-plugin-safety-rules">${safetyRuleRows || "—"}</div>
-    <h6>Blockierte Aktionen (global)</h6>
-    <div class="productive-plugin-blocked-actions">${blockedActionRows || "—"}</div>
+    <section class="plugin-control-ux" id="plugin-leitstand-demo-anchor" aria-labelledby="plugin-control-ux-title">
+      <header class="plugin-control-ux-head">
+        <p class="eyebrow">V6.36.4 Plugin-Leitstand · vereinfacht</p>
+        <h4 id="plugin-control-ux-title">${escapeHtml(pluginUx.title)}</h4>
+        <p class="plugin-control-ux-subtitle">${escapeHtml(pluginUx.subtitle)}</p>
+        <p class="plugin-control-ux-guidance">${escapeHtml(pluginUx.guidanceLine)}</p>
+      </header>
+
+      ${renderPluginControlSummary(pluginUx)}
+
+      <div class="plugin-control-ux-areas">
+        ${renderPluginControlArea(pluginUx.areaNowSafe)}
+        ${renderPluginControlArea(pluginUx.areaLaterPossible)}
+        ${renderPluginControlArea(pluginUx.areaJamalDecision)}
+      </div>
+
+      <article class="plugin-control-ux-notice">
+        <strong>${escapeHtml(pluginUx.noApprovalWithoutJamal)}</strong>
+      </article>
+
+      <section class="plugin-control-ux-plugins">
+        <header class="plugin-control-ux-plugins-head">
+          <p class="plugin-control-ux-area-kicker">Vorbereitete Stufen</p>
+          <h5 class="plugin-control-ux-area-question">Welche Tools sind kontrolliert vorbereitet?</h5>
+        </header>
+        <div class="plugin-control-ux-grid">
+          ${sortedPlugins.map((plugin) => renderPluginControlUxCard(plugin)).join("")}
+        </div>
+      </section>
+
+      ${renderDemoCockpitDetails(
+        "Technische Leitstand-Details",
+        `
+        <dl class="plugin-rollout-facts">
+          <div><dt>Leitstand-Status</dt><dd>${center.pluginCommandCenterReady ? "bereit" : "nicht bereit"}</dd></div>
+          <div><dt>Version</dt><dd>${escapeHtml(center.pluginCommandCenterVersion || "—")}</dd></div>
+          <div><dt>Modus</dt><dd>${escapeHtml(center.pluginCommandCenterMode || "—")}</dd></div>
+          <div><dt>Anzahl Plugins</dt><dd>${center.pluginCount ?? "—"}</dd></div>
+          <div><dt>Demo-prioritär</dt><dd>${Array.isArray(center.highPriorityPlugins) && center.highPriorityPlugins.length ? center.highPriorityPlugins.map((item) => escapeHtml(item)).join(", ") : "—"}</dd></div>
+          <div><dt>Nächster sicherer Demo-Schritt</dt><dd>${escapeHtml(center.nextPluginDemoStep || "—")}</dd></div>
+          <div><dt>Blocker</dt><dd>${blockerRows}</dd></div>
+        </dl>
+        <h6>Sicherheitsregeln</h6>
+        <div class="productive-plugin-safety-rules">${safetyRuleRows || "—"}</div>
+        <h6>Blockierte Aktionen (global)</h6>
+        <div class="productive-plugin-blocked-actions">${blockedActionRows || "—"}</div>
+      `,
+      )}
+    </section>
   `;
 }
 
@@ -31184,7 +31324,6 @@ function pluginReadinessMarkup() {
       <div id="productive-work-project-run">
         ${renderProductiveProjectWorkBlock(productiveManualHealthDayWork)}
       </div>
-      <h6 id="plugin-leitstand-demo-anchor">Plugin-Leitstand</h6>
       <div id="productive-work-plugin-command-center">
         ${renderProductivePluginCommandCenterBlock(productiveManualHealthDayWork)}
       </div>
