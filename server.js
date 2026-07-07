@@ -6613,6 +6613,41 @@ function getDemoCockpit() {
     productiveCentralDemoFreezePrepared: true,
     nextProductiveCentralDemoFreezeStep:
       "Interne 5–7-Minuten-Demo einmal trocken durchklicken und danach externe Demo-Vorbereitung starten.",
+    productiveCentralExternalDemoPreparation: {
+      title: "Externe Demo-Vorbereitung",
+      demoGoal:
+        "Zeigen, wie die KI-Unternehmenszentrale Projekte, Agenten, Entscheidungen und Sicherheitsgrenzen sichtbar zusammenführt.",
+      recommendedFlow: [
+        "Einstieg: Was ist die KI-Unternehmenszentrale?",
+        "Portfolio zeigen: Health Upgrade Kompass als konkretes Projekt",
+        "Demo-Cockpit zeigen: heutiger Stand und Freeze-Status",
+        "Agenten-Zentrale zeigen: 25 Agenten als Arbeitsrollen",
+        "Plugin-Leitstand zeigen: read-only Vorbereitung statt blinder Automatisierung",
+        "HR-Tagesvorschläge zeigen: Agenten liefern konkrete nächste Schritte",
+        "Abschluss: Stand ist demo-ready-read-only, nächste Entscheidung bleibt bei Jamal",
+      ],
+      sayExplicitly: [
+        "Das ist kein fertiges SaaS-Produkt.",
+        "Das ist eine interne Steuerungszentrale für Projekte, Agenten und Entscheidungen.",
+        "Aktuell bewusst read-only.",
+        "Keine externen Requests, keine Schreibrechte, keine Secrets.",
+        "Erst wenn die Freigabe passt, kommen Plugin- und Schreibstufen.",
+      ],
+      doNotShowOrPromise: [
+        "keine automatische Kundendatenverarbeitung",
+        "keine echte medizinische Diagnose",
+        "keine automatische Airtable-Schreibaktion",
+        "keine Cloud-/Login-/Deployment-Zusage",
+        "keine fertige Expansion-App als abgeschlossenes Produkt",
+      ],
+      jamalOpeningSentence:
+        "Ich zeige euch heute keinen fertigen Chatbot, sondern unsere interne KI-Unternehmenszentrale: eine Steuerungsebene, die Projekte, Agenten, Entscheidungen und Sicherheitsgrenzen zusammenbringt.",
+      jamalClosingSentence:
+        "Der Stand ist bewusst eingefroren: vorführbar, read-only und sicher genug, um jetzt gemeinsam über die nächsten Freigaben zu entscheiden.",
+    },
+    productiveCentralExternalDemoPreparationPrepared: true,
+    nextProductiveCentralExternalDemoPreparationStep:
+      "Externe 5–7-Minuten-Demo mit Zuschauer durchführen und Freigaben gemeinsam entscheiden.",
     demoQuickNav: [
       { label: "Plugin-Leitstand", view: "cockpit", anchor: "plugin-leitstand-demo-anchor" },
       { label: "Produktivbereich", view: "cockpit", anchor: "demo-productive-anchor" },
@@ -18250,6 +18285,11 @@ function getPluginReadiness(requestUrl) {
     productiveCentralDemoFreeze: getDemoCockpit().productiveCentralDemoFreeze,
     productiveCentralDemoFreezePrepared: getDemoCockpit().productiveCentralDemoFreezePrepared,
     nextProductiveCentralDemoFreezeStep: getDemoCockpit().nextProductiveCentralDemoFreezeStep,
+    productiveCentralExternalDemoPreparation: getDemoCockpit().productiveCentralExternalDemoPreparation,
+    productiveCentralExternalDemoPreparationPrepared:
+      getDemoCockpit().productiveCentralExternalDemoPreparationPrepared,
+    nextProductiveCentralExternalDemoPreparationStep:
+      getDemoCockpit().nextProductiveCentralExternalDemoPreparationStep,
     demoCockpit: getDemoCockpit(),
     pluginReadyAgentCount: agentPluginReadiness.length,
     availablePluginCategories,

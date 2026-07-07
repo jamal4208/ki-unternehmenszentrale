@@ -15697,6 +15697,41 @@ function getDemoCockpit() {
     productiveCentralDemoFreezePrepared: true,
     nextProductiveCentralDemoFreezeStep:
       "Interne 5–7-Minuten-Demo einmal trocken durchklicken und danach externe Demo-Vorbereitung starten.",
+    productiveCentralExternalDemoPreparation: {
+      title: "Externe Demo-Vorbereitung",
+      demoGoal:
+        "Zeigen, wie die KI-Unternehmenszentrale Projekte, Agenten, Entscheidungen und Sicherheitsgrenzen sichtbar zusammenführt.",
+      recommendedFlow: [
+        "Einstieg: Was ist die KI-Unternehmenszentrale?",
+        "Portfolio zeigen: Health Upgrade Kompass als konkretes Projekt",
+        "Demo-Cockpit zeigen: heutiger Stand und Freeze-Status",
+        "Agenten-Zentrale zeigen: 25 Agenten als Arbeitsrollen",
+        "Plugin-Leitstand zeigen: read-only Vorbereitung statt blinder Automatisierung",
+        "HR-Tagesvorschläge zeigen: Agenten liefern konkrete nächste Schritte",
+        "Abschluss: Stand ist demo-ready-read-only, nächste Entscheidung bleibt bei Jamal",
+      ],
+      sayExplicitly: [
+        "Das ist kein fertiges SaaS-Produkt.",
+        "Das ist eine interne Steuerungszentrale für Projekte, Agenten und Entscheidungen.",
+        "Aktuell bewusst read-only.",
+        "Keine externen Requests, keine Schreibrechte, keine Secrets.",
+        "Erst wenn die Freigabe passt, kommen Plugin- und Schreibstufen.",
+      ],
+      doNotShowOrPromise: [
+        "keine automatische Kundendatenverarbeitung",
+        "keine echte medizinische Diagnose",
+        "keine automatische Airtable-Schreibaktion",
+        "keine Cloud-/Login-/Deployment-Zusage",
+        "keine fertige Expansion-App als abgeschlossenes Produkt",
+      ],
+      jamalOpeningSentence:
+        "Ich zeige euch heute keinen fertigen Chatbot, sondern unsere interne KI-Unternehmenszentrale: eine Steuerungsebene, die Projekte, Agenten, Entscheidungen und Sicherheitsgrenzen zusammenbringt.",
+      jamalClosingSentence:
+        "Der Stand ist bewusst eingefroren: vorführbar, read-only und sicher genug, um jetzt gemeinsam über die nächsten Freigaben zu entscheiden.",
+    },
+    productiveCentralExternalDemoPreparationPrepared: true,
+    nextProductiveCentralExternalDemoPreparationStep:
+      "Externe 5–7-Minuten-Demo mit Zuschauer durchführen und Freigaben gemeinsam entscheiden.",
     demoQuickNav: [
       { label: "Plugin-Leitstand", view: "cockpit", anchor: "plugin-leitstand-demo-anchor" },
       { label: "Produktivbereich", view: "cockpit", anchor: "demo-productive-anchor" },
@@ -15881,6 +15916,34 @@ function renderDemoCockpit() {
         </ul>
         <p class="demo-cockpit-quote"><strong>Nächster manueller Schritt:</strong> ${escapeHtml(demo.productiveCentralDemoFreeze.nextManualStep)}</p>
         <p class="demo-cockpit-quote"><strong>Empfehlung:</strong> ${escapeHtml(demo.productiveCentralDemoFreeze.recommendation)}</p>
+      </article>
+
+      <article class="demo-cockpit-card demo-cockpit-card--external demo-cockpit-card--wide">
+        <header class="demo-cockpit-card-head">
+          <h4>${escapeHtml(demo.productiveCentralExternalDemoPreparation.title)}</h4>
+          ${renderDemoCockpitBadge("vorbereitet", "Vorführhilfe")}
+        </header>
+        <dl class="demo-cockpit-facts">
+          <div><dt>Demo-Ziel</dt><dd>${escapeHtml(demo.productiveCentralExternalDemoPreparation.demoGoal)}</dd></div>
+        </dl>
+        <h5>Empfohlener 5–7-Minuten-Ablauf</h5>
+        <ol class="demo-cockpit-steps">
+          ${demo.productiveCentralExternalDemoPreparation.recommendedFlow.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}
+        </ol>
+        <h5>Was ausdrücklich gesagt werden soll</h5>
+        <ul class="demo-cockpit-list demo-cockpit-list--compact">
+          ${demo.productiveCentralExternalDemoPreparation.sayExplicitly.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ul>
+        <h5>Was nicht gezeigt / nicht versprochen werden soll</h5>
+        <ul class="demo-cockpit-list demo-cockpit-list--compact">
+          ${demo.productiveCentralExternalDemoPreparation.doNotShowOrPromise.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ul>
+        <p class="demo-cockpit-quote"><strong>Jamal-Satz Einstieg:</strong> ${escapeHtml(demo.productiveCentralExternalDemoPreparation.jamalOpeningSentence)}</p>
+        <p class="demo-cockpit-quote"><strong>Jamal-Satz Abschluss:</strong> ${escapeHtml(demo.productiveCentralExternalDemoPreparation.jamalClosingSentence)}</p>
+        <div class="demo-cockpit-actions">
+          <button class="secondary-button" type="button" data-view-jump="portfolio">Portfolio öffnen</button>
+          <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="plugin-leitstand-demo-anchor">Plugin-Leitstand</button>
+        </div>
       </article>
 
       <article class="demo-cockpit-card">
