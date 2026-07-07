@@ -24,9 +24,46 @@
   --shadow: 0 14px 34px rgba(35, 27, 18, 0.04);
   --radius: 10px;
   --radius-card: 14px;
+  --radius-group: 16px;
   --content-max: 1120px;
   --sidebar-width: 268px;
   --focus: 0 0 0 3px rgba(170, 138, 82, 0.22);
+  /* V6.37.2 — vereinheitlichte UI-Tokens */
+  --text-xs: 0.72rem;
+  --text-sm: 0.84rem;
+  --text-base: 0.92rem;
+  --text-md: 1rem;
+  --heading-card: 1rem;
+  --heading-question: 1.02rem;
+  --font-label: 650;
+  --font-body: 520;
+  --font-medium: 600;
+  --font-strong: 650;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 20px;
+  --space-xl: 24px;
+  --gap-stack: 14px;
+  --gap-cards: 14px;
+  --card-border: #ebe4da;
+  --card-border-soft: #f0ebe3;
+  --card-bg: #ffffff;
+  --card-bg-muted: #fcfaf7;
+  --card-bg-group: #faf8f4;
+  --card-shadow: 0 4px 14px rgba(44, 34, 22, 0.028);
+  --card-padding: 16px 18px;
+  --card-padding-compact: 14px 16px;
+  --badge-neutral-bg: #f5f1ea;
+  --badge-neutral-fg: #5f574d;
+  --badge-success-bg: #f3faf5;
+  --badge-success-fg: #4d7a54;
+  --badge-info-bg: #f4f7fb;
+  --badge-info-fg: #4a6080;
+  --badge-warn-bg: #fdf8ee;
+  --badge-warn-fg: #8a6a24;
+  --badge-blocked-bg: #faf4f2;
+  --badge-blocked-fg: #8f5a50;
 }
 
 * {
@@ -3257,28 +3294,35 @@ select {
 .secondary-button,
 .segment,
 .small-button {
-  min-height: 40px;
-  border-radius: 8px;
-  font-weight: 800;
+  min-height: 38px;
+  border-radius: var(--radius);
+  font-weight: var(--font-medium);
 }
 
 .primary-button {
-  border: 1px solid #0b5953;
-  background: var(--teal);
+  border: 1px solid #0d5f59;
+  background: #117a72;
   color: #ffffff;
-  padding: 0 14px;
+  padding: 0 16px;
 }
 
 .primary-button:hover {
-  background: #0d655e;
+  background: #0f6f68;
 }
 
 .secondary-button,
 .small-button {
-  border: 1px solid var(--line-strong);
-  background: #ffffff;
-  color: var(--ink);
-  padding: 0 13px;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  color: #4f4a42;
+  padding: 0 14px;
+  font-weight: var(--font-body);
+}
+
+.secondary-button:hover,
+.small-button:hover {
+  border-color: #ddd4c8;
+  background: #faf8f4;
 }
 
 .link-button {
@@ -3507,9 +3551,9 @@ select {
   display: inline-flex;
   gap: 4px;
   padding: 4px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #ffffff;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  background: var(--card-bg);
 }
 
 .segment {
@@ -3517,14 +3561,16 @@ select {
   border: 1px solid transparent;
   background: transparent;
   color: var(--muted);
-  padding: 0 11px;
-  font-size: 12px;
+  padding: 0 12px;
+  font-size: var(--text-sm);
+  font-weight: var(--font-body);
 }
 
 .segment.is-active {
-  border-color: #b6d9d4;
-  background: var(--teal-soft);
-  color: #0d4f49;
+  border-color: #d4e5e1;
+  background: #f3faf9;
+  color: #2f5f58;
+  font-weight: var(--font-medium);
 }
 
 .agent-card {
@@ -6803,32 +6849,38 @@ select {
 .demo-cockpit-badge {
   display: inline-flex;
   align-items: center;
-  padding: 3px 9px;
+  min-height: 24px;
+  padding: 3px 10px;
+  border: 1px solid transparent;
   border-radius: 999px;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  letter-spacing: 0.01em;
   white-space: nowrap;
 }
 
 .demo-cockpit-badge--bestanden {
-  background: #e7f6ec;
-  color: #1f6b3b;
+  border-color: #d4e8d9;
+  background: var(--badge-success-bg);
+  color: var(--badge-success-fg);
 }
 
 .demo-cockpit-badge--vorbereitet {
-  background: #eef3ff;
-  color: #2f4f9f;
+  border-color: #d8e0ea;
+  background: var(--badge-info-bg);
+  color: var(--badge-info-fg);
 }
 
 .demo-cockpit-badge--blockiert {
-  background: #fdeeee;
-  color: #8f2f2f;
+  border-color: #e8d6d2;
+  background: var(--badge-blocked-bg);
+  color: var(--badge-blocked-fg);
 }
 
 .demo-cockpit-badge--offen {
-  background: #f4f0e8;
-  color: #6a5a3d;
+  border-color: #e8e0d4;
+  background: var(--badge-warn-bg);
+  color: var(--badge-warn-fg);
 }
 
 .demo-cockpit-actions {
@@ -6854,16 +6906,23 @@ select {
 }
 
 .demo-cockpit-longform {
-  border: 1px dashed #d8d0c4;
-  border-radius: 14px;
-  padding: 10px 14px;
-  background: #fcfaf6;
+  border: 1px solid var(--card-border-soft);
+  border-radius: var(--card-radius);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--card-bg-muted);
 }
 
 .demo-cockpit-longform > summary {
   cursor: pointer;
-  font-weight: 700;
-  color: #4a433b;
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  color: #524b42;
+  line-height: 1.45;
+}
+
+.demo-cockpit-longform[open] {
+  padding-bottom: var(--space-md);
+  background: #fdfcf9;
 }
 
 .premium-ui-design-system {
@@ -6954,8 +7013,357 @@ select {
 
 .demo-cockpit-longform-body {
   display: grid;
-  gap: 18px;
-  margin-top: 14px;
+  gap: var(--gap-stack);
+  margin-top: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--card-border-soft);
+}
+
+/* V6.37.2 — Karten, Farben, Abstände und Typografie vereinheitlichen */
+.demo-cockpit-group-kicker,
+.portfolio-ux-focus-kicker,
+.portfolio-ux-group-kicker,
+.agent-ux-group-kicker,
+.agent-ux-summary-label,
+.plugin-control-ux-area-kicker,
+.plugin-control-ux-summary-label,
+.premium-ui-design-system-area-kicker,
+.demo-cockpit-lead-label,
+.demo-cockpit-hero-kicker {
+  font-size: var(--text-xs);
+  font-weight: var(--font-label);
+  letter-spacing: 0.05em;
+  color: #8a8176;
+}
+
+.demo-cockpit-group-question,
+.portfolio-ux-group-question,
+.portfolio-ux-focus-head h4,
+.agent-ux-group-question,
+.plugin-control-ux-area-question,
+.premium-ui-design-system-area-question {
+  font-size: var(--heading-question);
+  font-weight: var(--font-strong);
+  line-height: 1.35;
+  color: #3f3a34;
+}
+
+.demo-cockpit-card,
+.portfolio-ux-card,
+.agent-ux-card,
+.plugin-control-ux-card,
+.agent-ux-summary-card,
+.plugin-control-ux-summary-card {
+  border: 1px solid var(--card-border);
+  border-radius: var(--card-radius);
+  background: var(--card-bg);
+  box-shadow: var(--card-shadow);
+  padding: var(--card-padding-compact);
+  gap: var(--space-xs);
+}
+
+.demo-cockpit-group,
+.portfolio-ux-group,
+.agent-ux-group,
+.portfolio-ux-focus,
+.agent-ux-hr-example,
+.plugin-control-ux,
+.premium-ui-design-system {
+  gap: var(--gap-stack);
+  padding: var(--card-padding);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-group);
+  background: var(--card-bg-group);
+  box-shadow: var(--card-shadow);
+}
+
+.demo-cockpit-section {
+  padding: var(--space-lg) 22px;
+  border-color: var(--card-border);
+  box-shadow: var(--card-shadow);
+}
+
+.demo-cockpit-lead {
+  padding: var(--card-padding);
+  border-color: var(--card-border);
+  border-radius: var(--radius-group);
+  box-shadow: var(--card-shadow);
+}
+
+.demo-cockpit-lead-card {
+  padding: var(--card-padding-compact);
+  border: 1px solid var(--card-border-soft);
+  border-radius: var(--card-radius);
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.demo-cockpit-lead-value {
+  font-size: var(--text-md);
+  font-weight: var(--font-strong);
+}
+
+.demo-cockpit-card-head h4,
+.portfolio-ux-card-head h4,
+.agent-ux-card-head h4,
+.plugin-control-ux-card-head h5 {
+  font-size: var(--heading-card);
+  font-weight: var(--font-strong);
+  line-height: 1.35;
+}
+
+.demo-cockpit-card-summary,
+.portfolio-ux-card-summary,
+.portfolio-ux-card-next,
+.agent-ux-card-task,
+.agent-ux-card-benefit,
+.plugin-control-ux-purpose,
+.plugin-control-ux-boundary,
+.plugin-control-ux-next,
+.demo-cockpit-lead-note,
+.demo-cockpit-lead-meta {
+  font-size: var(--text-base);
+  line-height: 1.5;
+  color: #5f574d;
+}
+
+.portfolio-ux-card-safety,
+.plugin-control-ux-summary-label,
+.demo-cockpit-facts dt,
+.agent-ux-hr-example-facts dt,
+.portfolio-ux-focus-facts dt {
+  font-size: var(--text-xs);
+  font-weight: var(--font-label);
+  letter-spacing: 0.04em;
+  color: #8a8176;
+}
+
+.demo-cockpit-list,
+.demo-cockpit-steps,
+.plugin-control-ux-list,
+.premium-ui-design-system-list,
+.premium-ui-design-system-steps-list {
+  gap: var(--space-xs);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  color: #5f574d;
+}
+
+.demo-cockpit-output,
+.portfolio-ux-output,
+.agent-ux-output {
+  gap: var(--space-lg);
+}
+
+.demo-cockpit-group-grid,
+.portfolio-ux-group-grid,
+.agent-ux-group-grid,
+.plugin-control-ux-grid,
+.demo-cockpit-grid {
+  gap: var(--gap-cards);
+}
+
+.portfolio-ux-status,
+.portfolio-ux-badge,
+.agent-ux-mode,
+.plugin-control-ux-mode,
+.demo-cockpit-badge,
+.status-pill,
+.risk-pill,
+.tag {
+  min-height: 24px;
+  padding: 3px 10px;
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+}
+
+.portfolio-ux-status,
+.portfolio-ux-badge,
+.agent-ux-mode,
+.plugin-control-ux-mode {
+  border: 1px solid var(--card-border);
+  background: var(--badge-neutral-bg);
+  color: var(--badge-neutral-fg);
+}
+
+.portfolio-ux-badge {
+  border-color: #d4e8d9;
+  background: var(--badge-success-bg);
+  color: var(--badge-success-fg);
+}
+
+.demo-cockpit-quicknav-chip {
+  min-height: 32px;
+  padding: 6px 14px;
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
+  background: var(--card-bg);
+  color: #524b42;
+  font-size: var(--text-sm);
+  font-weight: var(--font-body);
+}
+
+.demo-cockpit-quicknav-chip:hover {
+  border-color: #ddd4c8;
+  background: #faf8f4;
+}
+
+.demo-cockpit-card--hr,
+.demo-cockpit-card--health,
+.demo-cockpit-card--finish,
+.demo-cockpit-card--freeze,
+.demo-cockpit-card--external,
+.demo-cockpit-card--design {
+  border-color: var(--card-border);
+  background: var(--card-bg);
+  box-shadow: var(--card-shadow);
+}
+
+.demo-cockpit-card--health {
+  border-color: #dfe9e3;
+  background: linear-gradient(180deg, #fdfefc 0%, #f8fbf9 100%);
+}
+
+.demo-cockpit-card--freeze {
+  border-color: #dfe8df;
+  background: linear-gradient(180deg, #fdfefc 0%, #f7faf7 100%);
+}
+
+.demo-cockpit-card--hr {
+  border-color: #ebe4d8;
+  background: linear-gradient(180deg, #fffdfb 0%, #faf7f1 100%);
+}
+
+.demo-cockpit-card--external {
+  border-color: #e6e0ea;
+  background: linear-gradient(180deg, #fdfcfe 0%, #f9f7fb 100%);
+}
+
+.demo-cockpit-card--design {
+  border-color: #dfe5ea;
+  background: linear-gradient(180deg, #fcfdfe 0%, #f6f9fb 100%);
+}
+
+.demo-cockpit-hero {
+  padding: var(--card-padding);
+  border: 1px solid var(--card-border);
+  border-radius: var(--card-radius);
+  background: var(--card-bg-muted);
+  box-shadow: none;
+}
+
+.demo-cockpit-hero-quote {
+  font-size: 1.15rem;
+  font-weight: var(--font-strong);
+}
+
+.demo-cockpit-quote {
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius);
+  background: #f8f4ec;
+  font-size: var(--text-base);
+  line-height: 1.5;
+}
+
+.plugin-control-ux-area,
+.premium-ui-design-system-area,
+.premium-ui-design-system-agents,
+.premium-ui-design-system-steps {
+  padding: var(--card-padding-compact);
+  border: 1px solid var(--card-border-soft);
+  border-radius: var(--card-radius);
+  background: var(--card-bg);
+  box-shadow: none;
+}
+
+.plugin-control-ux-notice,
+.premium-ui-design-system-notice {
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid #e8dfd2;
+  border-radius: var(--radius);
+  background: #faf7f1;
+  font-size: var(--text-base);
+  line-height: 1.5;
+  color: #4a433b;
+}
+
+.portfolio-ux-filter-details,
+details.local-agent-assignment-details,
+.cockpit-detail-group {
+  border-color: var(--card-border-soft);
+  background: var(--card-bg-muted);
+}
+
+.portfolio-ux-filter-details > summary,
+details.local-agent-assignment-details > summary {
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  color: #524b42;
+}
+
+.cockpit-detail-group > summary {
+  padding: var(--space-md) var(--space-lg);
+  font-weight: var(--font-medium);
+}
+
+.cockpit-detail-group summary span {
+  font-size: var(--text-md);
+  font-weight: var(--font-strong);
+}
+
+.cockpit-detail-group-body {
+  gap: var(--gap-stack);
+  padding: 0 var(--space-lg) var(--space-lg);
+}
+
+.tag.blue {
+  border-color: #d4dfea;
+  background: var(--badge-info-bg);
+  color: var(--badge-info-fg);
+}
+
+.tag.violet {
+  border-color: #e2d8ea;
+  background: #f8f5fb;
+  color: #6a5080;
+}
+
+.lifecycle-tag {
+  border-color: #d4e5e1;
+  background: #f3faf9;
+  color: #3f6a62;
+}
+
+.project-safety-note {
+  border-color: #ead9b0;
+  background: var(--badge-warn-bg);
+  color: var(--badge-warn-fg);
+  font-weight: var(--font-medium);
+}
+
+.demo-cockpit-tagesfuehrung,
+.demo-cockpit-codex {
+  padding: var(--card-padding-compact);
+  border-color: var(--card-border-soft);
+  border-radius: var(--card-radius);
+  background: var(--card-bg-muted);
+}
+
+.portfolio-ux-subtitle,
+.agent-ux-subtitle,
+.plugin-control-ux-subtitle,
+.premium-ui-design-system-subtitle {
+  font-size: var(--text-base);
+  line-height: 1.5;
+  color: #5f574d;
+}
+
+.portfolio-ux-guidance,
+.agent-ux-guidance,
+.plugin-control-ux-guidance,
+.premium-ui-design-system-guidance {
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  color: #4a433b;
 }
 
 @media (min-width: 1100px) {
