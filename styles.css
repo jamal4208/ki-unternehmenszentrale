@@ -6047,6 +6047,21 @@ select {
   background: linear-gradient(180deg, #fffdf9 0%, #faf5ec 100%);
 }
 
+.demo-cockpit-card--health {
+  border-color: #d7e6df;
+  background: linear-gradient(180deg, #fbfefc 0%, #f1f8f4 100%);
+}
+
+.demo-cockpit-card--finish {
+  border-color: #d8dff0;
+  background: linear-gradient(180deg, #fcfdff 0%, #f4f7fd 100%);
+}
+
+.demo-cockpit-card--freeze {
+  border-color: #d8e0d5;
+  background: linear-gradient(180deg, #fcfffb 0%, #f1f7ef 100%);
+}
+
 .demo-cockpit-tagesfuehrung,
 .demo-cockpit-codex {
   margin-bottom: 18px;

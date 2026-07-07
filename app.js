@@ -15650,11 +15650,47 @@ function getDemoCockpit() {
     demoUiUxFinishVersion: DEMO_UI_UX_FINISH_VERSION,
     demoUiUxFinishReady: true,
     demoUiUxFinishMode: "demo-presentation-ready",
+    demoFinishChecklistPrepared: true,
+    demoFinishChecklistStatus: "ready-for-internal-dry-run",
+    nextDemoFinishStep: "Internen 5–7-Minuten-Trockenlauf durchführen und Demo-Stand einfrieren",
+    productiveCentralDemoFreeze: {
+      title: "KI-Unternehmenszentrale – Demo-Stand eingefroren",
+      status: "demo-ready-read-only",
+      shortAssessment:
+        "Die KI-Unternehmenszentrale ist für eine erste interne und vorbereitende externe Demo ausreichend fertig.",
+      demoReadyChecks: [
+        "Demo-Cockpit sichtbar",
+        "Projekt-Dropdown sichtbar",
+        "Health Upgrade Kompass auswählbar",
+        "Plugin-Leitstand sichtbar",
+        "HR-Tagesvorschläge sichtbar",
+        "Agenten-Zentrale sichtbar",
+        "25 Agenten bestätigt",
+        "Tagesfokus / Morgenlogik / Entscheidungsstruktur vorhanden",
+        "Read-only-Sicherheitsgrenzen sichtbar",
+        "Keine Schreibpfade, keine externen Requests, keine Secrets",
+      ],
+      freezeBoundaries: [
+        "Keine neuen Agenten",
+        "Keine neuen Plugin-Stufen",
+        "Keine neue Health-Produktlogik",
+        "Keine neue Expansion-App-Logik",
+        "Kein UI-Großumbau",
+        "Keine Schreibrechte",
+        "Keine Cloud-/Login-/Deployment-Erweiterung",
+      ],
+      nextManualStep:
+        "Interne 5–7-Minuten-Demo einmal trocken durchklicken und danach externe Demo-Vorbereitung starten.",
+      recommendation: "Stand einfrieren. Nur noch echte Fehler korrigieren.",
+    },
+    productiveCentralDemoFreezePrepared: true,
+    nextProductiveCentralDemoFreezeStep:
+      "Interne 5–7-Minuten-Demo einmal trocken durchklicken und danach externe Demo-Vorbereitung starten.",
     demoQuickNav: [
-      { label: "Plugin-Leitstand", view: "agents", anchor: "plugin-leitstand-demo-anchor" },
-      { label: "Produktivbereich", view: "agents", anchor: "demo-productive-anchor" },
+      { label: "Plugin-Leitstand", view: "cockpit", anchor: "plugin-leitstand-demo-anchor" },
+      { label: "Produktivbereich", view: "cockpit", anchor: "demo-productive-anchor" },
       { label: "HR-Tagesvorschlag", view: "cockpit", anchor: "hr-agent-daily-suggestion" },
-      { label: "Agenten-Zentrale", view: "agents", anchor: "agent-plugin-readiness" },
+      { label: "Agenten-Zentrale", view: "cockpit", anchor: "agent-plugin-readiness" },
     ],
     demoStatus: {
       label: "Intern vorführbar",
@@ -15783,6 +15819,57 @@ function renderDemoCockpit() {
         <div class="demo-cockpit-actions">
           <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="hr-agent-daily-suggestion">Vollständig öffnen</button>
         </div>
+      </article>
+
+      <article class="demo-cockpit-card demo-cockpit-card--health">
+        <header class="demo-cockpit-card-head">
+          <h4>Health Upgrade Kompass</h4>
+          ${renderDemoCockpitBadge("bestanden", "demo-ready")}
+        </header>
+        <dl class="demo-cockpit-facts">
+          <div><dt>Demostand</dt><dd>Bereich 1–4 reichen für die erste Demo.</dd></div>
+          <div><dt>Abgrenzung</dt><dd>Körperanalysewaage bleibt Phase 2.</dd></div>
+        </dl>
+        <div class="demo-cockpit-actions">
+          <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="demo-productive-anchor">Im Projekt-Dropdown auswählen</button>
+        </div>
+      </article>
+
+      <article class="demo-cockpit-card demo-cockpit-card--finish">
+        <header class="demo-cockpit-card-head">
+          <h4>Demo-Finish-Checkliste</h4>
+          ${renderDemoCockpitBadge("bestanden", "ready")}
+        </header>
+        <ul class="demo-cockpit-list demo-cockpit-list--compact">
+          <li>Health Upgrade Kompass im Projekt-Dropdown sichtbar und auswählbar</li>
+          <li>Health Upgrade Kompass als Demo-Projekt sichtbar erklärt</li>
+          <li>Bereich 1–4 reichen für die erste Demo</li>
+          <li>Körperanalysewaage bleibt Phase 2</li>
+          <li>Plugin-Leitstand sichtbar</li>
+          <li>HR-Tagesvorschläge sichtbar</li>
+          <li>25 Agenten bestätigt</li>
+          <li>Keine Schreibpfade, keine externen Requests, keine Secrets</li>
+          <li>Demo kann intern 5–7 Minuten trocken durchgeklickt werden</li>
+        </ul>
+        <p class="demo-cockpit-quote"><strong>Empfehlung:</strong> Demo-Stand nach internem Trockenlauf einfrieren.</p>
+      </article>
+
+      <article class="demo-cockpit-card demo-cockpit-card--freeze">
+        <header class="demo-cockpit-card-head">
+          <h4>${escapeHtml(demo.productiveCentralDemoFreeze.title)}</h4>
+          ${renderDemoCockpitBadge("bestanden", demo.productiveCentralDemoFreeze.status)}
+        </header>
+        <p class="demo-cockpit-quote">${escapeHtml(demo.productiveCentralDemoFreeze.shortAssessment)}</p>
+        <h5>Fertig genug für Demo</h5>
+        <ul class="demo-cockpit-list demo-cockpit-list--compact">
+          ${demo.productiveCentralDemoFreeze.demoReadyChecks.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ul>
+        <h5>Nicht mehr vor erster Demo anfassen</h5>
+        <ul class="demo-cockpit-list demo-cockpit-list--compact">
+          ${demo.productiveCentralDemoFreeze.freezeBoundaries.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ul>
+        <p class="demo-cockpit-quote"><strong>Nächster manueller Schritt:</strong> ${escapeHtml(demo.productiveCentralDemoFreeze.nextManualStep)}</p>
+        <p class="demo-cockpit-quote"><strong>Empfehlung:</strong> ${escapeHtml(demo.productiveCentralDemoFreeze.recommendation)}</p>
       </article>
 
       <article class="demo-cockpit-card">
@@ -45223,9 +45310,9 @@ function scrollToDemoAnchor(anchorId) {
 
 const DEMO_HASH_ANCHOR_VIEWS = {
   "hr-agent-daily-suggestion": "cockpit",
-  "plugin-leitstand-demo-anchor": "agents",
-  "demo-productive-anchor": "agents",
-  "agent-plugin-readiness": "agents",
+  "plugin-leitstand-demo-anchor": "cockpit",
+  "demo-productive-anchor": "cockpit",
+  "agent-plugin-readiness": "cockpit",
 };
 
 function handleDemoAnchorFromHash() {
