@@ -6697,6 +6697,7 @@ function getDemoCockpit() {
     nextProductiveCentralDesignUsabilityStep:
       "Bestehende Agentenrollen für UI/UX-Finish-Bewertung einplanen und ersten Finish-Sprint vorbereiten.",
     demoQuickNav: [
+      { label: "Designsystem", view: "cockpit", anchor: "premium-ui-design-system-anchor" },
       { label: "Plugin-Leitstand", view: "cockpit", anchor: "plugin-leitstand-demo-anchor" },
       { label: "Produktivbereich", view: "cockpit", anchor: "demo-productive-anchor" },
       { label: "HR-Tagesvorschlag", view: "cockpit", anchor: "hr-agent-daily-suggestion" },
@@ -6890,6 +6891,108 @@ function getProductiveCentralPluginControlUxFinish() {
 const PRODUCTIVE_CENTRAL_PLUGIN_CONTROL_UX_FINISH_PREPARED = true;
 const NEXT_PRODUCTIVE_CENTRAL_PLUGIN_CONTROL_UX_STEP =
   "Erste Plugin-Stufe mit Jamal bewusst als read-only Test freigeben oder bewusst zurückstellen.";
+
+function getProductiveCentralPremiumUiDesignSystem() {
+  return {
+    version: "V6.37.0",
+    title: "Designsystem und Premium-UI-Leitlinie",
+    subtitle:
+      "Welche Gestaltungsrichtung gilt für die nächste UI-Finish-Runde — ohne Umbau, ohne neue Produktlogik?",
+    guidanceLine:
+      "Fokus: Erst Leitlinie festlegen, dann gezielt auf bestehende Hauptbereiche anwenden — noch kein großer UI-Umbau.",
+    mode: "read-only-guideline",
+    designDna: {
+      title: "Design-DNA",
+      question: "Wie soll die Zentrale sich anfühlen?",
+      points: [
+        "Apple statt Dashboard-Hölle",
+        "ruhig, warm, hochwertig",
+        "mediterrane Klarheit statt technischer Überladung",
+        "Geschäftsführersprache statt Systemjargon",
+        "wenige Entscheidungen pro Screen",
+        "Funktion erklärt sich über Gestaltung",
+        "Sicherheit sichtbar, aber nicht dominant",
+      ],
+    },
+    visualPrinciples: {
+      title: "Visuelle Prinzipien",
+      question: "Wie führen wir durch jeden Screen?",
+      points: [
+        "Eine Hauptfrage pro Bereich",
+        "Ein nächster Schritt pro Screen",
+        "Weniger Karten, stärkere Gruppen",
+        "Weniger Text auf erster Ebene",
+        "Details nur bei Bedarf aufklappbar",
+        "Status klar, aber nicht laut",
+        "Weißraum wichtiger als Informationsdichte",
+        "Führung statt Tabellengefühl",
+      ],
+    },
+    componentGuidelines: {
+      title: "Komponenten-Leitlinie",
+      question: "Welche Bausteine bilden die Oberfläche?",
+      components: [
+        "Executive-Kopfbereich",
+        "Fokuskarte",
+        "Entscheidungskarte",
+        "Status-Badge",
+        "Sicherheits-Hinweisbox",
+        "Detailbereich mit <details>",
+        "Next-Step-Leiste",
+        "Demo-relevante Primärkarte",
+        "Sekundäre Vorbereitungskarte",
+      ],
+    },
+    styleRules: {
+      title: "Stilregeln",
+      question: "Was vermeiden wir bewusst?",
+      rules: [
+        "Keine Textwände",
+        "Keine zehn gleich lauten Karten nebeneinander",
+        "Keine grellen Statusfarben",
+        "Keine technischen Überschriften als Hauptbotschaft",
+        "Keine grinsenden Stock-Gesichter",
+        "Keine unnötigen Animationen",
+        "Keine überladene Dashboard-Optik",
+        "Kein „alles ist gleich wichtig“",
+      ],
+    },
+    designAgentAssignments: [
+      {
+        agent: "Design-Director-Agent",
+        task: "Premium-Wirkung und visuelle Hierarchie bewerten",
+      },
+      {
+        agent: "UX-Agent",
+        task: "Navigation, Klickpfade und Bedienbarkeit prüfen",
+      },
+      {
+        agent: "Content-Agent",
+        task: "Texte kürzen und in Geschäftsführersprache bringen",
+      },
+      {
+        agent: "QA-Agent",
+        task: "Regression prüfen",
+      },
+      {
+        agent: "GF-Demo-Agent",
+        task: "Verständlichkeit in 5–7 Minuten bewerten",
+      },
+    ],
+    nextDesignSteps: [
+      "V6.37.1 Globales Layout vereinfachen",
+      "V6.37.2 Karten, Farben, Abstände und Typografie vereinheitlichen",
+      "V6.37.3 Demo-Startscreen / Executive Cockpit hochwertiger gestalten",
+      "V6.37.4 Mobile-/Browser-Lesbarkeit prüfen",
+    ],
+    recommendation:
+      "Ab jetzt keine neuen Inhaltskarten mehr, bevor das Designsystem auf die bestehenden Hauptbereiche angewendet wurde.",
+  };
+}
+
+const PRODUCTIVE_CENTRAL_PREMIUM_UI_DESIGN_SYSTEM_PREPARED = true;
+const NEXT_PRODUCTIVE_CENTRAL_PREMIUM_UI_DESIGN_SYSTEM_STEP =
+  "V6.37.1 starten: globales Layout vereinfachen und Designsystem auf Demo-Cockpit, Portfolio und Agenten-Zentrale anwenden.";
 
 const PRODUCTIVE_AGENT_REGISTRY = [
   { id: "strategy-agent", name: "Strategie-Agent", role: "Bewertet Ziel, Richtung und Priorität", category: "strategy", active: true, readOnly: true },
@@ -18499,6 +18602,9 @@ function getPluginReadiness(requestUrl) {
     productiveCentralPluginControlUxFinish: getProductiveCentralPluginControlUxFinish(),
     productiveCentralPluginControlUxFinishPrepared: PRODUCTIVE_CENTRAL_PLUGIN_CONTROL_UX_FINISH_PREPARED,
     nextProductiveCentralPluginControlUxStep: NEXT_PRODUCTIVE_CENTRAL_PLUGIN_CONTROL_UX_STEP,
+    productiveCentralPremiumUiDesignSystem: getProductiveCentralPremiumUiDesignSystem(),
+    productiveCentralPremiumUiDesignSystemPrepared: PRODUCTIVE_CENTRAL_PREMIUM_UI_DESIGN_SYSTEM_PREPARED,
+    nextProductiveCentralPremiumUiDesignSystemStep: NEXT_PRODUCTIVE_CENTRAL_PREMIUM_UI_DESIGN_SYSTEM_STEP,
     demoCockpit: getDemoCockpit(),
     pluginReadyAgentCount: agentPluginReadiness.length,
     availablePluginCategories,

@@ -15781,6 +15781,7 @@ function getDemoCockpit() {
     nextProductiveCentralDesignUsabilityStep:
       "Bestehende Agentenrollen für UI/UX-Finish-Bewertung einplanen und ersten Finish-Sprint vorbereiten.",
     demoQuickNav: [
+      { label: "Designsystem", view: "cockpit", anchor: "premium-ui-design-system-anchor" },
       { label: "Plugin-Leitstand", view: "cockpit", anchor: "plugin-leitstand-demo-anchor" },
       { label: "Produktivbereich", view: "cockpit", anchor: "demo-productive-anchor" },
       { label: "HR-Tagesvorschlag", view: "cockpit", anchor: "hr-agent-daily-suggestion" },
@@ -16094,6 +16095,217 @@ function getProductiveCentralPluginControlUxFinish() {
 const PRODUCTIVE_CENTRAL_PLUGIN_CONTROL_UX_FINISH_PREPARED = true;
 const NEXT_PRODUCTIVE_CENTRAL_PLUGIN_CONTROL_UX_STEP =
   "Erste Plugin-Stufe mit Jamal bewusst als read-only Test freigeben oder bewusst zurückstellen.";
+
+function getProductiveCentralPremiumUiDesignSystem() {
+  return {
+    version: "V6.37.0",
+    title: "Designsystem und Premium-UI-Leitlinie",
+    subtitle:
+      "Welche Gestaltungsrichtung gilt für die nächste UI-Finish-Runde — ohne Umbau, ohne neue Produktlogik?",
+    guidanceLine:
+      "Fokus: Erst Leitlinie festlegen, dann gezielt auf bestehende Hauptbereiche anwenden — noch kein großer UI-Umbau.",
+    mode: "read-only-guideline",
+    designDna: {
+      title: "Design-DNA",
+      question: "Wie soll die Zentrale sich anfühlen?",
+      points: [
+        "Apple statt Dashboard-Hölle",
+        "ruhig, warm, hochwertig",
+        "mediterrane Klarheit statt technischer Überladung",
+        "Geschäftsführersprache statt Systemjargon",
+        "wenige Entscheidungen pro Screen",
+        "Funktion erklärt sich über Gestaltung",
+        "Sicherheit sichtbar, aber nicht dominant",
+      ],
+    },
+    visualPrinciples: {
+      title: "Visuelle Prinzipien",
+      question: "Wie führen wir durch jeden Screen?",
+      points: [
+        "Eine Hauptfrage pro Bereich",
+        "Ein nächster Schritt pro Screen",
+        "Weniger Karten, stärkere Gruppen",
+        "Weniger Text auf erster Ebene",
+        "Details nur bei Bedarf aufklappbar",
+        "Status klar, aber nicht laut",
+        "Weißraum wichtiger als Informationsdichte",
+        "Führung statt Tabellengefühl",
+      ],
+    },
+    componentGuidelines: {
+      title: "Komponenten-Leitlinie",
+      question: "Welche Bausteine bilden die Oberfläche?",
+      components: [
+        "Executive-Kopfbereich",
+        "Fokuskarte",
+        "Entscheidungskarte",
+        "Status-Badge",
+        "Sicherheits-Hinweisbox",
+        "Detailbereich mit <details>",
+        "Next-Step-Leiste",
+        "Demo-relevante Primärkarte",
+        "Sekundäre Vorbereitungskarte",
+      ],
+    },
+    styleRules: {
+      title: "Stilregeln",
+      question: "Was vermeiden wir bewusst?",
+      rules: [
+        "Keine Textwände",
+        "Keine zehn gleich lauten Karten nebeneinander",
+        "Keine grellen Statusfarben",
+        "Keine technischen Überschriften als Hauptbotschaft",
+        "Keine grinsenden Stock-Gesichter",
+        "Keine unnötigen Animationen",
+        "Keine überladene Dashboard-Optik",
+        "Kein „alles ist gleich wichtig“",
+      ],
+    },
+    designAgentAssignments: [
+      {
+        agent: "Design-Director-Agent",
+        task: "Premium-Wirkung und visuelle Hierarchie bewerten",
+      },
+      {
+        agent: "UX-Agent",
+        task: "Navigation, Klickpfade und Bedienbarkeit prüfen",
+      },
+      {
+        agent: "Content-Agent",
+        task: "Texte kürzen und in Geschäftsführersprache bringen",
+      },
+      {
+        agent: "QA-Agent",
+        task: "Regression prüfen",
+      },
+      {
+        agent: "GF-Demo-Agent",
+        task: "Verständlichkeit in 5–7 Minuten bewerten",
+      },
+    ],
+    nextDesignSteps: [
+      "V6.37.1 Globales Layout vereinfachen",
+      "V6.37.2 Karten, Farben, Abstände und Typografie vereinheitlichen",
+      "V6.37.3 Demo-Startscreen / Executive Cockpit hochwertiger gestalten",
+      "V6.37.4 Mobile-/Browser-Lesbarkeit prüfen",
+    ],
+    recommendation:
+      "Ab jetzt keine neuen Inhaltskarten mehr, bevor das Designsystem auf die bestehenden Hauptbereiche angewendet wurde.",
+  };
+}
+
+const PRODUCTIVE_CENTRAL_PREMIUM_UI_DESIGN_SYSTEM_PREPARED = true;
+const NEXT_PRODUCTIVE_CENTRAL_PREMIUM_UI_DESIGN_SYSTEM_STEP =
+  "V6.37.1 starten: globales Layout vereinfachen und Designsystem auf Demo-Cockpit, Portfolio und Agenten-Zentrale anwenden.";
+
+function renderPremiumUiDesignSystemArea(area) {
+  return `
+    <section class="premium-ui-design-system-area">
+      <header class="premium-ui-design-system-area-head">
+        <p class="premium-ui-design-system-area-kicker">${escapeHtml(area.title)}</p>
+        <h5 class="premium-ui-design-system-area-question">${escapeHtml(area.question)}</h5>
+      </header>
+      <ul class="premium-ui-design-system-list">
+        ${area.points.map((point) => `<li>${escapeHtml(point)}</li>`).join("")}
+      </ul>
+    </section>
+  `;
+}
+
+function renderPremiumUiDesignSystemSection() {
+  const designSystem = getProductiveCentralPremiumUiDesignSystem();
+  const agentRows = designSystem.designAgentAssignments
+    .map(
+      (entry) =>
+        `<li><strong>${escapeHtml(entry.agent)}:</strong> ${escapeHtml(entry.task)}</li>`,
+    )
+    .join("");
+  const stepRows = designSystem.nextDesignSteps
+    .map((step) => `<li>${escapeHtml(step)}</li>`)
+    .join("");
+  const componentRows = designSystem.componentGuidelines.components
+    .map((component) => `<li>${escapeHtml(component)}</li>`)
+    .join("");
+
+  return `
+    <section
+      class="premium-ui-design-system"
+      id="premium-ui-design-system-anchor"
+      aria-labelledby="premium-ui-design-system-title"
+    >
+      <header class="premium-ui-design-system-head">
+        <p class="eyebrow">V6.37.0 Designsystem · read-only Leitlinie</p>
+        <h4 id="premium-ui-design-system-title">${escapeHtml(designSystem.title)}</h4>
+        <p class="premium-ui-design-system-subtitle">${escapeHtml(designSystem.subtitle)}</p>
+        <p class="premium-ui-design-system-guidance">${escapeHtml(designSystem.guidanceLine)}</p>
+      </header>
+
+      <div class="premium-ui-design-system-areas">
+        ${renderPremiumUiDesignSystemArea(designSystem.designDna)}
+        ${renderPremiumUiDesignSystemArea(designSystem.visualPrinciples)}
+      </div>
+
+      <div class="premium-ui-design-system-secondary">
+        <section class="premium-ui-design-system-area">
+          <header class="premium-ui-design-system-area-head">
+            <p class="premium-ui-design-system-area-kicker">${escapeHtml(designSystem.componentGuidelines.title)}</p>
+            <h5 class="premium-ui-design-system-area-question">${escapeHtml(designSystem.componentGuidelines.question)}</h5>
+          </header>
+          <ul class="premium-ui-design-system-list premium-ui-design-system-list--components">
+            ${componentRows}
+          </ul>
+        </section>
+
+        <section class="premium-ui-design-system-area">
+          <header class="premium-ui-design-system-area-head">
+            <p class="premium-ui-design-system-area-kicker">${escapeHtml(designSystem.styleRules.title)}</p>
+            <h5 class="premium-ui-design-system-area-question">${escapeHtml(designSystem.styleRules.question)}</h5>
+          </header>
+          <ul class="premium-ui-design-system-list premium-ui-design-system-list--rules">
+            ${designSystem.styleRules.rules.map((rule) => `<li>${escapeHtml(rule)}</li>`).join("")}
+          </ul>
+        </section>
+      </div>
+
+      <section class="premium-ui-design-system-agents">
+        <header class="premium-ui-design-system-area-head">
+          <p class="premium-ui-design-system-area-kicker">Design-Agentenauftrag</p>
+          <h5 class="premium-ui-design-system-area-question">Welche Rollen bewerten die nächste UI-Runde?</h5>
+        </header>
+        <ul class="premium-ui-design-system-list premium-ui-design-system-list--agents">
+          ${agentRows}
+        </ul>
+      </section>
+
+      <section class="premium-ui-design-system-steps">
+        <header class="premium-ui-design-system-area-head">
+          <p class="premium-ui-design-system-area-kicker">Nächste Designschritte</p>
+          <h5 class="premium-ui-design-system-area-question">In welcher Reihenfolge wird gestaltet?</h5>
+        </header>
+        <ol class="premium-ui-design-system-steps-list">
+          ${stepRows}
+        </ol>
+      </section>
+
+      <article class="premium-ui-design-system-notice">
+        <strong>${escapeHtml(designSystem.recommendation)}</strong>
+      </article>
+
+      ${renderDemoCockpitDetails(
+        "Technische Leitlinien-Details",
+        `
+        <dl class="plugin-rollout-facts">
+          <div><dt>Version</dt><dd>${escapeHtml(designSystem.version)}</dd></div>
+          <div><dt>Modus</dt><dd>${escapeHtml(designSystem.mode)}</dd></div>
+          <div><dt>Vorbereitet</dt><dd>ja · read-only</dd></div>
+          <div><dt>Nächster Sprint</dt><dd>${escapeHtml(NEXT_PRODUCTIVE_CENTRAL_PREMIUM_UI_DESIGN_SYSTEM_STEP)}</dd></div>
+          <div><dt>Grenze</dt><dd>Kein UI-Umbau · keine Figma-/Canva-Aktivierung · keine neue Produktlogik</dd></div>
+        </dl>
+      `,
+      )}
+    </section>
+  `;
+}
 
 function renderPluginControlSummary() {
   return `
@@ -16508,6 +16720,8 @@ function renderDemoCockpit() {
       "4 · Qualität weiter",
       "Was verbessern wir nach der Demo?",
       `
+      ${renderPremiumUiDesignSystemSection()}
+
       <article class="demo-cockpit-card demo-cockpit-card--design">
         <header class="demo-cockpit-card-head">
           <h4>${escapeHtml(demo.productiveCentralDesignUsabilityDiagnosis.title)}</h4>
@@ -45668,6 +45882,7 @@ function scrollToDemoAnchor(anchorId) {
 
 const DEMO_HASH_ANCHOR_VIEWS = {
   "hr-agent-daily-suggestion": "cockpit",
+  "premium-ui-design-system-anchor": "cockpit",
   "plugin-leitstand-demo-anchor": "cockpit",
   "demo-productive-anchor": "cockpit",
   "agent-plugin-readiness": "cockpit",
