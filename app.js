@@ -1274,13 +1274,13 @@ const defaultProjects = [
   },
   {
     id: "proj-health",
-    title: "Health Upgrade Projektsteuerung",
+    title: "Health Upgrade Kompass",
     area: "Health Upgrade",
-    description: "Strukturierte Steuerung für Produktideen, Herstellerkontakte, Tests, Dokumente und Freigaben.",
+    description: "Bereich 1–4 reichen für die erste Demo. Körperanalysewaage bleibt Phase 2.",
     targetGroup: "Interne Leitung, Produktentwicklung und spätere Partner.",
     value: "Komplexe Produktentscheidungen werden mit Risiko-, Qualitäts- und Dokumentationspflichten verbunden.",
     model: "Produkt- und Partnersteuerung mit späterer operativer Erweiterung.",
-    status: "In Prüfung",
+    status: "demo-ready-read-only",
     lifecycleStatus: "Freigabe",
     priority: "Hoch",
     progress: 48,
@@ -1876,7 +1876,18 @@ function isVideoContentAgentProject(project) {
 }
 
 function mergePortfolioProjectSeedIntoState(projects) {
-  const existingProjects = (Array.isArray(projects) ? projects : []).filter((project) => !isVideoContentAgentProject(project));
+  const existingProjects = (Array.isArray(projects) ? projects : [])
+    .filter((project) => !isVideoContentAgentProject(project))
+    .map((project) => {
+      if (project?.id !== "proj-health") return project;
+      return {
+        ...project,
+        title: "Health Upgrade Kompass",
+        status: "demo-ready-read-only",
+        description:
+          "Bereich 1–4 reichen für die erste Demo. Körperanalysewaage bleibt Phase 2.",
+      };
+    });
   const existingIds = new Set(existingProjects.map((project) => project.id).filter(Boolean));
   const existingTitles = new Set(existingProjects.map((project) => comparableText(project.title || project.name)).filter(Boolean));
   const mergedProjects = [...existingProjects];
