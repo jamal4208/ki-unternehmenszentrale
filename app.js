@@ -15651,7 +15651,7 @@ function buildPluginCommandCenter(projectContext, workRequest, analysis, agentRu
 }
 
 const DEMO_COCKPIT_VERSION = "V6.34.3";
-const DEMO_UI_UX_FINISH_VERSION = "V6.35.0";
+const DEMO_UI_UX_FINISH_VERSION = "V6.36.1";
 
 function getDemoCockpit() {
   return {
@@ -15831,6 +15831,27 @@ function renderDemoCockpitBadge(kind, label) {
   return `<span class="demo-cockpit-badge demo-cockpit-badge--${escapeHtml(kind)}">${escapeHtml(label)}</span>`;
 }
 
+function renderDemoCockpitDetails(summary, bodyHtml) {
+  return `
+    <details class="demo-cockpit-longform">
+      <summary>${summary}</summary>
+      <div class="demo-cockpit-longform-body">${bodyHtml}</div>
+    </details>
+  `;
+}
+
+function renderDemoCockpitGroup(title, question, innerHtml) {
+  return `
+    <section class="demo-cockpit-group">
+      <header class="demo-cockpit-group-head">
+        <p class="demo-cockpit-group-kicker">${escapeHtml(title)}</p>
+        <h4 class="demo-cockpit-group-question">${escapeHtml(question)}</h4>
+      </header>
+      ${innerHtml}
+    </section>
+  `;
+}
+
 function renderDemoCockpit() {
   const output = byId("demo-cockpit-output");
   if (!output) return;
@@ -15838,11 +15859,21 @@ function renderDemoCockpit() {
   const demo = getDemoCockpit();
   const hrSuggestion = getHrDailyAgentSuggestion();
   output.innerHTML = `
-    <aside class="demo-cockpit-hero" aria-label="Demo-Pflichtsatz">
-      <p class="demo-cockpit-hero-kicker">Demo-Präsentation · ${escapeHtml(demo.demoUiUxFinishVersion)}</p>
-      <blockquote class="demo-cockpit-hero-quote">verbunden heißt nicht ausführend</blockquote>
-      <p class="demo-cockpit-hero-note">Alle Plugin-Verbindungen sind read-only. Keine Ausführung ohne Jamals Bestätigung.</p>
-    </aside>
+    <section class="demo-cockpit-lead" aria-label="Priorität jetzt">
+      <div class="demo-cockpit-lead-grid">
+        <article class="demo-cockpit-lead-card demo-cockpit-lead-card--important">
+          <p class="demo-cockpit-lead-label">Was ist wichtig?</p>
+          <p class="demo-cockpit-lead-value">${escapeHtml(demo.productiveCentralDemoFreeze.status)}</p>
+          <p class="demo-cockpit-lead-note">${escapeHtml(demo.productiveCentralDemoFreeze.shortAssessment)}</p>
+          <p class="demo-cockpit-lead-meta">25 Agenten · read-only · GitHub + Airtable bestätigt</p>
+        </article>
+        <article class="demo-cockpit-lead-card demo-cockpit-lead-card--next">
+          <p class="demo-cockpit-lead-label">Was als Nächstes?</p>
+          <p class="demo-cockpit-lead-value">${escapeHtml(demo.nextProductiveCentralExternalDemoPreparationStep)}</p>
+          <p class="demo-cockpit-lead-quote">„verbunden heißt nicht ausführend“</p>
+        </article>
+      </div>
+    </section>
 
     <nav class="demo-cockpit-quicknav" aria-label="Demo-Schnellnavigation">
       ${demo.demoQuickNav
@@ -15859,200 +15890,211 @@ function renderDemoCockpit() {
         .join("")}
     </nav>
 
-    <div class="demo-cockpit-grid">
-      <article class="demo-cockpit-card">
-        <header class="demo-cockpit-card-head">
-          <h4>Demo-Status</h4>
-          ${renderDemoCockpitBadge("bestanden", demo.demoStatus.label)}
-        </header>
-        <dl class="demo-cockpit-facts">
-          <div><dt>Version</dt><dd>UI/UX ${escapeHtml(demo.demoUiUxFinishVersion)} · Cockpit ${escapeHtml(demo.demoCockpitVersion)} · Plugin ${escapeHtml(demo.demoStatus.pluginLeitstandVersion)}</dd></div>
-          <div><dt>Modus</dt><dd>${escapeHtml(demo.demoStatus.mode)}</dd></div>
-          <div><dt>Ergebnis</dt><dd>${escapeHtml(demo.demoStatus.result)}</dd></div>
-        </dl>
-      </article>
+    ${renderDemoCockpitGroup(
+      "1 · Stand auf einen Blick",
+      "Ist alles demo-bereit?",
+      `
+      <div class="demo-cockpit-group-grid">
+        <article class="demo-cockpit-card demo-cockpit-card--compact">
+          <header class="demo-cockpit-card-head">
+            <h4>Demo-Status</h4>
+            ${renderDemoCockpitBadge("bestanden", demo.demoStatus.label)}
+          </header>
+          <p class="demo-cockpit-card-summary">${escapeHtml(demo.demoStatus.mode)} · ${escapeHtml(demo.demoStatus.result)}</p>
+        </article>
 
-      <article class="demo-cockpit-card">
-        <header class="demo-cockpit-card-head">
-          <h4>Plugin-Live-Status</h4>
-        </header>
-        <ul class="demo-cockpit-list">
-          <li>${renderDemoCockpitBadge("bestanden", "GitHub")} live read-only bestanden</li>
-          <li>${renderDemoCockpitBadge("bestanden", "Airtable")} live read-only sanitisiert bestanden</li>
-          <li>${renderDemoCockpitBadge("vorbereitet", "Vercel")} vorbereitet, nicht live</li>
-          <li>${renderDemoCockpitBadge("offen", "Canva")} briefing-ready, nicht production-ready</li>
-        </ul>
-        <div class="demo-cockpit-actions">
-          <button class="secondary-button" type="button" data-view-jump="agents" data-view-anchor="plugin-leitstand-demo-anchor">Plugin-Leitstand öffnen</button>
-        </div>
-      </article>
+        <article class="demo-cockpit-card demo-cockpit-card--compact">
+          <header class="demo-cockpit-card-head">
+            <h4>Plugins</h4>
+            ${renderDemoCockpitBadge("bestanden", "read-only")}
+          </header>
+          <p class="demo-cockpit-card-summary">GitHub + Airtable live · Vercel vorbereitet · Canva briefing</p>
+          <div class="demo-cockpit-actions">
+            <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="plugin-leitstand-demo-anchor">Plugin-Leitstand</button>
+          </div>
+        </article>
 
-      <article class="demo-cockpit-card">
-        <header class="demo-cockpit-card-head">
-          <h4>Agentenstatus</h4>
-          ${renderDemoCockpitBadge("bestanden", "25 Agenten")}
-        </header>
-        <dl class="demo-cockpit-facts">
-          <div><dt>Anzahl</dt><dd>25 – keine neuen Agenten</dd></div>
-          <div><dt>Modus</dt><dd>projektbezogen aktiv · read-only</dd></div>
-        </dl>
-        <div class="demo-cockpit-actions">
-          <button class="secondary-button" type="button" data-view-jump="agents" data-view-anchor="agent-plugin-readiness">Agenten-Zentrale</button>
-        </div>
-      </article>
+        <article class="demo-cockpit-card demo-cockpit-card--compact">
+          <header class="demo-cockpit-card-head">
+            <h4>Agenten</h4>
+            ${renderDemoCockpitBadge("bestanden", "25")}
+          </header>
+          <p class="demo-cockpit-card-summary">projektbezogen aktiv · keine neuen Agenten</p>
+          <div class="demo-cockpit-actions">
+            <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="agent-plugin-readiness">Agenten-Zentrale</button>
+          </div>
+        </article>
 
-      <article class="demo-cockpit-card demo-cockpit-card--hr">
-        <header class="demo-cockpit-card-head">
-          <h4>HR-Tagesvorschlag</h4>
-          ${renderDemoCockpitBadge("vorbereitet", "read-only")}
-        </header>
-        <dl class="demo-cockpit-facts">
-          <div><dt>Heute trainieren</dt><dd>${escapeHtml(hrSuggestion.targetName)}</dd></div>
-          <div><dt>1%-Verbesserung</dt><dd>${escapeHtml(hrSuggestion.improvement)}</dd></div>
-        </dl>
-        <div class="demo-cockpit-actions">
-          <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="hr-agent-daily-suggestion">Vollständig öffnen</button>
-        </div>
-      </article>
+        <article class="demo-cockpit-card demo-cockpit-card--compact demo-cockpit-card--hr">
+          <header class="demo-cockpit-card-head">
+            <h4>HR-Tagesvorschlag</h4>
+            ${renderDemoCockpitBadge("vorbereitet", "heute")}
+          </header>
+          <p class="demo-cockpit-card-summary">${escapeHtml(hrSuggestion.targetName)} · ${escapeHtml(hrSuggestion.improvement)}</p>
+          <div class="demo-cockpit-actions">
+            <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="hr-agent-daily-suggestion">Öffnen</button>
+          </div>
+        </article>
 
-      <article class="demo-cockpit-card demo-cockpit-card--health">
-        <header class="demo-cockpit-card-head">
-          <h4>Health Upgrade Kompass</h4>
-          ${renderDemoCockpitBadge("bestanden", "demo-ready")}
-        </header>
-        <dl class="demo-cockpit-facts">
-          <div><dt>Demostand</dt><dd>Bereich 1–4 reichen für die erste Demo.</dd></div>
-          <div><dt>Abgrenzung</dt><dd>Körperanalysewaage bleibt Phase 2.</dd></div>
-        </dl>
-        <div class="demo-cockpit-actions">
-          <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="demo-productive-anchor">Im Projekt-Dropdown auswählen</button>
-        </div>
-      </article>
+        <article class="demo-cockpit-card demo-cockpit-card--compact demo-cockpit-card--health">
+          <header class="demo-cockpit-card-head">
+            <h4>Health Upgrade Kompass</h4>
+            ${renderDemoCockpitBadge("bestanden", "demo-ready")}
+          </header>
+          <p class="demo-cockpit-card-summary">Bereich 1–4 für Demo · Körperanalysewaage Phase 2</p>
+          <div class="demo-cockpit-actions">
+            <button class="secondary-button" type="button" data-view-jump="portfolio">Portfolio</button>
+            <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="demo-productive-anchor">Auswählen</button>
+          </div>
+        </article>
+      </div>
+    `,
+    )}
 
-      <article class="demo-cockpit-card demo-cockpit-card--finish">
-        <header class="demo-cockpit-card-head">
-          <h4>Demo-Finish-Checkliste</h4>
-          ${renderDemoCockpitBadge("bestanden", "ready")}
-        </header>
-        <ul class="demo-cockpit-list demo-cockpit-list--compact">
-          <li>Health Upgrade Kompass im Projekt-Dropdown sichtbar und auswählbar</li>
-          <li>Health Upgrade Kompass als Demo-Projekt sichtbar erklärt</li>
-          <li>Bereich 1–4 reichen für die erste Demo</li>
-          <li>Körperanalysewaage bleibt Phase 2</li>
-          <li>Plugin-Leitstand sichtbar</li>
-          <li>HR-Tagesvorschläge sichtbar</li>
-          <li>25 Agenten bestätigt</li>
-          <li>Keine Schreibpfade, keine externen Requests, keine Secrets</li>
-          <li>Demo kann intern 5–7 Minuten trocken durchgeklickt werden</li>
-        </ul>
-        <p class="demo-cockpit-quote"><strong>Empfehlung:</strong> Demo-Stand nach internem Trockenlauf einfrieren.</p>
-      </article>
-
+    ${renderDemoCockpitGroup(
+      "2 · Vorführung",
+      "Was zeige ich in 5–7 Minuten?",
+      `
       <article class="demo-cockpit-card demo-cockpit-card--freeze">
         <header class="demo-cockpit-card-head">
           <h4>${escapeHtml(demo.productiveCentralDemoFreeze.title)}</h4>
           ${renderDemoCockpitBadge("bestanden", demo.productiveCentralDemoFreeze.status)}
         </header>
-        <p class="demo-cockpit-quote">${escapeHtml(demo.productiveCentralDemoFreeze.shortAssessment)}</p>
-        <h5>Fertig genug für Demo</h5>
-        <ul class="demo-cockpit-list demo-cockpit-list--compact">
-          ${demo.productiveCentralDemoFreeze.demoReadyChecks.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
-        </ul>
-        <h5>Nicht mehr vor erster Demo anfassen</h5>
-        <ul class="demo-cockpit-list demo-cockpit-list--compact">
-          ${demo.productiveCentralDemoFreeze.freezeBoundaries.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
-        </ul>
-        <p class="demo-cockpit-quote"><strong>Nächster manueller Schritt:</strong> ${escapeHtml(demo.productiveCentralDemoFreeze.nextManualStep)}</p>
-        <p class="demo-cockpit-quote"><strong>Empfehlung:</strong> ${escapeHtml(demo.productiveCentralDemoFreeze.recommendation)}</p>
+        <p class="demo-cockpit-card-summary">${escapeHtml(demo.productiveCentralDemoFreeze.recommendation)}</p>
+        ${renderDemoCockpitDetails(
+          "Freeze-Details anzeigen",
+          `
+          <h5>Fertig genug für Demo</h5>
+          <ul class="demo-cockpit-list demo-cockpit-list--compact">
+            ${demo.productiveCentralDemoFreeze.demoReadyChecks.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ul>
+          <h5>Nicht mehr vor erster Demo anfassen</h5>
+          <ul class="demo-cockpit-list demo-cockpit-list--compact">
+            ${demo.productiveCentralDemoFreeze.freezeBoundaries.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ul>
+        `,
+        )}
       </article>
 
-      <article class="demo-cockpit-card demo-cockpit-card--external demo-cockpit-card--wide">
+      <article class="demo-cockpit-card demo-cockpit-card--external">
         <header class="demo-cockpit-card-head">
           <h4>${escapeHtml(demo.productiveCentralExternalDemoPreparation.title)}</h4>
-          ${renderDemoCockpitBadge("vorbereitet", "Vorführhilfe")}
+          ${renderDemoCockpitBadge("vorbereitet", "Ablauf")}
         </header>
-        <dl class="demo-cockpit-facts">
-          <div><dt>Demo-Ziel</dt><dd>${escapeHtml(demo.productiveCentralExternalDemoPreparation.demoGoal)}</dd></div>
-        </dl>
-        <h5>Empfohlener 5–7-Minuten-Ablauf</h5>
-        <ol class="demo-cockpit-steps">
+        <p class="demo-cockpit-card-summary">${escapeHtml(demo.productiveCentralExternalDemoPreparation.demoGoal)}</p>
+        <ol class="demo-cockpit-steps demo-cockpit-steps--flow">
           ${demo.productiveCentralExternalDemoPreparation.recommendedFlow.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}
         </ol>
-        <h5>Was ausdrücklich gesagt werden soll</h5>
-        <ul class="demo-cockpit-list demo-cockpit-list--compact">
-          ${demo.productiveCentralExternalDemoPreparation.sayExplicitly.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
-        </ul>
-        <h5>Was nicht gezeigt / nicht versprochen werden soll</h5>
-        <ul class="demo-cockpit-list demo-cockpit-list--compact">
-          ${demo.productiveCentralExternalDemoPreparation.doNotShowOrPromise.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
-        </ul>
-        <p class="demo-cockpit-quote"><strong>Jamal-Satz Einstieg:</strong> ${escapeHtml(demo.productiveCentralExternalDemoPreparation.jamalOpeningSentence)}</p>
-        <p class="demo-cockpit-quote"><strong>Jamal-Satz Abschluss:</strong> ${escapeHtml(demo.productiveCentralExternalDemoPreparation.jamalClosingSentence)}</p>
+        ${renderDemoCockpitDetails(
+          "Sätze, Grenzen und Formulierungen",
+          `
+          <h5>Was ausdrücklich sagen</h5>
+          <ul class="demo-cockpit-list demo-cockpit-list--compact">
+            ${demo.productiveCentralExternalDemoPreparation.sayExplicitly.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ul>
+          <h5>Was nicht versprechen</h5>
+          <ul class="demo-cockpit-list demo-cockpit-list--compact">
+            ${demo.productiveCentralExternalDemoPreparation.doNotShowOrPromise.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ul>
+          <p class="demo-cockpit-quote"><strong>Einstieg:</strong> ${escapeHtml(demo.productiveCentralExternalDemoPreparation.jamalOpeningSentence)}</p>
+          <p class="demo-cockpit-quote"><strong>Abschluss:</strong> ${escapeHtml(demo.productiveCentralExternalDemoPreparation.jamalClosingSentence)}</p>
+        `,
+        )}
         <div class="demo-cockpit-actions">
           <button class="secondary-button" type="button" data-view-jump="portfolio">Portfolio öffnen</button>
-          <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="plugin-leitstand-demo-anchor">Plugin-Leitstand</button>
         </div>
       </article>
+    `,
+    )}
 
-      <article class="demo-cockpit-card demo-cockpit-card--design demo-cockpit-card--wide">
+    ${renderDemoCockpitGroup(
+      "3 · Grenzen",
+      "Was bleibt bewusst aus?",
+      `
+      <div class="demo-cockpit-group-grid demo-cockpit-group-grid--two">
+        <article class="demo-cockpit-card demo-cockpit-card--compact">
+          <header class="demo-cockpit-card-head">
+            <h4>Sicherheit</h4>
+            ${renderDemoCockpitBadge("blockiert", "geschützt")}
+          </header>
+          <p class="demo-cockpit-card-summary">Keine Schreibrechte · keine externen Requests · keine Secrets</p>
+          ${renderDemoCockpitDetails(
+            "Alle Sicherheitsgrenzen",
+            `<ul class="demo-cockpit-list demo-cockpit-list--compact">
+              ${demo.safetyStatus.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+            </ul>`,
+          )}
+        </article>
+
+        <article class="demo-cockpit-card demo-cockpit-card--compact">
+          <header class="demo-cockpit-card-head">
+            <h4>Offene Punkte</h4>
+            ${renderDemoCockpitBadge("offen", "beobachten")}
+          </header>
+          <ul class="demo-cockpit-list demo-cockpit-list--compact">
+            ${demo.openPoints.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ul>
+        </article>
+      </div>
+    `,
+    )}
+
+    ${renderDemoCockpitGroup(
+      "4 · Qualität weiter",
+      "Was verbessern wir nach der Demo?",
+      `
+      <article class="demo-cockpit-card demo-cockpit-card--design">
         <header class="demo-cockpit-card-head">
           <h4>${escapeHtml(demo.productiveCentralDesignUsabilityDiagnosis.title)}</h4>
-          ${renderDemoCockpitBadge("vorbereitet", "Diagnose")}
+          ${renderDemoCockpitBadge("vorbereitet", "UI/UX")}
         </header>
-        <dl class="demo-cockpit-facts">
-          <div><dt>Aktuelle Einschätzung</dt><dd>${escapeHtml(demo.productiveCentralDesignUsabilityDiagnosis.currentAssessment)}</dd></div>
-        </dl>
-        <h5>Hauptprobleme</h5>
-        <ol class="demo-cockpit-steps">
-          ${demo.productiveCentralDesignUsabilityDiagnosis.mainProblems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
-        </ol>
-        <h5>Design-Zielbild</h5>
-        <ol class="demo-cockpit-steps">
-          ${demo.productiveCentralDesignUsabilityDiagnosis.designVision.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
-        </ol>
-        <h5>Designkriterien</h5>
-        <ul class="demo-cockpit-list demo-cockpit-list--compact">
-          ${demo.productiveCentralDesignUsabilityDiagnosis.designCriteria.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
-        </ul>
-        <h5>Agentenauftrag für den nächsten Schritt</h5>
-        <ol class="demo-cockpit-steps">
-          ${demo.productiveCentralDesignUsabilityDiagnosis.agentAssignments.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
-        </ol>
-        <p class="demo-cockpit-quote"><strong>Empfehlung:</strong> ${escapeHtml(demo.productiveCentralDesignUsabilityDiagnosis.recommendation)}</p>
+        <p class="demo-cockpit-card-summary">${escapeHtml(demo.productiveCentralDesignUsabilityDiagnosis.recommendation)}</p>
+        ${renderDemoCockpitDetails(
+          "Diagnose-Details anzeigen",
+          `
+          <p class="demo-cockpit-quote">${escapeHtml(demo.productiveCentralDesignUsabilityDiagnosis.currentAssessment)}</p>
+          <h5>Hauptprobleme</h5>
+          <ol class="demo-cockpit-steps">
+            ${demo.productiveCentralDesignUsabilityDiagnosis.mainProblems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ol>
+          <h5>Design-Zielbild</h5>
+          <ol class="demo-cockpit-steps">
+            ${demo.productiveCentralDesignUsabilityDiagnosis.designVision.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ol>
+          <h5>Designkriterien</h5>
+          <ul class="demo-cockpit-list demo-cockpit-list--compact">
+            ${demo.productiveCentralDesignUsabilityDiagnosis.designCriteria.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ul>
+          <h5>Agentenauftrag</h5>
+          <ol class="demo-cockpit-steps">
+            ${demo.productiveCentralDesignUsabilityDiagnosis.agentAssignments.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ol>
+          <p class="demo-cockpit-quote"><strong>Nächster Schritt:</strong> ${escapeHtml(demo.nextProductiveCentralDesignUsabilityStep)}</p>
+        `,
+        )}
       </article>
 
-      <article class="demo-cockpit-card">
-        <header class="demo-cockpit-card-head">
-          <h4>Sicherheitsstatus</h4>
-          ${renderDemoCockpitBadge("blockiert", "geschützt")}
-        </header>
-        <ul class="demo-cockpit-list demo-cockpit-list--compact">
-          ${demo.safetyStatus.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
-        </ul>
-      </article>
-
-      <article class="demo-cockpit-card demo-cockpit-card--wide">
-        <header class="demo-cockpit-card-head">
-          <h4>Nächster Demo-Schritt</h4>
-        </header>
-        <ol class="demo-cockpit-steps">
-          ${demo.nextDemoSteps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}
-        </ol>
-        <p class="demo-cockpit-quote"><strong>Pflichtsatz:</strong> verbunden heißt nicht ausführend</p>
-        <div class="demo-cockpit-actions">
-          <button class="secondary-button" type="button" data-view-jump="agents" data-view-anchor="demo-productive-anchor">Produktivbereich öffnen</button>
-        </div>
-      </article>
-
-      <article class="demo-cockpit-card demo-cockpit-card--wide">
-        <header class="demo-cockpit-card-head">
-          <h4>Offene Punkte</h4>
-        </header>
-        <ul class="demo-cockpit-list demo-cockpit-list--compact">
-          ${demo.openPoints.map((item) => `<li>${renderDemoCockpitBadge("offen", "beobachten")} ${escapeHtml(item)}</li>`).join("")}
-        </ul>
-      </article>
-    </div>
+      ${renderDemoCockpitDetails(
+        `Demo-Finish-Checkliste · ${escapeHtml(demo.demoFinishChecklistStatus)}`,
+        `
+        <article class="demo-cockpit-card demo-cockpit-card--finish">
+          <ul class="demo-cockpit-list demo-cockpit-list--compact">
+            <li>Health Upgrade Kompass im Projekt-Dropdown sichtbar und auswählbar</li>
+            <li>Health Upgrade Kompass als Demo-Projekt sichtbar erklärt</li>
+            <li>Bereich 1–4 reichen für die erste Demo</li>
+            <li>Körperanalysewaage bleibt Phase 2</li>
+            <li>Plugin-Leitstand sichtbar</li>
+            <li>HR-Tagesvorschläge sichtbar</li>
+            <li>25 Agenten bestätigt</li>
+            <li>Keine Schreibpfade, keine externen Requests, keine Secrets</li>
+            <li>Demo kann intern 5–7 Minuten trocken durchgeklickt werden</li>
+          </ul>
+          <p class="demo-cockpit-quote"><strong>Empfehlung:</strong> Demo-Stand nach internem Trockenlauf einfrieren.</p>
+        </article>
+      `,
+      )}
+    `,
+    )}
   `;
 }
 

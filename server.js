@@ -6567,7 +6567,7 @@ function buildPluginCommandCenter(projectContext, workRequest, analysis, agentRu
 }
 
 const DEMO_COCKPIT_VERSION = "V6.34.3";
-const DEMO_UI_UX_FINISH_VERSION = "V6.35.0";
+const DEMO_UI_UX_FINISH_VERSION = "V6.36.1";
 
 function getDemoCockpit() {
   return {

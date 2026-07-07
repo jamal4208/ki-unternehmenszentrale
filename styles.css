@@ -5987,7 +5987,120 @@ select {
 .demo-cockpit-output {
   margin-top: 16px;
   display: grid;
+  gap: 18px;
+}
+
+.demo-cockpit-lead {
+  padding: 18px 20px;
+  border: 1px solid #ddd2c2;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #fffaf2 0%, #f4ebdd 100%);
+}
+
+.demo-cockpit-lead-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.demo-cockpit-lead-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.demo-cockpit-lead-card--next {
+  border: 1px solid #d8e0d5;
+  background: linear-gradient(180deg, #fcfffb 0%, #f1f7ef 100%);
+}
+
+.demo-cockpit-lead-label {
+  margin: 0;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #7a6f61;
+  font-weight: 700;
+}
+
+.demo-cockpit-lead-value {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #3f372f;
+}
+
+.demo-cockpit-lead-note,
+.demo-cockpit-lead-meta,
+.demo-cockpit-lead-quote {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: #6a6258;
+}
+
+.demo-cockpit-lead-quote {
+  font-style: italic;
+}
+
+.demo-cockpit-group {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid #e8e2d8;
+  border-radius: 16px;
+  background: #fcfaf6;
+}
+
+.demo-cockpit-group-head {
+  display: grid;
+  gap: 4px;
+}
+
+.demo-cockpit-group-kicker {
+  margin: 0;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #8a7f72;
+  font-weight: 700;
+}
+
+.demo-cockpit-group-question {
+  margin: 0;
+  font-size: 1.1rem;
+  line-height: 1.35;
+  color: #3f372f;
+}
+
+.demo-cockpit-group-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.demo-cockpit-group-grid--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.demo-cockpit-card--compact {
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.demo-cockpit-card-summary {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: #5f574d;
+}
+
+.demo-cockpit-steps--flow {
+  gap: 6px;
+  font-size: 0.88rem;
 }
 
 .demo-cockpit-hero {
@@ -6238,6 +6351,12 @@ select {
 
 @media (max-width: 900px) {
   .demo-cockpit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .demo-cockpit-lead-grid,
+  .demo-cockpit-group-grid,
+  .demo-cockpit-group-grid--two {
     grid-template-columns: 1fr;
   }
 }
