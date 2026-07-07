@@ -6067,6 +6067,11 @@ select {
   background: linear-gradient(180deg, #fdfcff 0%, #f5f0fa 100%);
 }
 
+.demo-cockpit-card--design {
+  border-color: #d9e0e8;
+  background: linear-gradient(180deg, #fcfdfe 0%, #f2f6f9 100%);
+}
+
 .demo-cockpit-tagesfuehrung,
 .demo-cockpit-codex {
   margin-bottom: 18px;

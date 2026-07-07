@@ -15732,6 +15732,54 @@ function getDemoCockpit() {
     productiveCentralExternalDemoPreparationPrepared: true,
     nextProductiveCentralExternalDemoPreparationStep:
       "Externe 5–7-Minuten-Demo mit Zuschauer durchführen und Freigaben gemeinsam entscheiden.",
+    productiveCentralDesignUsabilityDiagnosis: {
+      title: "Design- und Bedienbarkeitsdiagnose",
+      currentAssessment:
+        "Funktional ist die KI-Unternehmenszentrale vorführbar. Die Bedienbarkeit und visuelle Klarheit reichen aber noch nicht für eine überzeugende externe Demo.",
+      mainProblems: [
+        "Zu viele Informationen gleichzeitig sichtbar",
+        "Zu viele interne Begriffe",
+        "Zu wenig visuelle Führung",
+        "Zu wenig klare Priorität pro Screen",
+        "Portfolio, Cockpit, Agenten und Plugins wirken noch wie technische Module statt wie eine einfache Steuerungszentrale",
+        "Der nächste sinnvolle Schritt für Jamal ist nicht immer sofort sichtbar",
+        "Design und Bedienbarkeit erklären die Funktionalität noch nicht ausreichend",
+      ],
+      designVision: [
+        "Ruhige, hochwertige Oberfläche",
+        "Weniger Karten, klarere Gruppen",
+        "Eine Führungsfrage pro Bereich",
+        "Stärkere visuelle Hierarchie",
+        "Verständliche Geschäftsführersprache statt Technikbegriffe",
+        "Jeder Screen beantwortet: „Was sehe ich hier?“ und „Was soll ich jetzt tun?“",
+        "Demo-tauglich in 5–7 Minuten erklärbar",
+        "Gestaltung unterstützt Verständnis statt zusätzliche Komplexität zu erzeugen",
+      ],
+      designCriteria: [
+        "Apple statt Dashboard-Hölle",
+        "warm, klar, hochwertig",
+        "mediterran ruhig statt technisch überladen",
+        "keine grinsenden Stock-Gesichter",
+        "keine unnötigen Effekte",
+        "keine Textwände",
+        "klare Entscheidungskarten",
+        "sichtbarer nächster Schritt",
+        "wenige Prioritäten pro Screen",
+        "read-only Sicherheit sichtbar, aber nicht dominant",
+        "Funktion soll sich durch Gestaltung erklären",
+      ],
+      agentAssignments: [
+        "Design-Director-Agent bewertet visuelle Qualität, Hierarchie und Premium-Wirkung",
+        "UX-Agent bewertet Bedienbarkeit, Navigation und Klickpfade",
+        "GF-Demo-Agent bewertet Verständlichkeit für externe Zuschauer",
+        "Content-Agent kürzt und vereinfacht Texte",
+        "QA-Agent prüft, dass keine bestehende Funktion beschädigt wird",
+      ],
+      recommendation: "Vor weiterer Produktlogik zuerst UI/UX-Finish durchführen.",
+    },
+    productiveCentralDesignUsabilityDiagnosisPrepared: true,
+    nextProductiveCentralDesignUsabilityStep:
+      "Bestehende Agentenrollen für UI/UX-Finish-Bewertung einplanen und ersten Finish-Sprint vorbereiten.",
     demoQuickNav: [
       { label: "Plugin-Leitstand", view: "cockpit", anchor: "plugin-leitstand-demo-anchor" },
       { label: "Produktivbereich", view: "cockpit", anchor: "demo-productive-anchor" },
@@ -15944,6 +15992,33 @@ function renderDemoCockpit() {
           <button class="secondary-button" type="button" data-view-jump="portfolio">Portfolio öffnen</button>
           <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="plugin-leitstand-demo-anchor">Plugin-Leitstand</button>
         </div>
+      </article>
+
+      <article class="demo-cockpit-card demo-cockpit-card--design demo-cockpit-card--wide">
+        <header class="demo-cockpit-card-head">
+          <h4>${escapeHtml(demo.productiveCentralDesignUsabilityDiagnosis.title)}</h4>
+          ${renderDemoCockpitBadge("vorbereitet", "Diagnose")}
+        </header>
+        <dl class="demo-cockpit-facts">
+          <div><dt>Aktuelle Einschätzung</dt><dd>${escapeHtml(demo.productiveCentralDesignUsabilityDiagnosis.currentAssessment)}</dd></div>
+        </dl>
+        <h5>Hauptprobleme</h5>
+        <ol class="demo-cockpit-steps">
+          ${demo.productiveCentralDesignUsabilityDiagnosis.mainProblems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ol>
+        <h5>Design-Zielbild</h5>
+        <ol class="demo-cockpit-steps">
+          ${demo.productiveCentralDesignUsabilityDiagnosis.designVision.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ol>
+        <h5>Designkriterien</h5>
+        <ul class="demo-cockpit-list demo-cockpit-list--compact">
+          ${demo.productiveCentralDesignUsabilityDiagnosis.designCriteria.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ul>
+        <h5>Agentenauftrag für den nächsten Schritt</h5>
+        <ol class="demo-cockpit-steps">
+          ${demo.productiveCentralDesignUsabilityDiagnosis.agentAssignments.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ol>
+        <p class="demo-cockpit-quote"><strong>Empfehlung:</strong> ${escapeHtml(demo.productiveCentralDesignUsabilityDiagnosis.recommendation)}</p>
       </article>
 
       <article class="demo-cockpit-card">
