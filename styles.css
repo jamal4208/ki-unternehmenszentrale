@@ -6194,6 +6194,167 @@ select {
   background: #fcfaf6;
 }
 
+.portfolio-ux-subtitle,
+.portfolio-ux-guidance {
+  margin: 6px 0 0;
+  max-width: 62ch;
+  line-height: 1.45;
+  color: #5f574d;
+}
+
+.portfolio-ux-guidance {
+  font-weight: 600;
+  color: #4a433b;
+}
+
+.portfolio-ux-filter-details {
+  align-self: start;
+  min-width: 220px;
+}
+
+.portfolio-ux-filter-details > summary {
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: #6a6258;
+}
+
+.portfolio-ux-output {
+  display: grid;
+  gap: 18px;
+}
+
+.portfolio-ux-focus {
+  display: grid;
+  gap: 12px;
+  padding: 18px 20px;
+  border: 1px solid #d7e6df;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fbfefc 0%, #f1f8f4 100%);
+}
+
+.portfolio-ux-focus-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.portfolio-ux-focus-kicker,
+.portfolio-ux-group-kicker {
+  margin: 0 0 4px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #7a6f61;
+  font-weight: 700;
+}
+
+.portfolio-ux-focus-head h4,
+.portfolio-ux-group-question {
+  margin: 0;
+}
+
+.portfolio-ux-focus-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.portfolio-ux-focus-facts div {
+  display: grid;
+  gap: 2px;
+}
+
+.portfolio-ux-focus-facts dt {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6f675d;
+}
+
+.portfolio-ux-focus-facts dd {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.portfolio-ux-focus-actions,
+.portfolio-ux-group-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.portfolio-ux-group {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid #e8e2d8;
+  border-radius: 16px;
+  background: #fcfaf6;
+}
+
+.portfolio-ux-group-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.portfolio-ux-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid #e8e2d8;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.portfolio-ux-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.portfolio-ux-card-head h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.portfolio-ux-status,
+.portfolio-ux-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #f2ece2;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #5f574d;
+  white-space: nowrap;
+}
+
+.portfolio-ux-card-summary,
+.portfolio-ux-card-next,
+.portfolio-ux-card-safety {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: #5f574d;
+}
+
+.portfolio-ux-card-safety {
+  font-size: 0.82rem;
+  color: #8a7f72;
+}
+
+.portfolio-ux-badge {
+  background: #e8f3ec;
+  color: #3f5d49;
+}
+
 .demo-cockpit-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -6357,6 +6518,11 @@ select {
   .demo-cockpit-lead-grid,
   .demo-cockpit-group-grid,
   .demo-cockpit-group-grid--two {
+    grid-template-columns: 1fr;
+  }
+
+  .portfolio-ux-focus-facts,
+  .portfolio-ux-group-grid {
     grid-template-columns: 1fr;
   }
 }

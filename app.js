@@ -15827,6 +15827,170 @@ function getDemoCockpit() {
   };
 }
 
+function getProductiveCentralPortfolioUxFinish() {
+  return {
+    version: "V6.36.2",
+    title: "Projektportfolio",
+    subtitle:
+      "Welche Projekte sind sichtbar, wo stehen sie, und was ist der nächste sinnvolle Schritt?",
+    guidanceLine: "Fokus: Erst verstehen, dann entscheiden, dann gezielt weiterbauen.",
+    focusProject: {
+      id: "proj-health",
+      title: "Health Upgrade Kompass",
+      status: "demo-ready-read-only",
+      whyImportant:
+        "Konkretes Demo-Projekt, an dem die KI-Unternehmenszentrale sichtbar erklärt werden kann.",
+      readyEnough: "Bereich 1–4 reichen für die erste Demo.",
+      later: "Körperanalysewaage bleibt Phase 2.",
+      nextStep:
+        "Demo mit Health Upgrade Kompass durchgehen und nur echte Verständnisprobleme notieren.",
+    },
+    groups: [
+      {
+        id: "now",
+        title: "Jetzt wichtig",
+        question: "Welches Projekt zählt für die nächste Demo?",
+      },
+      {
+        id: "prepared",
+        title: "Vorbereitet",
+        question: "Welche Projekte stehen bereit, sind aber nicht Demo-Fokus?",
+      },
+      {
+        id: "later",
+        title: "Später / nicht für diese Demo",
+        question: "Was bewusst zurückstellen?",
+      },
+    ],
+    recommendation:
+      "Portfolio lesen, Health Upgrade Kompass als Fokus führen, andere Projekte nur kurz einordnen.",
+  };
+}
+
+const PRODUCTIVE_CENTRAL_PORTFOLIO_UX_FINISH_PREPARED = true;
+const NEXT_PRODUCTIVE_CENTRAL_PORTFOLIO_UX_STEP =
+  "Health Upgrade Kompass in der Demo zeigen und Portfolio-Verständlichkeit mit einem externen Zuschauer testen.";
+
+function getPortfolioUxGroup(project) {
+  const status = String(project.status || "").toLowerCase();
+  const lifecycle = getProjectLifecycle(project);
+
+  if (project.id === "proj-health" || status.includes("demo-ready")) {
+    return "now";
+  }
+  if (project.id === "proj-os") {
+    return "now";
+  }
+  if (["Freigabe", "Test", "MVP", "Planung"].includes(lifecycle) || project.priority === "Hoch") {
+    return "prepared";
+  }
+  return "later";
+}
+
+function renderPortfolioUxBadge(label) {
+  return `<span class="portfolio-ux-badge">${escapeHtml(label)}</span>`;
+}
+
+function renderPortfolioFocusCard(portfolioUx) {
+  const focus = portfolioUx.focusProject;
+  return `
+    <article class="portfolio-ux-focus" aria-label="Fokusprojekt">
+      <header class="portfolio-ux-focus-head">
+        <p class="portfolio-ux-focus-kicker">Fokusprojekt</p>
+        <h4>${escapeHtml(focus.title)}</h4>
+        ${renderPortfolioUxBadge(focus.status)}
+      </header>
+      <dl class="portfolio-ux-focus-facts">
+        <div><dt>Warum wichtig</dt><dd>${escapeHtml(focus.whyImportant)}</dd></div>
+        <div><dt>Fertig genug</dt><dd>${escapeHtml(focus.readyEnough)}</dd></div>
+        <div><dt>Bewusst später</dt><dd>${escapeHtml(focus.later)}</dd></div>
+        <div><dt>Nächster Schritt</dt><dd>${escapeHtml(focus.nextStep)}</dd></div>
+      </dl>
+      <div class="portfolio-ux-focus-actions">
+        <button class="secondary-button" type="button" data-open-project="${escapeHtml(focus.id)}">Projekt öffnen</button>
+        <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="demo-productive-anchor">Im Dropdown auswählen</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderPortfolioUxCard(project) {
+  const lifecycle = getProjectLifecycle(project);
+  const connection = normalizeLeadershipConnection(project).leadershipConnection;
+  const nextStep =
+    connection.naechster_schritt ||
+    (project.nextSteps || [])[0] ||
+    "Bewusst noch nicht priorisiert.";
+  const detailHref = `?project=${encodeURIComponent(project.id)}#project-detail`;
+
+  return `
+    <article class="portfolio-ux-card">
+      <header class="portfolio-ux-card-head">
+        <h4>${escapeHtml(project.title)}</h4>
+        <span class="portfolio-ux-status">${escapeHtml(project.status || lifecycle)}</span>
+      </header>
+      <p class="portfolio-ux-card-summary">${escapeHtml(project.description || "Kurzbeschreibung folgt.")}</p>
+      <p class="portfolio-ux-card-next"><strong>Nächster Schritt:</strong> ${escapeHtml(nextStep)}</p>
+      <p class="portfolio-ux-card-safety">read-only · keine externe Aktion ohne Freigabe</p>
+      ${renderDemoCockpitDetails(
+        "Technische Details",
+        `
+        <dl class="portfolio-connection-facts">
+          <div><dt>Bereich</dt><dd>${escapeHtml(project.area || "Nicht zugeordnet")}</dd></div>
+          <div><dt>Lebenszyklus</dt><dd>${escapeHtml(lifecycle)}</dd></div>
+          <div><dt>Priorität</dt><dd>${escapeHtml(connection.prioritaet)}</dd></div>
+          <div><dt>Anbindung</dt><dd>${escapeHtml(connection.status)}</dd></div>
+          <div><dt>Zuständig</dt><dd>${escapeHtml(connection.zustaendig || (project.agents || ["Nicht zugeordnet"])[0])}</dd></div>
+          <div><dt>Risiko</dt><dd>${escapeHtml(project.riskLevel || "Mittel")}</dd></div>
+        </dl>
+        <label class="status-control">
+          Projektstatus
+          <select data-lifecycle-project="${escapeHtml(project.id)}" aria-label="Projektstatus für ${escapeHtml(project.title)}">
+            ${lifecycleOptions(lifecycle)}
+          </select>
+        </label>
+        ${
+          project.source === "manual"
+            ? `<p class="form-note">Nur lokal vorgemerkt. Keine externe Aktion.</p>`
+            : ""
+        }
+      `,
+      )}
+      <a class="secondary-button link-button" href="${escapeHtml(detailHref)}" data-open-project="${escapeHtml(project.id)}">Projekt öffnen</a>
+    </article>
+  `;
+}
+
+function renderPortfolioGroup(group, projects) {
+  if (projects.length === 0) {
+    return "";
+  }
+
+  return `
+    <section class="portfolio-ux-group">
+      <header class="portfolio-ux-group-head">
+        <p class="portfolio-ux-group-kicker">${escapeHtml(group.title)}</p>
+        <h4 class="portfolio-ux-group-question">${escapeHtml(group.question)}</h4>
+      </header>
+      <div class="portfolio-ux-group-grid">
+        ${projects.map((project) => renderPortfolioUxCard(project)).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function bindPortfolioUxActions(container) {
+  if (!container) return;
+
+  container.querySelectorAll("[data-open-project]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openProjectDetail(button.dataset.openProject);
+    });
+  });
+}
+
 function renderDemoCockpitBadge(kind, label) {
   return `<span class="demo-cockpit-badge demo-cockpit-badge--${escapeHtml(kind)}">${escapeHtml(label)}</span>`;
 }
@@ -42848,125 +43012,51 @@ function renderRisks() {
 }
 
 function renderPortfolio(filter = "all") {
+  const portfolioUx = getProductiveCentralPortfolioUxFinish();
   const projects = state.projects.filter((project) => {
     if (filter === "risk") return project.riskLevel === "Hoch";
     if (filter === "approval") return (project.qualityChecks || []).some((check) => !check.done);
     return true;
   });
 
-  const projectGrid = byId("project-grid");
+  const portfolioOutput = byId("portfolio-ux-output");
+  const legacyGrid = byId("project-grid");
+
   if (projects.length === 0) {
-    projectGrid.innerHTML = `
-      <article class="project-card">
-        <div class="project-top">
-          <div>
-            <h4>Noch keine echten Projekte angelegt.</h4>
-            <p>Die Zentrale ist trotzdem arbeitsbereit: Tagesstart, Agentenwahl, E-Mail-Check-Vorbereitung und Projektaufnahme sind vorbereitet.</p>
-          </div>
-          <span class="risk-pill low">0 Projekte</span>
-        </div>
-        <div class="tag-row">
-          <span class="tag blue">Tagesstart vorbereitet</span>
-          <span class="tag violet">Agentenwahl vorbereitet</span>
-          <span class="tag">E-Mail-Check vorbereitet</span>
-          <span class="tag lifecycle-tag">Projektaufnahme vorbereitet</span>
-        </div>
-        <p class="form-note">Keine echte Projektakte, keine Projektzuweisung, keine Speicherung und keine Migration wurden erzeugt.</p>
+    const emptyHtml = `
+      <article class="portfolio-ux-card portfolio-ux-card--empty">
+        <h4>Noch keine echten Projekte angelegt.</h4>
+        <p>Die Zentrale ist trotzdem arbeitsbereit: Tagesstart, Agentenwahl und Projektaufnahme sind vorbereitet.</p>
+        <p class="portfolio-ux-card-safety">read-only · keine Speicherung ohne bewusste Freigabe</p>
       </article>
     `;
+    if (portfolioOutput) portfolioOutput.innerHTML = emptyHtml;
+    if (legacyGrid) legacyGrid.innerHTML = emptyHtml;
     return;
   }
 
-  projectGrid.innerHTML = projects
-    .map((project) => {
-      const lifecycle = getProjectLifecycle(project);
-      const connection = normalizeLeadershipConnection(project).leadershipConnection;
-      const detailHref = `?project=${encodeURIComponent(project.id)}#project-detail`;
-      return `
-        <article class="project-card">
-          <div class="project-top">
-            <div>
-              <h4>${escapeHtml(project.title)} <span class="title-status">– ${escapeHtml(lifecycle)}</span></h4>
-              <p>${escapeHtml(project.description)}</p>
-            </div>
-            <span class="risk-pill ${riskClass(project.riskLevel)}">${escapeHtml(project.riskLevel || "Mittel")}</span>
-          </div>
-          <div class="tag-row">
-            <span class="tag blue">${escapeHtml(project.area || "Nicht zugeordnet")}</span>
-            <span class="tag">Priorität ${escapeHtml(connection.prioritaet)}</span>
-            <span class="tag lifecycle-tag">Status: ${escapeHtml(lifecycle)}</span>
-            <span class="status-pill ${statusClass(project)}">${escapeHtml(project.status || "Neu")}</span>
-            <span class="status-pill ready">An KI-Unternehmensleitung angebunden</span>
-          </div>
-          <dl class="portfolio-connection-facts">
-            <div>
-              <dt>Anbindungsstatus</dt>
-              <dd>${escapeHtml(connection.status)}</dd>
-            </div>
-            <div>
-              <dt>Zugeordnet an</dt>
-              <dd>${escapeHtml(connection.angebunden_an)}</dd>
-            </div>
-            <div>
-              <dt>Steuerungsebene</dt>
-              <dd>${escapeHtml(connection.steuerungsebene)}</dd>
-            </div>
-            <div>
-              <dt>Zuständig</dt>
-              <dd>${escapeHtml(connection.zustaendig || (project.agents || ["Nicht zugeordnet"])[0])}</dd>
-            </div>
-            <div>
-              <dt>Unterstützende Agenten</dt>
-              <dd>${escapeHtml((connection.unterstuetzende_agenten || project.agents || ["Nicht zugeordnet"]).join(" / "))}</dd>
-            </div>
-            <div>
-              <dt>Letzter Report</dt>
-              <dd>${escapeHtml(connection.letzter_report)}</dd>
-            </div>
-          </dl>
-          <label class="status-control">
-            Projektstatus
-            <select data-lifecycle-project="${escapeHtml(project.id)}" aria-label="Projektstatus für ${escapeHtml(project.title)}">
-              ${lifecycleOptions(lifecycle)}
-            </select>
-          </label>
-          <div class="progress-track" aria-label="Fortschritt ${project.progress || 0} Prozent">
-            <span class="progress-bar" style="width: ${project.progress || 0}%"></span>
-          </div>
-          <div>
-            <p><strong>Nächster Arbeitsschritt</strong></p>
-            ${list([connection.naechster_schritt, ...((project.nextSteps || []).filter((step) => step !== connection.naechster_schritt))].slice(0, 3).map(escapeHtml))}
-          </div>
-          ${
-            project.source === "manual"
-              ? `
-                <p class="form-note">Nur lokal vorgemerkt. Keine externe Aktion.</p>
-                <p class="project-safety-note">${escapeHtml(project.manualSafetyNote || "Dieses Projekt wurde nur lokal aufgenommen.")}</p>
-                ${
-                  project.suggestedAgent
-                    ? `<div class="agent-tags"><span class="tag violet">${escapeHtml(project.suggestedAgent)} · read-only Hinweis</span></div>`
-                    : ""
-                }
-              `
-              : ""
-          }
-          <div class="agent-tags">
-            ${(project.agents || []).slice(0, 5).map((agent) => `<span class="tag violet">${escapeHtml(agent)}</span>`).join("")}
-          </div>
-          <div class="project-card-actions">
-            <a class="secondary-button link-button" href="${escapeHtml(detailHref)}" data-open-project="${escapeHtml(project.id)}">Projekt öffnen</a>
-          </div>
-        </article>
-      `;
-    })
-    .join("");
-
-  projectGrid.querySelectorAll("button[data-open-project]").forEach((button) => {
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      openProjectDetail(button.dataset.openProject);
-    });
+  const grouped = { now: [], prepared: [], later: [] };
+  projects.forEach((project) => {
+    if (project.id === portfolioUx.focusProject.id) {
+      return;
+    }
+    grouped[getPortfolioUxGroup(project)].push(project);
   });
+
+  const html = `
+    ${renderPortfolioFocusCard(portfolioUx)}
+    ${portfolioUx.groups.map((group) => renderPortfolioGroup(group, grouped[group.id])).join("")}
+  `;
+
+  if (portfolioOutput) {
+    portfolioOutput.innerHTML = html;
+    bindPortfolioUxActions(portfolioOutput);
+  }
+
+  if (legacyGrid) {
+    legacyGrid.innerHTML = html;
+    bindPortfolioUxActions(legacyGrid);
+  }
 }
 
 function renderAgents() {

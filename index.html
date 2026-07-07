@@ -1077,19 +1077,25 @@
           </div>
         </section>
 
-        <section class="view" id="portfolio-view" data-title="Portfolio-Leitstand">
+        <section class="view" id="portfolio-view" data-title="Projektportfolio">
           <div class="section-toolbar">
             <div>
-              <p class="eyebrow">Alle Projekte</p>
-              <h3>Portfolio-Leitstand</h3>
+                <p class="eyebrow">V6.36.2 Portfolio · vereinfacht</p>
+                <h3>Projektportfolio</h3>
+                <p class="portfolio-ux-subtitle">Welche Projekte sind sichtbar, wo stehen sie, und was ist der nächste sinnvolle Schritt?</p>
+                <p class="portfolio-ux-guidance">Fokus: Erst verstehen, dann entscheiden, dann gezielt weiterbauen.</p>
+              </div>
+              <details class="portfolio-ux-filter-details">
+                <summary>Erweiterter Filter</summary>
+                <div class="segmented portfolio-ux-filter" role="group" aria-label="Portfolio Filter">
+                  <button class="segment is-active" type="button" data-filter="all">Alle</button>
+                  <button class="segment" type="button" data-filter="risk">Risiko</button>
+                  <button class="segment" type="button" data-filter="approval">Freigabe</button>
+                </div>
+              </details>
             </div>
-            <div class="segmented" role="group" aria-label="Portfolio Filter">
-              <button class="segment is-active" type="button" data-filter="all">Alle</button>
-              <button class="segment" type="button" data-filter="risk">Risiko</button>
-              <button class="segment" type="button" data-filter="approval">Freigabe</button>
-            </div>
-          </div>
-          <div class="project-grid" id="project-grid"></div>
+            <div id="portfolio-ux-output" class="portfolio-ux-output"></div>
+            <div class="project-grid is-legacy-hidden" id="project-grid" hidden></div>
         </section>
 
         <section class="view" id="project-detail-view" data-title="Projekt-Detail">

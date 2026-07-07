@@ -6743,6 +6743,50 @@ function getDemoCockpit() {
   };
 }
 
+function getProductiveCentralPortfolioUxFinish() {
+  return {
+    version: "V6.36.2",
+    title: "Projektportfolio",
+    subtitle:
+      "Welche Projekte sind sichtbar, wo stehen sie, und was ist der nächste sinnvolle Schritt?",
+    guidanceLine: "Fokus: Erst verstehen, dann entscheiden, dann gezielt weiterbauen.",
+    focusProject: {
+      id: "proj-health",
+      title: "Health Upgrade Kompass",
+      status: "demo-ready-read-only",
+      whyImportant:
+        "Konkretes Demo-Projekt, an dem die KI-Unternehmenszentrale sichtbar erklärt werden kann.",
+      readyEnough: "Bereich 1–4 reichen für die erste Demo.",
+      later: "Körperanalysewaage bleibt Phase 2.",
+      nextStep:
+        "Demo mit Health Upgrade Kompass durchgehen und nur echte Verständnisprobleme notieren.",
+    },
+    groups: [
+      {
+        id: "now",
+        title: "Jetzt wichtig",
+        question: "Welches Projekt zählt für die nächste Demo?",
+      },
+      {
+        id: "prepared",
+        title: "Vorbereitet",
+        question: "Welche Projekte stehen bereit, sind aber nicht Demo-Fokus?",
+      },
+      {
+        id: "later",
+        title: "Später / nicht für diese Demo",
+        question: "Was bewusst zurückstellen?",
+      },
+    ],
+    recommendation:
+      "Portfolio lesen, Health Upgrade Kompass als Fokus führen, andere Projekte nur kurz einordnen.",
+  };
+}
+
+const PRODUCTIVE_CENTRAL_PORTFOLIO_UX_FINISH_PREPARED = true;
+const NEXT_PRODUCTIVE_CENTRAL_PORTFOLIO_UX_STEP =
+  "Health Upgrade Kompass in der Demo zeigen und Portfolio-Verständlichkeit mit einem externen Zuschauer testen.";
+
 const PRODUCTIVE_AGENT_REGISTRY = [
   { id: "strategy-agent", name: "Strategie-Agent", role: "Bewertet Ziel, Richtung und Priorität", category: "strategy", active: true, readOnly: true },
   { id: "product-agent", name: "Produkt-Agent", role: "Ordnet Auftrag produktlogisch ein", category: "product", active: true, readOnly: true },
@@ -18342,6 +18386,9 @@ function getPluginReadiness(requestUrl) {
     productiveCentralDesignUsabilityDiagnosisPrepared:
       getDemoCockpit().productiveCentralDesignUsabilityDiagnosisPrepared,
     nextProductiveCentralDesignUsabilityStep: getDemoCockpit().nextProductiveCentralDesignUsabilityStep,
+    productiveCentralPortfolioUxFinish: getProductiveCentralPortfolioUxFinish(),
+    productiveCentralPortfolioUxFinishPrepared: PRODUCTIVE_CENTRAL_PORTFOLIO_UX_FINISH_PREPARED,
+    nextProductiveCentralPortfolioUxStep: NEXT_PRODUCTIVE_CENTRAL_PORTFOLIO_UX_STEP,
     demoCockpit: getDemoCockpit(),
     pluginReadyAgentCount: agentPluginReadiness.length,
     availablePluginCategories,
