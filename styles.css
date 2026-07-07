@@ -6355,6 +6355,160 @@ select {
   color: #3f5d49;
 }
 
+.agent-ux-subtitle,
+.agent-ux-guidance {
+  margin: 6px 0 0;
+  max-width: 62ch;
+  line-height: 1.45;
+  color: #5f574d;
+}
+
+.agent-ux-guidance {
+  font-weight: 600;
+  color: #4a433b;
+}
+
+.agent-ux-output {
+  display: grid;
+  gap: 18px;
+}
+
+.agent-ux-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.agent-ux-summary-card {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid #e8e2d8;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.agent-ux-summary-label,
+.agent-ux-group-kicker {
+  margin: 0;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #7a6f61;
+  font-weight: 700;
+}
+
+.agent-ux-summary-value {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.4;
+  color: #3f372f;
+  font-weight: 600;
+}
+
+.agent-ux-hr-example {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid #e6ddd0;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fffdf9 0%, #faf5ec 100%);
+}
+
+.agent-ux-hr-example-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.agent-ux-hr-example-facts div {
+  display: grid;
+  gap: 2px;
+}
+
+.agent-ux-hr-example-facts dt {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6f675d;
+}
+
+.agent-ux-hr-example-facts dd {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.agent-ux-hr-example-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.agent-ux-group {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid #e8e2d8;
+  border-radius: 16px;
+  background: #fcfaf6;
+}
+
+.agent-ux-group-question {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.35;
+  color: #3f372f;
+}
+
+.agent-ux-group-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.agent-ux-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid #e8e2d8;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.agent-ux-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.agent-ux-card-head h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.agent-ux-mode {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #f2ece2;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #5f574d;
+  white-space: nowrap;
+}
+
+.agent-ux-card-task,
+.agent-ux-card-benefit {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: #5f574d;
+}
+
 .demo-cockpit-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -6523,6 +6677,12 @@ select {
 
   .portfolio-ux-focus-facts,
   .portfolio-ux-group-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-ux-summary-grid,
+  .agent-ux-group-grid,
+  .agent-ux-hr-example-facts {
     grid-template-columns: 1fr;
   }
 }

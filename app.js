@@ -15991,6 +15991,189 @@ function bindPortfolioUxActions(container) {
   });
 }
 
+function getProductiveCentralAgentCenterUxFinish() {
+  return {
+    version: "V6.36.3",
+    title: "Agenten-Zentrale",
+    subtitle:
+      "Welche Agenten helfen gerade, was liefern sie, und welche bleiben bewusst read-only?",
+    guidanceLine:
+      "Fokus: Agenten liefern Orientierung und Vorschläge — Entscheidungen bleiben bei Jamal.",
+    summary: {
+      agentCount: 25,
+      mode: "read-only Arbeitsmodus",
+      noExternalRequests: true,
+      noWriteRights: true,
+      demoFirst: true,
+    },
+    groups: [
+      {
+        id: "demo",
+        title: "Für die Demo wichtig",
+        question: "Welche Agenten zeige ich zuerst?",
+      },
+      {
+        id: "project",
+        title: "Für Projektsteuerung wichtig",
+        question: "Wer hilft bei Projekten und nächsten Schritten?",
+      },
+      {
+        id: "quality",
+        title: "Für Qualität und Sicherheit wichtig",
+        question: "Wer prüft Grenzen, Risiken und Qualität?",
+      },
+      {
+        id: "later",
+        title: "Später / vorbereitet",
+        question: "Was bleibt bewusst im Hintergrund?",
+      },
+    ],
+    hrExampleLead: "So sieht ein konkreter Agentenbeitrag aus.",
+    recommendation:
+      "Demo mit Kernagenten führen, HR-Tagesvorschlag als Beispiel zeigen, Rest nur bei Bedarf öffnen.",
+  };
+}
+
+const PRODUCTIVE_CENTRAL_AGENT_CENTER_UX_FINISH_PREPARED = true;
+const NEXT_PRODUCTIVE_CENTRAL_AGENT_CENTER_UX_STEP =
+  "Agenten-Zentrale in der externen Demo kurz erklären und HR-Tagesvorschlag als konkretes Beispiel zeigen.";
+
+const AGENT_CENTER_DEMO_NAMES = new Set([
+  "Geschäftsführer-Agent",
+  "Morgenbriefing-Agent",
+  "Design-Director-Agent",
+  "Content-Agent",
+  "HR-/Team-Agent",
+  "Projektmanager-Agent",
+  "Plugin-/Tool-Radar-Agent",
+  "QA-Agent",
+]);
+
+const AGENT_CENTER_PROJECT_NAMES = new Set([
+  "Produktmanager-Agent",
+  "Strategie-/Geschäftsentwicklungs-Agent",
+  "Operations-/Prozess-Agent",
+  "Entwickler-Agent",
+  "Plugin-/Integrations-Architekt-Agent",
+  "Web- & App-Product-Design-Agent",
+]);
+
+const AGENT_CENTER_QUALITY_NAMES = new Set([
+  "Compliance-/Risiko-Agent",
+  "Rechts-/Compliance-Agent",
+  "Support-Agent",
+  "Wissens-/Archiv-Agent",
+]);
+
+function getAgentCenterUxGroup(agentName) {
+  if (AGENT_CENTER_DEMO_NAMES.has(agentName)) return "demo";
+  if (AGENT_CENTER_PROJECT_NAMES.has(agentName)) return "project";
+  if (AGENT_CENTER_QUALITY_NAMES.has(agentName)) return "quality";
+  return "later";
+}
+
+function getAgentCenterMode(agentName) {
+  if (AGENT_CENTER_DEMO_NAMES.has(agentName)) return "demo-relevant · read-only";
+  return "read-only · vorbereitet";
+}
+
+function renderAgentCenterSummary(agentCenterUx) {
+  const summary = agentCenterUx.summary;
+  return `
+    <section class="agent-ux-summary" aria-label="Agenten-Übersicht">
+      <div class="agent-ux-summary-grid">
+        <article class="agent-ux-summary-card">
+          <p class="agent-ux-summary-label">Agenten</p>
+          <p class="agent-ux-summary-value">${summary.agentCount} vorbereitet</p>
+        </article>
+        <article class="agent-ux-summary-card">
+          <p class="agent-ux-summary-label">Modus</p>
+          <p class="agent-ux-summary-value">${escapeHtml(summary.mode)}</p>
+        </article>
+        <article class="agent-ux-summary-card">
+          <p class="agent-ux-summary-label">Sicherheit</p>
+          <p class="agent-ux-summary-value">keine externen Requests · keine Schreibrechte</p>
+        </article>
+        <article class="agent-ux-summary-card">
+          <p class="agent-ux-summary-label">Demo</p>
+          <p class="agent-ux-summary-value">relevante Agenten zuerst sichtbar</p>
+        </article>
+      </div>
+    </section>
+  `;
+}
+
+function renderAgentCenterHrExample(agentCenterUx, hrSuggestion) {
+  return `
+    <article class="agent-ux-hr-example" id="agent-ux-hr-example">
+      <header class="agent-ux-hr-example-head">
+        <p class="agent-ux-group-kicker">Beispiel</p>
+        <h4>${escapeHtml(agentCenterUx.hrExampleLead)}</h4>
+      </header>
+      <dl class="agent-ux-hr-example-facts">
+        <div><dt>HR-Agent</dt><dd>${escapeHtml(hrSuggestion.hrAgentName)}</dd></div>
+        <div><dt>Heute trainieren</dt><dd>${escapeHtml(hrSuggestion.targetName)}</dd></div>
+        <div><dt>1%-Verbesserung</dt><dd>${escapeHtml(hrSuggestion.improvement)}</dd></div>
+        <div><dt>Grenze</dt><dd>${escapeHtml(hrSuggestion.risk)}</dd></div>
+      </dl>
+      <div class="agent-ux-hr-example-actions">
+        <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="hr-agent-daily-suggestion">HR-Tagesvorschlag öffnen</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderAgentCenterUxCard(agent, options = {}) {
+  const { extended = false, projectCount = 0 } = options;
+  const task = extended ? agent.role : agent.mandate;
+  const benefit = extended
+    ? agent.core
+    : (agent.strengths || []).slice(0, 2).join(" · ") || "Orientierung und nächste Schritte vorbereiten.";
+  const mode = getAgentCenterMode(agent.name);
+  const detailBody = extended
+    ? `
+        <dl class="extended-agent-facts">
+          <div><dt>Kernauftrag</dt><dd>${escapeHtml(agent.core)}</dd></div>
+          <div><dt>Nächster manueller Schritt</dt><dd>${escapeHtml(agent.nextManualStep || "Bewusst manuell durch Jamal.")}</dd></div>
+          <div><dt>Grenze</dt><dd>${escapeHtml(agent.boundary)}</dd></div>
+          ${agent.trainingStatus ? `<div><dt>Ausbildungsstand</dt><dd>${escapeHtml(agent.trainingStatus)}</dd></div>` : ""}
+          ${agent.primaryTasks?.length ? `<div><dt>Hauptaufgaben</dt><dd>${escapeHtml(agent.primaryTasks.join(" · "))}</dd></div>` : ""}
+        </dl>
+      `
+    : `
+        <p>${escapeHtml(agent.boundary)}</p>
+        ${projectCount ? `<p>${projectCount} Projekte zugeordnet</p>` : ""}
+        <div class="agent-tags">
+          ${(agent.strengths || []).map((strength) => `<span class="tag">${escapeHtml(strength)}</span>`).join("")}
+        </div>
+      `;
+
+  return `
+    <article class="agent-ux-card">
+      <header class="agent-ux-card-head">
+        <h4>${escapeHtml(agent.name)}</h4>
+        <span class="agent-ux-mode">${escapeHtml(mode)}</span>
+      </header>
+      <p class="agent-ux-card-task"><strong>Aufgabe:</strong> ${escapeHtml(task)}</p>
+      <p class="agent-ux-card-benefit"><strong>Bringt Jamal:</strong> ${escapeHtml(benefit)}</p>
+      ${renderDemoCockpitDetails("Technische Details", detailBody)}
+    </article>
+  `;
+}
+
+function renderAgentCenterGroup(group, cardsHtml) {
+  if (!cardsHtml.trim()) return "";
+  return `
+    <section class="agent-ux-group">
+      <header class="agent-ux-group-head">
+        <p class="agent-ux-group-kicker">${escapeHtml(group.title)}</p>
+        <h4 class="agent-ux-group-question">${escapeHtml(group.question)}</h4>
+      </header>
+      <div class="agent-ux-group-grid">${cardsHtml}</div>
+    </section>
+  `;
+}
+
 function renderDemoCockpitBadge(kind, label) {
   return `<span class="demo-cockpit-badge demo-cockpit-badge--${escapeHtml(kind)}">${escapeHtml(label)}</span>`;
 }
@@ -43060,6 +43243,8 @@ function renderPortfolio(filter = "all") {
 }
 
 function renderAgents() {
+  const agentCenterUx = getProductiveCentralAgentCenterUxFinish();
+  const hrSuggestion = getHrDailyAgentSuggestion();
   const counts = agents.reduce((map, agent) => {
     const names = [agent.name, ...(agent.aliases || [])];
     map[agent.name] = state.projects.filter((project) =>
@@ -43068,275 +43253,28 @@ function renderAgents() {
     return map;
   }, {});
 
-  const cardsByName = new Map();
+  const grouped = { demo: [], project: [], quality: [], later: [] };
 
   agents.forEach((agent) => {
-      const load = Math.min(100, counts[agent.name] * 18 + 12);
-      cardsByName.set(
-        agent.name,
-        `
-        <article class="agent-card">
-          <div class="agent-avatar" aria-hidden="true">${agent.initials}</div>
-          <div>
-            <h4>${escapeHtml(agent.name)}</h4>
-            <p>${escapeHtml(agent.mandate)}</p>
-          </div>
-          <div class="agent-card-status-row">
-            <span class="status-pill pending">Grundrolle bereit</span>
-            <span class="status-pill pending">read-only / manuell</span>
-          </div>
-          <p class="agent-boundary">${escapeHtml(agent.boundary)}</p>
-          <div class="agent-load">
-            <div class="progress-track" aria-label="Auslastung ${load} Prozent">
-              <span class="progress-bar" style="width: ${load}%"></span>
-            </div>
-            <span>${counts[agent.name]} Projekte</span>
-          </div>
-          <p class="extended-agent-ready">Bereitschaftsstatus: lokal nutzbar für Vorschläge, Struktur und manuelle nächste Schritte.</p>
-          <div class="agent-tags">
-            ${agent.strengths.map((strength) => `<span class="tag">${escapeHtml(strength)}</span>`).join("")}
-          </div>
-        </article>
-      `,
-      );
-    });
+    grouped[getAgentCenterUxGroup(agent.name)].push(
+      renderAgentCenterUxCard(agent, { projectCount: counts[agent.name] || 0 }),
+    );
+  });
 
   extendedLeadershipAgents.forEach((agent) => {
-      const badge = agent.number.split("/")[0];
-      const tags = agent.possibleUseAreas || [];
-      const optionalFacts = [
-        agent.status ? { label: "Status", value: agent.status } : null,
-        agent.trainingStatus ? { label: "Ausbildungsstand", value: agent.trainingStatus } : null,
-        agent.shortName ? { label: "Kurzname", value: agent.shortName } : null,
-        agent.mission ? { label: "Mission", value: agent.mission } : null,
-        agent.finalCore ? { label: "Finaler Kernauftrag", value: agent.finalCore } : null,
-        agent.startArchitecture?.length
-          ? { label: "Startarchitektur", value: agent.startArchitecture.join(" · ") }
-          : null,
-        agent.finalCard ? { label: "Finale Agentenkarte", value: agent.finalCard } : null,
-        agent.education ? { label: "Fachliche Verankerung", value: agent.education } : null,
-        agent.workingLogic
-          ? {
-              label: "Zentrale Denklogik",
-              value: Array.isArray(agent.workingLogic) ? agent.workingLogic.join(" · ") : agent.workingLogic,
-            }
-          : null,
-        agent.primaryTasks?.length ? { label: "Hauptaufgaben", value: agent.primaryTasks.join(" · ") } : null,
-        agent.pluginDomains?.length ? { label: "Plugin-Domänen", value: agent.pluginDomains.join(" · ") } : null,
-        agent.integrationLogic?.length
-          ? { label: "Integrationslogik", value: agent.integrationLogic.join(" · ") }
-          : null,
-        agent.rightsModel?.length ? { label: "Rechte- und Freigabemodell", value: agent.rightsModel.join(" · ") } : null,
-        agent.finalOperatingLogic?.length
-          ? { label: "Finale Einsatzlogik", value: agent.finalOperatingLogic.join(" · ") }
-          : null,
-        agent.finalTasks?.length ? { label: "Typische finale Aufgaben", value: agent.finalTasks.join(" · ") } : null,
-        agent.mustNot?.length ? { label: "Harte Grenzen", value: agent.mustNot.join(" · ") } : null,
-        agent.hardBoundaries?.length ? { label: "Harte Nicht-Dürfen-Regeln", value: agent.hardBoundaries.join(" · ") } : null,
-        agent.approvalRules?.length ? { label: "Freigaberegeln", value: agent.approvalRules.join(" · ") } : null,
-        agent.escalationLogic?.length
-          ? { label: "Freigabe- und Eskalationslogik", value: agent.escalationLogic.join(" · ") }
-          : null,
-        agent.standardOutput?.length ? { label: "Standard-Ausgabe", value: agent.standardOutput.join(" · ") } : null,
-        agent.collaborationModel?.length
-          ? { label: "Zusammenarbeit mit anderen Agenten", value: agent.collaborationModel.join(" · ") }
-          : null,
-        agent.planningVsExecutionBoundary
-          ? { label: "Grenze Planung / Integration / Automatisierung", value: agent.planningVsExecutionBoundary }
-          : null,
-        agent.thinking ? { label: "Denkweise", value: agent.thinking } : null,
-        agent.projectTypes?.length ? { label: "Einordnung", value: agent.projectTypes.join(" · ") } : null,
-        agent.userFlowQuestions?.length
-          ? { label: "Nutzerweg klären", value: agent.userFlowQuestions.join(" · ") }
-          : null,
-        agent.screenStructure ? { label: "Screen-Struktur", value: agent.screenStructure } : null,
-        agent.layoutLogic ? { label: "Layoutlogik", value: agent.layoutLogic } : null,
-        agent.designSystemLogic?.length
-          ? { label: "Designsystem-Logik", value: agent.designSystemLogic.join(" · ") }
-          : null,
-        agent.referenceLogic ? { label: "Referenzlogik", value: agent.referenceLogic } : null,
-        agent.portfolioSources ? { label: "Portfolio-/Recherchequellen", value: agent.portfolioSources } : null,
-        agent.productBenchmarks ? { label: "AI-/Produkt-Benchmarks", value: agent.productBenchmarks } : null,
-        agent.designRisks?.length ? { label: "Designrisiken", value: agent.designRisks.join(" · ") } : null,
-        agent.figmaBriefing ? { label: "Figma-Briefing", value: agent.figmaBriefing } : null,
-        agent.standardFormula ? { label: "Standard-Denkformel", value: agent.standardFormula } : null,
-        agent.separation ? { label: "Abgrenzung", value: agent.separation } : null,
-        agent.cannotDo?.length
-          ? { label: "Was der Agent ausdrücklich nicht darf", value: agent.cannotDo.join(" · ") }
-          : null,
-        agent.typicalUseCases?.length
-          ? { label: "Typische Einsatzfälle", value: agent.typicalUseCases.join(" · ") }
-          : null,
-        agent.tasks?.length ? { label: "Aufgaben", value: agent.tasks.join(" · ") } : null,
-        agent.outputFormat?.length ? { label: "Standard-Ausgabeformat", value: agent.outputFormat.join(" · ") } : null,
-      ].filter(Boolean);
+    grouped[getAgentCenterUxGroup(agent.name)].push(renderAgentCenterUxCard(agent, { extended: true }));
+  });
 
-      cardsByName.set(
-        agent.name,
-        `
-        <article class="agent-card extended-agent-card">
-          <div class="agent-avatar" aria-hidden="true">${escapeHtml(badge)}</div>
-          <div>
-            <h4>${escapeHtml(agent.name)}</h4>
-            <p>${escapeHtml(agent.role)}</p>
-          </div>
-          <div class="agent-card-status-row">
-            <span class="status-pill pending">${escapeHtml(agent.trainingStatus || "Ausbildungsstand offen")}</span>
-            <span class="status-pill pending">read-only</span>
-          </div>
-          <p class="agent-boundary">${escapeHtml(agent.boundary)}</p>
-          <div class="agent-load">
-            <div class="progress-track" aria-label="Auslastung 0 Prozent">
-              <span class="progress-bar" style="width: 0%"></span>
-            </div>
-            <span>0 Projekte</span>
-          </div>
-          <p class="extended-agent-ready">Bereit für Einsatz – noch ohne Projektbezug</p>
-          <details class="agent-detail-disclosure">
-            <summary>Details anzeigen</summary>
-            <dl class="extended-agent-facts">
-              <div>
-                <dt>Kernauftrag</dt>
-                <dd>${escapeHtml(agent.core)}</dd>
-              </div>
-              <div>
-                <dt>Nächster manueller Schritt</dt>
-                <dd>${escapeHtml(agent.nextManualStep)}</dd>
-              </div>
-              ${optionalFacts
-                .map(
-                  (fact) => `
-                    <div>
-                      <dt>${escapeHtml(fact.label)}</dt>
-                      <dd>${escapeHtml(fact.value)}</dd>
-                    </div>
-                  `,
-                )
-                .join("")}
-            </dl>
-          </details>
-          <div class="agent-tags">
-            ${tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}
-          </div>
-        </article>
-      `,
-      );
-    });
-
-  const agentGroups = [
-    {
-      title: "Geschäftsführung / Steuerung",
-      note: "Führung, Tagesfokus, Entscheidungen und strategische Orientierung.",
-      names: [
-        "Geschäftsführer-Agent",
-        "Morgenbriefing-Agent",
-        "Strategie-/Geschäftsentwicklungs-Agent",
-      ],
-    },
-    {
-      title: "Projekt & Produkt",
-      note: "Projektsteuerung, Produktlogik, Prozesse, E-Commerce und operative Weiterführung.",
-      names: [
-        "Projektmanager-Agent",
-        "Produktmanager-Agent",
-        "Operations-/Prozess-Agent",
-        "E-Commerce-Manager",
-      ],
-    },
-    {
-      title: "Design / Content / Präsentation / Bild / Video",
-      note: "Marke, Inhalte, Präsentationen, Bildwelt, Video und verwertbares Produktionsmaterial.",
-      names: [
-        "Design-Director-Agent",
-        "Content-Agent",
-        "Web- & App-Product-Design-Agent",
-        "Präsentations-/Keynote-/Pitch-Deck-Agent",
-        "Foto-/Bildwelt-Director-Agent",
-        "Video-Content-Produktionsagent",
-      ],
-    },
-    {
-      title: "Technik / Entwicklung / Plugins",
-      note: "Lokale App, Code, Tool-Radar, Plugin-Architektur und technische Vorbereitung.",
-      names: [
-        "Entwickler-Agent",
-        "Plugin-/Tool-Radar-Agent",
-        "Plugin-/Integrations-Architekt-Agent",
-      ],
-    },
-    {
-      title: "Support / Wissen / Compliance / HR",
-      note: "Support, Qualität, Wissen, Risiko, Recht, Finanzen, Vertrieb, Partner und Team.",
-      names: [
-        "Support-Agent",
-        "QA-Agent",
-        "Compliance-/Risiko-Agent",
-        "Wissens-/Archiv-Agent",
-        "HR-/Team-Agent",
-        "Rechts-/Compliance-Agent",
-        "Finanz-/Controlling-Agent",
-        "Vertriebs-Agent",
-        "Partner-/Kooperations-Agent",
-        "Kunden-/Customer-Success-Agent",
-      ],
-    },
-  ];
-
-  const usedAgentNames = new Set();
-  const groupedAgentSections = agentGroups
-    .map((group) => {
-      const cards = group.names
-        .map((name) => {
-          const card = cardsByName.get(name);
-          if (!card) return "";
-          usedAgentNames.add(name);
-          return card;
-        })
-        .join("");
-      if (!cards.trim()) return "";
-      return `
-        <section class="agent-group-section" aria-label="${escapeHtml(group.title)}">
-          <div class="agent-group-head">
-            <div>
-              <p class="eyebrow">Agentengruppe</p>
-              <h4>${escapeHtml(group.title)}</h4>
-              <p>${escapeHtml(group.note)}</p>
-            </div>
-            <span class="status-pill pending">lokal · read-only · manuell</span>
-          </div>
-          <div class="agent-group-grid">
-            ${cards}
-          </div>
-        </section>
-      `;
-    })
-    .join("");
-
-  const remainingAgentCards = [...cardsByName.entries()]
-    .filter(([name]) => !usedAgentNames.has(name))
-    .map(([, card]) => card)
-    .join("");
-
-  byId("agent-grid").innerHTML = `
-    ${groupedAgentSections}
-    ${
-      remainingAgentCards
-        ? `
-          <section class="agent-group-section" aria-label="Weitere Agenten">
-            <div class="agent-group-head">
-              <div>
-                <p class="eyebrow">Weitere Agenten</p>
-                <h4>Nicht gruppierte Agenten</h4>
-                <p>Defensiv sichtbar, falls ein Agent im Datenmodell ergänzt wurde.</p>
-              </div>
-              <span class="status-pill pending">read-only</span>
-            </div>
-            <div class="agent-group-grid">${remainingAgentCards}</div>
-          </section>
-        `
-        : ""
-    }
+  const html = `
+    ${renderAgentCenterSummary(agentCenterUx)}
+    ${renderAgentCenterHrExample(agentCenterUx, hrSuggestion)}
+    ${agentCenterUx.groups.map((group) => renderAgentCenterGroup(group, grouped[group.id].join(""))).join("")}
   `;
+
+  const output = byId("agent-ux-output") || byId("agent-grid");
+  if (output) {
+    output.innerHTML = html;
+  }
 }
 
 function renderSupport() {

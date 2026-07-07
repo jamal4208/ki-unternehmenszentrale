@@ -6787,6 +6787,53 @@ const PRODUCTIVE_CENTRAL_PORTFOLIO_UX_FINISH_PREPARED = true;
 const NEXT_PRODUCTIVE_CENTRAL_PORTFOLIO_UX_STEP =
   "Health Upgrade Kompass in der Demo zeigen und Portfolio-Verständlichkeit mit einem externen Zuschauer testen.";
 
+function getProductiveCentralAgentCenterUxFinish() {
+  return {
+    version: "V6.36.3",
+    title: "Agenten-Zentrale",
+    subtitle:
+      "Welche Agenten helfen gerade, was liefern sie, und welche bleiben bewusst read-only?",
+    guidanceLine:
+      "Fokus: Agenten liefern Orientierung und Vorschläge — Entscheidungen bleiben bei Jamal.",
+    summary: {
+      agentCount: 25,
+      mode: "read-only Arbeitsmodus",
+      noExternalRequests: true,
+      noWriteRights: true,
+      demoFirst: true,
+    },
+    groups: [
+      {
+        id: "demo",
+        title: "Für die Demo wichtig",
+        question: "Welche Agenten zeige ich zuerst?",
+      },
+      {
+        id: "project",
+        title: "Für Projektsteuerung wichtig",
+        question: "Wer hilft bei Projekten und nächsten Schritten?",
+      },
+      {
+        id: "quality",
+        title: "Für Qualität und Sicherheit wichtig",
+        question: "Wer prüft Grenzen, Risiken und Qualität?",
+      },
+      {
+        id: "later",
+        title: "Später / vorbereitet",
+        question: "Was bleibt bewusst im Hintergrund?",
+      },
+    ],
+    hrExampleLead: "So sieht ein konkreter Agentenbeitrag aus.",
+    recommendation:
+      "Demo mit Kernagenten führen, HR-Tagesvorschlag als Beispiel zeigen, Rest nur bei Bedarf öffnen.",
+  };
+}
+
+const PRODUCTIVE_CENTRAL_AGENT_CENTER_UX_FINISH_PREPARED = true;
+const NEXT_PRODUCTIVE_CENTRAL_AGENT_CENTER_UX_STEP =
+  "Agenten-Zentrale in der externen Demo kurz erklären und HR-Tagesvorschlag als konkretes Beispiel zeigen.";
+
 const PRODUCTIVE_AGENT_REGISTRY = [
   { id: "strategy-agent", name: "Strategie-Agent", role: "Bewertet Ziel, Richtung und Priorität", category: "strategy", active: true, readOnly: true },
   { id: "product-agent", name: "Produkt-Agent", role: "Ordnet Auftrag produktlogisch ein", category: "product", active: true, readOnly: true },
@@ -18389,6 +18436,9 @@ function getPluginReadiness(requestUrl) {
     productiveCentralPortfolioUxFinish: getProductiveCentralPortfolioUxFinish(),
     productiveCentralPortfolioUxFinishPrepared: PRODUCTIVE_CENTRAL_PORTFOLIO_UX_FINISH_PREPARED,
     nextProductiveCentralPortfolioUxStep: NEXT_PRODUCTIVE_CENTRAL_PORTFOLIO_UX_STEP,
+    productiveCentralAgentCenterUxFinish: getProductiveCentralAgentCenterUxFinish(),
+    productiveCentralAgentCenterUxFinishPrepared: PRODUCTIVE_CENTRAL_AGENT_CENTER_UX_FINISH_PREPARED,
+    nextProductiveCentralAgentCenterUxStep: NEXT_PRODUCTIVE_CENTRAL_AGENT_CENTER_UX_STEP,
     demoCockpit: getDemoCockpit(),
     pluginReadyAgentCount: agentPluginReadiness.length,
     availablePluginCategories,
