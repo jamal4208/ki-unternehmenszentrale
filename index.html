@@ -19,21 +19,23 @@
         </div>
 
         <nav class="nav-list">
-          <button class="nav-item is-active" type="button" data-view="cockpit">
+          <p class="nav-section-label">Hauptbereiche</p>
+          <button class="nav-item nav-item--focus is-active" type="button" data-view="cockpit">
             <span class="nav-icon" aria-hidden="true">01</span>
             Cockpit
           </button>
-          <button class="nav-item" type="button" data-view="intake">
+          <button class="nav-item nav-item--focus" type="button" data-view="portfolio">
             <span class="nav-icon" aria-hidden="true">02</span>
-            Projektaufnahme
-          </button>
-          <button class="nav-item" type="button" data-view="portfolio">
-            <span class="nav-icon" aria-hidden="true">03</span>
             Portfolio
           </button>
-          <button class="nav-item" type="button" data-view="agents">
-            <span class="nav-icon" aria-hidden="true">04</span>
+          <button class="nav-item nav-item--focus" type="button" data-view="agents">
+            <span class="nav-icon" aria-hidden="true">03</span>
             Agenten
+          </button>
+          <p class="nav-section-label">Weitere Bereiche</p>
+          <button class="nav-item" type="button" data-view="intake">
+            <span class="nav-icon" aria-hidden="true">04</span>
+            Projektaufnahme
           </button>
           <button class="nav-item" type="button" data-view="support">
             <span class="nav-icon" aria-hidden="true">05</span>
@@ -59,11 +61,11 @@
       <main class="workspace">
         <header class="topbar">
           <div>
-            <p class="eyebrow">Gründungsauftrag V1</p>
+            <p class="eyebrow">Steuerungszentrale</p>
             <h2 id="view-title">Cockpit</h2>
           </div>
           <div class="topbar-actions">
-            <span class="system-pill system-pill-safe">Live-Schaltungen gesperrt</span>
+            <span class="system-pill system-pill-safe">Read-only · gesperrt</span>
             <span class="system-pill">Lokaler Entwurf</span>
           </div>
         </header>

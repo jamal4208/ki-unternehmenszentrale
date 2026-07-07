@@ -21,10 +21,12 @@
   --green-soft: #e5f4e8;
   --violet: #6d3fb3;
   --violet-soft: #efe7fb;
-  --shadow: 0 18px 38px rgba(35, 27, 18, 0.055);
-  --radius: 8px;
-  --sidebar-width: 292px;
-  --focus: 0 0 0 3px rgba(170, 138, 82, 0.24);
+  --shadow: 0 14px 34px rgba(35, 27, 18, 0.04);
+  --radius: 10px;
+  --radius-card: 14px;
+  --content-max: 1120px;
+  --sidebar-width: 268px;
+  --focus: 0 0 0 3px rgba(170, 138, 82, 0.22);
 }
 
 * {
@@ -80,10 +82,10 @@ textarea:focus-visible {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  padding: 24px 18px;
+  gap: 18px;
+  padding: 28px 20px;
   border-right: 1px solid var(--line);
-  background: rgba(250, 247, 241, 0.9);
+  background: #faf7f2;
 }
 
 .brand {
@@ -121,18 +123,31 @@ textarea:focus-visible {
 }
 
 .eyebrow {
-  margin: 0 0 4px;
-  color: var(--muted);
+  margin: 0 0 6px;
+  color: #8a8176;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.nav-section-label {
+  margin: 10px 8px 4px;
+  color: #9a9186;
+  font-size: 10px;
+  font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.nav-section-label:first-of-type {
+  margin-top: 4px;
 }
 
 .nav-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .nav-item {
@@ -140,46 +155,49 @@ textarea:focus-visible {
   align-items: center;
   gap: 10px;
   width: 100%;
-  min-height: 42px;
-  padding: 9px 10px;
+  min-height: 40px;
+  padding: 10px 12px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 10px;
   background: transparent;
-  color: #34302a;
+  color: #4f4a42;
   text-align: left;
+  font-weight: 520;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .nav-item:hover {
-  border-color: #e3d8ca;
-  background: rgba(255, 255, 255, 0.56);
+  border-color: #ebe3d8;
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .nav-item.is-active {
-  border-color: #dccdbc;
-  background: rgba(255, 255, 255, 0.76);
+  border-color: #e8dfd2;
+  background: #ffffff;
   color: #181512;
-  font-weight: 750;
+  font-weight: 650;
+  box-shadow: inset 3px 0 0 var(--executive-accent);
+}
+
+.nav-item--focus {
+  font-weight: 560;
+}
+
+.nav-item--focus.is-active {
+  font-weight: 680;
 }
 
 .nav-icon {
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  width: 28px;
-  height: 24px;
-  border: 1px solid #cfc7ba;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 800;
+  display: none;
 }
 
 .principle-box {
   margin-top: auto;
-  padding: 14px;
+  padding: 16px;
   border: 1px solid var(--line);
   border-left: 3px solid var(--executive-accent);
-  border-radius: var(--radius);
-  background: #fffefa;
+  border-radius: var(--radius-card);
+  background: #fffdfa;
   overflow-wrap: anywhere;
 }
 
@@ -201,20 +219,27 @@ textarea:focus-visible {
 
 .workspace {
   min-width: 0;
-  padding: 34px;
+  padding: 36px 40px 52px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.42) 0%, rgba(255, 255, 255, 0) 220px),
+    var(--bg);
 }
 
 .topbar {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 24px;
+  gap: 20px;
+  max-width: var(--content-max);
+  margin-bottom: 28px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
 }
 
 .topbar h2 {
-  font-size: 30px;
-  line-height: 1.1;
+  font-size: 26px;
+  line-height: 1.15;
+  font-weight: 650;
 }
 
 .topbar-actions {
@@ -230,21 +255,21 @@ textarea:focus-visible {
 .risk-pill {
   display: inline-flex;
   align-items: center;
-  min-height: 28px;
-  padding: 5px 9px;
+  min-height: 26px;
+  padding: 4px 10px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: #ffffff;
-  color: #33404a;
-  font-size: 12px;
-  font-weight: 700;
+  color: #5f574d;
+  font-size: 11px;
+  font-weight: 600;
   white-space: nowrap;
 }
 
 .system-pill-safe {
-  border-color: #f2b7ad;
-  background: var(--red-soft);
-  color: var(--red);
+  border-color: #e6d8d4;
+  background: #faf6f4;
+  color: #8b5a50;
 }
 
 .view {
@@ -253,6 +278,7 @@ textarea:focus-visible {
 
 .view.is-active {
   display: block;
+  max-width: var(--content-max);
 }
 
 .executive-mode-section {
@@ -629,8 +655,8 @@ textarea:focus-visible {
 }
 
 .cockpit-detail-group summary span {
-  font-size: 18px;
-  font-weight: 820;
+  font-size: 17px;
+  font-weight: 650;
 }
 
 .cockpit-detail-group summary small {
@@ -665,10 +691,10 @@ textarea:focus-visible {
 .template-card,
 .autonomy-card,
 .automation-item {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border: 1px solid #ebe4da;
+  border-radius: var(--radius-card);
   background: var(--surface);
-  box-shadow: 0 8px 22px rgba(44, 34, 22, 0.035);
+  box-shadow: 0 6px 18px rgba(44, 34, 22, 0.028);
 }
 
 .codex-safety-section {
@@ -3021,8 +3047,8 @@ textarea:focus-visible {
 
 .panel {
   min-width: 0;
-  margin-bottom: 18px;
-  padding: 18px;
+  margin-bottom: 22px;
+  padding: 20px 22px;
 }
 
 .section-head,
@@ -3030,8 +3056,8 @@ textarea:focus-visible {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 18px;
+  gap: 16px;
+  margin-bottom: 20px;
 }
 
 .section-toolbar {
@@ -3040,8 +3066,9 @@ textarea:focus-visible {
 
 .panel h3,
 .section-toolbar h3 {
-  font-size: 20px;
-  line-height: 1.25;
+  font-size: 18px;
+  line-height: 1.3;
+  font-weight: 650;
 }
 
 .icon-button {
@@ -3423,23 +3450,23 @@ select {
 
 .risk-pill.high,
 .status-pill.blocked {
-  border-color: #eda69c;
-  background: var(--red-soft);
-  color: var(--red);
+  border-color: #e8cfc9;
+  background: #faf4f2;
+  color: #9a4f45;
 }
 
 .risk-pill.medium,
 .status-pill.pending {
-  border-color: #e7c56b;
-  background: var(--amber-soft);
-  color: var(--amber);
+  border-color: #ead9b0;
+  background: #fdf8ee;
+  color: #8a6a24;
 }
 
 .risk-pill.low,
 .status-pill.ready {
-  border-color: #a8dcb4;
-  background: var(--green-soft);
-  color: var(--green);
+  border-color: #c8e0cc;
+  background: #f3faf4;
+  color: #4d7a54;
 }
 
 .tag.blue {
@@ -4401,7 +4428,12 @@ select {
   .workspace {
     max-width: 100%;
     min-width: 0;
-    padding: 18px;
+    padding: 22px 18px 32px;
+  }
+
+  .view.is-active,
+  .topbar {
+    max-width: 100%;
   }
 
   .view.is-active,
@@ -5823,7 +5855,33 @@ select {
 .status-pill,
 .risk-pill,
 .tag {
-  font-weight: 760;
+  font-weight: 600;
+}
+
+/* V6.37.1 Globales Layout vereinfachen */
+.portfolio-ux-subtitle,
+.portfolio-ux-guidance,
+.agent-ux-subtitle,
+.agent-ux-guidance {
+  max-width: 58ch;
+  line-height: 1.5;
+}
+
+#portfolio-view > .section-toolbar h3,
+#agents-view > .section-head h3 {
+  font-size: 1.35rem;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.operation-item,
+.decision-item,
+.ticket-item,
+.knowledge-item,
+.principle-item {
+  padding: 16px;
+  border-color: #ebe4da;
+  border-radius: var(--radius-card);
 }
 
 @media (max-width: 1220px) {
@@ -5971,23 +6029,32 @@ select {
 }
 
 .demo-cockpit-section {
-  margin-bottom: 20px;
-  padding: 20px 22px;
-  border: 1px solid #e4dfd6;
+  margin-bottom: 24px;
+  padding: 24px 26px;
+  border: 1px solid #ebe4da;
   border-radius: 18px;
-  background: linear-gradient(180deg, #fffdf8 0%, #f8f4ec 100%);
-  box-shadow: 0 10px 28px rgba(24, 21, 18, 0.05);
+  background: linear-gradient(180deg, #fffdf9 0%, #f9f5ee 100%);
+  box-shadow: 0 8px 24px rgba(24, 21, 18, 0.04);
 }
 
 .demo-cockpit-head h3 {
-  margin: 6px 0 4px;
-  font-size: 1.35rem;
+  margin: 8px 0 6px;
+  font-size: 1.28rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.demo-cockpit-head p:not(.eyebrow) {
+  max-width: 52ch;
+  margin: 0;
+  color: #6a6258;
+  line-height: 1.5;
 }
 
 .demo-cockpit-output {
-  margin-top: 16px;
+  margin-top: 20px;
   display: grid;
-  gap: 18px;
+  gap: 22px;
 }
 
 .demo-cockpit-lead {
@@ -6139,20 +6206,20 @@ select {
 }
 
 .demo-cockpit-quicknav-chip {
-  padding: 8px 12px;
-  border: 1px solid #ddd4c6;
+  padding: 7px 13px;
+  border: 1px solid #e4ddd2;
   border-radius: 999px;
-  background: #fff;
-  color: #4a433b;
-  font-size: 0.84rem;
-  font-weight: 600;
+  background: rgba(255, 255, 255, 0.82);
+  color: #524b42;
+  font-size: 0.82rem;
+  font-weight: 560;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .demo-cockpit-quicknav-chip:hover {
-  background: #faf6ef;
-  border-color: #c9bca8;
+  background: #faf7f1;
+  border-color: #d5cbbd;
 }
 
 .demo-cockpit-card--hr {
