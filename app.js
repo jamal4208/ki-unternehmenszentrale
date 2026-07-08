@@ -15780,7 +15780,36 @@ function getDemoCockpit() {
     productiveCentralDesignUsabilityDiagnosisPrepared: true,
     nextProductiveCentralDesignUsabilityStep:
       "Bestehende Agentenrollen für UI/UX-Finish-Bewertung einplanen und ersten Finish-Sprint vorbereiten.",
+    productiveCentralDemoFinalReviewDecision: {
+      title: "Demo-Abschlussprüfung und V1-Fertigstellungsentscheidung",
+      status: "entscheidungsreif vorbereitet",
+      leadershipQuestion:
+        "Reicht der aktuelle Stand für externe Demo-Vorbereitung?",
+      shortAssessment:
+        "Der aktuelle Demo-/V1-Stand ist read-only stabil und in den Kernbereichen sichtbar. Vor externer Vorbereitung braucht es nur dann noch einen Schritt, wenn ein klarer Kernblocker erkennbar ist.",
+      options: [
+        "Demo-Stand einfrieren und extern vorbereiten",
+        "Genau einen begrenzten V1-Abschluss-Schritt ergänzen",
+        "Stoppen / nicht weiter ausbauen",
+      ],
+      recommendation:
+        "Demo-Stand einfrieren, sofern keine offenen Kernblocker sichtbar sind.",
+      riskBoundary:
+        "Keine Schreibrechte, keine echten Kundendaten, keine Plugin-Aktivierung.",
+      nextSmallestStep:
+        "Offene Kernblocker einmal kurz prüfen und danach genau eine Entscheidung dokumentieren.",
+      nonGoals: [
+        "Kein Cloud-/Login-Ausbau",
+        "Keine neue Produktlogik",
+        "Keine neue Plugin-Stufe",
+        "Kein weiterer Design-Großumbau",
+      ],
+    },
+    productiveCentralDemoFinalReviewDecisionPrepared: true,
+    nextProductiveCentralDemoFinalReviewDecision:
+      "Jamal trifft eine der drei Optionen und hält nur den kleinsten nächsten Schritt fest.",
     demoQuickNav: [
+      { label: "Abschlussentscheidung", view: "cockpit", anchor: "demo-final-review-decision-anchor" },
       { label: "Designsystem", view: "cockpit", anchor: "premium-ui-design-system-anchor" },
       { label: "Plugin-Leitstand", view: "cockpit", anchor: "plugin-leitstand-demo-anchor" },
       { label: "Produktivbereich", view: "cockpit", anchor: "demo-productive-anchor" },
@@ -16720,6 +16749,30 @@ function renderDemoCockpit() {
       "4 · Qualität weiter",
       "Was verbessern wir nach der Demo?",
       `
+      <article class="demo-cockpit-card demo-cockpit-card--finish" id="demo-final-review-decision-anchor">
+        <header class="demo-cockpit-card-head">
+          <h4>${escapeHtml(demo.productiveCentralDemoFinalReviewDecision.title)}</h4>
+          ${renderDemoCockpitBadge("vorbereitet", demo.productiveCentralDemoFinalReviewDecision.status)}
+        </header>
+        <p class="demo-cockpit-card-summary"><strong>Führungsfrage:</strong> ${escapeHtml(demo.productiveCentralDemoFinalReviewDecision.leadershipQuestion)}</p>
+        <p class="demo-cockpit-card-summary"><strong>Kurzbefund:</strong> ${escapeHtml(demo.productiveCentralDemoFinalReviewDecision.shortAssessment)}</p>
+        <h5>Entscheidungsoptionen für Jamal</h5>
+        <ol class="demo-cockpit-steps">
+          ${demo.productiveCentralDemoFinalReviewDecision.options.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ol>
+        <p class="demo-cockpit-quote"><strong>Empfehlung:</strong> ${escapeHtml(demo.productiveCentralDemoFinalReviewDecision.recommendation)}</p>
+        <p class="demo-cockpit-card-summary"><strong>Risiko/Grenze:</strong> ${escapeHtml(demo.productiveCentralDemoFinalReviewDecision.riskBoundary)}</p>
+        <p class="demo-cockpit-card-summary"><strong>Nächster kleinster Schritt:</strong> ${escapeHtml(demo.nextProductiveCentralDemoFinalReviewDecision)}</p>
+        ${renderDemoCockpitDetails(
+          "Nicht-Ziele",
+          `
+          <ul class="demo-cockpit-list demo-cockpit-list--compact">
+            ${demo.productiveCentralDemoFinalReviewDecision.nonGoals.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ul>
+        `,
+        )}
+      </article>
+
       ${renderPremiumUiDesignSystemSection()}
 
       <article class="demo-cockpit-card demo-cockpit-card--design">
@@ -45882,6 +45935,7 @@ function scrollToDemoAnchor(anchorId) {
 
 const DEMO_HASH_ANCHOR_VIEWS = {
   "hr-agent-daily-suggestion": "cockpit",
+  "demo-final-review-decision-anchor": "cockpit",
   "premium-ui-design-system-anchor": "cockpit",
   "plugin-leitstand-demo-anchor": "cockpit",
   "demo-productive-anchor": "cockpit",
