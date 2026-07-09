@@ -7407,6 +7407,12 @@ details.local-agent-assignment-details > summary {
   }
 }
 
+/* V6.38.1 Cockpit-Datenfluss Diagnose */
+.cockpit-data-diagnostics {
+  color: #5c5348;
+  font-size: 0.92rem;
+}
+
 /* V6.38.0 V1-Arbeitsmodus */
 .v1-work-cockpit {
   display: grid;

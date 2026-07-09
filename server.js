@@ -1259,6 +1259,7 @@ function getHealthUpgradeLocalDemoReviewStandPrepared() {
 function getTodaysThreeThings() {
   return {
     version: "V1.1.5",
+    cockpitDataFlowVersion: COCKPIT_DATA_FLOW_VERSION,
     agentCount: 25,
     title: "Heute wirklich nur diese 3 Dinge",
     headline: "Heute wirklich nur diese 3 Dinge",
@@ -6569,12 +6570,13 @@ function buildPluginCommandCenter(projectContext, workRequest, analysis, agentRu
   };
 }
 
-const DEMO_COCKPIT_VERSION = "V6.38.0";
+const DEMO_COCKPIT_VERSION = "V6.38.1";
+const COCKPIT_DATA_FLOW_VERSION = "V6.38.1";
 const DEMO_UI_UX_FINISH_VERSION = "V6.36.1";
 
 function getProductiveCentralV1WorkMode() {
   return {
-    version: "V6.38.0",
+    version: "V6.38.1",
     title: "V1-Arbeitsmodus",
     status: "tagesbereit / read-only",
     todayPriorityProject: "Health Upgrade Kompass",
@@ -6650,7 +6652,7 @@ function getProductiveCentralV1FinishPlan() {
 
 function getProductiveCentralPortfolioWorkBoard() {
   return {
-    version: "V6.38.0",
+    version: "V6.38.1",
     title: "Projektsteuerung",
     guidanceLine: "Ein Fokusprojekt heute — alle anderen nur einordnen, nicht parallel fertigstellen.",
     projects: [
@@ -6756,7 +6758,7 @@ function getProductiveCentralPortfolioWorkBoard() {
 
 function getProductiveCentralAgentWorkNow() {
   return {
-    version: "V6.38.0",
+    version: "V6.38.1",
     title: "Wer hilft mir jetzt?",
     guidanceLine: "Nicht alle 25 Agenten lesen — nur die Rollen für heute.",
     rolesNow: [
@@ -6775,7 +6777,7 @@ function getProductiveCentralAgentWorkNow() {
 
 function getProductiveCentralPluginLeitstandV1() {
   return {
-    version: "V6.38.0",
+    version: "V6.38.1",
     categories: [
       {
         id: "active-read-only",
@@ -18891,6 +18893,7 @@ function getPluginReadiness(requestUrl) {
 
   return {
     version: "V1.1.5",
+    cockpitDataFlowVersion: COCKPIT_DATA_FLOW_VERSION,
     agentCount: agentPluginReadiness.length,
     productiveWorkRequestInputSupported: true,
     productiveWorkRequestMaxLength: PRODUCTIVE_WORK_REQUEST_MAX_LENGTH,

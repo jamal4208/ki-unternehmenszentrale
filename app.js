@@ -15650,12 +15650,13 @@ function buildPluginCommandCenter(projectContext, workRequest, analysis, agentRu
   };
 }
 
-const DEMO_COCKPIT_VERSION = "V6.38.0";
+const DEMO_COCKPIT_VERSION = "V6.38.1";
+const COCKPIT_DATA_FLOW_VERSION = "V6.38.1";
 const DEMO_UI_UX_FINISH_VERSION = "V6.36.1";
 
 function getProductiveCentralV1WorkMode() {
   return {
-    version: "V6.38.0",
+    version: "V6.38.1",
     title: "V1-Arbeitsmodus",
     status: "tagesbereit / read-only",
     todayPriorityProject: "Health Upgrade Kompass",
@@ -15731,7 +15732,7 @@ function getProductiveCentralV1FinishPlan() {
 
 function getProductiveCentralPortfolioWorkBoard() {
   return {
-    version: "V6.38.0",
+    version: "V6.38.1",
     title: "Projektsteuerung",
     guidanceLine: "Ein Fokusprojekt heute — alle anderen nur einordnen, nicht parallel fertigstellen.",
     projects: [
@@ -15837,7 +15838,7 @@ function getProductiveCentralPortfolioWorkBoard() {
 
 function getProductiveCentralAgentWorkNow() {
   return {
-    version: "V6.38.0",
+    version: "V6.38.1",
     title: "Wer hilft mir jetzt?",
     guidanceLine: "Nicht alle 25 Agenten lesen — nur die Rollen für heute.",
     rolesNow: [
@@ -15856,7 +15857,7 @@ function getProductiveCentralAgentWorkNow() {
 
 function getProductiveCentralPluginLeitstandV1() {
   return {
-    version: "V6.38.0",
+    version: "V6.38.1",
     categories: [
       {
         id: "active-read-only",
@@ -16892,11 +16893,265 @@ function renderDemoCockpitGroup(title, question, innerHtml) {
   `;
 }
 
+const cockpitWorkDataState = {
+  status: "idle",
+  loading: false,
+  diagnostics: {
+    todaysThreeThings: null,
+    pluginReadiness: null,
+    hrSuggestion: null,
+  },
+  apiPayload: null,
+  renderModel: null,
+};
+
+const COCKPIT_V1_API_FIELDS = [
+  "productiveCentralV1WorkMode",
+  "productiveCentralV1FinishPlan",
+  "productiveCentralPortfolioWorkBoard",
+  "productiveCentralAgentWorkNow",
+  "productiveCentralPluginLeitstandV1",
+  "productiveCentralV1CompletionSummary",
+  "productiveCentralV1FreezeDecision",
+  "productiveCentralDemoFinalReviewDecision",
+  "productiveCentralDailyWorkMode",
+];
+
+function getCockpitFallbackRenderModel() {
+  const demo = getDemoCockpit();
+  return {
+    demo,
+    workMode: demo.productiveCentralV1WorkMode,
+    finishPlan: demo.productiveCentralV1FinishPlan,
+    portfolioBoard: demo.productiveCentralPortfolioWorkBoard,
+    agentWork: demo.productiveCentralAgentWorkNow,
+    pluginV1: demo.productiveCentralPluginLeitstandV1,
+    hrSuggestion: getHrDailyAgentSuggestion(),
+    agentCount: 25,
+    dataSource: "fallback",
+    dataFlowVersion: COCKPIT_DATA_FLOW_VERSION,
+    writeOperationsBlocked: true,
+    madeExternalRequest: false,
+    diagnostics: cockpitWorkDataState.diagnostics,
+  };
+}
+
+function normalizeHrSuggestionFromApi(hrApi, fallback) {
+  if (!hrApi || typeof hrApi !== "object") return fallback;
+  const top = hrApi.topTrainingRecommendation || {};
+  return {
+    hrAgentName: top.hrAgentName || hrApi.hrAgentName || fallback.hrAgentName,
+    targetName:
+      hrApi.recommendedAgent ||
+      top.recommendedAgent ||
+      top.agent ||
+      fallback.targetName,
+    improvement:
+      hrApi.recommendedTrainingStep ||
+      top.recommendedTrainingStep ||
+      hrApi.reason ||
+      top.reason ||
+      fallback.improvement,
+    manualStep: hrApi.nextManualStepForJamal || hrApi.nextManualStep || fallback.manualStep,
+    autonomy: hrApi.possibleAutonomyIncrease || top.possibleAutonomyIncrease || fallback.autonomy,
+    risk: hrApi.riskBoundary || top.riskBoundary || fallback.risk,
+  };
+}
+
+function enrichWorkModeFromTodaysThree(workMode, t3, fallbackWorkMode) {
+  const base = { ...(fallbackWorkMode || {}), ...(workMode || {}) };
+  if (!t3 || typeof t3 !== "object") return base;
+
+  const fromT3 = [];
+  if (t3.decisionItem?.question) {
+    fromT3.push(`${t3.decisionItem.label || "Entscheidung"}: ${t3.decisionItem.question}`);
+  }
+  if (t3.trainingItem?.trainingStep) {
+    fromT3.push(t3.trainingItem.trainingStep);
+  }
+  if (t3.contentDesignItem?.task) {
+    fromT3.push(`${t3.contentDesignItem.label || "Content/Design"}: ${t3.contentDesignItem.task}`);
+  }
+  if (fromT3.length >= 3) {
+    base.todaysThreeThings = fromT3;
+  }
+
+  if (t3.decisionItem?.question) {
+    base.openDecision = t3.decisionItem.question;
+  }
+
+  const nextWork = t3.nextProductiveCentralV1WorkMode;
+  if (nextWork && typeof nextWork === "string") {
+    base.smallestNextStep = nextWork;
+  } else if (nextWork && typeof nextWork === "object") {
+    if (nextWork.smallestNextStep) base.smallestNextStep = nextWork.smallestNextStep;
+    if (nextWork.todayPriorityProject) base.todayPriorityProject = nextWork.todayPriorityProject;
+    if (nextWork.openDecision) base.openDecision = nextWork.openDecision;
+    if (nextWork.responsibleAgent) base.responsibleAgent = nextWork.responsibleAgent;
+  }
+
+  if (t3.healthUpgradeLocalDemoStatusSummary?.focusProject) {
+    base.todayPriorityProject = t3.healthUpgradeLocalDemoStatusSummary.focusProject;
+  }
+
+  return base;
+}
+
+function buildCockpitRenderModel(apiPayload = cockpitWorkDataState.apiPayload) {
+  const fallback = getCockpitFallbackRenderModel();
+  const t3 = apiPayload?.todaysThreeThings;
+  const pr = apiPayload?.pluginReadiness;
+  const hrApi = apiPayload?.hrSuggestion;
+
+  if (!t3 && !pr && !hrApi) {
+    return fallback;
+  }
+
+  const demo = pr?.demoCockpit ? { ...fallback.demo, ...pr.demoCockpit } : { ...fallback.demo };
+  COCKPIT_V1_API_FIELDS.forEach((field) => {
+    if (pr?.[field]) demo[field] = pr[field];
+  });
+  if (t3?.nextProductiveCentralV1FreezeDecision) {
+    demo.productiveCentralV1FreezeDecision = t3.nextProductiveCentralV1FreezeDecision;
+  }
+  if (t3?.nextProductiveCentralDailyWorkMode) {
+    demo.productiveCentralDailyWorkMode = t3.nextProductiveCentralDailyWorkMode;
+  }
+
+  const workMode = enrichWorkModeFromTodaysThree(
+    pr?.productiveCentralV1WorkMode || demo.productiveCentralV1WorkMode,
+    t3,
+    fallback.workMode,
+  );
+
+  const hasApi = Boolean(t3 || pr);
+  return {
+    demo,
+    workMode,
+    finishPlan: pr?.productiveCentralV1FinishPlan || demo.productiveCentralV1FinishPlan || fallback.finishPlan,
+    portfolioBoard:
+      pr?.productiveCentralPortfolioWorkBoard ||
+      demo.productiveCentralPortfolioWorkBoard ||
+      fallback.portfolioBoard,
+    agentWork: pr?.productiveCentralAgentWorkNow || demo.productiveCentralAgentWorkNow || fallback.agentWork,
+    pluginV1:
+      pr?.productiveCentralPluginLeitstandV1 || demo.productiveCentralPluginLeitstandV1 || fallback.pluginV1,
+    hrSuggestion: normalizeHrSuggestionFromApi(hrApi, fallback.hrSuggestion),
+    agentCount: pr?.agentCount ?? t3?.agentCount ?? fallback.agentCount,
+    dataSource: hasApi ? "api" : "fallback",
+    dataFlowVersion: pr?.cockpitDataFlowVersion || t3?.cockpitDataFlowVersion || COCKPIT_DATA_FLOW_VERSION,
+    writeOperationsBlocked: pr?.writeOperationsBlocked ?? true,
+    madeExternalRequest: pr?.madeExternalRequest ?? t3?.madeExternalRequest ?? false,
+    diagnostics: cockpitWorkDataState.diagnostics,
+  };
+}
+
+function getCockpitRenderModel() {
+  return cockpitWorkDataState.renderModel || buildCockpitRenderModel();
+}
+
+function renderCockpitDataDiagnostics(model) {
+  const diag = model.diagnostics || {};
+  const formatDiag = (entry) => {
+    if (!entry) return "noch nicht geprüft";
+    if (entry.ok) return `ok (${entry.source || "api"})`;
+    return `Fallback (${entry.message || "nicht erreichbar"})`;
+  };
+
+  return `
+    <ul class="demo-cockpit-list demo-cockpit-list--compact cockpit-data-diagnostics">
+      <li>Datenquelle: ${escapeHtml(model.dataSource || "fallback")}</li>
+      <li>Datenfluss: ${escapeHtml(model.dataFlowVersion || COCKPIT_DATA_FLOW_VERSION)}</li>
+      <li>/api/cockpit/todays-three-things: ${escapeHtml(formatDiag(diag.todaysThreeThings))}</li>
+      <li>/api/agents/plugin-readiness: ${escapeHtml(formatDiag(diag.pluginReadiness))}</li>
+      <li>/api/agents/hr-daily-training-suggestion: ${escapeHtml(formatDiag(diag.hrSuggestion))}</li>
+      <li>writeOperationsBlocked: ${model.writeOperationsBlocked === false ? "false" : "true"}</li>
+      <li>madeExternalRequest: ${model.madeExternalRequest === true ? "true" : "false"}</li>
+      <li>agentCount: ${escapeHtml(String(model.agentCount ?? 25))}</li>
+    </ul>
+  `;
+}
+
+async function fetchCockpitApiJson(path) {
+  const response = await fetch(path, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
+async function refreshCockpitWorkData() {
+  if (cockpitWorkDataState.loading) return cockpitWorkDataState.renderModel;
+  cockpitWorkDataState.loading = true;
+
+  const diagnostics = {
+    todaysThreeThings: null,
+    pluginReadiness: null,
+    hrSuggestion: null,
+  };
+  const apiPayload = { todaysThreeThings: null, pluginReadiness: null, hrSuggestion: null };
+
+  const [t3Result, prResult, hrResult] = await Promise.allSettled([
+    fetchCockpitApiJson("/api/cockpit/todays-three-things"),
+    fetchCockpitApiJson("/api/agents/plugin-readiness"),
+    fetchCockpitApiJson("/api/agents/hr-daily-training-suggestion"),
+  ]);
+
+  if (t3Result.status === "fulfilled") {
+    apiPayload.todaysThreeThings = t3Result.value;
+    diagnostics.todaysThreeThings = { ok: true, source: "api" };
+  } else {
+    diagnostics.todaysThreeThings = {
+      ok: false,
+      message: t3Result.reason?.message || "nicht erreichbar",
+    };
+  }
+
+  if (prResult.status === "fulfilled") {
+    apiPayload.pluginReadiness = prResult.value;
+    diagnostics.pluginReadiness = { ok: true, source: "api" };
+  } else {
+    diagnostics.pluginReadiness = {
+      ok: false,
+      message: prResult.reason?.message || "nicht erreichbar",
+    };
+  }
+
+  if (hrResult.status === "fulfilled") {
+    apiPayload.hrSuggestion = hrResult.value;
+    diagnostics.hrSuggestion = { ok: true, source: "api" };
+  } else {
+    diagnostics.hrSuggestion = {
+      ok: false,
+      message: hrResult.reason?.message || "nicht erreichbar",
+    };
+  }
+
+  cockpitWorkDataState.diagnostics = diagnostics;
+  cockpitWorkDataState.apiPayload = apiPayload;
+  cockpitWorkDataState.status =
+    diagnostics.todaysThreeThings?.ok || diagnostics.pluginReadiness?.ok ? "api" : "fallback";
+  cockpitWorkDataState.renderModel = buildCockpitRenderModel(apiPayload);
+  cockpitWorkDataState.loading = false;
+
+  renderDemoCockpit();
+  const agentsOutput = byId("agent-ux-output") || byId("agent-grid");
+  if (agentsOutput) {
+    renderAgents();
+  }
+
+  return cockpitWorkDataState.renderModel;
+}
+
 function renderV1WorkCockpit(workMode) {
   return `
     <section class="v1-work-cockpit" id="v1-work-mode-anchor" aria-label="V1-Arbeitsmodus">
       <header class="v1-work-cockpit-head">
-        <p class="eyebrow">V6.38.0 · ${escapeHtml(workMode.title)}</p>
+        <p class="eyebrow">${escapeHtml(workMode.version || DEMO_COCKPIT_VERSION)} · ${escapeHtml(workMode.title)}</p>
         <h3>Heute mit der Unternehmenszentrale arbeiten</h3>
         ${renderDemoCockpitBadge("read-only", workMode.status)}
       </header>
@@ -17096,13 +17351,8 @@ function renderDemoCockpit() {
   const output = byId("demo-cockpit-output");
   if (!output) return;
 
-  const demo = getDemoCockpit();
-  const workMode = demo.productiveCentralV1WorkMode;
-  const finishPlan = demo.productiveCentralV1FinishPlan;
-  const portfolioBoard = demo.productiveCentralPortfolioWorkBoard;
-  const agentWork = demo.productiveCentralAgentWorkNow;
-  const pluginV1 = demo.productiveCentralPluginLeitstandV1;
-  const hrSuggestion = getHrDailyAgentSuggestion();
+  const model = getCockpitRenderModel();
+  const { demo, workMode, finishPlan, portfolioBoard, agentWork, pluginV1, hrSuggestion, agentCount } = model;
   output.innerHTML = `
     ${renderV1WorkCockpit(workMode)}
     ${renderV1FinishPlanCard(finishPlan)}
@@ -17132,7 +17382,7 @@ function renderDemoCockpit() {
             <h4>Systemstatus</h4>
             ${renderDemoCockpitBadge("bestanden", demo.demoStatus.label)}
           </header>
-          <p class="demo-cockpit-card-summary">${escapeHtml(demo.demoStatus.mode)} · 25 Agenten · read-only</p>
+          <p class="demo-cockpit-card-summary">${escapeHtml(demo.demoStatus.mode)} · ${agentCount} Agenten · read-only</p>
         </article>
         <article class="demo-cockpit-card demo-cockpit-card--compact demo-cockpit-card--hr">
           <header class="demo-cockpit-card-head">
@@ -17243,6 +17493,11 @@ function renderDemoCockpit() {
         `,
         )}
       </article>
+
+      ${renderDemoCockpitDetails(
+        "Cockpit-Datenfluss Diagnose",
+        renderCockpitDataDiagnostics(model),
+      )}
 
       <div class="demo-cockpit-group-grid demo-cockpit-group-grid--two">
         <article class="demo-cockpit-card demo-cockpit-card--compact">
@@ -44141,8 +44396,9 @@ function renderPortfolio(filter = "all") {
 
 function renderAgents() {
   const agentCenterUx = getProductiveCentralAgentCenterUxFinish();
-  const agentWork = getProductiveCentralAgentWorkNow();
-  const hrSuggestion = getHrDailyAgentSuggestion();
+  const cockpitModel = getCockpitRenderModel();
+  const agentWork = cockpitModel.agentWork;
+  const hrSuggestion = cockpitModel.hrSuggestion;
   const counts = agents.reduce((map, agent) => {
     const names = [agent.name, ...(agent.aliases || [])];
     map[agent.name] = state.projects.filter((project) =>
@@ -49173,6 +49429,7 @@ function restoreDraft() {
 setupNavigation();
 setupForms();
 renderAll();
+refreshCockpitWorkData();
 refreshAirtablePilotStatus();
 handleDemoAnchorFromHash();
 let openedInitialProject = false;
