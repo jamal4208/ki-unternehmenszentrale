@@ -239,6 +239,7 @@ const productiveManualProjectWorkRunPreparationPrepared = true;
 const productiveManualProjectWorkRunEvaluationPrepared = true;
 const productiveHealthProjectAgentWorkOrderPrepared = true;
 const productiveHealthProjectManagerReadOnlyRunPrepared = true;
+const productiveHealthStartJamalReleaseCardPrepared = true;
 const productiveHealthProjectAgentRunEvaluationPrepared = true;
 const productiveManualHealthProjectWorkStepPreparationPrepared = true;
 const productiveFastQualityWorkModePrepared = true;
@@ -371,6 +372,7 @@ function getPilotStatus() {
     productiveManualProjectWorkRunEvaluationPrepared,
     productiveHealthProjectAgentWorkOrderPrepared,
     productiveHealthProjectManagerReadOnlyRunPrepared,
+    productiveHealthStartJamalReleaseCardPrepared,
     productiveHealthProjectAgentRunEvaluationPrepared,
     productiveManualHealthProjectWorkStepPreparationPrepared,
     productiveFastQualityWorkModePrepared,
@@ -750,6 +752,9 @@ function getPilotStatus() {
     productiveHealthProjectManagerReadOnlyRun: getProductiveHealthProjectManagerReadOnlyRun(),
     nextProductiveHealthProjectManagerReadOnlyRun:
       getDemoCockpit().nextProductiveHealthProjectManagerReadOnlyRun,
+    productiveHealthStartJamalReleaseCard: getProductiveHealthStartJamalReleaseCard(),
+    nextProductiveHealthStartJamalReleaseCard:
+      getDemoCockpit().nextProductiveHealthStartJamalReleaseCard,
     writeEnabled: false,
     writeOperationsBlocked: true,
     automationEnabled: false,
@@ -2058,6 +2063,10 @@ function getTodaysThreeThings() {
     productiveHealthProjectManagerReadOnlyRunPrepared: true,
     nextProductiveHealthProjectManagerReadOnlyRun:
       getDemoCockpit().nextProductiveHealthProjectManagerReadOnlyRun,
+    productiveHealthStartJamalReleaseCard: getProductiveHealthStartJamalReleaseCard(),
+    productiveHealthStartJamalReleaseCardPrepared: true,
+    nextProductiveHealthStartJamalReleaseCard:
+      getDemoCockpit().nextProductiveHealthStartJamalReleaseCard,
   };
 }
 
@@ -6579,8 +6588,8 @@ function buildPluginCommandCenter(projectContext, workRequest, analysis, agentRu
   };
 }
 
-const DEMO_COCKPIT_VERSION = "V6.38.2";
-const COCKPIT_DATA_FLOW_VERSION = "V6.38.2";
+const DEMO_COCKPIT_VERSION = "V6.38.3";
+const COCKPIT_DATA_FLOW_VERSION = "V6.38.3";
 const DEMO_UI_UX_FINISH_VERSION = "V6.36.1";
 
 function getProductiveCentralV1WorkMode() {
@@ -6928,6 +6937,44 @@ function getProductiveHealthProjectManagerReadOnlyRun() {
   };
 }
 
+function getProductiveHealthStartJamalReleaseCard() {
+  return {
+    version: "V6.38.3",
+    title: "Health-Start Freigabe",
+    decisionTitle: "Health als erstes Arbeitsprojekt starten",
+    status: "read-only / Freigabe vorbereitet",
+    question:
+      "Soll der Health Upgrade Kompass diese Woche als erstes echtes Arbeitsprojekt gestartet werden?",
+    currentSituation:
+      "V6.38.2 PM-Arbeitslauf ist vorbereitet. Health ist demo-ready; jetzt braucht es eine klare Jamal-Freigabe für den Wochenstart.",
+    options: [
+      "Option A: Ja, Health diese Woche priorisieren",
+      "Option B: Erst Unternehmenszentrale weiter stabilisieren",
+      "Option C: Zuerst Plugin-Anbindung (Airtable read-only) vorbereiten",
+    ],
+    recommendation: "Option A — Ja, Health diese Woche priorisieren",
+    recommendationReason:
+      "Health ist das vorbereitete Fokusprojekt; der kleinste sichere Schritt ist Demo-Ziel und Flow-Prüfung ohne neue Technik.",
+    weeklyGoal: "Demo-Ziel für diese Woche konkretisieren",
+    workArea: "Kompass-Flow Bereich 1–4 prüfen",
+    readOnlyBoundaries: [
+      "Weiter read-only",
+      "Keine Kundendaten",
+      "Keine Gesundheitsdiagnosen",
+      "Keine Heilversprechen",
+      "Keine externen Aktionen",
+      "Keine Airtable-Schreiboperationen",
+      "Keine Gmail-/Kalender-Aktionen",
+      "Keine Deployments",
+    ],
+    nextManualStep:
+      "Kompass-Flow Bereich 1–4 einmal durchgehen und konkrete Verbesserungs-/Freigabepunkte notieren.",
+    safetyNote:
+      "Keine Kundendaten, keine Diagnosen, keine Heilversprechen, keine externen Aktionen, keine Airtable-/Gmail-/Deployment-Aktionen.",
+    prepared: true,
+  };
+}
+
 function getDemoCockpit() {
   return {
     demoCockpitVersion: DEMO_COCKPIT_VERSION,
@@ -7183,9 +7230,14 @@ function getDemoCockpit() {
     productiveHealthProjectManagerReadOnlyRunPrepared: true,
     nextProductiveHealthProjectManagerReadOnlyRun:
       "Health Upgrade Kompass: Demo-Ziel klären, Kompass-Flow prüfen und PM-Entscheidungskarte für Jamal vorbereiten.",
+    productiveHealthStartJamalReleaseCard: getProductiveHealthStartJamalReleaseCard(),
+    productiveHealthStartJamalReleaseCardPrepared: true,
+    nextProductiveHealthStartJamalReleaseCard:
+      "Health Upgrade Kompass diese Woche starten: Demo-Ziel festhalten, Bereich 1–4 durchgehen und Freigabepunkte notieren.",
     demoQuickNav: [
       { label: "Heute arbeiten", view: "cockpit", anchor: "v1-work-mode-anchor" },
       { label: "Health-PM", view: "cockpit", anchor: "health-pm-run-anchor" },
+      { label: "Health-Freigabe", view: "cockpit", anchor: "health-start-release-anchor" },
       { label: "Projekte", view: "cockpit", anchor: "portfolio-work-board-anchor" },
       { label: "Agenten", view: "agents" },
       { label: "Plugins", view: "cockpit", anchor: "plugin-leitstand-demo-anchor" },
@@ -19112,6 +19164,10 @@ function getPluginReadiness(requestUrl) {
     productiveHealthProjectManagerReadOnlyRunPrepared: true,
     nextProductiveHealthProjectManagerReadOnlyRun:
       getDemoCockpit().nextProductiveHealthProjectManagerReadOnlyRun,
+    productiveHealthStartJamalReleaseCard: getProductiveHealthStartJamalReleaseCard(),
+    productiveHealthStartJamalReleaseCardPrepared: true,
+    nextProductiveHealthStartJamalReleaseCard:
+      getDemoCockpit().nextProductiveHealthStartJamalReleaseCard,
     productiveCentralPortfolioUxFinish: getProductiveCentralPortfolioUxFinish(),
     productiveCentralPortfolioUxFinishPrepared: PRODUCTIVE_CENTRAL_PORTFOLIO_UX_FINISH_PREPARED,
     nextProductiveCentralPortfolioUxStep: NEXT_PRODUCTIVE_CENTRAL_PORTFOLIO_UX_STEP,

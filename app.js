@@ -15650,8 +15650,8 @@ function buildPluginCommandCenter(projectContext, workRequest, analysis, agentRu
   };
 }
 
-const DEMO_COCKPIT_VERSION = "V6.38.2";
-const COCKPIT_DATA_FLOW_VERSION = "V6.38.2";
+const DEMO_COCKPIT_VERSION = "V6.38.3";
+const COCKPIT_DATA_FLOW_VERSION = "V6.38.3";
 const DEMO_UI_UX_FINISH_VERSION = "V6.36.1";
 
 function getProductiveCentralV1WorkMode() {
@@ -15999,6 +15999,44 @@ function getProductiveHealthProjectManagerReadOnlyRun() {
   };
 }
 
+function getProductiveHealthStartJamalReleaseCard() {
+  return {
+    version: "V6.38.3",
+    title: "Health-Start Freigabe",
+    decisionTitle: "Health als erstes Arbeitsprojekt starten",
+    status: "read-only / Freigabe vorbereitet",
+    question:
+      "Soll der Health Upgrade Kompass diese Woche als erstes echtes Arbeitsprojekt gestartet werden?",
+    currentSituation:
+      "V6.38.2 PM-Arbeitslauf ist vorbereitet. Health ist demo-ready; jetzt braucht es eine klare Jamal-Freigabe für den Wochenstart.",
+    options: [
+      "Option A: Ja, Health diese Woche priorisieren",
+      "Option B: Erst Unternehmenszentrale weiter stabilisieren",
+      "Option C: Zuerst Plugin-Anbindung (Airtable read-only) vorbereiten",
+    ],
+    recommendation: "Option A — Ja, Health diese Woche priorisieren",
+    recommendationReason:
+      "Health ist das vorbereitete Fokusprojekt; der kleinste sichere Schritt ist Demo-Ziel und Flow-Prüfung ohne neue Technik.",
+    weeklyGoal: "Demo-Ziel für diese Woche konkretisieren",
+    workArea: "Kompass-Flow Bereich 1–4 prüfen",
+    readOnlyBoundaries: [
+      "Weiter read-only",
+      "Keine Kundendaten",
+      "Keine Gesundheitsdiagnosen",
+      "Keine Heilversprechen",
+      "Keine externen Aktionen",
+      "Keine Airtable-Schreiboperationen",
+      "Keine Gmail-/Kalender-Aktionen",
+      "Keine Deployments",
+    ],
+    nextManualStep:
+      "Kompass-Flow Bereich 1–4 einmal durchgehen und konkrete Verbesserungs-/Freigabepunkte notieren.",
+    safetyNote:
+      "Keine Kundendaten, keine Diagnosen, keine Heilversprechen, keine externen Aktionen, keine Airtable-/Gmail-/Deployment-Aktionen.",
+    prepared: true,
+  };
+}
+
 function getDemoCockpit() {
   return {
     demoCockpitVersion: DEMO_COCKPIT_VERSION,
@@ -16254,9 +16292,14 @@ function getDemoCockpit() {
     productiveHealthProjectManagerReadOnlyRunPrepared: true,
     nextProductiveHealthProjectManagerReadOnlyRun:
       "Health Upgrade Kompass: Demo-Ziel klären, Kompass-Flow prüfen und PM-Entscheidungskarte für Jamal vorbereiten.",
+    productiveHealthStartJamalReleaseCard: getProductiveHealthStartJamalReleaseCard(),
+    productiveHealthStartJamalReleaseCardPrepared: true,
+    nextProductiveHealthStartJamalReleaseCard:
+      "Health Upgrade Kompass diese Woche starten: Demo-Ziel festhalten, Bereich 1–4 durchgehen und Freigabepunkte notieren.",
     demoQuickNav: [
       { label: "Heute arbeiten", view: "cockpit", anchor: "v1-work-mode-anchor" },
       { label: "Health-PM", view: "cockpit", anchor: "health-pm-run-anchor" },
+      { label: "Health-Freigabe", view: "cockpit", anchor: "health-start-release-anchor" },
       { label: "Projekte", view: "cockpit", anchor: "portfolio-work-board-anchor" },
       { label: "Agenten", view: "agents" },
       { label: "Plugins", view: "cockpit", anchor: "plugin-leitstand-demo-anchor" },
@@ -17030,6 +17073,7 @@ const COCKPIT_V1_API_FIELDS = [
   "productiveCentralDemoFinalReviewDecision",
   "productiveCentralDailyWorkMode",
   "productiveHealthProjectManagerReadOnlyRun",
+  "productiveHealthStartJamalReleaseCard",
 ];
 
 function getCockpitFallbackRenderModel() {
@@ -17042,6 +17086,7 @@ function getCockpitFallbackRenderModel() {
     agentWork: demo.productiveCentralAgentWorkNow,
     pluginV1: demo.productiveCentralPluginLeitstandV1,
     healthPmRun: demo.productiveHealthProjectManagerReadOnlyRun,
+    healthStartRelease: demo.productiveHealthStartJamalReleaseCard,
     hrSuggestion: getHrDailyAgentSuggestion(),
     agentCount: 25,
     dataSource: "fallback",
@@ -17110,7 +17155,9 @@ function enrichWorkModeFromTodaysThree(workMode, t3, fallbackWorkMode) {
     base.todayPriorityProject = t3.healthUpgradeLocalDemoStatusSummary.focusProject;
   }
 
-  if (t3.nextProductiveHealthProjectManagerReadOnlyRun) {
+  if (t3.nextProductiveHealthStartJamalReleaseCard) {
+    base.smallestNextStep = t3.nextProductiveHealthStartJamalReleaseCard;
+  } else if (t3.nextProductiveHealthProjectManagerReadOnlyRun) {
     base.smallestNextStep = t3.nextProductiveHealthProjectManagerReadOnlyRun;
   }
 
@@ -17143,6 +17190,12 @@ function buildCockpitRenderModel(apiPayload = cockpitWorkDataState.apiPayload) {
   if (pr?.productiveHealthProjectManagerReadOnlyRun) {
     demo.productiveHealthProjectManagerReadOnlyRun = pr.productiveHealthProjectManagerReadOnlyRun;
   }
+  if (t3?.productiveHealthStartJamalReleaseCard) {
+    demo.productiveHealthStartJamalReleaseCard = t3.productiveHealthStartJamalReleaseCard;
+  }
+  if (pr?.productiveHealthStartJamalReleaseCard) {
+    demo.productiveHealthStartJamalReleaseCard = pr.productiveHealthStartJamalReleaseCard;
+  }
 
   const workMode = enrichWorkModeFromTodaysThree(
     pr?.productiveCentralV1WorkMode || demo.productiveCentralV1WorkMode,
@@ -17167,6 +17220,11 @@ function buildCockpitRenderModel(apiPayload = cockpitWorkDataState.apiPayload) {
       t3?.productiveHealthProjectManagerReadOnlyRun ||
       demo.productiveHealthProjectManagerReadOnlyRun ||
       fallback.healthPmRun,
+    healthStartRelease:
+      pr?.productiveHealthStartJamalReleaseCard ||
+      t3?.productiveHealthStartJamalReleaseCard ||
+      demo.productiveHealthStartJamalReleaseCard ||
+      fallback.healthStartRelease,
     hrSuggestion: normalizeHrSuggestionFromApi(hrApi, fallback.hrSuggestion),
     agentCount: pr?.agentCount ?? t3?.agentCount ?? fallback.agentCount,
     dataSource: hasApi ? "api" : "fallback",
@@ -17416,6 +17474,52 @@ function renderHealthProjectManagerReadOnlyRun(healthRun) {
         </ul>
       `,
       )}
+      <div class="demo-cockpit-actions">
+        <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="health-start-release-anchor">Jamal-Freigabe öffnen</button>
+      </div>
+    </section>
+  `;
+}
+
+function renderHealthStartJamalReleaseCard(releaseCard) {
+  if (!releaseCard) return "";
+  return `
+    <section class="health-start-release-card" id="health-start-release-anchor" aria-label="Health-Start Jamal-Freigabe">
+      <header class="health-start-release-head">
+        <p class="eyebrow">${escapeHtml(releaseCard.version)} · ${escapeHtml(releaseCard.title)}</p>
+        <h4>${escapeHtml(releaseCard.decisionTitle)}</h4>
+        ${renderDemoCockpitBadge("read-only", releaseCard.status)}
+      </header>
+      <p class="health-start-release-question"><strong>Freigabefrage:</strong> ${escapeHtml(releaseCard.question)}</p>
+      <p class="health-start-release-situation">${escapeHtml(releaseCard.currentSituation)}</p>
+      <div class="health-start-release-grid">
+        <article class="health-start-release-cell">
+          <h5>Ziel dieser Woche</h5>
+          <p>${escapeHtml(releaseCard.weeklyGoal)}</p>
+        </article>
+        <article class="health-start-release-cell">
+          <h5>Arbeitsbereich</h5>
+          <p>${escapeHtml(releaseCard.workArea)}</p>
+        </article>
+        <article class="health-start-release-cell">
+          <h5>Nächster manueller Schritt</h5>
+          <p>${escapeHtml(releaseCard.nextManualStep)}</p>
+        </article>
+      </div>
+      <h5>Entscheidungsoptionen</h5>
+      <ul class="demo-cockpit-list demo-cockpit-list--compact">
+        ${releaseCard.options.map((option) => `<li>${escapeHtml(option)}</li>`).join("")}
+      </ul>
+      <p class="health-start-release-recommendation">
+        <strong>Empfehlung:</strong> ${escapeHtml(releaseCard.recommendation)} — ${escapeHtml(releaseCard.recommendationReason)}
+      </p>
+      ${renderDemoCockpitDetails(
+        "Read-only-Grenzen",
+        `<ul class="demo-cockpit-list demo-cockpit-list--compact">
+          ${releaseCard.readOnlyBoundaries.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ul>
+        <p class="demo-cockpit-card-summary"><strong>Sicherheitshinweis:</strong> ${escapeHtml(releaseCard.safetyNote)}</p>
+      `)}
     </section>
   `;
 }
@@ -17464,7 +17568,7 @@ function renderV1FinishPlanCard(plan) {
   `;
 }
 
-function renderPortfolioWorkBoardCard(project, healthPmRun) {
+function renderPortfolioWorkBoardCard(project, healthPmRun, healthStartRelease) {
   const priorityClass = project.priority === "heute" ? "bestanden" : "vorbereitet";
   const isHealth = project.id === "health-upgrade-kompass" && healthPmRun;
   return `
@@ -17479,8 +17583,14 @@ function renderPortfolioWorkBoardCard(project, healthPmRun) {
       ${
         isHealth
           ? `<p class="portfolio-work-card-pm-hint"><strong>PM-Arbeitslauf:</strong> ${escapeHtml(healthPmRun.nextBestStep)}</p>
+             ${
+               healthStartRelease
+                 ? `<p class="portfolio-work-card-pm-hint"><strong>Freigabe:</strong> ${escapeHtml(healthStartRelease.recommendation)}</p>`
+                 : ""
+             }
              <div class="demo-cockpit-actions">
                <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="health-pm-run-anchor">Health-PM öffnen</button>
+               <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="health-start-release-anchor">Freigabe</button>
              </div>`
           : ""
       }
@@ -17496,7 +17606,7 @@ function renderPortfolioWorkBoardCard(project, healthPmRun) {
   `;
 }
 
-function renderPortfolioWorkBoard(board, healthPmRun) {
+function renderPortfolioWorkBoard(board, healthPmRun, healthStartRelease) {
   return `
     <section class="portfolio-work-board" id="portfolio-work-board-anchor" aria-label="Projektsteuerung">
       <header class="portfolio-work-board-head">
@@ -17504,7 +17614,7 @@ function renderPortfolioWorkBoard(board, healthPmRun) {
         <p class="portfolio-work-board-guidance">${escapeHtml(board.guidanceLine)}</p>
       </header>
       <div class="portfolio-work-board-grid">
-        ${board.projects.map((project) => renderPortfolioWorkBoardCard(project, healthPmRun)).join("")}
+        ${board.projects.map((project) => renderPortfolioWorkBoardCard(project, healthPmRun, healthStartRelease)).join("")}
       </div>
       <div class="demo-cockpit-actions">
         <button class="secondary-button" type="button" data-view-jump="portfolio">Portfolio-Ansicht öffnen</button>
@@ -17577,11 +17687,12 @@ function renderDemoCockpit() {
   if (!output) return;
 
   const model = getCockpitRenderModel();
-  const { demo, workMode, finishPlan, portfolioBoard, agentWork, pluginV1, healthPmRun, hrSuggestion, agentCount } =
+  const { demo, workMode, finishPlan, portfolioBoard, agentWork, pluginV1, healthPmRun, healthStartRelease, hrSuggestion, agentCount } =
     model;
   output.innerHTML = `
     ${renderV1WorkCockpit(workMode)}
     ${renderHealthProjectManagerReadOnlyRun(healthPmRun)}
+    ${renderHealthStartJamalReleaseCard(healthStartRelease)}
     ${renderV1FinishPlanCard(finishPlan)}
 
     <nav class="demo-cockpit-quicknav" aria-label="Arbeits-Schnellnavigation">
@@ -17626,8 +17737,9 @@ function renderDemoCockpit() {
             <h4>Fokusprojekt</h4>
             ${renderDemoCockpitBadge("bestanden", "Health")}
           </header>
-          <p class="demo-cockpit-card-summary">Health Upgrade Kompass · PM-Arbeitslauf bereit</p>
+          <p class="demo-cockpit-card-summary">Health Upgrade Kompass · Freigabe-Karte bereit</p>
           <div class="demo-cockpit-actions">
+            <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="health-start-release-anchor">Freigabe</button>
             <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="health-pm-run-anchor">Health-PM</button>
             <button class="secondary-button" type="button" data-view-jump="portfolio">Portfolio</button>
           </div>
@@ -17639,7 +17751,7 @@ function renderDemoCockpit() {
     ${renderDemoCockpitGroup(
       "B · Projektsteuerung",
       "Welche Projekte sind dran — und was nicht?",
-      renderPortfolioWorkBoard(portfolioBoard, healthPmRun),
+      renderPortfolioWorkBoard(portfolioBoard, healthPmRun, healthStartRelease),
     )}
 
     ${renderDemoCockpitGroup(
@@ -46916,6 +47028,7 @@ const DEMO_HASH_ANCHOR_VIEWS = {
   "v1-finish-plan-anchor": "cockpit",
   "portfolio-work-board-anchor": "cockpit",
   "health-pm-run-anchor": "cockpit",
+  "health-start-release-anchor": "cockpit",
   "agent-work-now-anchor": "cockpit",
   "plugin-leitstand-v1-summary-anchor": "cockpit",
   "daily-work-mode-anchor": "cockpit",
