@@ -2047,6 +2047,7 @@ function getTodaysThreeThings() {
     rightsChanged: false,
     nextProductiveCentralV1FreezeDecision: getDemoCockpit().nextProductiveCentralV1FreezeDecision,
     nextProductiveCentralDailyWorkMode: getDemoCockpit().nextProductiveCentralDailyWorkMode,
+    nextProductiveCentralV1WorkMode: getDemoCockpit().nextProductiveCentralV1WorkMode,
   };
 }
 
@@ -6568,14 +6569,249 @@ function buildPluginCommandCenter(projectContext, workRequest, analysis, agentRu
   };
 }
 
-const DEMO_COCKPIT_VERSION = "V6.34.3";
+const DEMO_COCKPIT_VERSION = "V6.38.0";
 const DEMO_UI_UX_FINISH_VERSION = "V6.36.1";
 
+function getProductiveCentralV1WorkMode() {
+  return {
+    version: "V6.38.0",
+    title: "V1-Arbeitsmodus",
+    status: "tagesbereit / read-only",
+    todayPriorityProject: "Health Upgrade Kompass",
+    todaysThreeThings: [
+      "Health Upgrade Kompass lokal prüfen und kleinsten Schritt notieren",
+      "V1-Freeze-Entscheidung prüfen oder bewusst offen lassen",
+      "HR-Top-Training Projektmanager-Agent: nächste kleinste Schritte schärfen",
+    ],
+    openDecision: "Soll der aktuelle read-only Demo-Stand als V1 eingefroren werden?",
+    responsibleAgent: "Projektmanager-Agent",
+    gfAgentSupport: "Geschäftsführer-Agent",
+    blocked: [
+      "Schreiboperationen und Plugin-Aktivierung",
+      "Expansion App und Marketing Agentur OS als Hauptfokus heute",
+      "Deployment, Cloud, Login und API-Automatisierung",
+    ],
+    notAutomated: [
+      "Keine automatischen externen Requests",
+      "Keine E-Mails, Kalenderänderungen oder Airtable-Schreibungen",
+      "Keine Agentenfolge ohne Jamals Freigabe",
+    ],
+    readOnlyPrepared: [
+      "Airtable read-only Projektstand",
+      "Gmail lesen und Entwürfe vorbereiten",
+      "Google Calendar Tageskontext lesen",
+      "GitHub Stand und Logs read-only",
+    ],
+    smallestNextStep:
+      "Den Health Upgrade Kompass lokal prüfen und nur notieren: aktueller Stand, kleinster nächster Qualitätsschritt, offene Entscheidung und klare Grenze.",
+    safetyBoundary:
+      "Read-only, keine Schreibaktionen, keine externen Requests ohne manuelle Freigabe.",
+  };
+}
+
+function getProductiveCentralV1FinishPlan() {
+  return {
+    title: "V1-Fertigstellungsplan",
+    status: "arbeitsbereit — Rest bewusst nach V1.1",
+    readyNow: [
+      "Tagesarbeits-Cockpit, Portfolio und Agenten-Zentrale",
+      "25 Agenten mit Rollen und verdichteten HR-Vorschlägen",
+      "Plugin-Leitstand read-only vorbereitet",
+      "Health Upgrade Kompass als Fokusprojekt",
+    ],
+    missingBeforeRealUse: [
+      "Jamals V1-Freeze-Entscheidung dokumentieren",
+      "Ersten echten Arbeitstag mit der Zentrale durchführen",
+      "Optional: erste Airtable read-only Verbindung manuell freigeben",
+    ],
+    afterV1: [
+      "Schreibfreigaben je Plugin",
+      "Expansion App und Marketing Agentur OS vertiefen",
+      "Cloud/Login nur bei bewusster Entscheidung",
+    ],
+    topPriorities: [
+      "Mit Health Upgrade Kompass täglich arbeiten",
+      "V1-Freeze-Entscheidung treffen",
+      "Erste Airtable read-only Stufe manuell prüfen",
+    ],
+    decisionForJamal: "V1 einfrieren und täglich nutzen, oder eine letzte interne Demo?",
+    firstPlugins: ["Airtable read-only", "Gmail read-only", "Google Calendar read-only", "GitHub read-only"],
+    doNotExpandBeforeV1Use: [
+      "Keine neue Produktlogik",
+      "Kein Design-Großumbau",
+      "Keine Schreibarchitektur",
+      "Kein Deployment",
+    ],
+    recommendation: "V1 jetzt nutzen, nicht weiter aufbauen — erst nach realem Arbeitstag entscheiden.",
+    riskBoundary: "Keine Schreibrechte, keine Plugin-Aktivierung, keine echten Kundendaten.",
+    nextSmallestStep: "Morgen öffnen, Tagesarbeitskarte lesen, Health-Schritt ausführen.",
+  };
+}
+
+function getProductiveCentralPortfolioWorkBoard() {
+  return {
+    version: "V6.38.0",
+    title: "Projektsteuerung",
+    guidanceLine: "Ein Fokusprojekt heute — alle anderen nur einordnen, nicht parallel fertigstellen.",
+    projects: [
+      {
+        id: "health-upgrade-kompass",
+        name: "Health Upgrade Kompass",
+        status: "demo-ready-read-only",
+        priority: "heute",
+        nextStep: "Demo-Fluss Bereich 1–4 prüfen und Verständnisprobleme notieren.",
+        agents: "Projektmanager-Agent, Produktmanager-Agent, QA-Agent",
+        blocker: "Körperanalysewaage bleibt Phase 2.",
+        decision: "Health heute als Hauptprojekt führen?",
+        plugins: "Airtable read-only später für Projektstand",
+        readOnlyOnly: true,
+      },
+      {
+        id: "expansion-app",
+        name: "Expansion App",
+        status: "clarify-before-continue",
+        priority: "erst klären",
+        nextStep: "Kleinsten App-Ausschnitt formulieren — keine neue Komplexität.",
+        agents: "Strategie-Agent, Produktmanager-Agent",
+        blocker: "Scope noch zu breit für aktive Bearbeitung.",
+        decision: "Welcher Ausschnitt ist der erste Prüfpunkt?",
+        plugins: "Später GitHub read-only",
+        readOnlyOnly: true,
+      },
+      {
+        id: "marketing-agentur-os",
+        name: "Marketing Agentur OS",
+        status: "later-read-only",
+        priority: "später",
+        nextStep: "Einen manuellen Agentur-OS-Nutzen ohne Tool-Aktion beschreiben.",
+        agents: "Strategie-Agent, Content-Agent",
+        blocker: "Nicht heutiger Startpunkt.",
+        decision: "Bewusst zurückstellen oder Q2 vormerken?",
+        plugins: "Canva/HeyGen später",
+        readOnlyOnly: true,
+      },
+      {
+        id: "flowlingo",
+        name: "FlowLingo Portugiesisch Sprachtrainer",
+        status: "later-read-only",
+        priority: "später",
+        nextStep: "Eine Lern-/Demo-Situation als Qualitätsfrage formulieren.",
+        agents: "Produktmanager-Agent, Content-Agent",
+        blocker: "Lern-/Demo-Grenze noch offen.",
+        decision: "Welche eine Demo-Situation zuerst?",
+        plugins: "Keine in V1",
+        readOnlyOnly: true,
+      },
+      {
+        id: "ki-unternehmenszentrale",
+        name: "KI-Unternehmenszentrale",
+        status: "active-read-only",
+        priority: "Systemkern",
+        nextStep: "Täglich mit V1-Arbeitsmodus arbeiten und Freeze-Entscheidung treffen.",
+        agents: "Geschäftsführer-Agent, Projektmanager-Agent",
+        blocker: "Keine Schreibpfade in V1.",
+        decision: "V1 einfrieren oder letzte interne Demo?",
+        plugins: "GitHub + Airtable read-only live",
+        readOnlyOnly: true,
+      },
+      {
+        id: "your-day-mlm",
+        name: "Your Day / MLM Präsentation",
+        status: "later-read-only",
+        priority: "später",
+        nextStep: "Präsentationskern und Zielgruppe in einem Satz festhalten.",
+        agents: "Präsentations-Agent, Content-Agent, Vertriebs-Agent",
+        blocker: "proWIN/Your-Day-Kommunikation braucht Conny-Bezug.",
+        decision: "Jamal oder Conny als Freigabe?",
+        plugins: "Canva briefing-ready",
+        readOnlyOnly: true,
+      },
+      {
+        id: "finance-budget-toolkosten",
+        name: "Finanz- / Investmentthemen",
+        status: "placeholder-read-only",
+        priority: "intern",
+        nextStep: "Budget-/Toolkostenfragen nur read-only strukturieren.",
+        agents: "Finanz-/Controlling-Agent, Strategie-Agent",
+        blocker: "Keine echten Finanzdaten in V1.",
+        decision: "Welche eine Kostenfrage zuerst sichtbar machen?",
+        plugins: "Lexoffice/Lexware später",
+        readOnlyOnly: true,
+      },
+      {
+        id: "admin-steuer-organisation",
+        name: "Admin / Buchhaltung / Organisation",
+        status: "placeholder-read-only",
+        priority: "intern",
+        nextStep: "Organisatorische Aufgaben read-only sortieren.",
+        agents: "Operations-Agent, Workflow-Agent",
+        blocker: "Keine Steuerberatung, keine echten Dokumente.",
+        decision: "Welche Admin-Aufgabe ist heute relevant?",
+        plugins: "Keine in V1",
+        readOnlyOnly: true,
+      },
+    ],
+  };
+}
+
+function getProductiveCentralAgentWorkNow() {
+  return {
+    version: "V6.38.0",
+    title: "Wer hilft mir jetzt?",
+    guidanceLine: "Nicht alle 25 Agenten lesen — nur die Rollen für heute.",
+    rolesNow: [
+      { agent: "Projektmanager-Agent", task: "Kleinsten nächsten Schritt bündeln und Autonomie filtern", mode: "Filter" },
+      { agent: "Geschäftsführer-Agent", task: "Entscheidungsoptionen vorbereiten, nicht entscheiden", mode: "Entscheidung" },
+      { agent: "Morgenbriefing-Agent", task: "Tagesstart und Fokus strukturieren", mode: "Tagesstart" },
+      { agent: "QA-Agent", task: "Qualität und Regressionsschutz", mode: "Sicherheit" },
+      { agent: "Compliance-/Risiko-Agent", task: "Grenzen und Blocker sichtbar halten", mode: "Sicherheit" },
+      { agent: "Plugin-/Tool-Radar-Agent", task: "Plugin-Stufen read-only einordnen", mode: "Plugins" },
+      { agent: "HR-/Team-Agent", task: "1%-Training für alle 25 Agenten koordinieren", mode: "Entwicklung" },
+    ],
+    hrTopToday: "Projektmanager-Agent: bessere nächste kleinste Schritte formulieren",
+    pmFilterNote: "24 Agenten liefern Impulse → Projektmanager-Agent verdichtet für Jamal.",
+  };
+}
+
+function getProductiveCentralPluginLeitstandV1() {
+  return {
+    version: "V6.38.0",
+    categories: [
+      {
+        id: "active-read-only",
+        title: "Aktiv nutzbar read-only",
+        plugins: ["GitHub (live read-only)", "Airtable (live read-only sanitisiert)"],
+      },
+      {
+        id: "prepared",
+        title: "Technisch vorbereitet",
+        plugins: ["Gmail (Lesen/Entwürfe)", "Google Calendar (Lesen)", "Vercel (read-only prüfen)", "Canva (briefing-ready)"],
+      },
+      {
+        id: "not-connected",
+        title: "Noch nicht verbunden",
+        plugins: ["HeyGen", "Lexoffice/Lexware", "weitere Roadmap-Tools"],
+      },
+      {
+        id: "blocked",
+        title: "Bewusst gesperrt",
+        plugins: ["Schreiboperationen", "Automatische E-Mails", "Kalenderänderungen", "Airtable-Schreiben", "Deployments"],
+      },
+      {
+        id: "write-later",
+        title: "Spätere Schreibfreigabe nötig",
+        plugins: ["Airtable Stufe 2", "Gmail Senden", "GitHub Commits", "Vercel Deploy"],
+      },
+    ],
+    firstConnectOrder: ["Airtable read-only", "Gmail read-only", "Google Calendar read-only", "GitHub read-only"],
+    safetyNote: "writeOperationsBlocked bleibt true — keine Freigabe ohne Jamal.",
+  };
+}
 function getDemoCockpit() {
   return {
     demoCockpitVersion: DEMO_COCKPIT_VERSION,
     demoCockpitReady: true,
-    demoCockpitMode: "compact-read-only-demo",
+    demoCockpitMode: "v1-work-mode-read-only",
     demoUiUxFinishVersion: DEMO_UI_UX_FINISH_VERSION,
     demoUiUxFinishReady: true,
     demoUiUxFinishMode: "demo-presentation-ready",
@@ -6810,16 +7046,27 @@ function getDemoCockpit() {
         "Morgens Tagesarbeitskarte öffnen, Health-Schritt notieren und V1-Freeze-Entscheidung bestätigen oder offen lassen.",
     },
     productiveCentralV1CompletionSummaryPrepared: true,
+    productiveCentralV1WorkMode: getProductiveCentralV1WorkMode(),
+    productiveCentralV1WorkModePrepared: true,
+    nextProductiveCentralV1WorkMode:
+      "Heute mit Health Upgrade Kompass starten, kleinsten nächsten Schritt prüfen und V1-Freeze-Entscheidung sichtbar halten.",
+    productiveCentralV1FinishPlan: getProductiveCentralV1FinishPlan(),
+    productiveCentralV1FinishPlanPrepared: true,
+    productiveCentralPortfolioWorkBoard: getProductiveCentralPortfolioWorkBoard(),
+    productiveCentralPortfolioWorkBoardPrepared: true,
+    productiveCentralAgentWorkNow: getProductiveCentralAgentWorkNow(),
+    productiveCentralAgentWorkNowPrepared: true,
+    productiveCentralPluginLeitstandV1: getProductiveCentralPluginLeitstandV1(),
+    productiveCentralPluginLeitstandV1Prepared: true,
     demoQuickNav: [
-      { label: "Heute arbeiten", view: "cockpit", anchor: "daily-work-mode-anchor" },
-      { label: "V1-Status", view: "cockpit", anchor: "v1-completion-summary-anchor" },
+      { label: "Heute arbeiten", view: "cockpit", anchor: "v1-work-mode-anchor" },
+      { label: "Projekte", view: "cockpit", anchor: "portfolio-work-board-anchor" },
+      { label: "Agenten", view: "agents" },
+      { label: "Plugins", view: "cockpit", anchor: "plugin-leitstand-demo-anchor" },
+      { label: "V1-Plan", view: "cockpit", anchor: "v1-finish-plan-anchor" },
       { label: "V1 einfrieren", view: "cockpit", anchor: "v1-freeze-decision-anchor" },
       { label: "Abschlussentscheidung", view: "cockpit", anchor: "demo-final-review-decision-anchor" },
-      { label: "Designsystem", view: "cockpit", anchor: "premium-ui-design-system-anchor" },
-      { label: "Plugin-Leitstand", view: "cockpit", anchor: "plugin-leitstand-demo-anchor" },
-      { label: "Produktivbereich", view: "cockpit", anchor: "demo-productive-anchor" },
       { label: "HR-Tagesvorschlag", view: "cockpit", anchor: "hr-agent-daily-suggestion" },
-      { label: "Agenten-Zentrale", view: "cockpit", anchor: "agent-plugin-readiness" },
     ],
     demoStatus: {
       label: "Intern vorführbar",
@@ -18723,6 +18970,17 @@ function getPluginReadiness(requestUrl) {
     productiveCentralDailyWorkModePrepared: getDemoCockpit().productiveCentralDailyWorkModePrepared,
     productiveCentralV1CompletionSummary: getDemoCockpit().productiveCentralV1CompletionSummary,
     productiveCentralV1CompletionSummaryPrepared: getDemoCockpit().productiveCentralV1CompletionSummaryPrepared,
+    productiveCentralV1WorkMode: getDemoCockpit().productiveCentralV1WorkMode,
+    productiveCentralV1WorkModePrepared: getDemoCockpit().productiveCentralV1WorkModePrepared,
+    nextProductiveCentralV1WorkMode: getDemoCockpit().nextProductiveCentralV1WorkMode,
+    productiveCentralV1FinishPlan: getDemoCockpit().productiveCentralV1FinishPlan,
+    productiveCentralV1FinishPlanPrepared: getDemoCockpit().productiveCentralV1FinishPlanPrepared,
+    productiveCentralPortfolioWorkBoard: getDemoCockpit().productiveCentralPortfolioWorkBoard,
+    productiveCentralPortfolioWorkBoardPrepared: getDemoCockpit().productiveCentralPortfolioWorkBoardPrepared,
+    productiveCentralAgentWorkNow: getDemoCockpit().productiveCentralAgentWorkNow,
+    productiveCentralAgentWorkNowPrepared: getDemoCockpit().productiveCentralAgentWorkNowPrepared,
+    productiveCentralPluginLeitstandV1: getDemoCockpit().productiveCentralPluginLeitstandV1,
+    productiveCentralPluginLeitstandV1Prepared: getDemoCockpit().productiveCentralPluginLeitstandV1Prepared,
     productiveCentralPortfolioUxFinish: getProductiveCentralPortfolioUxFinish(),
     productiveCentralPortfolioUxFinishPrepared: PRODUCTIVE_CENTRAL_PORTFOLIO_UX_FINISH_PREPARED,
     nextProductiveCentralPortfolioUxStep: NEXT_PRODUCTIVE_CENTRAL_PORTFOLIO_UX_STEP,

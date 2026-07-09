@@ -7406,3 +7406,131 @@ details.local-agent-assignment-details > summary {
     grid-template-columns: 1fr;
   }
 }
+
+/* V6.38.0 V1-Arbeitsmodus */
+.v1-work-cockpit {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid #d8cfc2;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #fffdf9 0%, #f7f2ea 100%);
+}
+
+.v1-work-cockpit-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+
+.v1-work-cockpit-head h3 {
+  margin: 0;
+  flex: 1 1 220px;
+}
+
+.v1-work-cockpit-grid,
+.v1-work-cockpit-secondary {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.v1-work-cockpit-cell {
+  padding: 12px 14px;
+  border: 1px solid #e8e2d8;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.v1-work-cockpit-cell--focus {
+  border-color: #c9b89a;
+  background: #fffaf2;
+}
+
+.v1-work-cockpit-label {
+  margin: 0 0 6px;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #7a7268;
+}
+
+.v1-work-cockpit-value {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: #2f2a24;
+}
+
+.v1-work-cockpit-value--step {
+  font-size: 0.9rem;
+}
+
+.v1-work-cockpit-meta {
+  margin: 6px 0 0;
+  font-size: 0.85rem;
+  color: #6a6258;
+}
+
+.portfolio-work-board,
+.agent-work-now,
+.plugin-leitstand-v1-summary {
+  display: grid;
+  gap: 12px;
+}
+
+.portfolio-work-board-grid,
+.agent-work-now-grid,
+.plugin-leitstand-v1-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.portfolio-work-card,
+.agent-work-now-card,
+.plugin-leitstand-v1-card {
+  padding: 12px 14px;
+  border: 1px solid #e8e2d8;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.portfolio-work-card--focus {
+  border-color: #c9b89a;
+  background: #fffaf2;
+}
+
+.portfolio-work-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.portfolio-work-card-head h5,
+.agent-work-now-card h5,
+.plugin-leitstand-v1-card h5 {
+  margin: 0;
+}
+
+.portfolio-work-card-status,
+.portfolio-work-card-meta {
+  margin: 8px 0 0;
+  font-size: 0.88rem;
+  color: #6a6258;
+}
+
+.portfolio-work-card-next {
+  margin: 8px 0 0;
+  font-size: 0.92rem;
+}
+
+.demo-cockpit-archive {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px dashed #d8cfc2;
+  border-radius: 14px;
+  background: #faf8f4;
+}
