@@ -15808,7 +15808,37 @@ function getDemoCockpit() {
     productiveCentralDemoFinalReviewDecisionPrepared: true,
     nextProductiveCentralDemoFinalReviewDecision:
       "Jamal trifft eine der drei Optionen und hält nur den kleinsten nächsten Schritt fest.",
+    productiveCentralV1FreezeDecision: {
+      title: "V1-Abschlusskandidat einfrieren",
+      status: "abschlussbereit / read-only",
+      leadershipQuestion:
+        "Soll der aktuelle read-only Demo-Stand jetzt als V1 eingefroren werden?",
+      currentAssessment:
+        "Der Demo-Stand ist technisch abgeschlossen: read-only stabil, Kernbereiche sichtbar, Sicherheitsgrenzen eingehalten. Weitere Vorbereitungsrunden sind nicht nötig, außer Jamal entscheidet bewusst anders.",
+      decisionOptions: [
+        "V1 jetzt einfrieren",
+        "Eine letzte interne Demo durchführen",
+        "Externen Demo-Stand vorbereiten",
+      ],
+      recommendation:
+        "V1 jetzt einfrieren, sofern keine offenen Kernblocker sichtbar sind.",
+      freezeBoundary:
+        "Keine neuen Features, keine Plugin-Aktivierung, keine Schreibrechte, keine Cloud-/Login-/Deployment-Arbeit.",
+      nextSmallestStep:
+        "Eine der drei Optionen bewusst wählen und dokumentieren — ohne weitere Vorbereitungsrunden.",
+      nonGoals: [
+        "Kein weiterer Produktausbau",
+        "Keine Schreibarchitektur",
+        "Keine Plugin-Aktivierung",
+        "Kein Deployment",
+        "Keine neuen Designregeln",
+      ],
+    },
+    productiveCentralV1FreezeDecisionPrepared: true,
+    nextProductiveCentralV1FreezeDecision:
+      "Jamal entscheidet, ob der aktuelle read-only Demo-Stand als V1 eingefroren wird.",
     demoQuickNav: [
+      { label: "V1 einfrieren", view: "cockpit", anchor: "v1-freeze-decision-anchor" },
       { label: "Abschlussentscheidung", view: "cockpit", anchor: "demo-final-review-decision-anchor" },
       { label: "Designsystem", view: "cockpit", anchor: "premium-ui-design-system-anchor" },
       { label: "Plugin-Leitstand", view: "cockpit", anchor: "plugin-leitstand-demo-anchor" },
@@ -16768,6 +16798,30 @@ function renderDemoCockpit() {
           `
           <ul class="demo-cockpit-list demo-cockpit-list--compact">
             ${demo.productiveCentralDemoFinalReviewDecision.nonGoals.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ul>
+        `,
+        )}
+      </article>
+
+      <article class="demo-cockpit-card demo-cockpit-card--finish" id="v1-freeze-decision-anchor">
+        <header class="demo-cockpit-card-head">
+          <h4>${escapeHtml(demo.productiveCentralV1FreezeDecision.title)}</h4>
+          ${renderDemoCockpitBadge("read-only", demo.productiveCentralV1FreezeDecision.status)}
+        </header>
+        <p class="demo-cockpit-card-summary"><strong>Führungsfrage:</strong> ${escapeHtml(demo.productiveCentralV1FreezeDecision.leadershipQuestion)}</p>
+        <p class="demo-cockpit-card-summary"><strong>Kurzbewertung:</strong> ${escapeHtml(demo.productiveCentralV1FreezeDecision.currentAssessment)}</p>
+        <h5>Entscheidungsoptionen für Jamal</h5>
+        <ol class="demo-cockpit-steps">
+          ${demo.productiveCentralV1FreezeDecision.decisionOptions.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ol>
+        <p class="demo-cockpit-quote"><strong>Empfehlung:</strong> ${escapeHtml(demo.productiveCentralV1FreezeDecision.recommendation)}</p>
+        <p class="demo-cockpit-card-summary"><strong>Grenze:</strong> ${escapeHtml(demo.productiveCentralV1FreezeDecision.freezeBoundary)}</p>
+        <p class="demo-cockpit-card-summary"><strong>Nächster kleinster Schritt:</strong> ${escapeHtml(demo.nextProductiveCentralV1FreezeDecision)}</p>
+        ${renderDemoCockpitDetails(
+          "Nicht-Ziele",
+          `
+          <ul class="demo-cockpit-list demo-cockpit-list--compact">
+            ${demo.productiveCentralV1FreezeDecision.nonGoals.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
           </ul>
         `,
         )}
@@ -45935,6 +45989,7 @@ function scrollToDemoAnchor(anchorId) {
 
 const DEMO_HASH_ANCHOR_VIEWS = {
   "hr-agent-daily-suggestion": "cockpit",
+  "v1-freeze-decision-anchor": "cockpit",
   "demo-final-review-decision-anchor": "cockpit",
   "premium-ui-design-system-anchor": "cockpit",
   "plugin-leitstand-demo-anchor": "cockpit",

@@ -2045,6 +2045,7 @@ function getTodaysThreeThings() {
     automaticTrainingStarted: false,
     followUpAgentStarted: false,
     rightsChanged: false,
+    nextProductiveCentralV1FreezeDecision: getDemoCockpit().nextProductiveCentralV1FreezeDecision,
   };
 }
 
@@ -6724,7 +6725,37 @@ function getDemoCockpit() {
     productiveCentralDemoFinalReviewDecisionPrepared: true,
     nextProductiveCentralDemoFinalReviewDecision:
       "Jamal trifft eine der drei Optionen und hält nur den kleinsten nächsten Schritt fest.",
+    productiveCentralV1FreezeDecision: {
+      title: "V1-Abschlusskandidat einfrieren",
+      status: "abschlussbereit / read-only",
+      leadershipQuestion:
+        "Soll der aktuelle read-only Demo-Stand jetzt als V1 eingefroren werden?",
+      currentAssessment:
+        "Der Demo-Stand ist technisch abgeschlossen: read-only stabil, Kernbereiche sichtbar, Sicherheitsgrenzen eingehalten. Weitere Vorbereitungsrunden sind nicht nötig, außer Jamal entscheidet bewusst anders.",
+      decisionOptions: [
+        "V1 jetzt einfrieren",
+        "Eine letzte interne Demo durchführen",
+        "Externen Demo-Stand vorbereiten",
+      ],
+      recommendation:
+        "V1 jetzt einfrieren, sofern keine offenen Kernblocker sichtbar sind.",
+      freezeBoundary:
+        "Keine neuen Features, keine Plugin-Aktivierung, keine Schreibrechte, keine Cloud-/Login-/Deployment-Arbeit.",
+      nextSmallestStep:
+        "Eine der drei Optionen bewusst wählen und dokumentieren — ohne weitere Vorbereitungsrunden.",
+      nonGoals: [
+        "Kein weiterer Produktausbau",
+        "Keine Schreibarchitektur",
+        "Keine Plugin-Aktivierung",
+        "Kein Deployment",
+        "Keine neuen Designregeln",
+      ],
+    },
+    productiveCentralV1FreezeDecisionPrepared: true,
+    nextProductiveCentralV1FreezeDecision:
+      "Jamal entscheidet, ob der aktuelle read-only Demo-Stand als V1 eingefroren wird.",
     demoQuickNav: [
+      { label: "V1 einfrieren", view: "cockpit", anchor: "v1-freeze-decision-anchor" },
       { label: "Abschlussentscheidung", view: "cockpit", anchor: "demo-final-review-decision-anchor" },
       { label: "Designsystem", view: "cockpit", anchor: "premium-ui-design-system-anchor" },
       { label: "Plugin-Leitstand", view: "cockpit", anchor: "plugin-leitstand-demo-anchor" },
@@ -18627,6 +18658,8 @@ function getPluginReadiness(requestUrl) {
       getDemoCockpit().productiveCentralDemoFinalReviewDecisionPrepared,
     nextProductiveCentralDemoFinalReviewDecision:
       getDemoCockpit().nextProductiveCentralDemoFinalReviewDecision,
+    productiveCentralV1FreezeDecision: getDemoCockpit().productiveCentralV1FreezeDecision,
+    productiveCentralV1FreezeDecisionPrepared: getDemoCockpit().productiveCentralV1FreezeDecisionPrepared,
     productiveCentralPortfolioUxFinish: getProductiveCentralPortfolioUxFinish(),
     productiveCentralPortfolioUxFinishPrepared: PRODUCTIVE_CENTRAL_PORTFOLIO_UX_FINISH_PREPARED,
     nextProductiveCentralPortfolioUxStep: NEXT_PRODUCTIVE_CENTRAL_PORTFOLIO_UX_STEP,
