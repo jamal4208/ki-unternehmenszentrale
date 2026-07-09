@@ -7533,6 +7533,69 @@ details.local-agent-assignment-details > summary {
   font-size: 0.92rem;
 }
 
+.portfolio-work-card-pm-hint {
+  margin: 10px 0 0;
+  font-size: 0.9rem;
+  color: #4a443c;
+}
+
+.health-pm-run-card {
+  margin: 16px 0 20px;
+  padding: 16px 18px;
+  border: 1px solid #d4c9b8;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fffdf8 0%, #f8f4ec 100%);
+}
+
+.health-pm-run-head h4 {
+  margin: 6px 0 10px;
+  font-size: 1.05rem;
+}
+
+.health-pm-run-lead {
+  margin: 0 0 12px;
+  font-size: 0.95rem;
+}
+
+.health-pm-run-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.health-pm-run-cell {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid #e8dfd2;
+}
+
+.health-pm-run-cell h5,
+.health-pm-run-decision h5 {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+}
+
+.health-pm-run-steps {
+  margin: 0 0 12px;
+}
+
+.health-pm-run-recommendation {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f0ebe3;
+  font-size: 0.92rem;
+}
+
+.health-pm-run-agent-meta {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.82rem;
+  color: #6a6258;
+}
+
 .demo-cockpit-archive {
   margin-top: 8px;
   padding: 12px 14px;

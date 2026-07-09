@@ -238,6 +238,7 @@ const productiveReadOnlyProjectContextPreparationPrepared = true;
 const productiveManualProjectWorkRunPreparationPrepared = true;
 const productiveManualProjectWorkRunEvaluationPrepared = true;
 const productiveHealthProjectAgentWorkOrderPrepared = true;
+const productiveHealthProjectManagerReadOnlyRunPrepared = true;
 const productiveHealthProjectAgentRunEvaluationPrepared = true;
 const productiveManualHealthProjectWorkStepPreparationPrepared = true;
 const productiveFastQualityWorkModePrepared = true;
@@ -369,6 +370,7 @@ function getPilotStatus() {
     productiveManualProjectWorkRunPreparationPrepared,
     productiveManualProjectWorkRunEvaluationPrepared,
     productiveHealthProjectAgentWorkOrderPrepared,
+    productiveHealthProjectManagerReadOnlyRunPrepared,
     productiveHealthProjectAgentRunEvaluationPrepared,
     productiveManualHealthProjectWorkStepPreparationPrepared,
     productiveFastQualityWorkModePrepared,
@@ -745,6 +747,9 @@ function getPilotStatus() {
     canCloseV69: true,
     canRunLocalReadOnlyConnectionCheck: true,
     nextPluginStep: "Airtable local read-only connection pruefen",
+    productiveHealthProjectManagerReadOnlyRun: getProductiveHealthProjectManagerReadOnlyRun(),
+    nextProductiveHealthProjectManagerReadOnlyRun:
+      getDemoCockpit().nextProductiveHealthProjectManagerReadOnlyRun,
     writeEnabled: false,
     writeOperationsBlocked: true,
     automationEnabled: false,
@@ -2049,6 +2054,10 @@ function getTodaysThreeThings() {
     nextProductiveCentralV1FreezeDecision: getDemoCockpit().nextProductiveCentralV1FreezeDecision,
     nextProductiveCentralDailyWorkMode: getDemoCockpit().nextProductiveCentralDailyWorkMode,
     nextProductiveCentralV1WorkMode: getDemoCockpit().nextProductiveCentralV1WorkMode,
+    productiveHealthProjectManagerReadOnlyRun: getProductiveHealthProjectManagerReadOnlyRun(),
+    productiveHealthProjectManagerReadOnlyRunPrepared: true,
+    nextProductiveHealthProjectManagerReadOnlyRun:
+      getDemoCockpit().nextProductiveHealthProjectManagerReadOnlyRun,
   };
 }
 
@@ -6570,18 +6579,18 @@ function buildPluginCommandCenter(projectContext, workRequest, analysis, agentRu
   };
 }
 
-const DEMO_COCKPIT_VERSION = "V6.38.1";
-const COCKPIT_DATA_FLOW_VERSION = "V6.38.1";
+const DEMO_COCKPIT_VERSION = "V6.38.2";
+const COCKPIT_DATA_FLOW_VERSION = "V6.38.2";
 const DEMO_UI_UX_FINISH_VERSION = "V6.36.1";
 
 function getProductiveCentralV1WorkMode() {
   return {
-    version: "V6.38.1",
+    version: "V6.38.2",
     title: "V1-Arbeitsmodus",
     status: "tagesbereit / read-only",
     todayPriorityProject: "Health Upgrade Kompass",
     todaysThreeThings: [
-      "Health Upgrade Kompass lokal prüfen und kleinsten Schritt notieren",
+      "Health-PM-Arbeitslauf öffnen und Demo-Ziel für diese Woche klären",
       "V1-Freeze-Entscheidung prüfen oder bewusst offen lassen",
       "HR-Top-Training Projektmanager-Agent: nächste kleinste Schritte schärfen",
     ],
@@ -6605,7 +6614,7 @@ function getProductiveCentralV1WorkMode() {
       "GitHub Stand und Logs read-only",
     ],
     smallestNextStep:
-      "Den Health Upgrade Kompass lokal prüfen und nur notieren: aktueller Stand, kleinster nächster Qualitätsschritt, offene Entscheidung und klare Grenze.",
+      "Health Upgrade Kompass: Demo-Ziel klären, Kompass-Flow prüfen und PM-Entscheidungskarte für Jamal vorbereiten.",
     safetyBoundary:
       "Read-only, keine Schreibaktionen, keine externen Requests ohne manuelle Freigabe.",
   };
@@ -6652,7 +6661,7 @@ function getProductiveCentralV1FinishPlan() {
 
 function getProductiveCentralPortfolioWorkBoard() {
   return {
-    version: "V6.38.1",
+    version: "V6.38.2",
     title: "Projektsteuerung",
     guidanceLine: "Ein Fokusprojekt heute — alle anderen nur einordnen, nicht parallel fertigstellen.",
     projects: [
@@ -6661,10 +6670,10 @@ function getProductiveCentralPortfolioWorkBoard() {
         name: "Health Upgrade Kompass",
         status: "demo-ready-read-only",
         priority: "heute",
-        nextStep: "Demo-Fluss Bereich 1–4 prüfen und Verständnisprobleme notieren.",
-        agents: "Projektmanager-Agent, Produktmanager-Agent, QA-Agent",
+        nextStep: "Health-PM-Arbeitslauf: Demo-Ziel klären und Kompass-Flow Bereich 1–4 prüfen.",
+        agents: "Projektmanager-Agent, Produktmanager-Agent, QA-Agent, Compliance-Agent",
         blocker: "Körperanalysewaage bleibt Phase 2.",
-        decision: "Health heute als Hauptprojekt führen?",
+        decision: "Health als erstes echtes Arbeitsprojekt priorisieren? (PM empfiehlt Option A)",
         plugins: "Airtable read-only später für Projektstand",
         readOnlyOnly: true,
       },
@@ -6809,6 +6818,116 @@ function getProductiveCentralPluginLeitstandV1() {
     safetyNote: "writeOperationsBlocked bleibt true — keine Freigabe ohne Jamal.",
   };
 }
+
+function getProductiveHealthProjectManagerReadOnlyRun() {
+  return {
+    version: "V6.38.2",
+    title: "Health-Projektmanager-Arbeitslauf",
+    project: "Health Upgrade Kompass",
+    status: "read-only vorbereitet / demo-ready",
+    purpose:
+      "Erstes echtes Projekt wieder in Bewegung bringen — Struktur, Entscheidung und nächster Schritt ohne Automatisierung.",
+    currentSituation: {
+      status: "demo-ready-read-only",
+      whyImportant:
+        "Konkretes Demo- und Produktprojekt; zeigt, wie die Zentrale ein echtes Projekt führt.",
+      readyEnough: "Bereich 1–4 des Kompass-Flows für Demo und ersten Arbeitslauf.",
+      notYetDone: "Körperanalysewaage Phase 2, echte Kundendaten, Plugin-Schreibaktionen.",
+    },
+    projectManagerFinding: {
+      bottleneck:
+        "Kein fehlender Code — fehlende klare Wochenentscheidung und ein dokumentierter Demo-Zielpfad.",
+      nextBestStep:
+        "Health-Demo-Ziel für diese Woche klären und Kompass-Flow einmal bewusst durchgehen.",
+      doNotPostpone: "Entscheidung, ob Health jetzt das erste echte Arbeitsprojekt ist.",
+      distraction:
+        "Expansion App, Marketing Agentur OS oder Plugin-Anbindung vor dieser Entscheidung vertiefen.",
+    },
+    nextBestStep:
+      "Kompass-Flow Bereich 1–4 durchgehen und eine Entscheidungskarte für Jamal vorbereiten.",
+    workRunSteps: [
+      "Health-Demo-Ziel für diese Woche klären",
+      "Bestehenden Kompass-Flow (Bereich 1–4) prüfen",
+      "Erste Entscheidungskarte für Jamal vorbereiten",
+      "QA-/Compliance-Grenze gegen Health-Claims prüfen",
+      "Nächsten manuellen Umsetzungsschritt festlegen",
+    ],
+    agentContributions: [
+      {
+        agent: "Projektmanager-Agent",
+        contribution: "Arbeitslauf bündeln und kleinsten nächsten Schritt formulieren",
+        boundary: "Keine Umsetzung, keine Agentenfolge starten",
+        expectedResult: "Ein klarer 5-Schritte-Arbeitslauf für diese Woche",
+      },
+      {
+        agent: "Geschäftsführer-Agent",
+        contribution: "Entscheidungsoptionen A/B/C vorbereiten",
+        boundary: "Nicht entscheiden, nur Optionen strukturieren",
+        expectedResult: "Jamal kann eine Prioritätsentscheidung treffen",
+      },
+      {
+        agent: "Produktmanager-Agent",
+        contribution: "Kompass-Flow und Bereich 1–4 gegen Produktziel prüfen",
+        boundary: "Keine neue Produktlogik, keine Waage-Phase-2-Ausarbeitung",
+        expectedResult: "Klarheit, was demo-fähig vs. später ist",
+      },
+      {
+        agent: "QA-Agent",
+        contribution: "Demo-Flow auf Verständlichkeit und Regression prüfen",
+        boundary: "Keine automatischen Tests auslösen",
+        expectedResult: "Liste konkreter Verständnisprobleme, falls vorhanden",
+      },
+      {
+        agent: "Compliance-/Risiko-Agent",
+        contribution: "Health-Claims und Sicherheitsgrenzen gegenprüfen",
+        boundary: "Keine Diagnosen, keine Heilversprechen",
+        expectedResult: "Freigabefähige Formulierungsgrenzen für Demo",
+      },
+      {
+        agent: "Content-Agent",
+        contribution: "Entscheidungs- und Demo-Texte kürzen",
+        boundary: "Keine Veröffentlichung, keine Kundendaten",
+        expectedResult: "Verständliche Kurztexte für Jamals Entscheidung",
+      },
+    ],
+    jamalDecision: {
+      question: "Was ist der nächste sinnvolle Schritt für Health Upgrade Kompass?",
+      options: [
+        "Option A: Health-Kompass als erstes echtes Arbeitsprojekt priorisieren",
+        "Option B: Erst Unternehmenszentrale weiter stabilisieren",
+        "Option C: Zuerst Plugin-Anbindung (Airtable read-only) vorbereiten",
+      ],
+      recommendation: "Option A: Health-Kompass als erstes echtes Arbeitsprojekt priorisieren",
+      recommendationReason:
+        "Health ist demo-ready, hat klaren Flow und bringt das Portfolio ohne neue Technik in Bewegung.",
+    },
+    readOnlyBoundaries: [
+      "Keine echten Kundendaten",
+      "Keine automatischen E-Mails",
+      "Keine Airtable-Schreiboperationen",
+      "Keine Deployments",
+      "Keine Gesundheitsdiagnosen",
+      "Keine Heilversprechen",
+      "Keine Waage-/Labor-Auswertung in V1",
+      "Nur Vorbereitung, Struktur und Entscheidungshilfe",
+    ],
+    pluginPreparation: [
+      { plugin: "Airtable", use: "Projekt-/Statusdaten später strukturiert lesen", status: "read-only vorbereitet" },
+      { plugin: "Gmail", use: "Rückfragen und Entwürfe vorbereiten", status: "später read-only" },
+      { plugin: "Google Calendar", use: "Demo-Zeitfenster und Termine lesen", status: "später read-only" },
+      { plugin: "GitHub", use: "Entwicklungsstand prüfen", status: "live read-only" },
+      { plugin: "Canva/HeyGen", use: "Design-/Video-Unterstützung", status: "später, nicht Hauptfokus" },
+    ],
+    notNow: [
+      "Körperanalysewaage Phase 2 ausarbeiten",
+      "Expansion App parallel vertiefen",
+      "Plugin-Schreibfreigaben",
+      "Externe Demo ohne interne Durchsprache",
+    ],
+    prepared: true,
+  };
+}
+
 function getDemoCockpit() {
   return {
     demoCockpitVersion: DEMO_COCKPIT_VERSION,
@@ -7060,8 +7179,13 @@ function getDemoCockpit() {
     productiveCentralAgentWorkNowPrepared: true,
     productiveCentralPluginLeitstandV1: getProductiveCentralPluginLeitstandV1(),
     productiveCentralPluginLeitstandV1Prepared: true,
+    productiveHealthProjectManagerReadOnlyRun: getProductiveHealthProjectManagerReadOnlyRun(),
+    productiveHealthProjectManagerReadOnlyRunPrepared: true,
+    nextProductiveHealthProjectManagerReadOnlyRun:
+      "Health Upgrade Kompass: Demo-Ziel klären, Kompass-Flow prüfen und PM-Entscheidungskarte für Jamal vorbereiten.",
     demoQuickNav: [
       { label: "Heute arbeiten", view: "cockpit", anchor: "v1-work-mode-anchor" },
+      { label: "Health-PM", view: "cockpit", anchor: "health-pm-run-anchor" },
       { label: "Projekte", view: "cockpit", anchor: "portfolio-work-board-anchor" },
       { label: "Agenten", view: "agents" },
       { label: "Plugins", view: "cockpit", anchor: "plugin-leitstand-demo-anchor" },
@@ -18984,6 +19108,10 @@ function getPluginReadiness(requestUrl) {
     productiveCentralAgentWorkNowPrepared: getDemoCockpit().productiveCentralAgentWorkNowPrepared,
     productiveCentralPluginLeitstandV1: getDemoCockpit().productiveCentralPluginLeitstandV1,
     productiveCentralPluginLeitstandV1Prepared: getDemoCockpit().productiveCentralPluginLeitstandV1Prepared,
+    productiveHealthProjectManagerReadOnlyRun: getProductiveHealthProjectManagerReadOnlyRun(),
+    productiveHealthProjectManagerReadOnlyRunPrepared: true,
+    nextProductiveHealthProjectManagerReadOnlyRun:
+      getDemoCockpit().nextProductiveHealthProjectManagerReadOnlyRun,
     productiveCentralPortfolioUxFinish: getProductiveCentralPortfolioUxFinish(),
     productiveCentralPortfolioUxFinishPrepared: PRODUCTIVE_CENTRAL_PORTFOLIO_UX_FINISH_PREPARED,
     nextProductiveCentralPortfolioUxStep: NEXT_PRODUCTIVE_CENTRAL_PORTFOLIO_UX_STEP,
