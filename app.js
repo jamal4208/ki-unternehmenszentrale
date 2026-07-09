@@ -15837,7 +15837,64 @@ function getDemoCockpit() {
     productiveCentralV1FreezeDecisionPrepared: true,
     nextProductiveCentralV1FreezeDecision:
       "Jamal entscheidet, ob der aktuelle read-only Demo-Stand als V1 eingefroren wird.",
+    productiveCentralDailyWorkMode: {
+      title: "Heute mit der Unternehmenszentrale arbeiten",
+      status: "tagesbereit / read-only",
+      todayPriorityProject: "Health Upgrade Kompass",
+      smallestNextStep:
+        "Den Health Upgrade Kompass lokal prüfen und nur notieren: aktueller Stand, kleinster nächster Qualitätsschritt, offene Entscheidung und klare Grenze.",
+      openDecision:
+        "V1-Freeze-Entscheidung: Soll der aktuelle read-only Demo-Stand als V1 eingefroren werden?",
+      responsibleAgent: "Projektmanager-Agent",
+      safetyBoundary:
+        "Read-only, keine Schreibaktionen, keine externen Requests, keine Plugin-Aktivierung ohne manuelle Freigabe.",
+      notToday: [
+        "Expansion App vertiefen",
+        "Marketing Agentur OS starten",
+        "Schreibarchitektur aktivieren",
+        "Deployment/Cloud/Login/API-Automatisierung",
+      ],
+    },
+    productiveCentralDailyWorkModePrepared: true,
+    nextProductiveCentralDailyWorkMode:
+      "Heute mit Health Upgrade Kompass starten, kleinsten nächsten Schritt prüfen und V1-Freeze-Entscheidung sichtbar halten.",
+    productiveCentralV1CompletionSummary: {
+      title: "V1-Status auf einen Blick",
+      status: "arbeitsbereit / demo-bereit / read-only",
+      readyForInternalUse: [
+        "Demo-Cockpit, Portfolio, Agenten-Zentrale und Plugin-Leitstand",
+        "25 Agenten mit Tagesbeiträgen und HR-Vorschlägen",
+        "Tagesführung, Entscheidungskarten und Health als Fokusprojekt",
+      ],
+      demoReady: [
+        "Health Upgrade Kompass Bereich 1–4",
+        "GitHub + Airtable read-only live",
+        "5–7-Minuten-Demo-Pfad im Demo-Cockpit",
+      ],
+      staysReadOnly: [
+        "Schreiboperationen und Plugin-Aktivierung",
+        "Externe Requests ohne manuelle Freigabe",
+        "Airtable-Feldwerte, GitHub-Commits, Deployments",
+      ],
+      notPartOfV1: [
+        "Cloud-/Login-Ausbau",
+        "Schreibarchitektur und Persistenz",
+        "Vollständige Expansion App und Marketing Agentur OS",
+        "Automatische Agentenausführung",
+      ],
+      decisionForJamal:
+        "V1-Freeze akzeptieren oder mit minimaler Verdichtung abschließen — keine weiteren Vorbereitungsrunden.",
+      recommendation:
+        "V1 als read-only Arbeits- und Demo-Stand nutzen; Health führen, Freeze-Entscheidung treffen, Rest nach V1.1.",
+      riskBoundary:
+        "Keine neuen Features, keine Schreibrechte, keine Plugin-Aktivierung, keine echten Kundendaten.",
+      nextSmallestStep:
+        "Morgens Tagesarbeitskarte öffnen, Health-Schritt notieren und V1-Freeze-Entscheidung bestätigen oder offen lassen.",
+    },
+    productiveCentralV1CompletionSummaryPrepared: true,
     demoQuickNav: [
+      { label: "Heute arbeiten", view: "cockpit", anchor: "daily-work-mode-anchor" },
+      { label: "V1-Status", view: "cockpit", anchor: "v1-completion-summary-anchor" },
       { label: "V1 einfrieren", view: "cockpit", anchor: "v1-freeze-decision-anchor" },
       { label: "Abschlussentscheidung", view: "cockpit", anchor: "demo-final-review-decision-anchor" },
       { label: "Designsystem", view: "cockpit", anchor: "premium-ui-design-system-anchor" },
@@ -16630,6 +16687,64 @@ function renderDemoCockpit() {
       "1 · Stand auf einen Blick",
       "Ist alles demo-bereit?",
       `
+      <article class="demo-cockpit-card demo-cockpit-card--finish" id="daily-work-mode-anchor">
+        <header class="demo-cockpit-card-head">
+          <h4>${escapeHtml(demo.productiveCentralDailyWorkMode.title)}</h4>
+          ${renderDemoCockpitBadge("read-only", demo.productiveCentralDailyWorkMode.status)}
+        </header>
+        <p class="demo-cockpit-card-summary"><strong>Prioritätsprojekt heute:</strong> ${escapeHtml(demo.productiveCentralDailyWorkMode.todayPriorityProject)}</p>
+        <p class="demo-cockpit-card-summary"><strong>Kleinster nächster Schritt:</strong> ${escapeHtml(demo.productiveCentralDailyWorkMode.smallestNextStep)}</p>
+        <p class="demo-cockpit-card-summary"><strong>Offene Entscheidung:</strong> ${escapeHtml(demo.productiveCentralDailyWorkMode.openDecision)}</p>
+        <div class="demo-cockpit-actions">
+          <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="v1-freeze-decision-anchor">V1-Freeze prüfen</button>
+        </div>
+        <p class="demo-cockpit-card-summary"><strong>Verantwortlicher Agent:</strong> ${escapeHtml(demo.productiveCentralDailyWorkMode.responsibleAgent)}</p>
+        <p class="demo-cockpit-card-summary"><strong>Sicherheitsgrenze:</strong> ${escapeHtml(demo.productiveCentralDailyWorkMode.safetyBoundary)}</p>
+        ${renderDemoCockpitDetails(
+          "Nicht heute",
+          `
+          <ul class="demo-cockpit-list demo-cockpit-list--compact">
+            ${demo.productiveCentralDailyWorkMode.notToday.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ul>
+        `,
+        )}
+      </article>
+
+      <article class="demo-cockpit-card demo-cockpit-card--finish" id="v1-completion-summary-anchor">
+        <header class="demo-cockpit-card-head">
+          <h4>${escapeHtml(demo.productiveCentralV1CompletionSummary.title)}</h4>
+          ${renderDemoCockpitBadge("read-only", demo.productiveCentralV1CompletionSummary.status)}
+        </header>
+        <h5>Für interne Nutzung bereit</h5>
+        <ul class="demo-cockpit-list demo-cockpit-list--compact">
+          ${demo.productiveCentralV1CompletionSummary.readyForInternalUse.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ul>
+        <h5>Demo-bereit</h5>
+        <ul class="demo-cockpit-list demo-cockpit-list--compact">
+          ${demo.productiveCentralV1CompletionSummary.demoReady.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ul>
+        <p class="demo-cockpit-card-summary"><strong>Entscheidung für Jamal:</strong> ${escapeHtml(demo.productiveCentralV1CompletionSummary.decisionForJamal)}</p>
+        <p class="demo-cockpit-quote"><strong>Empfehlung:</strong> ${escapeHtml(demo.productiveCentralV1CompletionSummary.recommendation)}</p>
+        <p class="demo-cockpit-card-summary"><strong>Risiko-/Sicherheitsgrenze:</strong> ${escapeHtml(demo.productiveCentralV1CompletionSummary.riskBoundary)}</p>
+        <p class="demo-cockpit-card-summary"><strong>Kleinster nächster Schritt:</strong> ${escapeHtml(demo.productiveCentralV1CompletionSummary.nextSmallestStep)}</p>
+        ${renderDemoCockpitDetails(
+          "Read-only-Grenzen",
+          `
+          <ul class="demo-cockpit-list demo-cockpit-list--compact">
+            ${demo.productiveCentralV1CompletionSummary.staysReadOnly.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ul>
+        `,
+        )}
+        ${renderDemoCockpitDetails(
+          "Nicht Teil von V1",
+          `
+          <ul class="demo-cockpit-list demo-cockpit-list--compact">
+            ${demo.productiveCentralV1CompletionSummary.notPartOfV1.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ul>
+        `,
+        )}
+      </article>
+
       <div class="demo-cockpit-group-grid">
         <article class="demo-cockpit-card demo-cockpit-card--compact">
           <header class="demo-cockpit-card-head">
@@ -45989,6 +46104,8 @@ function scrollToDemoAnchor(anchorId) {
 
 const DEMO_HASH_ANCHOR_VIEWS = {
   "hr-agent-daily-suggestion": "cockpit",
+  "daily-work-mode-anchor": "cockpit",
+  "v1-completion-summary-anchor": "cockpit",
   "v1-freeze-decision-anchor": "cockpit",
   "demo-final-review-decision-anchor": "cockpit",
   "premium-ui-design-system-anchor": "cockpit",

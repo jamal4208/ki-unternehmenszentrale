@@ -2046,6 +2046,7 @@ function getTodaysThreeThings() {
     followUpAgentStarted: false,
     rightsChanged: false,
     nextProductiveCentralV1FreezeDecision: getDemoCockpit().nextProductiveCentralV1FreezeDecision,
+    nextProductiveCentralDailyWorkMode: getDemoCockpit().nextProductiveCentralDailyWorkMode,
   };
 }
 
@@ -6754,7 +6755,64 @@ function getDemoCockpit() {
     productiveCentralV1FreezeDecisionPrepared: true,
     nextProductiveCentralV1FreezeDecision:
       "Jamal entscheidet, ob der aktuelle read-only Demo-Stand als V1 eingefroren wird.",
+    productiveCentralDailyWorkMode: {
+      title: "Heute mit der Unternehmenszentrale arbeiten",
+      status: "tagesbereit / read-only",
+      todayPriorityProject: "Health Upgrade Kompass",
+      smallestNextStep:
+        "Den Health Upgrade Kompass lokal prüfen und nur notieren: aktueller Stand, kleinster nächster Qualitätsschritt, offene Entscheidung und klare Grenze.",
+      openDecision:
+        "V1-Freeze-Entscheidung: Soll der aktuelle read-only Demo-Stand als V1 eingefroren werden?",
+      responsibleAgent: "Projektmanager-Agent",
+      safetyBoundary:
+        "Read-only, keine Schreibaktionen, keine externen Requests, keine Plugin-Aktivierung ohne manuelle Freigabe.",
+      notToday: [
+        "Expansion App vertiefen",
+        "Marketing Agentur OS starten",
+        "Schreibarchitektur aktivieren",
+        "Deployment/Cloud/Login/API-Automatisierung",
+      ],
+    },
+    productiveCentralDailyWorkModePrepared: true,
+    nextProductiveCentralDailyWorkMode:
+      "Heute mit Health Upgrade Kompass starten, kleinsten nächsten Schritt prüfen und V1-Freeze-Entscheidung sichtbar halten.",
+    productiveCentralV1CompletionSummary: {
+      title: "V1-Status auf einen Blick",
+      status: "arbeitsbereit / demo-bereit / read-only",
+      readyForInternalUse: [
+        "Demo-Cockpit, Portfolio, Agenten-Zentrale und Plugin-Leitstand",
+        "25 Agenten mit Tagesbeiträgen und HR-Vorschlägen",
+        "Tagesführung, Entscheidungskarten und Health als Fokusprojekt",
+      ],
+      demoReady: [
+        "Health Upgrade Kompass Bereich 1–4",
+        "GitHub + Airtable read-only live",
+        "5–7-Minuten-Demo-Pfad im Demo-Cockpit",
+      ],
+      staysReadOnly: [
+        "Schreiboperationen und Plugin-Aktivierung",
+        "Externe Requests ohne manuelle Freigabe",
+        "Airtable-Feldwerte, GitHub-Commits, Deployments",
+      ],
+      notPartOfV1: [
+        "Cloud-/Login-Ausbau",
+        "Schreibarchitektur und Persistenz",
+        "Vollständige Expansion App und Marketing Agentur OS",
+        "Automatische Agentenausführung",
+      ],
+      decisionForJamal:
+        "V1-Freeze akzeptieren oder mit minimaler Verdichtung abschließen — keine weiteren Vorbereitungsrunden.",
+      recommendation:
+        "V1 als read-only Arbeits- und Demo-Stand nutzen; Health führen, Freeze-Entscheidung treffen, Rest nach V1.1.",
+      riskBoundary:
+        "Keine neuen Features, keine Schreibrechte, keine Plugin-Aktivierung, keine echten Kundendaten.",
+      nextSmallestStep:
+        "Morgens Tagesarbeitskarte öffnen, Health-Schritt notieren und V1-Freeze-Entscheidung bestätigen oder offen lassen.",
+    },
+    productiveCentralV1CompletionSummaryPrepared: true,
     demoQuickNav: [
+      { label: "Heute arbeiten", view: "cockpit", anchor: "daily-work-mode-anchor" },
+      { label: "V1-Status", view: "cockpit", anchor: "v1-completion-summary-anchor" },
       { label: "V1 einfrieren", view: "cockpit", anchor: "v1-freeze-decision-anchor" },
       { label: "Abschlussentscheidung", view: "cockpit", anchor: "demo-final-review-decision-anchor" },
       { label: "Designsystem", view: "cockpit", anchor: "premium-ui-design-system-anchor" },
@@ -18660,6 +18718,11 @@ function getPluginReadiness(requestUrl) {
       getDemoCockpit().nextProductiveCentralDemoFinalReviewDecision,
     productiveCentralV1FreezeDecision: getDemoCockpit().productiveCentralV1FreezeDecision,
     productiveCentralV1FreezeDecisionPrepared: getDemoCockpit().productiveCentralV1FreezeDecisionPrepared,
+    nextProductiveCentralV1FreezeDecision: getDemoCockpit().nextProductiveCentralV1FreezeDecision,
+    productiveCentralDailyWorkMode: getDemoCockpit().productiveCentralDailyWorkMode,
+    productiveCentralDailyWorkModePrepared: getDemoCockpit().productiveCentralDailyWorkModePrepared,
+    productiveCentralV1CompletionSummary: getDemoCockpit().productiveCentralV1CompletionSummary,
+    productiveCentralV1CompletionSummaryPrepared: getDemoCockpit().productiveCentralV1CompletionSummaryPrepared,
     productiveCentralPortfolioUxFinish: getProductiveCentralPortfolioUxFinish(),
     productiveCentralPortfolioUxFinishPrepared: PRODUCTIVE_CENTRAL_PORTFOLIO_UX_FINISH_PREPARED,
     nextProductiveCentralPortfolioUxStep: NEXT_PRODUCTIVE_CENTRAL_PORTFOLIO_UX_STEP,
