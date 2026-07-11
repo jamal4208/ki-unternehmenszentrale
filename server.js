@@ -240,6 +240,7 @@ const productiveManualProjectWorkRunEvaluationPrepared = true;
 const productiveHealthProjectAgentWorkOrderPrepared = true;
 const productiveHealthProjectManagerReadOnlyRunPrepared = true;
 const productiveHealthStartJamalReleaseCardPrepared = true;
+const productiveHealthWeeklyDemoGoalCardPrepared = true;
 const productiveHealthProjectAgentRunEvaluationPrepared = true;
 const productiveManualHealthProjectWorkStepPreparationPrepared = true;
 const productiveFastQualityWorkModePrepared = true;
@@ -373,6 +374,7 @@ function getPilotStatus() {
     productiveHealthProjectAgentWorkOrderPrepared,
     productiveHealthProjectManagerReadOnlyRunPrepared,
     productiveHealthStartJamalReleaseCardPrepared,
+    productiveHealthWeeklyDemoGoalCardPrepared,
     productiveHealthProjectAgentRunEvaluationPrepared,
     productiveManualHealthProjectWorkStepPreparationPrepared,
     productiveFastQualityWorkModePrepared,
@@ -755,6 +757,9 @@ function getPilotStatus() {
     productiveHealthStartJamalReleaseCard: getProductiveHealthStartJamalReleaseCard(),
     nextProductiveHealthStartJamalReleaseCard:
       getDemoCockpit().nextProductiveHealthStartJamalReleaseCard,
+    productiveHealthWeeklyDemoGoalCard: getProductiveHealthWeeklyDemoGoalCard(),
+    nextProductiveHealthWeeklyDemoGoalCard:
+      getDemoCockpit().nextProductiveHealthWeeklyDemoGoalCard,
     writeEnabled: false,
     writeOperationsBlocked: true,
     automationEnabled: false,
@@ -2056,7 +2061,9 @@ function getTodaysThreeThings() {
     automaticTrainingStarted: false,
     followUpAgentStarted: false,
     rightsChanged: false,
+    productiveCentralV1FreezeDecision: getDemoCockpit().productiveCentralV1FreezeDecision,
     nextProductiveCentralV1FreezeDecision: getDemoCockpit().nextProductiveCentralV1FreezeDecision,
+    productiveCentralDailyWorkMode: getDemoCockpit().productiveCentralDailyWorkMode,
     nextProductiveCentralDailyWorkMode: getDemoCockpit().nextProductiveCentralDailyWorkMode,
     nextProductiveCentralV1WorkMode: getDemoCockpit().nextProductiveCentralV1WorkMode,
     productiveHealthProjectManagerReadOnlyRun: getProductiveHealthProjectManagerReadOnlyRun(),
@@ -2067,6 +2074,10 @@ function getTodaysThreeThings() {
     productiveHealthStartJamalReleaseCardPrepared: true,
     nextProductiveHealthStartJamalReleaseCard:
       getDemoCockpit().nextProductiveHealthStartJamalReleaseCard,
+    productiveHealthWeeklyDemoGoalCard: getProductiveHealthWeeklyDemoGoalCard(),
+    productiveHealthWeeklyDemoGoalCardPrepared: true,
+    nextProductiveHealthWeeklyDemoGoalCard:
+      getDemoCockpit().nextProductiveHealthWeeklyDemoGoalCard,
   };
 }
 
@@ -6588,8 +6599,8 @@ function buildPluginCommandCenter(projectContext, workRequest, analysis, agentRu
   };
 }
 
-const DEMO_COCKPIT_VERSION = "V6.38.3";
-const COCKPIT_DATA_FLOW_VERSION = "V6.38.3";
+const DEMO_COCKPIT_VERSION = "V6.38.4";
+const COCKPIT_DATA_FLOW_VERSION = "V6.38.4";
 const DEMO_UI_UX_FINISH_VERSION = "V6.36.1";
 
 function getProductiveCentralV1WorkMode() {
@@ -6975,6 +6986,52 @@ function getProductiveHealthStartJamalReleaseCard() {
   };
 }
 
+function getProductiveHealthWeeklyDemoGoalCard() {
+  return {
+    version: "V6.38.4",
+    title: "Health-Demo-Zielkarte",
+    status: "read-only / Wochenziel vorbereitet",
+    question:
+      "Was muss diese Woche konkret fertig oder geklärt sein, damit der Health Upgrade Kompass als erstes Arbeitsprojekt sinnvoll weiterläuft?",
+    weeklyGoal:
+      "Health-Demo-Ziel für diese Woche klären und den Kompass-Flow Bereich 1–4 einmal bewusst durchgehen.",
+    whyImportant:
+      "Option A ist freigegeben — ohne klares Wochenziel verliert Health wieder an Klarheit, obwohl PM-Arbeitslauf und Freigabe bereits stehen.",
+    workArea: "Kompass-Flow Bereich 1–4",
+    checkPoints: [
+      "Versteht ein Außenstehender sofort, was der Health Upgrade Kompass tut?",
+      "Führen Bereich 1–4 zu einem klaren nächsten kleinen Schritt?",
+      "Ist die Grenze zwischen Orientierung und medizinischer Aussage klar genug?",
+    ],
+    resultNotes: [
+      "Was wirkt bereits demo-reif?",
+      "Was ist noch unklar oder zu lang?",
+      "Welche eine Verbesserung sollte als Nächstes vorbereitet werden?",
+    ],
+    notThisWeek: [
+      "Kundendaten",
+      "Echte Gesundheitsauswertung",
+      "Diagnosen oder Heilversprechen",
+      "Waage-/Labor-Auswertung",
+      "Airtable-Schreiben",
+      "Gmail-/Calendar-Aktionen",
+      "Deployment",
+      "Neue Plugin-Aktivierung",
+    ],
+    readOnlyBoundaries: [
+      "Weiter read-only",
+      "Keine Kundendaten",
+      "Keine Gesundheitsdiagnosen",
+      "Keine Heilversprechen",
+      "Keine externen Aktionen",
+      "Keine Airtable-/Gmail-/Deployment-Aktionen",
+    ],
+    nextManualStep:
+      "Kompass-Flow Bereich 1–4 einmal durchgehen und die drei Ergebnisnotizen manuell festhalten.",
+    prepared: true,
+  };
+}
+
 function getDemoCockpit() {
   return {
     demoCockpitVersion: DEMO_COCKPIT_VERSION,
@@ -7234,10 +7291,15 @@ function getDemoCockpit() {
     productiveHealthStartJamalReleaseCardPrepared: true,
     nextProductiveHealthStartJamalReleaseCard:
       "Health Upgrade Kompass diese Woche starten: Demo-Ziel festhalten, Bereich 1–4 durchgehen und Freigabepunkte notieren.",
+    productiveHealthWeeklyDemoGoalCard: getProductiveHealthWeeklyDemoGoalCard(),
+    productiveHealthWeeklyDemoGoalCardPrepared: true,
+    nextProductiveHealthWeeklyDemoGoalCard:
+      "Kompass-Flow Bereich 1–4 durchgehen und die drei Ergebnisnotizen manuell festhalten.",
     demoQuickNav: [
       { label: "Heute arbeiten", view: "cockpit", anchor: "v1-work-mode-anchor" },
       { label: "Health-PM", view: "cockpit", anchor: "health-pm-run-anchor" },
       { label: "Health-Freigabe", view: "cockpit", anchor: "health-start-release-anchor" },
+      { label: "Demo-Ziel", view: "cockpit", anchor: "health-weekly-demo-goal-anchor" },
       { label: "Projekte", view: "cockpit", anchor: "portfolio-work-board-anchor" },
       { label: "Agenten", view: "agents" },
       { label: "Plugins", view: "cockpit", anchor: "plugin-leitstand-demo-anchor" },
@@ -19168,6 +19230,10 @@ function getPluginReadiness(requestUrl) {
     productiveHealthStartJamalReleaseCardPrepared: true,
     nextProductiveHealthStartJamalReleaseCard:
       getDemoCockpit().nextProductiveHealthStartJamalReleaseCard,
+    productiveHealthWeeklyDemoGoalCard: getProductiveHealthWeeklyDemoGoalCard(),
+    productiveHealthWeeklyDemoGoalCardPrepared: true,
+    nextProductiveHealthWeeklyDemoGoalCard:
+      getDemoCockpit().nextProductiveHealthWeeklyDemoGoalCard,
     productiveCentralPortfolioUxFinish: getProductiveCentralPortfolioUxFinish(),
     productiveCentralPortfolioUxFinishPrepared: PRODUCTIVE_CENTRAL_PORTFOLIO_UX_FINISH_PREPARED,
     nextProductiveCentralPortfolioUxStep: NEXT_PRODUCTIVE_CENTRAL_PORTFOLIO_UX_STEP,

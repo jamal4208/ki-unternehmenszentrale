@@ -7647,6 +7647,47 @@ details.local-agent-assignment-details > summary {
   font-size: 0.92rem;
 }
 
+.health-weekly-demo-goal-card {
+  margin: 0 0 20px;
+  padding: 16px 18px;
+  border: 1px solid #c4d0e0;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef3fa 100%);
+}
+
+.health-weekly-demo-goal-head h4 {
+  margin: 6px 0 10px;
+  font-size: 1.05rem;
+}
+
+.health-weekly-demo-goal-question,
+.health-weekly-demo-goal-lead,
+.health-weekly-demo-goal-why,
+.health-weekly-demo-goal-area {
+  margin: 0 0 8px;
+  font-size: 0.92rem;
+}
+
+.health-weekly-demo-goal-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.health-weekly-demo-goal-columns h5 {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+}
+
+.health-weekly-demo-goal-next {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #e3eaf5;
+  font-size: 0.92rem;
+}
+
 .demo-cockpit-archive {
   margin-top: 8px;
   padding: 12px 14px;

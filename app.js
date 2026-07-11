@@ -15650,8 +15650,8 @@ function buildPluginCommandCenter(projectContext, workRequest, analysis, agentRu
   };
 }
 
-const DEMO_COCKPIT_VERSION = "V6.38.3";
-const COCKPIT_DATA_FLOW_VERSION = "V6.38.3";
+const DEMO_COCKPIT_VERSION = "V6.38.4";
+const COCKPIT_DATA_FLOW_VERSION = "V6.38.4";
 const DEMO_UI_UX_FINISH_VERSION = "V6.36.1";
 
 function getProductiveCentralV1WorkMode() {
@@ -16037,6 +16037,52 @@ function getProductiveHealthStartJamalReleaseCard() {
   };
 }
 
+function getProductiveHealthWeeklyDemoGoalCard() {
+  return {
+    version: "V6.38.4",
+    title: "Health-Demo-Zielkarte",
+    status: "read-only / Wochenziel vorbereitet",
+    question:
+      "Was muss diese Woche konkret fertig oder geklärt sein, damit der Health Upgrade Kompass als erstes Arbeitsprojekt sinnvoll weiterläuft?",
+    weeklyGoal:
+      "Health-Demo-Ziel für diese Woche klären und den Kompass-Flow Bereich 1–4 einmal bewusst durchgehen.",
+    whyImportant:
+      "Option A ist freigegeben — ohne klares Wochenziel verliert Health wieder an Klarheit, obwohl PM-Arbeitslauf und Freigabe bereits stehen.",
+    workArea: "Kompass-Flow Bereich 1–4",
+    checkPoints: [
+      "Versteht ein Außenstehender sofort, was der Health Upgrade Kompass tut?",
+      "Führen Bereich 1–4 zu einem klaren nächsten kleinen Schritt?",
+      "Ist die Grenze zwischen Orientierung und medizinischer Aussage klar genug?",
+    ],
+    resultNotes: [
+      "Was wirkt bereits demo-reif?",
+      "Was ist noch unklar oder zu lang?",
+      "Welche eine Verbesserung sollte als Nächstes vorbereitet werden?",
+    ],
+    notThisWeek: [
+      "Kundendaten",
+      "Echte Gesundheitsauswertung",
+      "Diagnosen oder Heilversprechen",
+      "Waage-/Labor-Auswertung",
+      "Airtable-Schreiben",
+      "Gmail-/Calendar-Aktionen",
+      "Deployment",
+      "Neue Plugin-Aktivierung",
+    ],
+    readOnlyBoundaries: [
+      "Weiter read-only",
+      "Keine Kundendaten",
+      "Keine Gesundheitsdiagnosen",
+      "Keine Heilversprechen",
+      "Keine externen Aktionen",
+      "Keine Airtable-/Gmail-/Deployment-Aktionen",
+    ],
+    nextManualStep:
+      "Kompass-Flow Bereich 1–4 einmal durchgehen und die drei Ergebnisnotizen manuell festhalten.",
+    prepared: true,
+  };
+}
+
 function getDemoCockpit() {
   return {
     demoCockpitVersion: DEMO_COCKPIT_VERSION,
@@ -16296,10 +16342,15 @@ function getDemoCockpit() {
     productiveHealthStartJamalReleaseCardPrepared: true,
     nextProductiveHealthStartJamalReleaseCard:
       "Health Upgrade Kompass diese Woche starten: Demo-Ziel festhalten, Bereich 1–4 durchgehen und Freigabepunkte notieren.",
+    productiveHealthWeeklyDemoGoalCard: getProductiveHealthWeeklyDemoGoalCard(),
+    productiveHealthWeeklyDemoGoalCardPrepared: true,
+    nextProductiveHealthWeeklyDemoGoalCard:
+      "Kompass-Flow Bereich 1–4 durchgehen und die drei Ergebnisnotizen manuell festhalten.",
     demoQuickNav: [
       { label: "Heute arbeiten", view: "cockpit", anchor: "v1-work-mode-anchor" },
       { label: "Health-PM", view: "cockpit", anchor: "health-pm-run-anchor" },
       { label: "Health-Freigabe", view: "cockpit", anchor: "health-start-release-anchor" },
+      { label: "Demo-Ziel", view: "cockpit", anchor: "health-weekly-demo-goal-anchor" },
       { label: "Projekte", view: "cockpit", anchor: "portfolio-work-board-anchor" },
       { label: "Agenten", view: "agents" },
       { label: "Plugins", view: "cockpit", anchor: "plugin-leitstand-demo-anchor" },
@@ -17074,6 +17125,7 @@ const COCKPIT_V1_API_FIELDS = [
   "productiveCentralDailyWorkMode",
   "productiveHealthProjectManagerReadOnlyRun",
   "productiveHealthStartJamalReleaseCard",
+  "productiveHealthWeeklyDemoGoalCard",
 ];
 
 function getCockpitFallbackRenderModel() {
@@ -17087,6 +17139,7 @@ function getCockpitFallbackRenderModel() {
     pluginV1: demo.productiveCentralPluginLeitstandV1,
     healthPmRun: demo.productiveHealthProjectManagerReadOnlyRun,
     healthStartRelease: demo.productiveHealthStartJamalReleaseCard,
+    healthWeeklyDemoGoal: demo.productiveHealthWeeklyDemoGoalCard,
     hrSuggestion: getHrDailyAgentSuggestion(),
     agentCount: 25,
     dataSource: "fallback",
@@ -17155,7 +17208,9 @@ function enrichWorkModeFromTodaysThree(workMode, t3, fallbackWorkMode) {
     base.todayPriorityProject = t3.healthUpgradeLocalDemoStatusSummary.focusProject;
   }
 
-  if (t3.nextProductiveHealthStartJamalReleaseCard) {
+  if (t3.nextProductiveHealthWeeklyDemoGoalCard) {
+    base.smallestNextStep = t3.nextProductiveHealthWeeklyDemoGoalCard;
+  } else if (t3.nextProductiveHealthStartJamalReleaseCard) {
     base.smallestNextStep = t3.nextProductiveHealthStartJamalReleaseCard;
   } else if (t3.nextProductiveHealthProjectManagerReadOnlyRun) {
     base.smallestNextStep = t3.nextProductiveHealthProjectManagerReadOnlyRun;
@@ -17178,11 +17233,11 @@ function buildCockpitRenderModel(apiPayload = cockpitWorkDataState.apiPayload) {
   COCKPIT_V1_API_FIELDS.forEach((field) => {
     if (pr?.[field]) demo[field] = pr[field];
   });
-  if (t3?.nextProductiveCentralV1FreezeDecision) {
-    demo.productiveCentralV1FreezeDecision = t3.nextProductiveCentralV1FreezeDecision;
+  if (t3?.productiveCentralV1FreezeDecision) {
+    demo.productiveCentralV1FreezeDecision = t3.productiveCentralV1FreezeDecision;
   }
-  if (t3?.nextProductiveCentralDailyWorkMode) {
-    demo.productiveCentralDailyWorkMode = t3.nextProductiveCentralDailyWorkMode;
+  if (t3?.productiveCentralDailyWorkMode) {
+    demo.productiveCentralDailyWorkMode = t3.productiveCentralDailyWorkMode;
   }
   if (t3?.productiveHealthProjectManagerReadOnlyRun) {
     demo.productiveHealthProjectManagerReadOnlyRun = t3.productiveHealthProjectManagerReadOnlyRun;
@@ -17195,6 +17250,12 @@ function buildCockpitRenderModel(apiPayload = cockpitWorkDataState.apiPayload) {
   }
   if (pr?.productiveHealthStartJamalReleaseCard) {
     demo.productiveHealthStartJamalReleaseCard = pr.productiveHealthStartJamalReleaseCard;
+  }
+  if (t3?.productiveHealthWeeklyDemoGoalCard) {
+    demo.productiveHealthWeeklyDemoGoalCard = t3.productiveHealthWeeklyDemoGoalCard;
+  }
+  if (pr?.productiveHealthWeeklyDemoGoalCard) {
+    demo.productiveHealthWeeklyDemoGoalCard = pr.productiveHealthWeeklyDemoGoalCard;
   }
 
   const workMode = enrichWorkModeFromTodaysThree(
@@ -17225,6 +17286,11 @@ function buildCockpitRenderModel(apiPayload = cockpitWorkDataState.apiPayload) {
       t3?.productiveHealthStartJamalReleaseCard ||
       demo.productiveHealthStartJamalReleaseCard ||
       fallback.healthStartRelease,
+    healthWeeklyDemoGoal:
+      pr?.productiveHealthWeeklyDemoGoalCard ||
+      t3?.productiveHealthWeeklyDemoGoalCard ||
+      demo.productiveHealthWeeklyDemoGoalCard ||
+      fallback.healthWeeklyDemoGoal,
     hrSuggestion: normalizeHrSuggestionFromApi(hrApi, fallback.hrSuggestion),
     agentCount: pr?.agentCount ?? t3?.agentCount ?? fallback.agentCount,
     dataSource: hasApi ? "api" : "fallback",
@@ -17520,6 +17586,53 @@ function renderHealthStartJamalReleaseCard(releaseCard) {
         </ul>
         <p class="demo-cockpit-card-summary"><strong>Sicherheitshinweis:</strong> ${escapeHtml(releaseCard.safetyNote)}</p>
       `)}
+      <div class="demo-cockpit-actions">
+        <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="health-weekly-demo-goal-anchor">Demo-Zielkarte öffnen</button>
+      </div>
+    </section>
+  `;
+}
+
+function renderHealthWeeklyDemoGoalCard(goalCard) {
+  if (!goalCard) return "";
+  return `
+    <section class="health-weekly-demo-goal-card" id="health-weekly-demo-goal-anchor" aria-label="Health-Demo-Zielkarte diese Woche">
+      <header class="health-weekly-demo-goal-head">
+        <p class="eyebrow">${escapeHtml(goalCard.version)} · ${escapeHtml(goalCard.title)}</p>
+        <h4>Wochenziel für Health Upgrade Kompass</h4>
+        ${renderDemoCockpitBadge("read-only", goalCard.status)}
+      </header>
+      <p class="health-weekly-demo-goal-question"><strong>Kernfrage:</strong> ${escapeHtml(goalCard.question)}</p>
+      <p class="health-weekly-demo-goal-lead"><strong>Wochenziel:</strong> ${escapeHtml(goalCard.weeklyGoal)}</p>
+      <p class="health-weekly-demo-goal-why"><strong>Warum jetzt:</strong> ${escapeHtml(goalCard.whyImportant)}</p>
+      <p class="health-weekly-demo-goal-area"><strong>Arbeitsbereich:</strong> ${escapeHtml(goalCard.workArea)}</p>
+      <div class="health-weekly-demo-goal-columns">
+        <article>
+          <h5>3 Prüfpunkte für Jamal</h5>
+          <ol class="demo-cockpit-steps">
+            ${goalCard.checkPoints.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ol>
+        </article>
+        <article>
+          <h5>3 Ergebnisnotizen (manuell festhalten)</h5>
+          <ol class="demo-cockpit-steps">
+            ${goalCard.resultNotes.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ol>
+        </article>
+      </div>
+      <p class="health-weekly-demo-goal-next"><strong>Nächster manueller Schritt:</strong> ${escapeHtml(goalCard.nextManualStep)}</p>
+      ${renderDemoCockpitDetails(
+        "Nicht diese Woche / Read-only-Grenzen",
+        `
+        <h6>Nicht Teil dieser Woche</h6>
+        <ul class="demo-cockpit-list demo-cockpit-list--compact">
+          ${goalCard.notThisWeek.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ul>
+        <h6>Read-only-Grenzen</h6>
+        <ul class="demo-cockpit-list demo-cockpit-list--compact">
+          ${goalCard.readOnlyBoundaries.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ul>
+      `)}
     </section>
   `;
 }
@@ -17568,7 +17681,7 @@ function renderV1FinishPlanCard(plan) {
   `;
 }
 
-function renderPortfolioWorkBoardCard(project, healthPmRun, healthStartRelease) {
+function renderPortfolioWorkBoardCard(project, healthPmRun, healthStartRelease, healthWeeklyDemoGoal) {
   const priorityClass = project.priority === "heute" ? "bestanden" : "vorbereitet";
   const isHealth = project.id === "health-upgrade-kompass" && healthPmRun;
   return `
@@ -17588,8 +17701,14 @@ function renderPortfolioWorkBoardCard(project, healthPmRun, healthStartRelease) 
                  ? `<p class="portfolio-work-card-pm-hint"><strong>Freigabe:</strong> ${escapeHtml(healthStartRelease.recommendation)}</p>`
                  : ""
              }
+             ${
+               healthWeeklyDemoGoal
+                 ? `<p class="portfolio-work-card-pm-hint"><strong>Wochenziel:</strong> ${escapeHtml(healthWeeklyDemoGoal.weeklyGoal)}</p>`
+                 : ""
+             }
              <div class="demo-cockpit-actions">
-               <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="health-pm-run-anchor">Health-PM öffnen</button>
+               <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="health-weekly-demo-goal-anchor">Demo-Ziel</button>
+               <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="health-pm-run-anchor">Health-PM</button>
                <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="health-start-release-anchor">Freigabe</button>
              </div>`
           : ""
@@ -17606,7 +17725,7 @@ function renderPortfolioWorkBoardCard(project, healthPmRun, healthStartRelease) 
   `;
 }
 
-function renderPortfolioWorkBoard(board, healthPmRun, healthStartRelease) {
+function renderPortfolioWorkBoard(board, healthPmRun, healthStartRelease, healthWeeklyDemoGoal) {
   return `
     <section class="portfolio-work-board" id="portfolio-work-board-anchor" aria-label="Projektsteuerung">
       <header class="portfolio-work-board-head">
@@ -17614,7 +17733,7 @@ function renderPortfolioWorkBoard(board, healthPmRun, healthStartRelease) {
         <p class="portfolio-work-board-guidance">${escapeHtml(board.guidanceLine)}</p>
       </header>
       <div class="portfolio-work-board-grid">
-        ${board.projects.map((project) => renderPortfolioWorkBoardCard(project, healthPmRun, healthStartRelease)).join("")}
+        ${board.projects.map((project) => renderPortfolioWorkBoardCard(project, healthPmRun, healthStartRelease, healthWeeklyDemoGoal)).join("")}
       </div>
       <div class="demo-cockpit-actions">
         <button class="secondary-button" type="button" data-view-jump="portfolio">Portfolio-Ansicht öffnen</button>
@@ -17687,12 +17806,13 @@ function renderDemoCockpit() {
   if (!output) return;
 
   const model = getCockpitRenderModel();
-  const { demo, workMode, finishPlan, portfolioBoard, agentWork, pluginV1, healthPmRun, healthStartRelease, hrSuggestion, agentCount } =
+  const { demo, workMode, finishPlan, portfolioBoard, agentWork, pluginV1, healthPmRun, healthStartRelease, healthWeeklyDemoGoal, hrSuggestion, agentCount } =
     model;
   output.innerHTML = `
     ${renderV1WorkCockpit(workMode)}
     ${renderHealthProjectManagerReadOnlyRun(healthPmRun)}
     ${renderHealthStartJamalReleaseCard(healthStartRelease)}
+    ${renderHealthWeeklyDemoGoalCard(healthWeeklyDemoGoal)}
     ${renderV1FinishPlanCard(finishPlan)}
 
     <nav class="demo-cockpit-quicknav" aria-label="Arbeits-Schnellnavigation">
@@ -17737,10 +17857,10 @@ function renderDemoCockpit() {
             <h4>Fokusprojekt</h4>
             ${renderDemoCockpitBadge("bestanden", "Health")}
           </header>
-          <p class="demo-cockpit-card-summary">Health Upgrade Kompass · Freigabe-Karte bereit</p>
+          <p class="demo-cockpit-card-summary">Health · Demo-Zielkarte für diese Woche</p>
           <div class="demo-cockpit-actions">
+            <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="health-weekly-demo-goal-anchor">Demo-Ziel</button>
             <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="health-start-release-anchor">Freigabe</button>
-            <button class="secondary-button" type="button" data-view-jump="cockpit" data-view-anchor="health-pm-run-anchor">Health-PM</button>
             <button class="secondary-button" type="button" data-view-jump="portfolio">Portfolio</button>
           </div>
         </article>
@@ -17751,7 +17871,7 @@ function renderDemoCockpit() {
     ${renderDemoCockpitGroup(
       "B · Projektsteuerung",
       "Welche Projekte sind dran — und was nicht?",
-      renderPortfolioWorkBoard(portfolioBoard, healthPmRun, healthStartRelease),
+      renderPortfolioWorkBoard(portfolioBoard, healthPmRun, healthStartRelease, healthWeeklyDemoGoal),
     )}
 
     ${renderDemoCockpitGroup(
@@ -47029,6 +47149,7 @@ const DEMO_HASH_ANCHOR_VIEWS = {
   "portfolio-work-board-anchor": "cockpit",
   "health-pm-run-anchor": "cockpit",
   "health-start-release-anchor": "cockpit",
+  "health-weekly-demo-goal-anchor": "cockpit",
   "agent-work-now-anchor": "cockpit",
   "plugin-leitstand-v1-summary-anchor": "cockpit",
   "daily-work-mode-anchor": "cockpit",
