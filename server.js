@@ -3,6 +3,11 @@ const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const { URL } = require("url");
+const {
+  API_SECURITY_FLAGS,
+  buildProjectResponse,
+  buildProjectsResponse,
+} = require("./project-registry");
 
 const rootDir = __dirname;
 const allowedFiles = new Map([
@@ -56,6 +61,24 @@ function sendText(res, statusCode, message) {
     "Cache-Control": "no-store",
   });
   res.end(message);
+}
+
+function handleProjects(res) {
+  sendJson(res, 200, buildProjectsResponse());
+}
+
+function handleHealthUpgradeKompassProject(res) {
+  sendJson(res, 200, buildProjectResponse("health-upgrade-kompass"));
+}
+
+function handleUnknownProject(res, projectId) {
+  sendJson(res, 404, {
+    ok: false,
+    error: "PROJECT_NOT_FOUND",
+    projectId,
+    message: "Unbekannte Projekt-ID. Es wurde keine Aktion ausgeführt.",
+    ...API_SECURITY_FLAGS,
+  });
 }
 
 const qualitySprintStandard = {
@@ -21859,14 +21882,31 @@ function serveStatic(reqPath, res) {
   });
 }
 
-const server = http.createServer((req, res) => {
+function requestHandler(req, res) {
   const requestUrl = new URL(req.url, `http://${req.headers.host || "127.0.0.1"}`);
 
   if (req.method !== "GET") {
     sendJson(res, 405, {
       ok: false,
-      message: "Nur sichere GET-Endpunkte sind im Airtable-Pilot vorbereitet.",
+      message: "Nur sichere GET-Endpunkte sind vorbereitet.",
+      ...API_SECURITY_FLAGS,
     });
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/projects") {
+    handleProjects(res);
+    return;
+  }
+
+  if (requestUrl.pathname === "/api/projects/health-upgrade-kompass") {
+    handleHealthUpgradeKompassProject(res);
+    return;
+  }
+
+  if (requestUrl.pathname.startsWith("/api/projects/")) {
+    const projectId = decodeURIComponent(requestUrl.pathname.slice("/api/projects/".length));
+    handleUnknownProject(res, projectId);
     return;
   }
 
@@ -22066,8 +22106,15 @@ const server = http.createServer((req, res) => {
   }
 
   serveStatic(requestUrl.pathname, res);
-});
+}
 
-server.listen(port, "127.0.0.1", () => {
-  console.log(`KI-Unternehmenszentrale local pilot server running on http://127.0.0.1:${port}`);
-});
+if (require.main === module) {
+  const server = http.createServer(requestHandler);
+  server.listen(port, "127.0.0.1", () => {
+    console.log(`KI-Unternehmenszentrale local pilot server running on http://127.0.0.1:${port}`);
+  });
+}
+
+module.exports = {
+  requestHandler,
+};

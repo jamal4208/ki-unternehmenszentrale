@@ -1,5 +1,13 @@
 # PROJECT MASTER
 
+## Verbindlicher Versionsstand V6.39.0
+
+Die KI-Unternehmenszentrale verwendet `project-registry.js` als einzige kanonische technische Quelle für **17 Projekte mit stabilen IDs**. Die Oberfläche unterscheidet `DEMO`, `PLANUNG`, `REAL_VERIFIZIERT` und `UNGEKLÄRT`. Health Upgrade Kompass ist der erste technisch real verifizierte Pilot; Git- und Testdaten sind bestätigte Momentaufnahmen und keine automatische Live-Prüfung.
+
+Health und Expansion bleiben fachlich getrennt, obwohl sie aktuell teilweise denselben Projektordner und Code nutzen. Work bleibt technisch `UNGEKLÄRT`, Codex bleibt manuell kontrolliert. Lokale Managementdaten werden im Browser per `localStorage` gespeichert, ohne die kanonische technische Akte zu überschreiben.
+
+V6.39.0 erteilt keine medizinische, fachliche, rechtliche, öffentliche oder produktive Freigabe. Die Zentrale bleibt eine lokale, kontrollierte Arbeitsoberfläche: keine autonome Produktivplattform, keine automatische externe Aktion, keine automatische Git-Aktion, keine Agentenausführung und keine Deploymentfreigabe.
+
 ## Projekt
 
 **Name:** KI-Unternehmenszentrale
@@ -46,7 +54,7 @@ Zweck ist eine lokale, verständliche und kontrollierte Steuerungsplattform, die
 
 - keine automatische Geschäftsführung oder Freigabe
 - keine ungeprüfte Automatisierung
-- keine automatische Veröffentlichung, Speicherung oder Plugin-Ausführung
+- keine automatische Veröffentlichung, externe oder serverseitige Speicherung oder Plugin-Ausführung; lokale Browser-Persistenz für Managementdaten bleibt sichtbar
 - keine Zahlungen, Verträge oder Deployments
 - keine Rechts-, Finanz- oder Medizinfreigabe
 - keine Diagnose oder Heilversprechen
@@ -67,15 +75,15 @@ Ein Versionsschritt ist abgeschlossen, wenn Ziel und Nicht-Ziele erfüllt, betro
 
 ## Bekannte Widersprüche
 
-- Sichtbare und interne Teilversionsangaben sind nicht durchgehend auf V6.38.4 vereinheitlicht.
+- Sichtbare und interne historische Teilversionsangaben sind nicht durchgehend auf V6.39.0 vereinheitlicht.
 - Work ist im Bestand nicht als eigenes technisches Modul eindeutig definiert.
 
 ## Noch zu normalisieren
 
 - zentrale Versionsquelle
 - Projekt- und Agentennamen
-- Trennung historischer Demo-, Vorbereitungs- und aktueller Arbeitsstrukturen
+- weitere Trennung historischer Demo-, Vorbereitungs- und aktueller Arbeitsstrukturen; die technische Projektquelle ist bereits `project-registry.js`
 
 ## Entscheidung durch Jamal erforderlich
 
-Jamal entscheidet später, welche dokumentierten Strukturen als verbindliche Normalform in den Produktcode übernommen werden.
+Jamal nimmt V6.39.0 manuell ab und entscheidet später separat über offene Projektidentitäten sowie Commit, Push und produktive Nutzung.

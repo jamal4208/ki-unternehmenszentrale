@@ -1,5 +1,11 @@
 const STORAGE_KEY = "ki-unternehmenszentrale-v1";
 
+const canonicalProjectRegistryState = {
+  status: "loading",
+  payload: null,
+  error: null,
+};
+
 const projectLifecycleStatuses = [
   "Idee",
   "Analyse",
@@ -44806,6 +44812,191 @@ function renderRisks() {
     .join("");
 }
 
+function canonicalDisplayValue(value, fallback = "UNGEKLÄRT") {
+  if (value === null || value === undefined || value === "") return fallback;
+  return String(value);
+}
+
+function canonicalRemoteRefsMarkup(remoteRefs) {
+  const entries = Object.entries(remoteRefs || {});
+  if (entries.length === 0) return "UNGEKLÄRT";
+  return entries
+    .map(([name, value]) => `${escapeHtml(name)} → ${escapeHtml(canonicalDisplayValue(value))}`)
+    .join("<br>");
+}
+
+function canonicalSafetyProfileMarkup(safetyProfile) {
+  const items = Array.isArray(safetyProfile) ? safetyProfile : [];
+  return items.length > 0 ? items.map((item) => escapeHtml(item)).join("<br>") : "UNGEKLÄRT";
+}
+
+function getLocalManagementSummaryForCanonicalProject(canonicalProject) {
+  const canonicalKeys = new Set(
+    [
+      canonicalProject.id,
+      canonicalProject.displayName,
+      ...(canonicalProject.aliases || []),
+      ...(canonicalProject.legacyIds || []),
+    ]
+      .map(comparableText)
+      .filter(Boolean),
+  );
+  const localManagementProject = state.projects.find((project) =>
+    [project.id, project.title, project.name]
+      .map(comparableText)
+      .filter(Boolean)
+      .some((key) => canonicalKeys.has(key)),
+  );
+
+  if (!localManagementProject) {
+    return "Keine zugeordnete lokale Managementakte; kanonische Daten bleiben unverändert.";
+  }
+
+  const historyCount = Array.isArray(localManagementProject.history) ? localManagementProject.history.length : 0;
+  return `Lokale Managementakte getrennt vorhanden (${historyCount} Verlaufseinträge). Sie überschreibt keine kanonischen Git-, Test- oder Sicherheitswerte.`;
+}
+
+function renderCanonicalProjectCard(project) {
+  const isHealthPilot = project.id === "health-upgrade-kompass";
+  const exclusions = Array.isArray(project.excludedSensitiveAssets) && project.excludedSensitiveAssets.length > 0
+    ? project.excludedSensitiveAssets.map((item) => escapeHtml(item)).join(" · ")
+    : "Keine projektspezifische Liste dokumentiert.";
+  const notes = Array.isArray(project.notes) && project.notes.length > 0
+    ? list(project.notes.map((item) => escapeHtml(item)))
+    : "";
+
+  return `
+    <article class="portfolio-ux-card${isHealthPilot ? " portfolio-ux-focus" : ""}" data-canonical-project="${escapeHtml(project.id)}">
+      <header class="portfolio-ux-card-head">
+        <div>
+          ${isHealthPilot ? '<p class="portfolio-ux-focus-kicker">Erster real verifizierter Pilot</p>' : ""}
+          <h4>${escapeHtml(project.displayName)}</h4>
+        </div>
+        ${renderPortfolioUxBadge(project.portfolioMode)}
+      </header>
+      <p class="portfolio-ux-card-summary">${escapeHtml(canonicalDisplayValue(project.currentStatus))}</p>
+      <dl class="portfolio-connection-facts">
+        <div><dt>Projekt-ID</dt><dd>${escapeHtml(project.id)}</dd></div>
+        <div><dt>Verifizierung</dt><dd>${escapeHtml(canonicalDisplayValue(project.verificationStatus))}</dd></div>
+        <div><dt>Quelle</dt><dd>${escapeHtml(canonicalDisplayValue(project.verificationSource))}</dd></div>
+        <div><dt>Letzte Verifizierung</dt><dd>${escapeHtml(canonicalDisplayValue(project.lastVerifiedAt))}</dd></div>
+        <div><dt>Lokaler Pfad</dt><dd>${escapeHtml(canonicalDisplayValue(project.localPath))}</dd></div>
+        <div><dt>Repository</dt><dd>${escapeHtml(canonicalDisplayValue(project.repositoryUrl))}</dd></div>
+        <div><dt>Lokaler Branch</dt><dd>${escapeHtml(canonicalDisplayValue(project.localBranch))}</dd></div>
+        <div><dt>Lokaler HEAD</dt><dd>${escapeHtml(canonicalDisplayValue(project.localHead))}</dd></div>
+        <div><dt>Baseline-Commit</dt><dd>${escapeHtml(canonicalDisplayValue(project.baselineCommit))}</dd></div>
+        <div><dt>Remote-Referenzen</dt><dd>${canonicalRemoteRefsMarkup(project.remoteRefs)}</dd></div>
+        <div><dt>Working Tree</dt><dd>${escapeHtml(canonicalDisplayValue(project.workingTreeStatus))}</dd></div>
+        <div><dt>Testbefehl</dt><dd>${escapeHtml(canonicalDisplayValue(project.testCommand))}</dd></div>
+        <div><dt>Teststatus</dt><dd>${escapeHtml(canonicalDisplayValue(project.testStatus))}</dd></div>
+        <div><dt>Ziel</dt><dd>${escapeHtml(canonicalDisplayValue(project.currentGoal))}</dd></div>
+        <div><dt>Nächster sicherer Schritt</dt><dd>${escapeHtml(canonicalDisplayValue(project.nextSafeStep))}</dd></div>
+        <div><dt>Blocker</dt><dd>${escapeHtml(canonicalDisplayValue(project.blocker))}</dd></div>
+        <div><dt>Offene Entscheidung</dt><dd>${escapeHtml(canonicalDisplayValue(project.openDecision))}</dd></div>
+        <div><dt>Work</dt><dd>${escapeHtml(canonicalDisplayValue(project.workStatus))}</dd></div>
+        <div><dt>Codex</dt><dd>${escapeHtml(canonicalDisplayValue(project.codexStatus))}</dd></div>
+        <div><dt>Sicherheitsprofil</dt><dd>${canonicalSafetyProfileMarkup(project.safetyProfile)}</dd></div>
+        <div><dt>Consent-Fix</dt><dd>${escapeHtml(canonicalDisplayValue(project.consentFixStatus))}</dd></div>
+        <div><dt>Ausgeschlossene sensible Bestände</dt><dd>${exclusions}</dd></div>
+        <div><dt>Lokale Managementdaten</dt><dd>${escapeHtml(getLocalManagementSummaryForCanonicalProject(project))}</dd></div>
+      </dl>
+      ${notes}
+      <p class="portfolio-ux-card-safety">Kanonische Akte read-only · keine externe Aktion · keine automatische Live-Aktualisierung</p>
+    </article>
+  `;
+}
+
+function renderCanonicalProjectRegistry() {
+  if (canonicalProjectRegistryState.status === "loading") {
+    return `
+      <section class="portfolio-ux-section" aria-label="Kanonisches Projektregister">
+        <article class="portfolio-ux-card portfolio-ux-card--empty">
+          <h4>Kanonisches Projektregister wird lokal geladen</h4>
+          <p>Bis zur bestätigten API-Antwort werden keine alten localStorage-Werte als technische Wahrheit verwendet.</p>
+        </article>
+      </section>
+    `;
+  }
+
+  if (canonicalProjectRegistryState.status !== "ready") {
+    return `
+      <section class="portfolio-ux-section" aria-label="Kanonisches Projektregister">
+        <article class="portfolio-ux-card portfolio-ux-card--empty">
+          <h4>Projektregister: UNGEKLÄRT</h4>
+          <p>${escapeHtml(canonicalProjectRegistryState.error || "Kanonische API lokal nicht erreichbar.")}</p>
+          <p>Es wird bewusst kein localStorage-Ersatz als verifizierter technischer Stand angezeigt.</p>
+        </article>
+      </section>
+    `;
+  }
+
+  const payload = canonicalProjectRegistryState.payload;
+  const projects = payload.projects.slice().sort((a, b) => {
+    if (a.id === "health-upgrade-kompass") return -1;
+    if (b.id === "health-upgrade-kompass") return 1;
+    return a.displayName.localeCompare(b.displayName, "de");
+  });
+  const modeCounts = projects.reduce((counts, project) => {
+    counts[project.portfolioMode] = (counts[project.portfolioMode] || 0) + 1;
+    return counts;
+  }, {});
+
+  return `
+    <section class="portfolio-ux-section" aria-label="Kanonisches Projektregister V6.39.0">
+      <article class="portfolio-ux-focus">
+        <header class="portfolio-ux-focus-head">
+          <p class="portfolio-ux-focus-kicker">V6.39.0 · einzige technische Projektquelle</p>
+          <h4>Kanonisches Projektregister</h4>
+          ${renderPortfolioUxBadge(`${projects.length} Projekte`)}
+        </header>
+        <p>${escapeHtml(payload.snapshotNotice)}</p>
+        <p><strong>Klassifikation:</strong> DEMO ${modeCounts.DEMO || 0} · PLANUNG ${modeCounts.PLANUNG || 0} · REAL_VERIFIZIERT ${modeCounts.REAL_VERIFIZIERT || 0} · UNGEKLÄRT ${modeCounts.UNGEKLÄRT || 0}</p>
+        <p><strong>Speicherhinweis:</strong> ${escapeHtml(payload.localPersistenceNotice)} Read-only bedeutet hier: keine externe oder serverseitige Schreibwirkung.</p>
+        <p class="portfolio-ux-card-safety">writeOperationsBlocked: true · madeExternalRequest: false · keine automatische Git- oder Deploymentaktion</p>
+      </article>
+      <div class="portfolio-ux-grid">
+        ${projects.map(renderCanonicalProjectCard).join("")}
+      </div>
+    </section>
+  `;
+}
+
+async function refreshCanonicalProjectRegistry() {
+  canonicalProjectRegistryState.status = "loading";
+  canonicalProjectRegistryState.error = null;
+
+  try {
+    const response = await fetch("/api/projects", {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    const payload = await response.json();
+    const isSafePayload =
+      response.ok &&
+      payload?.writeOperationsBlocked === true &&
+      payload?.madeExternalRequest === false &&
+      payload?.registrySource === "project-registry.js" &&
+      payload?.projectCount === 17 &&
+      Array.isArray(payload?.projects) &&
+      payload.projects.length === 17;
+
+    if (!isSafePayload) {
+      throw new Error("Registerantwort ist unvollständig oder verletzt die Sicherheitsflags.");
+    }
+
+    canonicalProjectRegistryState.status = "ready";
+    canonicalProjectRegistryState.payload = payload;
+  } catch (error) {
+    canonicalProjectRegistryState.status = "error";
+    canonicalProjectRegistryState.payload = null;
+    canonicalProjectRegistryState.error = error?.message || "Kanonische API lokal nicht erreichbar.";
+  }
+
+  const activeFilter = document.querySelector(".segment.is-active")?.dataset.filter || "all";
+  renderPortfolio(activeFilter);
+}
+
 function renderPortfolio(filter = "all") {
   const portfolioUx = getProductiveCentralPortfolioUxFinish();
   const projects = state.projects.filter((project) => {
@@ -44816,13 +45007,15 @@ function renderPortfolio(filter = "all") {
 
   const portfolioOutput = byId("portfolio-ux-output");
   const legacyGrid = byId("project-grid");
+  const canonicalRegistryHtml = renderCanonicalProjectRegistry();
 
   if (projects.length === 0) {
     const emptyHtml = `
+      ${canonicalRegistryHtml}
       <article class="portfolio-ux-card portfolio-ux-card--empty">
-        <h4>Noch keine echten Projekte angelegt.</h4>
-        <p>Die Zentrale ist trotzdem arbeitsbereit: Tagesstart, Agentenwahl und Projektaufnahme sind vorbereitet.</p>
-        <p class="portfolio-ux-card-safety">read-only · keine Speicherung ohne bewusste Freigabe</p>
+        <h4>Noch keine lokalen Managementprojekte angelegt.</h4>
+        <p>Das kanonische Register bleibt davon getrennt. Manuelle Managementdaten werden bei Nutzung lokal im Browser gespeichert.</p>
+        <p class="portfolio-ux-card-safety">keine externe oder serverseitige Schreibwirkung</p>
       </article>
     `;
     if (portfolioOutput) portfolioOutput.innerHTML = emptyHtml;
@@ -44839,6 +45032,11 @@ function renderPortfolio(filter = "all") {
   });
 
   const html = `
+    ${canonicalRegistryHtml}
+    <article class="portfolio-ux-card portfolio-ux-card--empty">
+      <h4>Lokale Managementansicht</h4>
+      <p>Bestehende manuelle Projekte, Verläufe, Entscheidungen und Notizen bleiben im Browser erhalten. Sie sind getrennt von den kanonischen technischen Akten.</p>
+    </article>
     ${renderPortfolioFocusCard(portfolioUx)}
     ${portfolioUx.groups.map((group) => renderPortfolioGroup(group, grouped[group.id])).join("")}
   `;
@@ -49892,6 +50090,7 @@ function restoreDraft() {
 setupNavigation();
 setupForms();
 renderAll();
+refreshCanonicalProjectRegistry();
 refreshCockpitWorkData();
 refreshAirtablePilotStatus();
 handleDemoAnchorFromHash();

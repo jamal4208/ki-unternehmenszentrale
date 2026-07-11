@@ -2,7 +2,7 @@
 
 ## Überblick
 
-`server.js` registriert **39 tatsächlich vorhandene API-Routen**, alle mit Methode `GET`. Jede andere HTTP-Methode wird vor dem Routing abgewiesen. Es gibt keine API-Schreibroute.
+`server.js` registriert **41 tatsächlich vorhandene API-Routen**, alle mit Methode `GET`. Jede andere HTTP-Methode wird vor dem Routing abgewiesen. Es gibt keine API-Schreibroute.
 
 Nur `/api/agents/plugin-readiness` liest HTTP-Query-Parameter. Lokale Serverkonfiguration ist eine Abhängigkeit, keine HTTP-Eingabe. Standardausgabe ist JSON. `Schreiben` bedeutet fachliche oder externe Schreibwirkung, nicht das Senden einer HTTP-Antwort.
 
@@ -47,6 +47,10 @@ Nur `/api/agents/plugin-readiness` liest HTTP-Query-Parameter. Lokale Serverkonf
 | 37 | `/api/agents/content-design-plugin-task/improvement-task` | Verbesserungsauftrag | keine HTTP-Eingaben → Entwurf | Read-only, interne Vorschau; keine Umsetzung | NEIN | NEIN | vorbereitet |
 | 38 | `/api/agents/content-design-plugin-task/usable-canva-task` | nutzbarer Canva-Auftrag | keine HTTP-Eingaben → Briefing | Read-only, interne Vorschau; keine Canva-Aktion | NEIN | NEIN | vorbereitet |
 | 39 | `/api/agents/projectmanager-plugin-task/autonomy-applied` | Autonomie-Anwendungsstatus | keine HTTP-Eingaben → Status | Read-only, Statusvorschau; keine Autonomieerhöhung | NEIN | NEIN | vorbereitet |
+| 40 | `/api/projects` | kanonische Projektliste | keine HTTP-Eingaben → 17 Projektakten aus `project-registry.js` | Read-only; `writeOperationsBlocked: true`; `madeExternalRequest: false` | NEIN | NEIN | V6.39.0; keine Live-Git-/Dateisystemprüfung |
+| 41 | `/api/projects/health-upgrade-kompass` | technische Health-Pilotakte | keine HTTP-Eingaben → bestätigte Health-Momentaufnahme | Read-only; `writeOperationsBlocked: true`; `madeExternalRequest: false`; unbekannte Projekt-ID kontrolliert 404 | NEIN | NEIN | V6.39.0; keine medizinische, fachliche oder rechtliche Freigabe |
+
+Die beiden V6.39.0-Routen lesen ausschließlich die beim Serverstart geladene In-Memory-Quelle `project-registry.js`. Ein API-Aufruf löst keinen Dateisystemzugriff, Git-Befehl, Netzwerkrequest oder externe Aktion aus. Andere Methoden bleiben mit HTTP 405 blockiert. Erfolgreiche Antworten enthalten immer `writeOperationsBlocked: true` und `madeExternalRequest: false`.
 
 ## Statische Auslieferung
 

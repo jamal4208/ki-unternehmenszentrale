@@ -1,6 +1,7 @@
 {
   "scripts": {
     "start": "node server.js",
+    "test": "node project-registry.test.js",
     "check": "node --check app.js && node --check server.js"
   }
 }

@@ -1,5 +1,62 @@
 # PROJECT REGISTRY
 
+## Kanonischer Stand V6.39.0
+
+`project-registry.js` ist die einzige verbindliche technische Projektquelle. Sie enthält exakt **17 Projekte** mit stabilen IDs. Frühere Tabellen, Frontend-Seeds und Server-Register bleiben aus Bestandsschutzgründen im Code sichtbar, sind aber keine Quelle für technische Git-, Test- oder Verifizierungswerte.
+
+| Stabile ID | Anzeigename | Modus | Technischer Stand |
+|---|---|---|---|
+| `ki-unternehmenszentrale` | KI-Unternehmenszentrale | `DEMO` | Git-Stand `main` / `a5367f1` bestätigt; V6.39.0 noch nicht committed |
+| `health-upgrade-kompass` | Health Upgrade Kompass | `REAL_VERIFIZIERT` | technischer Pilotstand bestätigt |
+| `health-upgrade-karriere` | Health Upgrade Karriere | `PLANUNG` | Technik ungeklärt |
+| `expansion-app` | Expansion App | `PLANUNG` | gemeinsame technische Basis mit Health bestätigt; eigene Projektakte offen |
+| `flowlingo-portugiesisch-sprachtrainer` | FlowLingo Portugiesisch Sprachtrainer | `PLANUNG` | Technik und Abgrenzung offen |
+| `portugiesisch-sprechtrainer` | Portugiesisch-Sprechtrainer | `UNGEKLÄRT` | Identität offen |
+| `spanisch-sprechtrainer` | Spanisch-Sprechtrainer | `PLANUNG` | Technik ungeklärt |
+| `marketing-agentur-os` | Marketing Agentur OS | `PLANUNG` | Technik ungeklärt |
+| `senior-designer-os` | Senior Designer OS | `UNGEKLÄRT` | Projektidentität offen |
+| `autopilot-light-system` | Autopilot-Light-System | `PLANUNG` | Einordnung als Projekt, Modul oder Methode offen |
+| `prowin-karriere` | proWIN Karriere | `PLANUNG` | Technik ungeklärt |
+| `your-day-portugal-2-0` | Your Day / Portugal 2.0 | `PLANUNG` | Abgrenzung offen |
+| `your-day-mlm-praesentation` | Your Day / MLM Präsentation | `PLANUNG` | Technik und Freigabeverantwortung ungeklärt |
+| `jaco-eventplanung` | JACO Eventplanung | `PLANUNG` | Read-only-Pilot dokumentiert; Technik ungeklärt |
+| `jaco-gbr-webseite` | JACO GbR Webseite | `UNGEKLÄRT` | Projektidentität offen |
+| `portugiesische-lda-gruendung` | portugiesische Lda-Gründung | `UNGEKLÄRT` | kein belastbarer Projektstand |
+| `seminare-und-praesentationen` | Seminare und Präsentationen | `PLANUNG` | Materialien dokumentiert; Gesamtprojekt ungeklärt |
+
+## Health-Pilotakte
+
+- lokaler Pfad: `/Users/jamal/Documents/New project/health-upgrade-kompass`
+- Repository: `https://github.com/jamal4208/health-upgrade-kompass.git`
+- lokal ausgecheckter Branch: `main`
+- lokaler HEAD / Merge-Commit: `bc98b5c`
+- erster privater Baseline-Commit: `26f65fe`
+- Remote-Referenz `baseline/private-health-expansion-2026-07-11`: `bc98b5c`
+- `origin/main`: `1f4f96d`
+- letzter bestätigter Working Tree: sauber
+- Testbefehl: `npm test`
+- bestätigte Tests: Check-Logik OK; exportReadiness tests passed; Consent-Persistenz OK
+- Consent-/localStorage-Widerspruch im Health-Projekt: behoben
+- kein neues Produktionsdeployment, keine externe Aktion, keine öffentliche Freigabe
+- Archive, Backups, Outputs, Partnerunterlagen und ungeklärte Bildbestände bleiben außerhalb der privaten Baseline
+
+Diese Git- und Testwerte sind eine bestätigte Momentaufnahme vom **2026-07-11** und werden nicht automatisch live aktualisiert. `REAL_VERIFIZIERT` bezieht sich ausschließlich auf den technischen Projektstand. Medizinische, fachliche und rechtliche Freigaben sind ausdrücklich nicht erteilt; Produktinhalte bleiben teilweise ungeprüfte interne Prototypinhalte.
+
+Health und Expansion bleiben fachlich getrennte Projekte mit getrennten stabilen IDs. Ihre technische Basis besteht derzeit teilweise aus demselben Ordner und Code. Das ist keine fachliche Zusammenführung und keine Freigabe.
+
+## Betriebs- und Speichergrenzen
+
+- Work bleibt technisch `UNGEKLÄRT`.
+- Codex bleibt manuell kontrolliert.
+- Manuelle Projekte, Verläufe, Entscheidungen und Notizen werden weiterhin lokal im Browser per `localStorage` gespeichert.
+- Kanonische Registerdaten und lokale Managementdaten werden getrennt behandelt; localStorage kann keine kanonischen Git-, Test- oder Sicherheitswerte überschreiben.
+- Die Zentrale ist keine autonome Produktivplattform.
+- Keine automatische externe Aktion, Git-Aktion, Agentenausführung oder Deploymentfreigabe.
+
+## Historischer Quellbestand vor V6.39.0 (nicht kanonisch)
+
+Die folgende Tabelle bleibt als Migrations- und Aliasnachweis erhalten. Angaben wie `UNGEKLÄRT` zu Health-Pfad oder Repository sind durch die kanonische Health-Pilotakte oben überholt und dürfen nicht mehr als aktueller technischer Stand verwendet werden.
+
 Statuswerte: `BESTÄTIGT`, `TEILWEISE BESTÄTIGT`, `UNGEKLÄRT`.
 
 Für alle Projekte gelten: keine externe Aktion, Speicherung, Veröffentlichung, Zahlung, Vertragsentscheidung oder Plugin-Ausführung ohne Jamal; kleine reversible Schritte und Bestandsschutz.
