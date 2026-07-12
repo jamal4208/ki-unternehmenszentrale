@@ -191,6 +191,199 @@ function runTests() {
     assert.match(agentPlanning.codexPreparation.preparedPrompt, /Keine Agenten-, Codex- oder Plugin-Ausführung/);
   });
 
+  const readyAgentPlanning = DailyWorkRun.transitionRun(agentPlanning, "READY_FOR_CODEX");
+  check("V6.40.3-Prüfphase startet sicher ohne Freigabe", () => {
+    const phase = DailyWorkRun.getAgentReviewPhase(readyAgentPlanning);
+    assert.strictEqual(phase.status, "NOT_APPROVED");
+    assert.strictEqual(phase.noAgentExecution, true);
+    assert.deepStrictEqual(phase.workItems, []);
+  });
+  check("Prüfphase kann ohne Jamals Freigabe nicht vorbereitet werden", () => {
+    assert.throws(() => DailyWorkRun.prepareAgentReviewPhase(readyAgentPlanning), /Freigabe/);
+  });
+  check("Prüfphase wird nur aus gültigem Agentenplan erzeugt", () => {
+    const invalid = JSON.parse(JSON.stringify(readyAgentPlanning));
+    invalid.workProposal.leadAgentId = "missing-agent";
+    assert.throws(() => DailyWorkRun.prepareAgentReviewPhase(invalid, { approved: true }), /Hauptverantwortlicher/);
+  });
+
+  const preparedAgentReview = DailyWorkRun.prepareAgentReviewPhase(readyAgentPlanning, { approved: true, now: "2026-07-12T09:00:00Z" });
+  const preparedPhase = DailyWorkRun.getAgentReviewPhase(preparedAgentReview);
+  check("genau ausgewählte Agenten erhalten Arbeitskarten", () => {
+    assert.strictEqual(preparedPhase.workItems.length, 13);
+    assert.deepStrictEqual(preparedPhase.workItems.map((item) => item.agentId), agentPlanning.workProposal.selectedAgentIds);
+  });
+  check("ausgeschlossene Agenten erhalten keine Arbeitskarte", () => {
+    const workIds = new Set(preparedPhase.workItems.map((item) => item.agentId));
+    AgentRegistry.PRODUCTIVE_AGENT_REGISTRY.filter((agent) => !agentPlanning.workProposal.selectedAgentIds.includes(agent.id)).forEach((agent) => assert.strictEqual(workIds.has(agent.id), false));
+  });
+  check("genau ein Lead-Agent bleibt erhalten", () => {
+    const leads = preparedPhase.workItems.filter((item) => item.isLead);
+    assert.strictEqual(leads.length, 1);
+    assert.strictEqual(leads[0].agentId, "orchestrator-agent");
+  });
+  check("kein Agent wird als tatsächlich ausgeführt dargestellt", () => {
+    assert.strictEqual(preparedPhase.noAgentExecution, true);
+    assert.doesNotMatch(JSON.stringify(preparedPhase), /arbeitet gerade|RUNNING|EXECUTING/i);
+  });
+  check("jede Arbeitskarte enthält Auftrag, Ergebnisziel, Prüfung und Grenze", () => {
+    assert.ok(preparedPhase.workItems.every((item) => item.subtask && item.expectedResult && item.acceptanceCheck && item.safetyBoundary));
+  });
+  check("Agentenstatus besitzt ausschließlich sichere Standardwerte", () => {
+    assert.ok(preparedPhase.workItems.every((item) => DailyWorkRun.AGENT_WORK_ITEM_STATUSES.includes(item.status)));
+    assert.ok(preparedPhase.workItems.every((item) => ["READY", "WAITING"].includes(item.status)));
+  });
+  check("vorbereitende Grundlagen sind sofort bereit", () => {
+    const prerequisites = preparedPhase.workItems.filter((item) => item.executionMode === "prerequisite");
+    assert.deepStrictEqual(prerequisites.map((item) => item.agentId), ["project-status-agent", "health-compass-agent", "product-agent", "documentation-agent"]);
+    assert.ok(prerequisites.every((item) => item.status === "READY"));
+  });
+  check("parallele Aufgaben warten zunächst auf Grundlagen", () => {
+    assert.ok(preparedPhase.workItems.filter((item) => item.executionMode === "parallel").every((item) => item.status === "WAITING"));
+  });
+  check("QA ist vor notwendigen Fachbefunden nicht bereit", () => {
+    assert.strictEqual(preparedPhase.workItems.find((item) => item.agentId === "quality-test-agent").status, "WAITING");
+    assert.throws(() => DailyWorkRun.recordQaResult(preparedAgentReview, { status: "BESTANDEN", resultText: "Zu früh" }), /erst nach/);
+  });
+  check("Orchestrator wartet vor QA", () => {
+    assert.strictEqual(preparedPhase.workItems.find((item) => item.agentId === "orchestrator-agent").status, "WAITING");
+    assert.throws(() => DailyWorkRun.recordOrchestrationSummary(preparedAgentReview, { confirmedFindings: "Zu früh" }), /erst nach/);
+  });
+  check("leeres Agentenergebnis kann nicht bestätigt werden", () => {
+    assert.throws(() => DailyWorkRun.recordAgentWorkResult(preparedAgentReview, "project-status-agent", { resultText: "", confirmed: true }), /resultText/);
+  });
+  check("Ergebnis muss zum richtigen ausgewählten Agenten gehören", () => {
+    assert.throws(() => DailyWorkRun.recordAgentWorkResult(preparedAgentReview, "strategy-agent", { resultText: "Fremd", confirmed: true }), /gehört nicht/);
+  });
+
+  let reviewProgress = DailyWorkRun.recordAgentWorkResult(preparedAgentReview, "project-status-agent", {
+    resultText: "Technischer Projektstand wurde manuell gegen die kanonische Akte geprüft.",
+    openPoints: "Live-Aktualisierung bleibt offen.",
+    confirmed: true,
+    now: "2026-07-12T09:10:00Z",
+  });
+  check("manuelle Ergebnisrückführung speichert Befund und Quelle", () => {
+    const item = DailyWorkRun.getAgentReviewPhase(reviewProgress).workItems.find((entry) => entry.agentId === "project-status-agent");
+    assert.strictEqual(item.status, "ACCEPTED");
+    assert.strictEqual(item.resultConfirmed, true);
+    assert.match(item.resultSource, /Manuelle Rückführung/);
+  });
+  check("bestätigtes Ergebnis kann nicht unbeabsichtigt doppelt bestätigt werden", () => {
+    assert.throws(() => DailyWorkRun.recordAgentWorkResult(reviewProgress, "project-status-agent", { resultText: "Überschreiben", confirmed: true }), /bereits bestätigt/);
+  });
+  check("Blocker bleiben sichtbar und verhindern Abschlussreife", () => {
+    const blocked = DailyWorkRun.recordAgentWorkResult(preparedAgentReview, "health-compass-agent", { resultText: "Fachgrenze offen.", blockers: "Medizinische Freigabe fehlt.", confirmed: true });
+    const item = DailyWorkRun.getAgentReviewPhase(blocked).workItems.find((entry) => entry.agentId === "health-compass-agent");
+    assert.strictEqual(item.status, "BLOCKED");
+    assert.deepStrictEqual(item.blockers, ["Medizinische Freigabe fehlt."]);
+  });
+  check("teilweise Ergebnisse bleiben nach Reload erhalten", () => {
+    const storageV6403 = mockStorage();
+    DailyWorkRun.saveDailyStore(storageV6403, DailyWorkRun.upsertRun(DailyWorkRun.createStore(), reviewProgress));
+    const reloaded = DailyWorkRun.getActiveRun(DailyWorkRun.loadDailyStore(storageV6403));
+    assert.deepStrictEqual(reloaded.agentReviewPhase, reviewProgress.agentReviewPhase);
+  });
+  check("alter V6.40.2-Lauf ohne Prüfphase bleibt lesbar", () => {
+    const oldV6402 = JSON.parse(JSON.stringify(readyAgentPlanning));
+    delete oldV6402.agentReviewPhase;
+    const oldStore = DailyWorkRun.createStore({ activeRunId: oldV6402.id, runs: [oldV6402] });
+    assert.strictEqual(DailyWorkRun.getActiveRun(oldStore).workProposal.selectedAgentIds.length, 13);
+    assert.strictEqual(DailyWorkRun.getAgentReviewPhase(DailyWorkRun.getActiveRun(oldStore)).status, "NOT_APPROVED");
+  });
+
+  for (const agentId of ["health-compass-agent", "product-agent", "documentation-agent"]) {
+    reviewProgress = DailyWorkRun.recordAgentWorkResult(reviewProgress, agentId, { resultText: `${agentId}: Grundlage manuell bestätigt.`, confirmed: true });
+  }
+  check("parallele Aufgaben werden nach Grundlagen bereit", () => {
+    const phase = DailyWorkRun.getAgentReviewPhase(reviewProgress);
+    assert.ok(phase.workItems.filter((item) => item.executionMode === "parallel").every((item) => item.status === "READY"));
+  });
+
+  const parallelAgentIds = DailyWorkRun.getAgentReviewPhase(reviewProgress).workItems.filter((item) => item.executionMode === "parallel").map((item) => item.agentId);
+  for (const agentId of parallelAgentIds) {
+    reviewProgress = DailyWorkRun.recordAgentWorkResult(reviewProgress, agentId, { resultText: `${agentId}: Fachbefund manuell bestätigt.`, confirmed: true });
+  }
+  check("QA wird erst nach allen notwendigen Ergebnissen bereit", () => {
+    const phase = DailyWorkRun.getAgentReviewPhase(reviewProgress);
+    assert.strictEqual(phase.status, "READY_FOR_QA");
+    assert.strictEqual(phase.workItems.find((item) => item.agentId === "quality-test-agent").status, "READY");
+    assert.strictEqual(phase.qa.missingAgentIds.length, 0);
+  });
+  check("QA erzeugt keine automatische Bestanden-Behauptung", () => {
+    const qa = DailyWorkRun.getAgentReviewPhase(reviewProgress).qa;
+    assert.strictEqual(qa.status, "NOT_READY");
+    assert.strictEqual(qa.confirmedAt, null);
+  });
+
+  reviewProgress = DailyWorkRun.recordQaResult(reviewProgress, {
+    status: "TEILWEISE_BESTANDEN",
+    resultText: "Alle Fachbefunde wurden manuell geprüft; offene Punkte bleiben sichtbar.",
+    openPoints: "Fachfreigabe bleibt offen.",
+    criteriaAnswered: true,
+    now: "2026-07-12T11:00:00Z",
+  });
+  check("QA-Befund wird ausschließlich manuell gespeichert", () => {
+    const phase = DailyWorkRun.getAgentReviewPhase(reviewProgress);
+    assert.strictEqual(phase.qa.status, "TEILWEISE_BESTANDEN");
+    assert.strictEqual(phase.qa.criteriaAnswered, true);
+    assert.strictEqual(phase.status, "QA_COMPLETED");
+  });
+  check("Orchestrator wird erst nach QA bereit", () => {
+    assert.strictEqual(DailyWorkRun.getAgentReviewPhase(reviewProgress).workItems.find((item) => item.agentId === "orchestrator-agent").status, "READY");
+  });
+  check("Jamals Abschlussentscheidung bleibt vor Gesamtbefund gesperrt", () => {
+    assert.throws(() => DailyWorkRun.setAgentReviewFinalDecision(reviewProgress, { decision: "FREIGEBEN", nextSafeStep: "Prüfen" }), /Gesamtbefund/);
+  });
+
+  reviewProgress = DailyWorkRun.recordOrchestrationSummary(reviewProgress, {
+    confirmedFindings: "Projektstand, Fachgrenzen und Qualitätsbefunde liegen manuell bestätigt vor.",
+    openPoints: "Medizinische und rechtliche Freigabe bleiben ausgeschlossen.",
+    conflicts: "Keine technischen Konflikte bestätigt.",
+    risks: "Keine echten Gesundheitsdaten verwenden.",
+    recommendedNextStep: "Jamal prüft den Gesamtbefund.",
+    notApproved: "Keine Umsetzung, Veröffentlichung oder externe Aktion.",
+    jamalDecisionQuestion: "Soll die nächste Health-Arbeitsphase auf Grundlage dieses geprüften Gesamtbefunds vorbereitet werden?",
+    now: "2026-07-12T11:20:00Z",
+  });
+  check("Orchestrator-Zusammenführung bleibt strukturiert und manuell", () => {
+    const phase = DailyWorkRun.getAgentReviewPhase(reviewProgress);
+    assert.strictEqual(phase.orchestration.status, "CONFIRMED");
+    assert.strictEqual(phase.status, "OVERALL_FINDING_PREPARED");
+    assert.strictEqual(phase.orchestration.confirmedFindings.length, 1);
+  });
+  check("Abschluss benötigt genau einen sicheren Textschritt", () => {
+    assert.throws(() => DailyWorkRun.setAgentReviewFinalDecision(reviewProgress, { decision: "FREIGEBEN", nextSafeStep: ["a", "b"] }), /Textwert/);
+  });
+
+  const completedAgentReview = DailyWorkRun.setAgentReviewFinalDecision(reviewProgress, {
+    decision: "WEITERE_PRUEFUNG_NOETIG",
+    nextSafeStep: "Jamal klärt die offene fachliche Freigabe ohne externe Aktion.",
+    now: "2026-07-12T11:30:00Z",
+  });
+  check("Jamals Abschlussentscheidung und nächster Schritt bleiben erhalten", () => {
+    const phase = DailyWorkRun.getAgentReviewPhase(completedAgentReview);
+    assert.strictEqual(phase.status, "JAMAL_COMPLETED");
+    assert.strictEqual(phase.finalDecision.decision, "WEITERE_PRUEFUNG_NOETIG");
+    assert.ok(phase.finalDecision.nextSafeStep);
+  });
+  check("Prüfphasen-Verlauf entsteht nur nach bewusster Bestätigung", () => {
+    assert.strictEqual(DailyWorkRun.createAgentReviewHistoryEntry(completedAgentReview, false), null);
+    assert.ok(DailyWorkRun.createAgentReviewHistoryEntry(completedAgentReview, true));
+  });
+  check("Prüfphasen-Verlauf kann nur einmal übernommen werden", () => {
+    const entry = DailyWorkRun.createAgentReviewHistoryEntry(completedAgentReview, true);
+    const once = DailyWorkRun.applyHistoryEntryOnce([], entry);
+    const twice = DailyWorkRun.applyHistoryEntryOnce(once, entry);
+    assert.strictEqual(twice.length, 1);
+    const marked = DailyWorkRun.markAgentReviewHistoryTransferred(completedAgentReview, entry, "2026-07-12T11:40:00Z");
+    assert.strictEqual(DailyWorkRun.markAgentReviewHistoryTransferred(marked, entry).agentReviewPhase.historyTransferredAt, "2026-07-12T11:40:00.000Z");
+  });
+  check("V6.40.3 behält alle Ausführungsverbote", () => {
+    assert.strictEqual(completedAgentReview.boundary.agentExecutionBlocked, true);
+    assert.strictEqual(completedAgentReview.boundary.codexExecutionBlocked, true);
+    assert.strictEqual(completedAgentReview.agentReviewPhase.noAgentExecution, true);
+  });
+
   const preparedDraft = validDraft();
   check("vollständige Pflichtfelder", () => assert.deepStrictEqual(DailyWorkRun.validateReadyForCodex(preparedDraft), []));
   check("nur zulässige Statuswerte", () => assert.deepStrictEqual(DailyWorkRun.STATUS_VALUES, ["DRAFT", "READY_FOR_CODEX", "RESULT_RECORDED", "CLOSED", "OPEN"]));
@@ -316,10 +509,10 @@ function runTests() {
   check("writeOperationsBlocked bleibt true", () => assert.strictEqual(API_SECURITY_FLAGS.writeOperationsBlocked, true));
   check("madeExternalRequest bleibt false", () => assert.strictEqual(API_SECURITY_FLAGS.madeExternalRequest, false));
 
-  assert.strictEqual(passed, 64);
+  assert.strictEqual(passed, 96);
   assert.strictEqual(DailyWorkRun.getActiveRun(stored).id, preparedDraft.id);
   assert.strictEqual(PROJECT_REGISTRY.length, 17);
-  console.log("daily-work-run.test.js: 64 Prüfpunkte erfolgreich");
+  console.log("daily-work-run.test.js: 96 Prüfpunkte erfolgreich");
 }
 
 runTests();

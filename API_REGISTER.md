@@ -4,6 +4,8 @@
 
 `server.js` registriert **41 tatsächlich vorhandene API-Routen**, alle mit Methode `GET`. Jede andere HTTP-Methode wird vor dem Routing abgewiesen. Es gibt keine API-Schreibroute.
 
+V6.40.3 ergänzt **keine neue API-Route**. Freigabe, interne Arbeitskarten, manuelle Ergebnisrückführung, QA, Orchestrator und Jamals Abschlussentscheidung laufen im bestehenden lokalen Tageslaufmodell. `writeOperationsBlocked: true` und `madeExternalRequest: false` bleiben unverändert; keine Agenten-, Codex-, Plugin-, Git- oder externe Aktion wird ausgelöst.
+
 V6.40.2 ergänzt **keine neue API-Route**. Der vertiefte Einsatzplan nutzt weiterhin ausschließlich `GET /api/projects` für den aktuellen kanonischen Projektstand. Das statisch ausgelieferte `agent-registry.js` ist die gemeinsame codebasierte Quelle der vorhandenen 25 Agenten; Agentenauswahl und Werkzeugprüfung laufen lokal und starten keine Codex-, Agenten-, Plugin-, Git-, Netzwerk- oder externe Aktion. Managementdaten werden nur lokal im Browser gespeichert.
 
 Nur `/api/agents/plugin-readiness` liest HTTP-Query-Parameter. Lokale Serverkonfiguration ist eine Abhängigkeit, keine HTTP-Eingabe. Standardausgabe ist JSON. `Schreiben` bedeutet fachliche oder externe Schreibwirkung, nicht das Senden einer HTTP-Antwort.

@@ -2,14 +2,25 @@
 
 ## Git- und Versionsstand
 
-- Version: **V6.40.2 – Vertiefter Agenten-Einsatzplan**
-- Ausgangs-HEAD für V6.40.2: `8373e3d`
-- Produktstand V6.40.1: `8373e3d` (auf `origin/main` gesichert)
+- Version: **V6.40.3 – Kontrollierte Agenten-Prüfphase**
+- Ausgangs-HEAD für V6.40.3: `8dc8ef9`
+- Produktstand V6.40.2: `8dc8ef9` (auf `origin/main` gesichert)
 - Branch: `main`
-- Upstream vor Beginn: `origin/main` auf `8373e3d`, synchron
-- Working Tree vor V6.40.2: sauber; V6.40.2 bleibt auftragsgemäß uncommitted und ungepusht
+- Upstream vor Beginn: `origin/main` auf `8dc8ef9`, synchron
+- Working Tree vor V6.40.3: sauber; V6.40.3 bleibt auftragsgemäß uncommitted und ungepusht
 
-## V6.40.2 – aktueller Funktionsstand
+## V6.40.3 – aktueller Funktionsstand
+
+- Ein gültiger V6.40.2-Agentenplan kann ausschließlich nach Jamals ausdrücklicher Freigabe in interne Arbeitskarten überführt werden.
+- Arbeitskarten entstehen nur für ausgewählte Agenten und enthalten Rolle, Teilauftrag, Ergebnisziel, Prüfkriterium, Sicherheitsgrenze, Abhängigkeiten, Übergabe, Quelle, Status und manuelle Befundfelder.
+- Kein Status behauptet echte Agentenarbeit. Sichtbar bleibt: „Die Agentenaufträge sind vorbereitet. Es wurde noch kein Agent ausgeführt.“
+- Gespeicherte Abhängigkeiten steuern Grundlagen, parallele Prüfungen, QA und Orchestrator. QA wird erst nach notwendigen bestätigten Fachbefunden bereit; der Orchestrator erst nach erfasstem QA-Befund.
+- Leere, fremde und doppelt bestätigte Befunde werden abgewiesen. Blocker und offene Punkte bleiben sichtbar; bestätigte Befunde werden nicht verdeckt überschrieben.
+- QA, Gesamtbefund und Jamals Abschlussentscheidung werden ausschließlich manuell gespeichert. Genau ein nächster sicherer Schritt und eine einmalige Verlaufsübernahme sind abgesichert.
+- Der bestehende localStorage-Schlüssel bleibt erhalten. Alte V6.40.1- und V6.40.2-Läufe bleiben ohne pauschale Migration lesbar.
+- Keine neue Route oder Schreib-API; 17 Projekte, 25 Agenten, 41 GET-Routen und alle Ausführungsverbote bleiben erhalten.
+
+## V6.40.2 – gesicherter Ausgangsstand
 
 - Ein neuer kompakter Hauptarbeitsweg steht im Cockpit vor den historischen Detailkarten.
 - Ein Tageslauf enthält genau ein bewusst gewähltes Fokusprojekt, ein großes Pflichtfeld für das gewünschte Ergebnis und eine optionale Verbotsgrenze.
@@ -68,7 +79,7 @@ Die Zentrale ist als lokaler read-only Arbeits-, Entscheidungs- und Demo-Stand p
 ## Tests
 
 - `npm test` → 20 Register-, Health-, API- und localStorage-Prüfpunkte
-- `npm test` führt zusätzlich 64 Tageslauf- und Agentenplan-Prüfpunkte aus
+- `npm test` führt zusätzlich 96 Tageslauf-, Agentenplan- und Prüfphasen-Prüfpunkte aus
 - `npm run check` prüft Agentenregister, Tageslauf, UI, Server und Projektregister syntaktisch
 - `npm start` → `node server.js`
 - manuelle lokale Browser- und GET-API-Prüfungen
@@ -76,7 +87,7 @@ Die Zentrale ist als lokaler read-only Arbeits-, Entscheidungs- und Demo-Stand p
 
 ## Weiterhin fehlende Tests
 
-Keine Coverage-, Lint-, HTML-/CSS- oder CI-Test-Suite ist im Bestand nachgewiesen. V6.40.2 ergänzt begrenzte Unit- und manuelle Browserprüfungen für Agentenauswahl, Einsatzplan und Persistenz.
+Keine Coverage-, Lint-, HTML-/CSS- oder CI-Test-Suite ist im Bestand nachgewiesen. V6.40.3 ergänzt begrenzte Unit- und manuelle Browserprüfungen für Freigabe, Abhängigkeiten, Ergebnisrückführung, QA, Zusammenführung und Persistenz.
 
 ## Technische Risiken
 
@@ -89,13 +100,13 @@ Keine Coverage-, Lint-, HTML-/CSS- oder CI-Test-Suite ist im Bestand nachgewiese
 
 ## Bekannte Versionswidersprüche
 
-- Neuer Tageslaufstand V6.40.2, historische Cockpit- und Modulkennzeichnungen teilweise V6.38.x oder älter.
+- Neuer Tageslaufstand V6.40.3, historische Cockpit- und Modulkennzeichnungen teilweise V6.38.x oder älter.
 - Zwei Commits tragen V6.37.0; V6.37.2 erscheint in der Historie vor V6.37.1.
 - Viele historische V4.x-, V5.x- und V6.x-Bezeichnungen bleiben parallel sichtbar.
 
 ## Genau ein empfohlener nächster Produktentwicklungsschritt
 
-V6.40.2 manuell im Browser abnehmen; danach separat entscheiden, ob der uncommittete Stand gesichert werden soll.
+V6.40.3 manuell im Browser abnehmen; danach separat entscheiden, ob der uncommittete Stand gesichert werden soll.
 
 ## Bekannte Widersprüche
 
@@ -107,4 +118,4 @@ Historische Versionskennzeichnungen, Namensvarianten und nicht-kanonische Altreg
 
 ## Entscheidung durch Jamal erforderlich
 
-Manuelle Abnahme von V6.40.2 sowie jede spätere Commit-, Push- oder Deploymententscheidung.
+Manuelle Abnahme von V6.40.3 sowie jede spätere Commit-, Push- oder Deploymententscheidung.

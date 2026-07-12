@@ -33,6 +33,26 @@
     "Qualität/Prüfung",
     "Plugin-/Werkzeugauswahl",
   ]);
+  const AGENT_REVIEW_PHASE_STATUSES = Object.freeze([
+    "NOT_APPROVED",
+    "PREPARED",
+    "RESULTS_PARTIAL",
+    "READY_FOR_QA",
+    "QA_COMPLETED",
+    "OVERALL_FINDING_PREPARED",
+    "JAMAL_COMPLETED",
+  ]);
+  const AGENT_WORK_ITEM_STATUSES = Object.freeze([
+    "NOT_PREPARED",
+    "READY",
+    "WAITING",
+    "RESULT_PENDING",
+    "RESULT_RECORDED",
+    "REVIEW_REQUIRED",
+    "ACCEPTED",
+    "BLOCKED",
+    "NOT_NEEDED",
+  ]);
   const CANONICAL_AGENTS = agentRegistryApi?.PRODUCTIVE_AGENT_REGISTRY || [];
   if (CANONICAL_AGENTS.length !== 25) {
     throw new Error("Das kanonische Register mit 25 Hauptagenten ist nicht verfügbar.");
@@ -151,6 +171,7 @@
         risks: [],
         openPoints: [],
       },
+      agentReviewPhase: createAgentReviewPhase(),
       closure: {
         status: "",
         jamalDecision: "",
@@ -159,6 +180,46 @@
         historyTransferredAt: null,
         closedAt: null,
       },
+    };
+  }
+
+  function createAgentReviewPhase(value = {}) {
+    return {
+      status: AGENT_REVIEW_PHASE_STATUSES.includes(value.status) ? value.status : "NOT_APPROVED",
+      approvalQuestion: "Soll die Zentrale die internen Prüfaufträge für dieses Agententeam jetzt vorbereiten?",
+      approvalDecision: singleText(value.approvalDecision, "approvalDecision"),
+      approvedAt: value.approvedAt || null,
+      preparedAt: value.preparedAt || null,
+      noAgentExecution: true,
+      workItems: Array.isArray(value.workItems) ? clone(value.workItems) : [],
+      qa: {
+        status: singleText(value.qa?.status || "NOT_READY", "qa.status", true),
+        resultText: singleText(value.qa?.resultText, "qa.resultText"),
+        availableAgentIds: textList(value.qa?.availableAgentIds),
+        missingAgentIds: textList(value.qa?.missingAgentIds),
+        blockedAgentIds: textList(value.qa?.blockedAgentIds),
+        criteriaAnswered: value.qa?.criteriaAnswered === true,
+        safetyBoundariesViolated: textList(value.qa?.safetyBoundariesViolated),
+        confirmedAt: value.qa?.confirmedAt || null,
+      },
+      orchestration: {
+        status: singleText(value.orchestration?.status || "NOT_READY", "orchestration.status", true),
+        confirmedFindings: textList(value.orchestration?.confirmedFindings),
+        openPoints: textList(value.orchestration?.openPoints),
+        conflicts: textList(value.orchestration?.conflicts),
+        risks: textList(value.orchestration?.risks),
+        recommendedNextStep: singleText(value.orchestration?.recommendedNextStep, "recommendedNextStep"),
+        notApproved: textList(value.orchestration?.notApproved),
+        jamalDecisionQuestion: singleText(value.orchestration?.jamalDecisionQuestion, "orchestration.jamalDecisionQuestion"),
+        confirmedAt: value.orchestration?.confirmedAt || null,
+      },
+      finalDecision: {
+        decision: singleText(value.finalDecision?.decision, "finalDecision.decision"),
+        nextSafeStep: singleText(value.finalDecision?.nextSafeStep, "finalDecision.nextSafeStep"),
+        decidedAt: value.finalDecision?.decidedAt || null,
+      },
+      historyEntry: value.historyEntry ? clone(value.historyEntry) : null,
+      historyTransferredAt: value.historyTransferredAt || null,
     };
   }
 
@@ -578,6 +639,221 @@
     return errors;
   }
 
+  function getAgentReviewPhase(run) {
+    return createAgentReviewPhase(run?.agentReviewPhase || {});
+  }
+
+  function refreshAgentReviewPhase(phaseValue, proposal) {
+    const phase = createAgentReviewPhase(phaseValue);
+    const leadId = proposal?.leadAgentId;
+    const qaId = proposal?.selectedAgentIds?.includes("quality-test-agent") ? "quality-test-agent" : null;
+    const acceptedIds = new Set(phase.workItems.filter((item) => item.status === "ACCEPTED").map((item) => item.agentId));
+
+    phase.workItems = phase.workItems.map((item) => {
+      if (["ACCEPTED", "BLOCKED", "RESULT_RECORDED", "REVIEW_REQUIRED"].includes(item.status)) return item;
+      if (item.agentId === leadId) {
+        return { ...item, status: qaId && acceptedIds.has(qaId) ? "READY" : "WAITING" };
+      }
+      if (item.agentId === qaId) {
+        const required = phase.workItems.filter((entry) => entry.agentId !== leadId && entry.agentId !== qaId);
+        const blockers = required.filter((entry) => entry.status === "BLOCKED");
+        return { ...item, status: blockers.length === 0 && required.every((entry) => acceptedIds.has(entry.agentId)) ? "READY" : "WAITING" };
+      }
+      const dependenciesMet = (item.dependsOn || []).every((id) => acceptedIds.has(id));
+      return { ...item, status: dependenciesMet ? "READY" : "WAITING" };
+    });
+
+    const domainItems = phase.workItems.filter((item) => item.agentId !== leadId && item.agentId !== qaId);
+    const qaItem = phase.workItems.find((item) => item.agentId === qaId);
+    const leadItem = phase.workItems.find((item) => item.agentId === leadId);
+    phase.qa.availableAgentIds = domainItems.filter((item) => item.status === "ACCEPTED").map((item) => item.agentId);
+    phase.qa.missingAgentIds = domainItems.filter((item) => item.status !== "ACCEPTED" && item.status !== "BLOCKED").map((item) => item.agentId);
+    phase.qa.blockedAgentIds = domainItems.filter((item) => item.status === "BLOCKED").map((item) => item.agentId);
+
+    if (phase.finalDecision.decidedAt) phase.status = "JAMAL_COMPLETED";
+    else if (leadItem?.status === "ACCEPTED") phase.status = "OVERALL_FINDING_PREPARED";
+    else if (qaItem?.status === "ACCEPTED") phase.status = "QA_COMPLETED";
+    else if (qaItem?.status === "READY") phase.status = "READY_FOR_QA";
+    else if (phase.workItems.some((item) => item.resultConfirmed)) phase.status = "RESULTS_PARTIAL";
+    else phase.status = phase.preparedAt ? "PREPARED" : "NOT_APPROVED";
+    return phase;
+  }
+
+  function prepareAgentReviewPhase(run, values = {}) {
+    const next = clone(run);
+    if (next.status !== "READY_FOR_CODEX") throw new Error("Ein erstellter Agenten-Einsatzplan ist erforderlich.");
+    const errors = validateAgentPlan(next.workProposal);
+    if (errors.length > 0) throw new Error(errors.join(" "));
+    if (values.approved !== true) throw new Error("Jamals ausdrückliche Freigabe ist erforderlich.");
+    if (next.agentReviewPhase?.preparedAt) throw new Error("Die Agenten-Prüfphase ist bereits vorbereitet.");
+    const now = isoDateTime(values.now || new Date());
+    const phase = createAgentReviewPhase({
+      status: "PREPARED",
+      approvalDecision: "APPROVED",
+      approvedAt: now,
+      preparedAt: now,
+      workItems: next.workProposal.agentPlan.map((item) => ({
+        agentId: item.agentId,
+        agentName: item.agentName,
+        roleInRun: item.roleInRun,
+        subtask: item.subtask,
+        expectedResult: item.expectedResult,
+        acceptanceCheck: item.acceptanceCheck,
+        safetyBoundary: item.safetyBoundary,
+        dependsOn: clone(item.dependsOn || []),
+        handoffTo: item.handoffTo,
+        executionMode: item.executionMode,
+        isLead: item.agentId === next.workProposal.leadAgentId,
+        status: item.executionMode === "prerequisite" ? "READY" : "WAITING",
+        resultSource: "Manuelle Rückführung in der KI-Unternehmenszentrale",
+        resultText: "",
+        openPoints: [],
+        blockers: [],
+        resultConfirmed: false,
+        resultRecordedAt: null,
+        resultConfirmedAt: null,
+      })),
+    });
+    next.agentReviewPhase = refreshAgentReviewPhase(phase, next.workProposal);
+    return next;
+  }
+
+  function setAgentReviewApproval(run, decision) {
+    const next = clone(run);
+    const normalized = singleText(decision, "approvalDecision", true).toUpperCase();
+    if (!["ADJUST", "DECLINED"].includes(normalized)) throw new Error("Unzulässige Freigabeentscheidung.");
+    const phase = getAgentReviewPhase(next);
+    if (phase.preparedAt) throw new Error("Die Prüfphase wurde bereits vorbereitet.");
+    phase.approvalDecision = normalized;
+    next.agentReviewPhase = phase;
+    return next;
+  }
+
+  function recordAgentWorkResult(run, agentId, values = {}) {
+    const next = clone(run);
+    const phase = getAgentReviewPhase(next);
+    if (!phase.preparedAt) throw new Error("Die Agentenaufträge sind noch nicht vorbereitet.");
+    const item = phase.workItems.find((entry) => entry.agentId === agentId);
+    if (!item) throw new Error("Arbeitskarte gehört nicht zu diesem Agentenplan.");
+    if (item.isLead || item.agentId === "quality-test-agent") throw new Error("QA und Zusammenführung besitzen eigene kontrollierte Rückführungen.");
+    if (item.resultConfirmedAt) throw new Error("Dieses Ergebnis wurde bereits bestätigt und wird nicht überschrieben.");
+    if (item.status !== "READY") throw new Error("Die Voraussetzungen für diesen Agentenbefund fehlen noch.");
+    if (values.confirmed !== true) throw new Error("Das Ergebnis muss bewusst bestätigt werden.");
+    item.resultText = singleText(values.resultText, "resultText", true);
+    item.openPoints = textList(values.openPoints);
+    item.blockers = textList(values.blockers);
+    item.resultRecordedAt = isoDateTime(values.now || new Date());
+    item.resultConfirmedAt = item.resultRecordedAt;
+    item.resultConfirmed = true;
+    item.status = item.blockers.length > 0 ? "BLOCKED" : "ACCEPTED";
+    next.agentReviewPhase = refreshAgentReviewPhase(phase, next.workProposal);
+    return next;
+  }
+
+  function recordQaResult(run, values = {}) {
+    const next = clone(run);
+    const phase = getAgentReviewPhase(next);
+    const item = phase.workItems.find((entry) => entry.agentId === "quality-test-agent");
+    if (!item || item.status !== "READY") throw new Error("QA ist erst nach allen notwendigen Agentenbefunden bereit.");
+    if (item.resultConfirmedAt) throw new Error("Der QA-Befund wurde bereits bestätigt.");
+    const qaStatus = singleText(values.status, "qaStatus", true).toUpperCase();
+    if (!["BESTANDEN", "TEILWEISE_BESTANDEN", "OFFEN", "BLOCKIERT"].includes(qaStatus)) throw new Error("Unzulässiger QA-Status.");
+    const resultText = singleText(values.resultText, "qaResult", true);
+    const now = isoDateTime(values.now || new Date());
+    phase.qa = {
+      ...phase.qa,
+      status: qaStatus,
+      resultText,
+      criteriaAnswered: values.criteriaAnswered === true,
+      safetyBoundariesViolated: textList(values.safetyBoundariesViolated),
+      confirmedAt: now,
+    };
+    item.resultText = resultText;
+    item.openPoints = textList(values.openPoints);
+    item.blockers = qaStatus === "BLOCKIERT" ? textList(values.blockers || ["QA blockiert"]) : textList(values.blockers);
+    item.resultRecordedAt = now;
+    item.resultConfirmedAt = now;
+    item.resultConfirmed = true;
+    item.status = qaStatus === "BLOCKIERT" ? "BLOCKED" : "ACCEPTED";
+    next.agentReviewPhase = refreshAgentReviewPhase(phase, next.workProposal);
+    return next;
+  }
+
+  function recordOrchestrationSummary(run, values = {}) {
+    const next = clone(run);
+    const phase = getAgentReviewPhase(next);
+    const item = phase.workItems.find((entry) => entry.agentId === next.workProposal?.leadAgentId);
+    if (!item || item.status !== "READY") throw new Error("Die Zusammenführung ist erst nach bestätigtem QA-Befund bereit.");
+    if (item.resultConfirmedAt) throw new Error("Der Gesamtbefund wurde bereits bestätigt.");
+    const confirmedFindings = textList(values.confirmedFindings);
+    if (confirmedFindings.length === 0) throw new Error("Mindestens ein bestätigter Befund ist erforderlich.");
+    const now = isoDateTime(values.now || new Date());
+    phase.orchestration = {
+      status: "CONFIRMED",
+      confirmedFindings,
+      openPoints: textList(values.openPoints),
+      conflicts: textList(values.conflicts),
+      risks: textList(values.risks),
+      recommendedNextStep: singleText(values.recommendedNextStep, "recommendedNextStep", true),
+      notApproved: textList(values.notApproved),
+      jamalDecisionQuestion: singleText(values.jamalDecisionQuestion, "jamalDecisionQuestion", true),
+      confirmedAt: now,
+    };
+    item.resultText = confirmedFindings.join("\n");
+    item.openPoints = phase.orchestration.openPoints;
+    item.blockers = [];
+    item.resultRecordedAt = now;
+    item.resultConfirmedAt = now;
+    item.resultConfirmed = true;
+    item.status = "ACCEPTED";
+    next.agentReviewPhase = refreshAgentReviewPhase(phase, next.workProposal);
+    return next;
+  }
+
+  function setAgentReviewFinalDecision(run, values = {}) {
+    const next = clone(run);
+    const phase = getAgentReviewPhase(next);
+    if (phase.orchestration.status !== "CONFIRMED") throw new Error("Ein bestätigter Gesamtbefund ist erforderlich.");
+    if (phase.finalDecision.decidedAt) throw new Error("Jamals Abschlussentscheidung wurde bereits gespeichert.");
+    const decision = singleText(values.decision, "finalDecision", true).toUpperCase();
+    if (!["FREIGEBEN", "MIT_AENDERUNGEN_FREIGEBEN", "WEITERE_PRUEFUNG_NOETIG", "VORERST_STOPPEN"].includes(decision)) throw new Error("Unzulässige Abschlussentscheidung.");
+    phase.finalDecision = {
+      decision,
+      nextSafeStep: singleText(values.nextSafeStep, "nextSafeStep", true),
+      decidedAt: isoDateTime(values.now || new Date()),
+    };
+    next.agentReviewPhase = refreshAgentReviewPhase(phase, next.workProposal);
+    return next;
+  }
+
+  function createAgentReviewHistoryEntry(run, manuallyConfirmed = false) {
+    const phase = getAgentReviewPhase(run);
+    if (!manuallyConfirmed || phase.status !== "JAMAL_COMPLETED") return null;
+    return {
+      id: `daily-work-run-agent-review-history-${run.id}`,
+      type: "Statusänderung",
+      at: phase.finalDecision.decidedAt,
+      description: [
+        `Kontrollierte Agenten-Prüfphase ${run.workDate}: ${run.canonicalSnapshot?.displayName || run.focusProjectId}.`,
+        `Ergebniswunsch: ${sentence(run.dailyOutcome?.desiredOutcome)}`,
+        `Jamals Entscheidung: ${sentence(phase.finalDecision.decision)}`,
+        `Nächster sicherer Schritt: ${sentence(phase.finalDecision.nextSafeStep)}`,
+        "Keine Agenten-, Codex-, Plugin- oder externe Ausführung wurde ausgelöst.",
+      ].join("\n"),
+    };
+  }
+
+  function markAgentReviewHistoryTransferred(run, entry, transferredAt = new Date()) {
+    const next = clone(run);
+    const phase = getAgentReviewPhase(next);
+    if (!entry || entry.id !== `daily-work-run-agent-review-history-${next.id}`) throw new Error("Ungültiger Prüfphasen-Verlaufseintrag.");
+    if (phase.historyTransferredAt) return next;
+    phase.historyEntry = clone(entry);
+    phase.historyTransferredAt = isoDateTime(transferredAt);
+    next.agentReviewPhase = phase;
+    return next;
+  }
+
   function transitionRun(run, nextStatus) {
     const target = singleText(nextStatus, "nextStatus", true).toUpperCase();
     if (!STATUS_VALUES.includes(target)) throw new Error("Unzulässiger Tageslaufstatus.");
@@ -776,6 +1052,8 @@
   }
 
   return Object.freeze({
+    AGENT_REVIEW_PHASE_STATUSES,
+    AGENT_WORK_ITEM_STATUSES,
     DAILY_STORAGE_KEY,
     FINAL_STATUS_VALUES,
     LEGACY_MANAGEMENT_STORAGE_KEY,
@@ -786,15 +1064,24 @@
     buildCodexPrompt,
     captureCanonicalSnapshot,
     createDraftRun,
+    createAgentReviewHistoryEntry,
     createHistoryEntry,
     createWorkProposal,
     createStore,
     currentCanonicalProject,
     getActiveRun,
+    getAgentReviewPhase,
     loadDailyStore,
     markHistoryTransferred,
+    markAgentReviewHistoryTransferred,
     detectTaskType,
     saveDailyStore,
+    prepareAgentReviewPhase,
+    recordAgentWorkResult,
+    recordOrchestrationSummary,
+    recordQaResult,
+    setAgentReviewApproval,
+    setAgentReviewFinalDecision,
     setClosure,
     setCodexPreparation,
     setDailyOutcome,

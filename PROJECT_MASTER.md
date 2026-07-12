@@ -1,6 +1,14 @@
 # PROJECT MASTER
 
-## Verbindlicher Versionsstand V6.40.2
+## Verbindlicher Versionsstand V6.40.3
+
+V6.40.3 ergänzt den abgenommenen Agenten-Einsatzplan um eine kontrollierte, ausschließlich lokale Agenten-Prüfphase. Nach Jamals ausdrücklicher Freigabe entstehen interne Arbeitskarten für genau die ausgewählten Agenten. Diese Karten bilden Auftrag, erwartetes Ergebnis, Prüfkriterium, Sicherheitsgrenze, gespeicherte Abhängigkeiten, Übergabe und manuelle Ergebnisrückführung ab. Sie starten keine Agenten und erzeugen keine simulierten Erfolgs- oder Ausführungsmeldungen.
+
+Grundlagen, parallele Fachbefunde, QS-/Test-Prüfung und Orchestrator-Zusammenführung werden in der gespeicherten Reihenfolge freigeschaltet. QA und Gesamtbefund bleiben manuelle Rückführungen. Jamals Abschlussentscheidung speichert genau einen nächsten sicheren Schritt und kann nur einmal in den bestehenden lokalen Projektverlauf übernommen werden. Alte V6.40.1- und V6.40.2-Läufe bleiben ohne pauschale Migration lesbar.
+
+Die Grenzen bleiben unverändert: 17 kanonische Projekte, 25 kanonische Agenten, 41 GET-Routen, keine Schreib-API, keine Agenten-, Codex-, Plugin-, Git- oder externe Ausführung und kein Deployment.
+
+## Gesicherter Ausgangsstand V6.40.2
 
 Die KI-Unternehmenszentrale erhält in V6.40.2 den vereinfachten Tagesstart aus V6.40.1 und vertieft ausschließlich den daraus abgeleiteten Agenten-Einsatzplan. Jamal wählt ein Fokusprojekt, formuliert genau einen Ergebniswunsch und kann optional eine zusätzliche Verbotsgrenze nennen. Die Zentrale erkennt den Auftragstyp und wählt aus dem kanonischen Bestand von 25 Hauptagenten ein möglichst kleines, aber fachlich vollständiges Team. Für jeden ausgewählten Agenten werden Auswahlgrund, Rolle, Teilauftrag, erwartetes Ergebnis, Prüfkriterium, Sicherheitsgrenze, Abhängigkeit, Arbeitsmodus und Übergabe strukturiert gespeichert.
 
@@ -90,4 +98,4 @@ Ein Versionsschritt ist abgeschlossen, wenn Ziel und Nicht-Ziele erfüllt, betro
 
 ## Entscheidung durch Jamal erforderlich
 
-Jamal nimmt V6.40.2 manuell ab und entscheidet später separat über Commit, Push und produktive Nutzung.
+Jamal nimmt V6.40.3 manuell ab und entscheidet später separat über Commit, Push und produktive Nutzung.

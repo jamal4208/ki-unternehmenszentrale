@@ -4763,6 +4763,153 @@ function renderDailyWorkProposal(proposal) {
   `;
 }
 
+function renderDailyWorkAgentReviewPhase(run) {
+  if (!run.workProposal?.selectedAgentIds || run.status !== "READY_FOR_CODEX") return "";
+  const api = dailyWorkRunApi();
+  const phase = api.getAgentReviewPhase(run);
+  const statusLabels = {
+    NOT_APPROVED: "Noch nicht freigegeben",
+    PREPARED: "Prüfphase vorbereitet",
+    RESULTS_PARTIAL: "Ergebnisse teilweise erfasst",
+    READY_FOR_QA: "Bereit für QA",
+    QA_COMPLETED: "QA abgeschlossen",
+    OVERALL_FINDING_PREPARED: "Gesamtbefund vorbereitet",
+    JAMAL_COMPLETED: "Von Jamal abgeschlossen",
+  };
+  const itemStatusLabels = {
+    NOT_PREPARED: "Noch nicht vorbereitet",
+    READY: "Auftrag vorbereitet",
+    WAITING: "Wartet auf Ergebnis",
+    RESULT_PENDING: "Ergebnis ausstehend",
+    RESULT_RECORDED: "Ergebnis erfasst",
+    REVIEW_REQUIRED: "Prüfung erforderlich",
+    ACCEPTED: "Bestätigt",
+    BLOCKED: "Blockiert",
+    NOT_NEEDED: "Nicht benötigt",
+  };
+  const nameById = new Map(phase.workItems.map((item) => [item.agentId, item.agentName || item.agentId]));
+  const displayAgent = (id) => id === "jamal" ? "Jamal" : (nameById.get(id) || id || "UNGEKLÄRT");
+  const renderWorkItem = (item) => {
+    const ready = item.status === "READY";
+    const isSpecial = item.isLead || item.agentId === "quality-test-agent";
+    return `
+      <article class="daily-work-review-card${item.isLead ? " is-lead" : ""}" data-agent-work-card="${escapeHtml(item.agentId)}">
+        <header>
+          <div><strong>${escapeHtml(item.agentName)}</strong><span>${escapeHtml(item.roleInRun)}</span></div>
+          <span class="daily-work-run-mode-tag">${escapeHtml(itemStatusLabels[item.status] || item.status)}</span>
+        </header>
+        <p><b>Teilauftrag:</b> ${escapeHtml(item.subtask)}</p>
+        <details>
+          <summary>Auftrag, Prüfung und Sicherheitsgrenze</summary>
+          <dl>
+            <div><dt>Erwartetes Ergebnis</dt><dd>${escapeHtml(item.expectedResult)}</dd></div>
+            <div><dt>Prüfkriterium</dt><dd>${escapeHtml(item.acceptanceCheck)}</dd></div>
+            <div><dt>Sicherheitsgrenze</dt><dd>${escapeHtml(item.safetyBoundary)}</dd></div>
+            <div><dt>Abhängigkeiten</dt><dd>${escapeHtml((item.dependsOn || []).map(displayAgent).join(", ") || "keine")}</dd></div>
+            <div><dt>Übergabe</dt><dd>${escapeHtml(displayAgent(item.handoffTo))}</dd></div>
+            <div><dt>Ergebnisquelle</dt><dd>${escapeHtml(item.resultSource)}</dd></div>
+          </dl>
+        </details>
+        ${item.resultConfirmed ? `
+          <div class="daily-work-review-result">
+            <strong>Manuell bestätigter Befund</strong>
+            <p>${escapeHtml(item.resultText)}</p>
+            ${dailyWorkRunList(item.openPoints, "Keine offenen Punkte erfasst.")}
+            ${dailyWorkRunList(item.blockers, "Keine Blocker erfasst.")}
+          </div>
+        ` : (!isSpecial && ready ? `
+          <form class="daily-work-review-result-form" data-agent-result-form data-agent-id="${escapeHtml(item.agentId)}">
+            <label>Ergebnis oder Befund<textarea name="resultText" rows="3" required></textarea></label>
+            <label>Wichtigste offene Punkte<textarea name="openPoints" rows="2"></textarea></label>
+            <label>Blocker<textarea name="blockers" rows="2"></textarea></label>
+            <label class="daily-work-review-confirm"><input type="checkbox" name="confirmed" required> Ergebnis bewusst bestätigen</label>
+            <button class="secondary-button" type="submit">Befund lokal speichern</button>
+          </form>
+        ` : (!isSpecial ? `<p class="daily-work-run-empty">Die gespeicherten Abhängigkeiten sind noch nicht vollständig bestätigt.</p>` : ""))}
+      </article>
+    `;
+  };
+  if (!phase.preparedAt) {
+    return `
+      <section class="daily-work-review-phase" aria-labelledby="daily-agent-review-title">
+        <header><div><p class="eyebrow">V6.40.3 · kontrolliert und lokal</p><h4 id="daily-agent-review-title">Kontrollierte Agenten-Prüfphase</h4></div><span class="daily-work-run-mode">${escapeHtml(statusLabels[phase.status])}</span></header>
+        <p><strong>${escapeHtml(phase.approvalQuestion)}</strong></p>
+        <p>Der Button bereitet ausschließlich interne Arbeitskarten vor. Er startet keinen Agenten.</p>
+        <div class="daily-work-run-boundaries"><span>Noch keine Agentenausführung</span><span>Keine Plugin-Ausführung</span><span>Keine externe Aktion</span></div>
+        <div class="daily-work-run-actions">
+          <button class="primary-button" type="button" data-prepare-agent-review>Prüfphase vorbereiten</button>
+          <button class="secondary-button" type="button" data-adjust-agent-review>Einsatzplan noch anpassen</button>
+          <button class="secondary-button" type="button" data-decline-agent-review>nicht starten</button>
+        </div>
+        ${phase.approvalDecision ? `<p class="daily-work-run-empty">Aktuelle manuelle Entscheidung: ${escapeHtml(phase.approvalDecision)}</p>` : ""}
+      </section>
+    `;
+  }
+
+  const prerequisites = phase.workItems.filter((item) => item.executionMode === "prerequisite");
+  const parallel = phase.workItems.filter((item) => item.executionMode === "parallel");
+  const qaItem = phase.workItems.find((item) => item.agentId === "quality-test-agent");
+  const leadItem = phase.workItems.find((item) => item.agentId === run.workProposal.leadAgentId);
+  const qaReady = qaItem?.status === "READY";
+  const leadReady = leadItem?.status === "READY";
+  const finalReady = phase.orchestration.status === "CONFIRMED";
+  return `
+    <section class="daily-work-review-phase" aria-labelledby="daily-agent-review-title">
+      <header><div><p class="eyebrow">V6.40.3 · kontrolliert und lokal</p><h4 id="daily-agent-review-title">Kontrollierte Agenten-Prüfphase</h4></div><span class="daily-work-run-mode">${escapeHtml(statusLabels[phase.status])}</span></header>
+      <article class="daily-work-run-notice"><strong>Die Agentenaufträge sind vorbereitet. Es wurde noch kein Agent ausgeführt.</strong><p>Freigabe: von Jamal freigegeben · interne Prüfaufträge: vorbereitet · alle Befunde werden ausschließlich manuell zurückgeführt.</p></article>
+      <div class="daily-work-run-boundaries"><span>Noch keine Agentenausführung</span><span>13 interne Karten beim Health-Pilot</span><span>Reloadfest lokal gespeichert</span></div>
+      <div class="daily-work-review-group"><h5>Grundlagen · kann sofort vorbereitet werden</h5><div class="daily-work-review-grid">${prerequisites.map(renderWorkItem).join("")}</div></div>
+      <div class="daily-work-review-group"><h5>Parallele Fachprüfungen · nach bestätigten Grundlagen</h5><div class="daily-work-review-grid">${parallel.map(renderWorkItem).join("")}</div></div>
+      ${qaItem ? `
+        <div class="daily-work-review-group"><h5>QA-Prüfung</h5>${renderWorkItem(qaItem)}
+          <dl class="daily-work-run-facts">
+            <div><dt>Vorliegende Fachbefunde</dt><dd>${escapeHtml(phase.qa.availableAgentIds.map(displayAgent).join(", ") || "keine")}</dd></div>
+            <div><dt>Fehlende Fachbefunde</dt><dd>${escapeHtml(phase.qa.missingAgentIds.map(displayAgent).join(", ") || "keine")}</dd></div>
+            <div><dt>Blockierte Fachbefunde</dt><dd>${escapeHtml(phase.qa.blockedAgentIds.map(displayAgent).join(", ") || "keine")}</dd></div>
+            <div><dt>Prüfkriterien beantwortet</dt><dd>${phase.qa.criteriaAnswered ? "ja" : "noch nicht manuell bestätigt"}</dd></div>
+            <div><dt>Sicherheitsgrenzen verletzt</dt><dd>${escapeHtml(phase.qa.safetyBoundariesViolated.join(", ") || "keine Verletzung manuell erfasst")}</dd></div>
+          </dl>
+          ${qaReady ? `<form class="daily-work-review-special-form" id="daily-work-review-qa-form">
+            <label>QA-Status<select name="status" required><option value="">Bitte wählen</option><option value="BESTANDEN">bestanden</option><option value="TEILWEISE_BESTANDEN">teilweise bestanden</option><option value="OFFEN">offen</option><option value="BLOCKIERT">blockiert</option></select></label>
+            <label>Manueller QA-Befund<textarea name="resultText" rows="4" required></textarea></label>
+            <label>Offene Punkte<textarea name="openPoints" rows="2"></textarea></label>
+            <label>Blocker<textarea name="blockers" rows="2"></textarea></label>
+            <label>Verletzte Sicherheitsgrenzen<textarea name="safetyBoundariesViolated" rows="2"></textarea></label>
+            <label class="daily-work-review-confirm"><input type="checkbox" name="criteriaAnswered" required> Alle Prüfkriterien wurden bewusst beantwortet</label>
+            <button class="primary-button" type="submit">QA-Befund lokal bestätigen</button>
+          </form>` : `<p class="daily-work-run-empty">QA wartet auf ${escapeHtml(phase.qa.missingAgentIds.length)} fehlende und ${escapeHtml(phase.qa.blockedAgentIds.length)} blockierte Fachbefunde.</p>`}
+        </div>
+      ` : ""}
+      ${leadItem ? `
+        <div class="daily-work-review-group"><h5>Orchestrator-Zusammenführung</h5>${renderWorkItem(leadItem)}
+          ${leadReady ? `<form class="daily-work-review-special-form" id="daily-work-review-orchestration-form">
+            <label>Bestätigte Befunde<textarea name="confirmedFindings" rows="4" required></textarea></label>
+            <label>Offene Punkte<textarea name="openPoints" rows="2"></textarea></label>
+            <label>Konflikte<textarea name="conflicts" rows="2"></textarea></label>
+            <label>Risiken<textarea name="risks" rows="2"></textarea></label>
+            <label>Empfohlener nächster Schritt<textarea name="recommendedNextStep" rows="2" required></textarea></label>
+            <label>Noch nicht freigegeben<textarea name="notApproved" rows="2"></textarea></label>
+            <label>Jamal-Entscheidungsfrage<textarea name="jamalDecisionQuestion" rows="2" required>Soll die nächste Health-Arbeitsphase auf Grundlage dieses geprüften Gesamtbefunds vorbereitet werden?</textarea></label>
+            <button class="primary-button" type="submit">Gesamtbefund lokal bestätigen</button>
+          </form>` : `<p class="daily-work-run-empty">Die Zusammenführung wartet auf einen vollständig erfassten QA-Befund.</p>`}
+        </div>
+      ` : ""}
+      ${finalReady ? `
+        <div class="daily-work-review-group"><h5>Jamals Abschlussentscheidung</h5>
+          ${phase.finalDecision.decidedAt ? `<dl class="daily-work-run-facts"><div><dt>Entscheidung</dt><dd>${escapeHtml(phase.finalDecision.decision)}</dd></div><div><dt>Nächster sicherer Schritt</dt><dd>${escapeHtml(phase.finalDecision.nextSafeStep)}</dd></div></dl><div class="daily-work-run-actions"><button class="secondary-button" type="button" data-transfer-agent-review-history ${phase.historyTransferredAt ? "disabled" : ""}>${phase.historyTransferredAt ? "Verlaufseintrag bereits übernommen" : "Abschluss einmalig in Verlauf übernehmen"}</button></div>` : `
+            <p>${escapeHtml(phase.orchestration.jamalDecisionQuestion)}</p>
+            <form class="daily-work-review-special-form" id="daily-work-review-final-form">
+              <label>Entscheidung<select name="decision" required><option value="">Bitte wählen</option><option value="FREIGEBEN">freigeben</option><option value="MIT_AENDERUNGEN_FREIGEBEN">mit Änderungen freigeben</option><option value="WEITERE_PRUEFUNG_NOETIG">weitere Prüfung nötig</option><option value="VORERST_STOPPEN">vorerst stoppen</option></select></label>
+              <label>Genau ein nächster sicherer Schritt<textarea name="nextSafeStep" rows="3" required></textarea></label>
+              <button class="primary-button" type="submit">Entscheidung lokal speichern</button>
+            </form>`}
+        </div>
+      ` : ""}
+      <details class="daily-work-run-technical-details"><summary>Technische Prüfphasendetails</summary><p>Status: ${escapeHtml(phase.status)} · vorbereitet: ${escapeHtml(phase.preparedAt)} · Agentenausführung: blockiert</p></details>
+    </section>
+  `;
+}
+
 function renderDailyWorkRunPrompt(run) {
   if (!["READY_FOR_CODEX", "RESULT_RECORDED", "CLOSED", "OPEN"].includes(run.status)) return "";
   return `
@@ -4914,9 +5061,10 @@ function renderDailyWorkRun() {
       <div class="daily-work-run-field--wide">${renderDailyWorkRunCurrentProject(run)}</div>
     </section>
     ${renderDailyWorkRunPreparation(run)}
-    ${renderDailyWorkRunPrompt(run)}
-    ${renderDailyWorkRunResultReturn(run)}
-    ${renderDailyWorkRunClosure(run)}
+    ${renderDailyWorkAgentReviewPhase(run)}
+    ${run.workProposal?.taskType === "Agenten- und Einsatzplanung" ? "" : renderDailyWorkRunPrompt(run)}
+    ${run.workProposal?.taskType === "Agenten- und Einsatzplanung" ? "" : renderDailyWorkRunResultReturn(run)}
+    ${run.workProposal?.taskType === "Agenten- und Einsatzplanung" ? "" : renderDailyWorkRunClosure(run)}
     <p class="daily-work-run-storage-note">Arbeitsdaten werden lokal in diesem Browser gespeichert. Kanonische Projekt-, Git- und Testdaten werden dadurch nicht verändert.</p>
   `;
 }
@@ -4929,6 +5077,75 @@ function setupDailyWorkRun() {
       const run = api.createDraftRun();
       saveDailyWorkRun(run);
       showToast("Neuer Tageslauf lokal begonnen. Noch kein Fokusprojekt gewählt.");
+      return;
+    }
+
+    const prepareAgentReviewButton = event.target.closest("[data-prepare-agent-review]");
+    if (prepareAgentReviewButton) {
+      try {
+        const run = dailyWorkRunApi().prepareAgentReviewPhase(getActiveDailyWorkRun(), { approved: true });
+        saveDailyWorkRun(run);
+        showToast("Interne Agentenaufträge vorbereitet. Es wurde kein Agent ausgeführt.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        showToast(error.message);
+      }
+      return;
+    }
+
+    const adjustAgentReviewButton = event.target.closest("[data-adjust-agent-review]");
+    if (adjustAgentReviewButton) {
+      try {
+        const api = dailyWorkRunApi();
+        const previous = getActiveDailyWorkRun();
+        const current = currentCanonicalDailyProject(previous.focusProjectId);
+        let run = api.createDraftRun();
+        if (current.available) run = api.setFocusProject(run, current.project, canonicalProjectRegistryState.payload.snapshotNotice);
+        saveDailyWorkRun(run);
+        showToast("Neuer bearbeitbarer Tageslauf begonnen. Der bisherige Einsatzplan bleibt erhalten.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        showToast(error.message);
+      }
+      return;
+    }
+
+    const declineAgentReviewButton = event.target.closest("[data-decline-agent-review]");
+    if (declineAgentReviewButton) {
+      try {
+        const run = dailyWorkRunApi().setAgentReviewApproval(getActiveDailyWorkRun(), "DECLINED");
+        saveDailyWorkRun(run);
+        showToast("Prüfphase bewusst nicht gestartet. Keine Agentenaufträge erzeugt.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        showToast(error.message);
+      }
+      return;
+    }
+
+    const transferAgentReviewButton = event.target.closest("[data-transfer-agent-review-history]");
+    if (transferAgentReviewButton) {
+      try {
+        const api = dailyWorkRunApi();
+        let run = getActiveDailyWorkRun();
+        const current = currentCanonicalDailyProject(run.focusProjectId);
+        const localProject = localManagementProjectForCanonical(current.project);
+        if (!localProject) throw new Error("Keine getrennte lokale Managementakte für dieses Projekt vorhanden.");
+        const entry = api.createAgentReviewHistoryEntry(run, true);
+        if (!entry) throw new Error("Prüfphasen-Verlauf ist noch nicht freigegeben.");
+        localProject.history = api.applyHistoryEntryOnce(getProjectHistory(localProject), entry);
+        run = api.markAgentReviewHistoryTransferred(run, entry);
+        saveState();
+        saveDailyWorkRun(run);
+        showToast("Prüfphasenabschluss einmalig lokal in den Projektverlauf übernommen.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        showToast(error.message);
+      }
       return;
     }
 
@@ -5004,6 +5221,93 @@ function setupDailyWorkRun() {
         run = api.transitionRun(run, "READY_FOR_CODEX");
         saveDailyWorkRun(run);
         showToast("Arbeitsvorschlag erstellt. Keine Ausführung gestartet.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        showToast(error.message);
+      }
+      return;
+    }
+
+    if (event.target.matches("[data-agent-result-form]")) {
+      event.preventDefault();
+      try {
+        const data = new FormData(event.target);
+        const run = dailyWorkRunApi().recordAgentWorkResult(
+          getActiveDailyWorkRun(),
+          event.target.dataset.agentId,
+          {
+            resultText: data.get("resultText"),
+            openPoints: data.get("openPoints"),
+            blockers: data.get("blockers"),
+            confirmed: data.get("confirmed") === "on",
+          },
+        );
+        saveDailyWorkRun(run);
+        showToast("Agentenbefund manuell bestätigt. Es wurde kein Agent ausgeführt.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        showToast(error.message);
+      }
+      return;
+    }
+
+    if (event.target.id === "daily-work-review-qa-form") {
+      event.preventDefault();
+      try {
+        const data = new FormData(event.target);
+        const run = dailyWorkRunApi().recordQaResult(getActiveDailyWorkRun(), {
+          status: data.get("status"),
+          resultText: data.get("resultText"),
+          openPoints: data.get("openPoints"),
+          blockers: data.get("blockers"),
+          safetyBoundariesViolated: data.get("safetyBoundariesViolated"),
+          criteriaAnswered: data.get("criteriaAnswered") === "on",
+        });
+        saveDailyWorkRun(run);
+        showToast("QA-Befund manuell bestätigt. Keine automatische Bewertung erzeugt.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        showToast(error.message);
+      }
+      return;
+    }
+
+    if (event.target.id === "daily-work-review-orchestration-form") {
+      event.preventDefault();
+      try {
+        const data = new FormData(event.target);
+        const run = dailyWorkRunApi().recordOrchestrationSummary(getActiveDailyWorkRun(), {
+          confirmedFindings: data.get("confirmedFindings"),
+          openPoints: data.get("openPoints"),
+          conflicts: data.get("conflicts"),
+          risks: data.get("risks"),
+          recommendedNextStep: data.get("recommendedNextStep"),
+          notApproved: data.get("notApproved"),
+          jamalDecisionQuestion: data.get("jamalDecisionQuestion"),
+        });
+        saveDailyWorkRun(run);
+        showToast("Gesamtbefund manuell bestätigt. Keine externe Aktion ausgelöst.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        showToast(error.message);
+      }
+      return;
+    }
+
+    if (event.target.id === "daily-work-review-final-form") {
+      event.preventDefault();
+      try {
+        const data = new FormData(event.target);
+        const run = dailyWorkRunApi().setAgentReviewFinalDecision(getActiveDailyWorkRun(), {
+          decision: data.get("decision"),
+          nextSafeStep: data.get("nextSafeStep"),
+        });
+        saveDailyWorkRun(run);
+        showToast("Jamals Entscheidung lokal gespeichert. Keine Folgeaktion gestartet.");
       } catch (error) {
         dailyWorkRunUiState.error = error.message;
         renderDailyWorkRun();
