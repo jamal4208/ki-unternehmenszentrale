@@ -66,7 +66,7 @@
   --badge-blocked-fg: #8f5a50;
 }
 
-/* V6.40.1 — vereinfachter geführter Tagesarbeitslauf */
+/* V6.40.2 — vereinfachter Tagesstart mit vertieftem Agenten-Einsatzplan */
 .daily-work-run-section {
   display: grid;
   gap: 18px;
@@ -460,6 +460,71 @@
   color: var(--muted);
 }
 
+.daily-work-run-agent-card.is-lead {
+  border-color: rgba(15, 118, 110, 0.42);
+  background: linear-gradient(145deg, #fff, var(--teal-soft));
+}
+
+.daily-work-run-agent-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.daily-work-run-agent-card > header > div {
+  display: grid;
+  gap: 4px;
+}
+
+.daily-work-run-mode-tag {
+  display: inline-flex;
+  width: fit-content;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: var(--blue-soft);
+  color: var(--blue) !important;
+  font-size: 0.68rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.daily-work-run-agent-card details {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.daily-work-run-agent-card summary {
+  cursor: pointer;
+  color: var(--blue);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+
+.daily-work-run-agent-card details dl {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.daily-work-run-agent-card details dl > div {
+  display: grid;
+  gap: 3px;
+}
+
+.daily-work-run-agent-card dt {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 650;
+}
+
+.daily-work-run-agent-card dd {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
 .daily-work-run-actions {
   display: flex;
   align-items: center;
@@ -531,6 +596,11 @@
   .daily-work-run-agent-grid,
   .daily-work-run-proposal-grid {
     grid-template-columns: 1fr;
+  }
+
+  .daily-work-run-agent-card > header {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 
@@ -7945,6 +8015,72 @@ details.local-agent-assignment-details > summary {
   margin: 6px 0 0;
   font-size: 0.85rem;
   color: #6a6258;
+}
+
+@media (max-width: 520px) {
+  .demo-cockpit-section {
+    padding: 16px;
+  }
+
+  .demo-cockpit-output,
+  .v1-work-cockpit,
+  .v1-work-cockpit-head,
+  .v1-work-cockpit-grid,
+  .v1-work-cockpit-secondary,
+  .v1-work-cockpit-cell {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .demo-cockpit-output {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .v1-work-cockpit {
+    width: 100%;
+    padding: 15px;
+  }
+
+  .v1-work-cockpit-head {
+    display: grid;
+  }
+
+  .v1-work-cockpit-grid,
+  .v1-work-cockpit-secondary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .v1-work-cockpit h3,
+  .v1-work-cockpit p,
+  .v1-work-cockpit li {
+    overflow-wrap: anywhere;
+  }
+
+  .demo-cockpit-group,
+  .demo-cockpit-group-head,
+  .demo-cockpit-card,
+  .demo-cockpit-card-head,
+  .demo-cockpit-longform,
+  .demo-cockpit-longform-body {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .demo-cockpit-group {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .demo-cockpit-card-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .demo-cockpit-badge {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
 }
 
 .portfolio-work-board,

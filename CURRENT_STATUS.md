@@ -2,20 +2,25 @@
 
 ## Git- und Versionsstand
 
-- Version: **V6.40.1 – Vereinfachter Tagesstart**
-- Ausgangs-HEAD für V6.40.1: `6978ce3`
-- Produktstand V6.40.0: `6978ce3` (auf `origin/main` gesichert)
+- Version: **V6.40.2 – Vertiefter Agenten-Einsatzplan**
+- Ausgangs-HEAD für V6.40.2: `8373e3d`
+- Produktstand V6.40.1: `8373e3d` (auf `origin/main` gesichert)
 - Branch: `main`
-- Upstream vor Beginn: `origin/main` auf `6978ce3`, synchron
-- Working Tree vor V6.40.1: sauber; V6.40.1 bleibt auftragsgemäß uncommitted und ungepusht
+- Upstream vor Beginn: `origin/main` auf `8373e3d`, synchron
+- Working Tree vor V6.40.2: sauber; V6.40.2 bleibt auftragsgemäß uncommitted und ungepusht
 
-## V6.40.1 – aktueller Funktionsstand
+## V6.40.2 – aktueller Funktionsstand
 
 - Ein neuer kompakter Hauptarbeitsweg steht im Cockpit vor den historischen Detailkarten.
 - Ein Tageslauf enthält genau ein bewusst gewähltes Fokusprojekt, ein großes Pflichtfeld für das gewünschte Ergebnis und eine optionale Verbotsgrenze.
 - Die frühere normale Eingabe von Begründung, Abnahmekriterium, Jamal-Frage, Allowlist, Tests, Git-Regeln und Rückfallweg entfällt; diese Angaben werden nachvollziehbar abgeleitet.
 - Acht Aufgabentypen werden erkannt: Agenten-/Einsatzplanung, Entwicklung/Codex, Design, Content, Recherche, Strategie/Entscheidung, Qualität/Prüfung und Plugin-/Werkzeugauswahl.
-- Der Arbeitsvorschlag enthält Zielverständnis, realistischen Tagesumfang, federführenden und weitere Agenten, Rollen, Teilaufgaben, Reihenfolge, Übergaben, Werkzeugkategorien, Dateien/Datenbereiche, Tests, Sicherheitsgrenzen, Abnahmekriterium und eine Jamal-Frage.
+- `agent-registry.js` ist die gemeinsame kanonische Quelle für exakt 25 Hauptagenten in Server und Browser; es gibt keine zweite Agentenliste.
+- Der Arbeitsvorschlag wählt projekt-, auftrags-, risiko- und umfangsbezogen nur benötigte Agenten und dokumentiert auch die Ausschlussregel.
+- Je Agent werden kanonische ID, Auswahlgrund, Rolle, Teilauftrag, erwartetes Ergebnis, Prüfkriterium, Sicherheitsgrenze, Abhängigkeiten, Übergabe, Arbeitsmodus und Werkzeugprüfbedarf strukturiert gespeichert.
+- Vorarbeiten, parallele Fachaufträge, wartende QA-Prüfung und abschließende Zusammenführung sind sichtbar getrennt.
+- Der Integrations-Agent bewertet bei Bedarf Fähigkeit, Werkzeugkategorien, Kombinationen, Bearbeitbarkeit, Datenschutz, Kostenart, Skalierung, Freigabegrenze und Ersatzlösung. Canva ist nie automatisch die einzige Wahl.
+- Der Health-Pilot berücksichtigt Projekt-/Demostand, Kernfluss, Fachgrenzen, Claims, Datenschutz/Consent, Design und Nutzertexte, Technik, Werkzeugwahl, QA und Projektwissen.
 - Agenten- und Einsatzplanung bleibt ausdrücklich ohne Codex-/Repository-Auftrag; technische Arbeitsdetails stehen standardmäßig geschlossen unter „Technische Details anzeigen“.
 - Die Vorlage wird nur als kopierbarer Text vorbereitet; es gibt keinen Codex-Aufruf und keinen Agentenstart.
 - Jeder Statusübergang benötigt Jamals bewusste Bedienung.
@@ -25,6 +30,7 @@
 - Bei nicht verfügbarer Register-API erscheint der aktuelle technische Stand als `UNGEKLÄRT`; gespeicherte Momentaufnahmen dienen nicht als Ersatz.
 - Keine neue API: weiterhin 41 GET-Routen, 404 für unbekannte Projekt-ID und 405 für andere Methoden.
 - Browserabnahme V6.40.1 erfolgreich: neuer Lauf ohne Autofokus, manuelle Health-Auswahl, Ergebniswunsch und optionale Grenze, Agenten-/Einsatzplanung ohne Repository-Auftrag, geschlossene Technikdetails, Reload-Persistenz und fehlerfreie Konsole geprüft. Ein bestehender abgeschlossener V6.40.0-Lauf blieb vollständig lesbar.
+- Browserabnahme V6.40.2 erfolgreich: Health-Pilottext vollständig verarbeitet; 13 von 25 Agenten fachlich begründet ausgewählt, Orchestrator eindeutig verantwortlich, Vorarbeiten/Parallelität/QA/Übergaben sichtbar, Integrations-Agent und verständliche Jamal-Frage vorhanden, technische Details geschlossen, Reload vollständig, Konsole fehlerfrei. Mobile Ansicht bei 390 × 844 ohne horizontalen Überlauf geprüft.
 
 ## Unveränderter V6.39.0-Registerstand
 
@@ -44,8 +50,9 @@
 - `server.js` – lokaler HTTP-Server, APIs und Geschäftslogik
 - `project-registry.js` – kanonisches Register für exakt 17 Projekte
 - `project-registry.test.js` – automatisierte Register-, API- und Persistenzgrenzen
-- `daily-work-run.js` – isoliertes Tageslaufmodell und manuelle Statusübergänge
-- `daily-work-run.test.js` – 44 automatisierte Tageslauf-, Eingabe-, Erkennungs-, Speicher- und Sicherheitsprüfungen
+- `agent-registry.js` – einziges kanonisches Register für 25 Hauptagenten und Rollen-Zuordnungen
+- `daily-work-run.js` – Tageslaufmodell, Agentenauswahl und manuelle Statusübergänge
+- `daily-work-run.test.js` – 64 automatisierte Tageslauf-, Agenten-, Eingabe-, Speicher- und Sicherheitsprüfungen
 - `styles.css` – Designsystem und Oberflächenregeln
 - `package.json` – Start- und Syntaxprüfungen
 - `package-lock.json` – Lockfile ohne installierte Paketabhängigkeiten
@@ -61,15 +68,15 @@ Die Zentrale ist als lokaler read-only Arbeits-, Entscheidungs- und Demo-Stand p
 ## Tests
 
 - `npm test` → 20 Register-, Health-, API- und localStorage-Prüfpunkte
-- `npm test` führt zusätzlich 44 Tageslauf-Prüfpunkte aus
-- `npm run check` → `node --check app.js && node --check server.js`
+- `npm test` führt zusätzlich 64 Tageslauf- und Agentenplan-Prüfpunkte aus
+- `npm run check` prüft Agentenregister, Tageslauf, UI, Server und Projektregister syntaktisch
 - `npm start` → `node server.js`
 - manuelle lokale Browser- und GET-API-Prüfungen
 - Airtable-Read-only-Prüfpfade mit separater Serverfreigabe
 
 ## Weiterhin fehlende Tests
 
-Keine Coverage-, Lint-, HTML-/CSS- oder CI-Test-Suite ist im Bestand nachgewiesen. V6.40.1 ergänzt begrenzte Unit- und manuelle Browserprüfungen für den vereinfachten Tagesstart.
+Keine Coverage-, Lint-, HTML-/CSS- oder CI-Test-Suite ist im Bestand nachgewiesen. V6.40.2 ergänzt begrenzte Unit- und manuelle Browserprüfungen für Agentenauswahl, Einsatzplan und Persistenz.
 
 ## Technische Risiken
 
@@ -82,13 +89,13 @@ Keine Coverage-, Lint-, HTML-/CSS- oder CI-Test-Suite ist im Bestand nachgewiese
 
 ## Bekannte Versionswidersprüche
 
-- Neuer Tageslaufstand V6.40.1, historische Cockpit- und Modulkennzeichnungen teilweise V6.38.x oder älter.
+- Neuer Tageslaufstand V6.40.2, historische Cockpit- und Modulkennzeichnungen teilweise V6.38.x oder älter.
 - Zwei Commits tragen V6.37.0; V6.37.2 erscheint in der Historie vor V6.37.1.
 - Viele historische V4.x-, V5.x- und V6.x-Bezeichnungen bleiben parallel sichtbar.
 
 ## Genau ein empfohlener nächster Produktentwicklungsschritt
 
-V6.40.1 manuell im Browser abnehmen; danach separat entscheiden, ob der uncommittete Stand gesichert werden soll.
+V6.40.2 manuell im Browser abnehmen; danach separat entscheiden, ob der uncommittete Stand gesichert werden soll.
 
 ## Bekannte Widersprüche
 
@@ -100,4 +107,4 @@ Historische Versionskennzeichnungen, Namensvarianten und nicht-kanonische Altreg
 
 ## Entscheidung durch Jamal erforderlich
 
-Manuelle Abnahme von V6.40.1 sowie jede spätere Commit-, Push- oder Deploymententscheidung.
+Manuelle Abnahme von V6.40.2 sowie jede spätere Commit-, Push- oder Deploymententscheidung.

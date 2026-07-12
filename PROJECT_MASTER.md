@@ -1,14 +1,16 @@
 # PROJECT MASTER
 
-## Verbindlicher Versionsstand V6.40.1
+## Verbindlicher Versionsstand V6.40.2
 
-Die KI-Unternehmenszentrale führt Jamal in V6.40.1 durch einen vereinfachten lokalen Tagesstart: Fokusprojekt bewusst wählen, genau einen Ergebniswunsch formulieren und optional eine zusätzliche Verbotsgrenze nennen. Daraus entsteht ein rein vorbereitender Arbeitsvorschlag mit Aufgabentyp, Tagesumfang, Agentenrollen, Teilaufgaben, Übergaben, Werkzeugkategorien, Datenbereichen, Qualitätsprüfung, Sicherheitsgrenzen, Abnahmekriterium und genau einer Jamal-Frage. Technische Details sind automatisch vorbelegt und standardmäßig geschlossen.
+Die KI-Unternehmenszentrale erhält in V6.40.2 den vereinfachten Tagesstart aus V6.40.1 und vertieft ausschließlich den daraus abgeleiteten Agenten-Einsatzplan. Jamal wählt ein Fokusprojekt, formuliert genau einen Ergebniswunsch und kann optional eine zusätzliche Verbotsgrenze nennen. Die Zentrale erkennt den Auftragstyp und wählt aus dem kanonischen Bestand von 25 Hauptagenten ein möglichst kleines, aber fachlich vollständiges Team. Für jeden ausgewählten Agenten werden Auswahlgrund, Rolle, Teilauftrag, erwartetes Ergebnis, Prüfkriterium, Sicherheitsgrenze, Abhängigkeit, Arbeitsmodus und Übergabe strukturiert gespeichert.
+
+`agent-registry.js` ist die einzige kanonische Quelle der 25 Hauptagenten für Server, Tageslauf und Browser. Historische Rollenbezeichnungen wie Projektmanager-, Entwickler-, Design-Director- oder Plugin-/Tool-Agent werden auf vorhandene kanonische IDs abgebildet; sie erzeugen keine zweite Agentenquelle. Werkzeuge wie Codex, Canva, HeyGen, GitHub oder Airtable bleiben Werkzeuge zuständiger Agenten und werden weder zu Steuerungsrollen noch automatisch ausgeführt.
 
 `project-registry.js` bleibt unverändert die einzige kanonische technische Quelle für **17 Projekte mit stabilen IDs**. Die Oberfläche unterscheidet `DEMO`, `PLANUNG`, `REAL_VERIFIZIERT` und `UNGEKLÄRT`. Health Upgrade Kompass bleibt der erste technisch real verifizierte Pilot; Git- und Testdaten sind bestätigte Momentaufnahmen und keine automatische Live-Prüfung.
 
 Health und Expansion bleiben fachlich getrennt, obwohl sie aktuell teilweise denselben Projektordner und Code nutzen. Work bleibt technisch `UNGEKLÄRT`, Codex bleibt manuell kontrolliert. Bestehende Managementdaten bleiben im bisherigen Browser-Speicher erhalten. Tagesläufe verwenden getrennt `ki-unternehmenszentrale-daily-work-runs-v1`; keine lokale Momentaufnahme darf die kanonische technische Akte überschreiben.
 
-V6.40.1 erteilt keine medizinische, fachliche, rechtliche, öffentliche oder produktive Freigabe. Agenten- und Einsatzplanung bleibt ausdrücklich ein Rollen- und Arbeitsplan und wird nicht in einen Codex-/Repository-Auftrag umgedeutet. Kopierbare Arbeitsvorlagen starten nichts. Die Zentrale bleibt eine lokale, kontrollierte Arbeitsoberfläche: keine autonome Produktivplattform, keine automatische externe Aktion, keine automatische Git-Aktion, keine Agentenausführung und keine Deploymentfreigabe.
+V6.40.2 erteilt keine medizinische, fachliche, rechtliche, öffentliche oder produktive Freigabe. Agenten- und Einsatzplanung bleibt ausdrücklich ein Rollen- und Arbeitsplan und wird nicht in einen Codex-/Repository-Auftrag umgedeutet. Kopierbare Arbeitsvorlagen starten nichts. Die Zentrale bleibt eine lokale, kontrollierte Arbeitsoberfläche: keine autonome Produktivplattform, keine automatische externe Aktion, keine automatische Git-Aktion, keine Agenten- oder Plugin-Ausführung und keine Deploymentfreigabe.
 
 ## Projekt
 
@@ -88,4 +90,4 @@ Ein Versionsschritt ist abgeschlossen, wenn Ziel und Nicht-Ziele erfüllt, betro
 
 ## Entscheidung durch Jamal erforderlich
 
-Jamal nimmt V6.40.1 manuell ab und entscheidet später separat über Commit, Push und produktive Nutzung.
+Jamal nimmt V6.40.2 manuell ab und entscheidet später separat über Commit, Push und produktive Nutzung.

@@ -3,6 +3,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
+const AgentRegistry = require("./agent-registry");
 const DailyWorkRun = require("./daily-work-run");
 const { API_SECURITY_FLAGS, PROJECT_REGISTRY, buildProjectsResponse, getProjectById } = require("./project-registry");
 const { requestHandler } = require("./server");
@@ -94,7 +95,7 @@ function runTests() {
     assert.deepStrictEqual(cases.map(([text]) => DailyWorkRun.detectTaskType(text)), cases.map(([, type]) => type));
   });
   const agentPlanning = DailyWorkRun.createWorkProposal(focused, {
-    desiredOutcome: "Erstelle einen Einsatzplan, welche Agenten für Health benötigt werden und wer was prüft.",
+    desiredOutcome: "Ich möchte wissen, welche Agenten jetzt beim Health Upgrade Kompass eingesetzt werden müssen und was jeder davon prüfen soll.",
   });
   check("Agentenplanung wird nicht zum Codex- oder Repository-Auftrag", () => {
     assert.strictEqual(agentPlanning.workProposal.taskType, "Agenten- und Einsatzplanung");
@@ -104,8 +105,90 @@ function runTests() {
   });
   check("Agentenplanung enthält Rollen, Teilaufgaben und Übergaben", () => {
     assert.ok(agentPlanning.workProposal.agentPlan.length >= 3);
-    assert.ok(agentPlanning.workProposal.agentPlan.every((item) => item.agent && item.role && item.subtask && item.handoffTo));
-    assert.ok(agentPlanning.workProposal.agentPlan.some((item) => item.agent === "Health-Kompass-Agent"));
+    assert.ok(agentPlanning.workProposal.agentPlan.every((item) => item.agentName && item.roleInRun && item.subtask && item.handoffTo));
+    assert.ok(agentPlanning.workProposal.agentPlan.some((item) => item.agentId === "health-compass-agent"));
+  });
+  check("kanonisches Agentenregister enthält exakt 25 Hauptagenten", () => {
+    assert.strictEqual(AgentRegistry.CANONICAL_AGENT_COUNT, 25);
+    assert.strictEqual(AgentRegistry.PRODUCTIVE_AGENT_REGISTRY.length, 25);
+  });
+  check("Server und Browser-Tageslauf verwenden dieselbe Agentenquelle", () => {
+    const serverSource = fs.readFileSync(path.join(__dirname, "server.js"), "utf8");
+    const browserSource = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
+    const htmlSource = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
+    assert.match(serverSource, /require\("\.\/agent-registry"\)/);
+    assert.doesNotMatch(serverSource, /const PRODUCTIVE_AGENT_REGISTRY = \[/);
+    assert.match(browserSource, /window\.AgentRegistry\?\.PRODUCTIVE_AGENT_REGISTRY/);
+    assert.doesNotMatch(browserSource, /const PRODUCTIVE_AGENT_REGISTRY = \[/);
+    assert.match(htmlSource, /<script src="agent-registry\.js"><\/script>\s*<script src="daily-work-run\.js"><\/script>/);
+  });
+  check("Health-Pilot wählt mehr als drei passende Agenten", () => assert.ok(agentPlanning.workProposal.selectedAgentIds.length > 3));
+  check("Health-Pilot wählt bewusst nicht alle Agenten", () => assert.ok(agentPlanning.workProposal.selectedAgentIds.length < AgentRegistry.CANONICAL_AGENT_COUNT));
+  check("kein erfundener Agent wird ausgewählt", () => {
+    assert.ok(agentPlanning.workProposal.selectedAgentIds.every(AgentRegistry.hasAgentId));
+    assert.deepStrictEqual(agentPlanning.workProposal.selectedAgentIds, agentPlanning.workProposal.agentPlan.map((item) => item.agentId));
+  });
+  check("jeder Agent hat Begründung, Teilauftrag, Ergebnis, Prüfung und Grenze", () => {
+    assert.deepStrictEqual(DailyWorkRun.validateAgentPlan(agentPlanning.workProposal), []);
+    assert.ok(agentPlanning.workProposal.agentPlan.every((item) => item.selectionReason && item.expectedResult && item.acceptanceCheck && item.safetyBoundary));
+  });
+  check("Hauptverantwortlicher ist eindeutig", () => {
+    assert.strictEqual(agentPlanning.workProposal.leadAgentId, "orchestrator-agent");
+    assert.strictEqual(agentPlanning.workProposal.agentPlan.filter((item) => item.agentId === agentPlanning.workProposal.leadAgentId).length, 1);
+  });
+  check("parallele Fachaufträge sind markiert", () => assert.ok(agentPlanning.workProposal.workStructure.parallelTasks.length > 2));
+  check("Abhängigkeiten sind strukturiert markiert", () => {
+    assert.ok(agentPlanning.workProposal.agentPlan.some((item) => item.dependsOn.length > 0));
+    assert.ok(agentPlanning.workProposal.workStructure.dependentReviews.includes("quality-test-agent"));
+  });
+  check("jede Übergabe endet bei Agent, QA oder Jamal", () => {
+    assert.ok(agentPlanning.workProposal.agentPlan.every((item) => item.handoffTo === "jamal" || AgentRegistry.hasAgentId(item.handoffTo)));
+  });
+  check("Integrations-Agent übernimmt relevante Plugin- und Werkzeugprüfung", () => {
+    assert.ok(agentPlanning.workProposal.selectedAgentIds.includes("integration-agent"));
+    assert.strictEqual(agentPlanning.workProposal.toolReview.responsibleAgentId, "integration-agent");
+    assert.strictEqual(agentPlanning.workProposal.toolReview.required, true);
+  });
+  check("Werkzeugprüfung bewertet Qualität, Datenschutz, Kosten und Ersatz", () => {
+    const review = agentPlanning.workProposal.toolReview;
+    ["Ergebnisqualität", "Datenschutz und Datenabfluss", "Kostenart", "Skalierbarkeit"].forEach((criterion) => assert.ok(review.selectionCriteria.includes(criterion)));
+    assert.ok(review.possibleCombination.length > 1);
+    assert.ok(review.fallback);
+  });
+  check("Canva wird nicht automatisch als einziges Werkzeug festgelegt", () => {
+    const reviewText = JSON.stringify(agentPlanning.workProposal.toolReview);
+    assert.match(reviewText, /Keine automatische Festlegung auf Canva/);
+    assert.notDeepStrictEqual(agentPlanning.workProposal.toolReview.toolCategories, ["Canva"]);
+  });
+  check("Health-Fach-, Produkt-, Risiko-, Datenschutz-, Design-, Technik- und QA-Rollen sind gedeckt", () => {
+    ["health-compass-agent", "product-agent", "risk-agent", "security-agent", "ui-agent", "api-agent", "quality-test-agent"].forEach((id) => assert.ok(agentPlanning.workProposal.selectedAgentIds.includes(id)));
+  });
+  check("bestehende Design-DNA und 8-von-10-Regel bleiben im Plan", () => {
+    assert.ok(agentPlanning.workProposal.designQualityFramework.includes("Apple statt Dubai"));
+    assert.ok(agentPlanning.workProposal.designQualityFramework.some((item) => item.includes("8/10")));
+  });
+  check("Jamal erhält eine verständliche Health-Frage", () => assert.strictEqual(agentPlanning.workProposal.jamalDecisionQuestion, "Soll die Zentrale mit diesem Agententeam die nächste Health-Prüfphase vorbereiten?"));
+  check("nicht benötigte Agenten werden mit nachvollziehbarer Regel ausgeschlossen", () => {
+    assert.strictEqual(agentPlanning.workProposal.excludedAgentCount, 25 - agentPlanning.workProposal.selectedAgentIds.length);
+    assert.match(agentPlanning.workProposal.exclusionReason, /Nicht ausgewählt/);
+  });
+  check("Reload erhält den vollständigen strukturierten Einsatzplan", () => {
+    const dailyStorage = mockStorage();
+    DailyWorkRun.saveDailyStore(dailyStorage, DailyWorkRun.upsertRun(DailyWorkRun.createStore(), agentPlanning));
+    const reloaded = DailyWorkRun.getActiveRun(DailyWorkRun.loadDailyStore(dailyStorage));
+    assert.deepStrictEqual(reloaded.workProposal, agentPlanning.workProposal);
+  });
+  check("alter Tageslauf ohne V6.40.2-Felder bleibt erhalten", () => {
+    const oldRun = { ...DailyWorkRun.createDraftRun({ id: "alter-v6401-lauf" }), workProposal: { taskType: "Agenten- und Einsatzplanung", agentPlan: [{ agent: "Orchestrator-Agent", role: "Einsatzleitung", subtask: "Altbestand", handoffTo: "Jamal" }] } };
+    const oldStore = DailyWorkRun.createStore({ activeRunId: oldRun.id, runs: [oldRun] });
+    assert.deepStrictEqual(DailyWorkRun.getActiveRun(oldStore).workProposal, oldRun.workProposal);
+  });
+  check("keine Löschung und keine automatische Agenten-, Codex- oder Plugin-Ausführung", () => {
+    const sources = ["daily-work-run.js", "app.js", "agent-registry.js"].map((file) => fs.readFileSync(path.join(__dirname, file), "utf8")).join("\n");
+    assert.doesNotMatch(sources, /localStorage\.(?:clear|removeItem)/);
+    assert.strictEqual(agentPlanning.boundary.agentExecutionBlocked, true);
+    assert.strictEqual(agentPlanning.boundary.codexExecutionBlocked, true);
+    assert.match(agentPlanning.codexPreparation.preparedPrompt, /Keine Agenten-, Codex- oder Plugin-Ausführung/);
   });
 
   const preparedDraft = validDraft();
@@ -138,7 +221,7 @@ function runTests() {
   check("Health und Expansion bleiben getrennt", () => assert.notStrictEqual(currentHealth.project.id, getProjectById("expansion-app").id));
   check("Codex-Auftrag ist nur Textvorlage", () => {
     assert.strictEqual(typeof preparedDraft.codexPreparation.preparedPrompt, "string");
-    assert.match(preparedDraft.codexPreparation.preparedPrompt, /ausschließlich eine manuell kopierbare Auftragsvorlage/);
+    assert.match(preparedDraft.codexPreparation.preparedPrompt, /manuell kopierbare Planungsvorlage/);
   });
 
   const appSource = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
@@ -233,10 +316,10 @@ function runTests() {
   check("writeOperationsBlocked bleibt true", () => assert.strictEqual(API_SECURITY_FLAGS.writeOperationsBlocked, true));
   check("madeExternalRequest bleibt false", () => assert.strictEqual(API_SECURITY_FLAGS.madeExternalRequest, false));
 
-  assert.strictEqual(passed, 44);
+  assert.strictEqual(passed, 64);
   assert.strictEqual(DailyWorkRun.getActiveRun(stored).id, preparedDraft.id);
   assert.strictEqual(PROJECT_REGISTRY.length, 17);
-  console.log("daily-work-run.test.js: 44 Prüfpunkte erfolgreich");
+  console.log("daily-work-run.test.js: 64 Prüfpunkte erfolgreich");
 }
 
 runTests();

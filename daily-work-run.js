@@ -1,14 +1,17 @@
 "use strict";
 
 (function initDailyWorkRun(root, factory) {
-  const api = factory();
+  const agentRegistry = typeof module === "object" && module.exports
+    ? require("./agent-registry")
+    : root?.AgentRegistry;
+  const api = factory(agentRegistry);
   if (typeof module === "object" && module.exports) {
     module.exports = api;
   }
   if (root) {
     root.DailyWorkRun = api;
   }
-})(typeof globalThis !== "undefined" ? globalThis : this, function createDailyWorkRunApi() {
+})(typeof globalThis !== "undefined" ? globalThis : this, function createDailyWorkRunApi(agentRegistryApi) {
   const SCHEMA_VERSION = 1;
   const DAILY_STORAGE_KEY = "ki-unternehmenszentrale-daily-work-runs-v1";
   const LEGACY_MANAGEMENT_STORAGE_KEY = "ki-unternehmenszentrale-v1";
@@ -30,6 +33,11 @@
     "Qualität/Prüfung",
     "Plugin-/Werkzeugauswahl",
   ]);
+  const CANONICAL_AGENTS = agentRegistryApi?.PRODUCTIVE_AGENT_REGISTRY || [];
+  if (CANONICAL_AGENTS.length !== 25) {
+    throw new Error("Das kanonische Register mit 25 Hauptagenten ist nicht verfügbar.");
+  }
+  const AGENTS_BY_ID = new Map(CANONICAL_AGENTS.map((agent) => [agent.id, agent]));
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
@@ -237,84 +245,168 @@
     return TASK_TYPES[5];
   }
 
-  function proposalBlueprint(taskType) {
+  function proposalBlueprint(taskType, run, desiredOutcome) {
     const commonSafety = [
       "Keine automatische Codex- oder Agentenausführung",
+      "Keine Plugin- oder Werkzeugausführung",
       "Keine externe Aktion ohne Jamals Freigabe",
       "Kein automatischer Commit, Push oder Deployment",
       "Kanonische Projekt- und Sicherheitsgrenzen einhalten",
     ];
-    const blueprints = {
+    const routes = {
       [TASK_TYPES[0]]: {
         repositoryWorkRequired: false,
-        leadAgent: "Orchestrator-Agent",
-        agents: [
-          ["Orchestrator-Agent", "Einsatzleitung", "Ziel in Rollen, Teilaufgaben und Übergaben zerlegen"],
-          ["Fach-Agent des Fokusprojekts", "Fachliche Verantwortung", "Projektkontext und fachliche Grenzen einbringen"],
-          ["QS-/Test-Agent", "Qualitätssicherung", "Vollständigkeit, Überschneidungen und Abnahmekriterium prüfen"],
-        ],
-        tools: ["Agentenregister", "kanonische Projektakte", "Prüfcheckliste"],
-        areas: ["Projektkontext und Agentenrollen", "keine Repository- oder Produktionsdatenänderung"],
-        quality: ["Jede Teilaufgabe hat genau eine verantwortliche Rolle", "Übergaben und Abschlussprüfung sind benannt"],
+        leadAgentId: "orchestrator-agent",
+        baseAgentIds: ["project-status-agent", "workflow-agent", "quality-test-agent"],
       },
       [TASK_TYPES[1]]: {
         repositoryWorkRequired: true,
-        leadAgent: "API-Agent",
-        agents: [["API-Agent", "Technische Umsetzung", "Begrenzte technische Änderung vorbereiten"], ["QS-/Test-Agent", "Qualitätssicherung", "Tests und Diff gegen das Ziel prüfen"]],
-        tools: ["Codex", "Repository-Werkzeuge", "Test- und Diff-Prüfung"],
-        areas: ["Projektdateien innerhalb einer expliziten Allowlist", "lokale Tests und Git-Diff"],
-        quality: ["Projektchecks erfolgreich", "Diff enthält nur die freigegebene Zieländerung"],
+        leadAgentId: "orchestrator-agent",
+        baseAgentIds: ["product-agent", "api-agent", "documentation-agent", "quality-test-agent", "integration-agent"],
       },
       [TASK_TYPES[2]]: {
         repositoryWorkRequired: false,
-        leadAgent: "UI-Agent",
-        agents: [["UI-Agent", "Gestaltungsleitung", "Gestaltungsrichtung und Qualitätsmaßstab festlegen"], ["Review-Agent", "Qualitätsprüfung", "Lesbarkeit, Konsistenz und Zielbezug prüfen"]],
-        tools: ["Designwerkzeug", "bestehendes Markensystem", "visuelle Qualitätsprüfung"],
-        areas: ["Design-Briefing und freigegebene Assets"],
-        quality: ["Gestaltung erfüllt Ziel, Format und Markenrahmen"],
+        leadAgentId: "ui-agent",
+        baseAgentIds: ["product-agent", "communication-agent", "integration-agent", "quality-test-agent", "review-agent"],
       },
       [TASK_TYPES[3]]: {
         repositoryWorkRequired: false,
-        leadAgent: "Kommunikations-Agent",
-        agents: [["Kommunikations-Agent", "Redaktion", "Kernaussage und Inhalt ausarbeiten"], ["Risiko-Agent", "Grenzprüfung", "Aussagen und sensible Inhalte prüfen"]],
-        tools: ["Redaktionsvorlage", "Projektwissen", "Qualitätscheck"],
-        areas: ["freigegebene Inhalte und Projektwissen"],
-        quality: ["Inhalt ist verständlich, zielgerichtet und sachlich geprüft"],
+        leadAgentId: "communication-agent",
+        baseAgentIds: ["product-agent", "documentation-agent", "risk-agent", "review-agent", "quality-test-agent"],
       },
       [TASK_TYPES[4]]: {
         repositoryWorkRequired: false,
-        leadAgent: "Dokumentations-Agent",
-        agents: [["Dokumentations-Agent", "Recherche", "Fragestellung, Quellen und Befunde strukturieren"], ["Review-Agent", "Quellenprüfung", "Nachvollziehbarkeit und Widersprüche prüfen"]],
-        tools: ["Recherchewerkzeuge", "Quellenregister", "Vergleichsmatrix"],
-        areas: ["öffentliche oder ausdrücklich freigegebene Quellen"],
-        quality: ["Befunde sind belegt und Unsicherheiten sichtbar"],
+        leadAgentId: "documentation-agent",
+        baseAgentIds: ["project-status-agent", "open-points-agent", "risk-agent", "review-agent", "quality-test-agent"],
       },
       [TASK_TYPES[5]]: {
         repositoryWorkRequired: false,
-        leadAgent: "Strategie-Agent",
-        agents: [["Strategie-Agent", "Entscheidungsvorbereitung", "Optionen, Wirkung und Entscheidungspunkt strukturieren"], ["Entscheidungs-Agent", "Entscheidungsprüfung", "Konsequenzen und nächste Schritte bewerten"]],
-        tools: ["Entscheidungsvorlage", "Projektakte", "Risikoabwägung"],
-        areas: ["Projektziele, Entscheidungen und bekannte Risiken"],
-        quality: ["Optionen, Konsequenzen und eine klare Entscheidung sind sichtbar"],
+        leadAgentId: "strategy-agent",
+        baseAgentIds: ["decision-agent", "product-agent", "prioritization-agent", "risk-agent", "documentation-agent"],
       },
       [TASK_TYPES[6]]: {
         repositoryWorkRequired: false,
-        leadAgent: "QS-/Test-Agent",
-        agents: [["QS-/Test-Agent", "Prüfleitung", "Prüfumfang, Kriterien und Nachweise festlegen"], ["Review-Agent", "Fachprüfung", "Ergebnis gegen fachliche Grenzen prüfen"]],
-        tools: ["Prüfcheckliste", "Testnachweise", "Abnahmeprotokoll"],
-        areas: ["freigegebene Ergebnisse und Prüfnachweise"],
-        quality: ["Jedes Kriterium hat einen nachvollziehbaren Nachweis"],
+        leadAgentId: "quality-test-agent",
+        baseAgentIds: ["review-agent", "project-status-agent", "security-agent", "documentation-agent"],
       },
       [TASK_TYPES[7]]: {
         repositoryWorkRequired: false,
-        leadAgent: "Integrations-Agent",
-        agents: [["Integrations-Agent", "Werkzeugauswahl", "Geeignete Kategorien und Kandidaten vergleichen"], ["Sicherheits-Agent", "Sicherheitsprüfung", "Datenzugriff, Freigaben und externe Wirkung prüfen"]],
-        tools: ["Plugin-Register", "Anforderungskatalog", "Sicherheitsprüfung"],
-        areas: ["Werkzeugmetadaten und freigegebene Integrationsanforderungen"],
-        quality: ["Empfehlung nennt Nutzen, Grenzen, Datenzugriff und Alternative"],
+        leadAgentId: "integration-agent",
+        baseAgentIds: ["security-agent", "operations-agent", "quality-test-agent", "risk-agent"],
       },
     };
-    return { ...blueprints[taskType], safety: commonSafety };
+    const route = routes[taskType] || routes[TASK_TYPES[5]];
+    const text = desiredOutcome.toLowerCase();
+    const selected = new Set([route.leadAgentId, ...route.baseAgentIds]);
+    const health = run.focusProjectId === "health-upgrade-kompass";
+    const toolRelevant = /plugin|werkzeug|tool|canva|heygen|github|airtable|video|präsent|design|bild|codex|browser/.test(text);
+    const designRelevant = /design|ui|ux|layout|bild|premium|verständ|nutzer|text/.test(text);
+    const technicalRelevant = /code|codex|entwick|api|frontend|backend|techn|repository|git|browser/.test(text);
+    const sensitive = health || /gesund|medizin|daten|einwillig|datenschutz|recht|claim|risiko/.test(text);
+    const costRelevant = /kosten|budget|preis|geschäftsmodell|betrieb|skalier/.test(text);
+
+    if (health) {
+      ["health-compass-agent", "product-agent", "risk-agent", "security-agent"].forEach((id) => selected.add(id));
+      if (taskType === TASK_TYPES[0]) {
+        ["ui-agent", "communication-agent", "api-agent", "integration-agent", "documentation-agent"].forEach((id) => selected.add(id));
+      }
+    }
+    if (toolRelevant) selected.add("integration-agent");
+    if (designRelevant) ["ui-agent", "communication-agent"].forEach((id) => selected.add(id));
+    if (technicalRelevant) ["api-agent", "integration-agent"].forEach((id) => selected.add(id));
+    if (sensitive) ["risk-agent", "security-agent"].forEach((id) => selected.add(id));
+    if (costRelevant) ["operations-agent", "strategy-agent"].forEach((id) => selected.add(id));
+
+    const selectedAgentIds = [...selected].filter((id) => AGENTS_BY_ID.has(id));
+    return {
+      ...route,
+      selectedAgentIds,
+      safety: commonSafety,
+      signals: { health, toolRelevant, designRelevant, technicalRelevant, sensitive, costRelevant },
+    };
+  }
+
+  const AGENT_ASSIGNMENT_TEMPLATES = Object.freeze({
+    "orchestrator-agent": ["Einsatzleitung und Zusammenführung", "Der Auftrag benötigt eine eindeutige Leitung ohne unnötige Agentenbreite.", "Arbeitsphasen, Abhängigkeiten und Übergaben koordinieren und die Fachbefunde verdichten.", "Ein kompakter Gesamtplan mit Konflikten, Reihenfolge und Entscheidungspunkt.", "Alle ausgewählten Beiträge sind vollständig, widerspruchsfrei und einem nächsten Schritt zugeordnet."],
+    "project-status-agent": ["Projekt- und Demostand", "Die Auswahl muss vom bestätigten Ist-Stand statt von Annahmen ausgehen.", "Aktuellen Produkt-, Demo- und Projektstand sowie offene Punkte aus der kanonischen Akte verdichten.", "Bestätigtes Standbild mit offenen und ungeklärten Punkten.", "Technische Momentaufnahme und fachliche Freigabe werden klar getrennt."],
+    "workflow-agent": ["Ablauf und Abhängigkeiten", "Mehrere Fachprüfungen benötigen eine belastbare Reihenfolge.", "Voraussetzungen, parallele Prüfungen, Wartepunkte und Zusammenführung strukturieren.", "Ausführbarer Ablaufplan ohne Agentenstart.", "Jeder Schritt besitzt Abhängigkeit und Übergabe."],
+    "health-compass-agent": ["Health-Fachverantwortung", "Das Fokusprojekt braucht seine vorhandenen fachlichen Grenzen und den Health-Kontext.", "Kernnutzerfluss, offene Fachfragen, Waage/Labor gemäß Projektstand sowie Diagnose- und Heilversprechengrenzen prüfen.", "Health-Fachbefund mit klaren Freigabegrenzen.", "Keine Diagnose, Heilversprechen oder medizinische Freigabe; Ungeklärtes bleibt sichtbar."],
+    "product-agent": ["Produktmanagement", "Nutzen, Kernfluss und nächster Produktumfang müssen vor Detailarbeit geklärt sein.", "Kernnutzerfluss, Demo-Ziel, Nutzen und offene Produktentscheidungen gegeneinander prüfen.", "Priorisierte Produktfragen und ein realistischer nächster Umfang.", "Der Umfang ist klein, nutzerbezogen und eindeutig abnehmbar."],
+    "risk-agent": ["Compliance und Risiko", "Sensible Aussagen und Projektgrenzen benötigen eine eigene Risikoprüfung.", "Medizinische Aussagen, Claims, rechtliche Unsicherheiten und Freigaberisiken kennzeichnen.", "Risikomatrix mit Stoppsignalen und benötigten Fachfreigaben.", "Keine ungeprüfte Aussage wird als freigegeben dargestellt."],
+    "security-agent": ["Datenschutz und Einwilligung", "Datenfluss und Einwilligungsgrenzen sind bei sensiblen Projekten eigenständig zu prüfen.", "Datenschutz, Consent, Datenabfluss sowie Ausschluss echter Gesundheits- und Kundendaten prüfen.", "Sicherheitsbefund mit erlaubten und verbotenen Datenwegen.", "Keine echten sensiblen Daten, keine externe Übertragung und keine automatische Aktion."],
+    "ui-agent": ["Design- und Nutzerflussqualität", "Premiumwirkung und Verständlichkeit sind Teil der Ergebnisqualität.", "Kernfluss, visuelle Hierarchie, Vertrauen, mediterrane Ruhe und mobile Verständlichkeit bewerten.", "Designbefund mit konkreten Qualitätslücken und Prioritäten.", "Verständnis und Vertrauen erreichen jeweils mindestens 8 von 10."],
+    "communication-agent": ["Content und Nutzertexte", "Nutzertexte beeinflussen Verständnis, Vertrauen und mögliche Claims.", "Kerntexte auf Klarheit, Ton, Handlungsführung und sensible Aussagen prüfen.", "Kurze Textempfehlungen mit markierten Freigabepunkten.", "Keine Heilversprechen; verständliche, ruhige und präzise Sprache."],
+    "api-agent": ["Technische Machbarkeit", "Technische offene Punkte müssen von fachlichen Entscheidungen getrennt sichtbar sein.", "Datenfluss, UI-/API-Bezug, technische Risiken und spätere Umsetzbarkeit read-only einordnen.", "Technischer Machbarkeitsbefund ohne Codeänderung.", "Keine Repository-Änderung und Codex nur als späteres Werkzeug nach Freigabe."],
+    "integration-agent": ["Plugin- und Werkzeugprüfung", "Werkzeuge sollen durch Anforderungen und Qualität statt Bequemlichkeit gewählt werden.", "Fähigkeit, Werkzeugkategorien, Kombinationen, Bearbeitbarkeit, Datenschutz, Kostenart, Skalierung und Ersatzlösung vergleichen.", "Werkzeug-Entscheidungsmatrix mit Kombination und Alternative.", "Kein Tool wird ausgeführt; Canva ist nie automatisch die einzige Wahl."],
+    "documentation-agent": ["Wissens- und Projektkontext", "Befunde müssen nachvollziehbar auf bestätigtem Projektwissen beruhen.", "Kanonische Akte, bekannte Entscheidungen und offene Annahmen zu einer Übergabegrundlage strukturieren.", "Quellen- und Kontextübersicht für alle Fachprüfungen.", "Keine lokale Momentaufnahme wird zur zweiten technischen Wahrheit."],
+    "quality-test-agent": ["Qualitätssicherung und Abnahme", "Der Einsatzplan braucht eine unabhängige, messbare Abschlussprüfung.", "Alle Fachbefunde, Grenzen, Übergaben und Akzeptanzkriterien gegen den Ergebniswunsch prüfen.", "QA-Abnahmebericht mit bestanden/offen/blockiert.", "Vollständigkeit 100 Prozent; Design bei Relevanz mindestens 8/10 für Verständnis und Vertrauen."],
+    "review-agent": ["Unabhängiges Review", "Ein zweiter Blick reduziert Scheinsicherheit und Lücken.", "Ergebnis gegen Ziel, Quellen und Sicherheitsgrenzen spiegeln.", "Reviewbefund mit Widersprüchen und Restlücken.", "Jede Abweichung ist belegt und einer Entscheidung zugeordnet."],
+    "strategy-agent": ["Strategische Verantwortung", "Zielrichtung und Wirkung müssen vor einer Entscheidung geklärt sein.", "Optionen, Wirkung, Aufwand und langfristige Folgen strukturieren.", "Strategische Empfehlung mit Alternativen.", "Empfehlung trennt Fakten, Annahmen und Jamals Entscheidung."],
+    "decision-agent": ["Entscheidungsvorbereitung", "Jamal benötigt eine klare, nicht technische Entscheidung.", "Maximal drei verständliche Optionen samt Konsequenzen formulieren.", "Entscheidungsvorlage mit Empfehlung.", "Genau eine verständliche Entscheidungsfrage bleibt offen."],
+    "prioritization-agent": ["Priorisierung", "Nicht alle möglichen Arbeiten sind jetzt nötig.", "Nutzen, Risiko und Dringlichkeit ordnen und bewusst Zurückgestelltes benennen.", "Kleine priorisierte Arbeitsfolge.", "Nur notwendige Schritte bleiben im aktuellen Umfang."],
+    "open-points-agent": ["Offene Fragen", "Recherche darf fehlende Informationen nicht mit Annahmen ersetzen.", "Ungeklärte Begriffe, Quellen und Entscheidungen sammeln.", "Priorisierte Fragenliste.", "Jede offene Frage hat einen Verantwortlichen oder Jamal-Entscheid."],
+    "operations-agent": ["Betrieb, Kostenart und Skalierung", "Betriebsfähigkeit und Kosten können die Werkzeug- oder Strategieauswahl verändern.", "Kostenart, Wartbarkeit, Skalierbarkeit und Betriebsgrenzen einordnen.", "Betriebsvergleich ohne Beschaffungsaktion.", "Keine Kostenannahme wird als bestätigter Preis ausgegeben."],
+    "data-structure-agent": ["Daten- und Ergebnisstruktur", "Strukturierte Ergebnisse müssen dauerhaft verständlich bleiben.", "Felder, Datenbeziehungen und Ergebnisformat prüfen.", "Strukturvorschlag mit Pflicht- und optionalen Feldern.", "Bestehende Daten bleiben kompatibel und erhalten."],
+    "customer-value-agent": ["Kundenwert", "Die Arbeit muss sichtbaren Nutzen für die Zielgruppe erzeugen.", "Nutzen, Reibung und Vertrauen aus Nutzersicht prüfen.", "Kundenwertbefund.", "Nutzen ist in einem verständlichen Satz belegbar."],
+    "next-actions-agent": ["Nächste Schritte", "Aus Befunden muss eine kleine nächste Handlung entstehen.", "Befunde in sichere nächste Schritte übersetzen.", "Priorisierte nächste Aktion.", "Schritt ist manuell, reversibel und freigabefähig."],
+    "closure-agent": ["Abschlussfähigkeit", "Der Umfang braucht ein klares Ende.", "Offene Blocker und Abschlusskriterien prüfen.", "Abschlussstatus mit Restpunkten.", "Kein voreiliger Abschluss ohne Nachweis."],
+    "release-agent": ["Release-Reife", "Veröffentlichungsnähe erfordert gesonderte Reifeprüfung.", "Qualitäts-, Sicherheits- und Freigabestatus bewerten.", "Release-Befund ohne Veröffentlichung.", "Kein Release oder Deployment wird gestartet."],
+    "error-analysis-agent": ["Fehleranalyse", "Fehler müssen vor Änderungen reproduziert und eingegrenzt werden.", "Symptom, Ursache und betroffene Schicht analysieren.", "Reproduzierbarer Fehlerbefund.", "Keine Änderung ohne bestätigte Ursache."],
+  });
+
+  function buildAgentPlan(blueprint) {
+    const leadId = blueprint.leadAgentId;
+    const qaId = blueprint.selectedAgentIds.includes("quality-test-agent") ? "quality-test-agent" : null;
+    const prerequisiteIds = blueprint.selectedAgentIds.filter((id) => ["project-status-agent", "health-compass-agent", "product-agent", "documentation-agent"].includes(id));
+    const domainIds = blueprint.selectedAgentIds.filter((id) => id !== leadId && id !== qaId && !prerequisiteIds.includes(id));
+    return blueprint.selectedAgentIds.map((agentId) => {
+      const agent = AGENTS_BY_ID.get(agentId);
+      const template = AGENT_ASSIGNMENT_TEMPLATES[agentId] || [agent.role, "Diese Fachperspektive ist für den erkannten Auftrag erforderlich.", `„${agent.role}“ auf den Ergebniswunsch anwenden.`, "Nachvollziehbarer Fachbefund.", "Ergebnis ist prüfbar und hält alle Sicherheitsgrenzen ein."];
+      const isLead = agentId === leadId;
+      const isQa = agentId === qaId;
+      const isPrerequisite = prerequisiteIds.includes(agentId);
+      const executionMode = isLead ? "final-consolidation" : isQa ? "dependent-review" : isPrerequisite ? "prerequisite" : "parallel";
+      const dependsOn = isLead
+        ? (qaId ? [qaId] : domainIds)
+        : isQa
+          ? [...prerequisiteIds, ...domainIds]
+          : isPrerequisite ? [] : prerequisiteIds;
+      return {
+        agentId,
+        agentName: agent.name,
+        canonicalRole: agent.role,
+        selectionReason: template[1],
+        roleInRun: template[0],
+        subtask: template[2],
+        expectedResult: template[3],
+        acceptanceCheck: template[4],
+        safetyBoundary: agentId === "integration-agent" ? "Nur interne Auswahl- und Bewertungslogik; keine Plugin-Ausführung oder externe Recherche." : "Nur Planung und Prüfung; keine automatische oder externe Ausführung.",
+        dependsOn,
+        handoffTo: isLead ? "jamal" : isQa ? leadId : (qaId || leadId),
+        executionMode,
+        toolReviewRequired: agentId === "integration-agent",
+      };
+    });
+  }
+
+  function buildToolReview(blueprint) {
+    const required = blueprint.selectedAgentIds.includes("integration-agent");
+    const categories = blueprint.signals.designRelevant
+      ? ["Spezialisiertes UI-/UX-Werkzeug", "Bildgenerierung und Retusche", "Präsentationswerkzeug", "Browserprüfung"]
+      : blueprint.signals.technicalRelevant
+        ? ["Codex als späteres Entwicklerwerkzeug", "Browserprüfung", "GitHub read-only", "Testwerkzeuge"]
+        : ["Projekt-/Wissensquelle read-only", "Qualitäts- und Browserprüfung", "bearbeitbare Fachvorlagen"];
+    return {
+      required,
+      responsibleAgentId: required ? "integration-agent" : null,
+      neededCapability: "Ein bearbeitbares, integrierbares Ergebnis mit hoher Qualität und kontrolliertem Datenfluss vorbereiten.",
+      toolCategories: categories,
+      possibleCombination: required ? categories.slice(0, 3) : [],
+      qualityAdvantage: "Spezialisierte Werkzeuge werden kombiniert, wenn dadurch Qualität, Bearbeitbarkeit oder Prüfbarkeit steigt.",
+      selectionCriteria: ["Ergebnisqualität", "Integrationsfähigkeit", "Bearbeitbarkeit", "Datenschutz und Datenabfluss", "Kostenart", "Skalierbarkeit"],
+      approvalBoundary: "Keine automatische Festlegung auf Canva und keine Werkzeugausführung ohne Jamals Freigabe.",
+      fallback: "Manuelle, lokal bearbeitbare Vorlage ohne externe Plugin-Nutzung.",
+    };
   }
 
   function createWorkProposal(run, values = {}) {
@@ -323,17 +415,19 @@
     const desiredOutcome = singleText(values.desiredOutcome, "desiredOutcome", true);
     const prohibitedToday = singleText(values.prohibitedToday, "prohibitedToday");
     const taskType = detectTaskType(desiredOutcome);
-    const blueprint = proposalBlueprint(taskType);
-    const focusAgent = run.focusProjectId === "health-upgrade-kompass" ? "Health-Kompass-Agent" : "Projektstatus-Agent";
-    blueprint.agents = blueprint.agents.map((entry) => entry[0] === "Fach-Agent des Fokusprojekts" ? [focusAgent, entry[1], entry[2]] : entry);
+    const blueprint = proposalBlueprint(taskType, run, desiredOutcome);
+    const agentPlan = buildAgentPlan(blueprint);
+    const leadAgent = AGENTS_BY_ID.get(blueprint.leadAgentId);
     const projectName = run.canonicalSnapshot?.displayName || run.focusProjectId;
     const realisticScope = `Heute einen prüfbaren ${taskType === TASK_TYPES[0] ? "Einsatzplan" : "Arbeitsstand"} für „${desiredOutcome}“ vorbereiten; keine automatische Ausführung.`;
     const acceptanceCriterion = taskType === TASK_TYPES[0]
-      ? "Ein klarer Einsatzplan benennt benötigte Agenten, eindeutige Teilaufgaben, Übergaben, Sicherheitsgrenzen und die abschließende Prüfung."
+      ? "Der Einsatzplan deckt Projektstand, Fachgrenzen, Produkt, Risiko, Datenschutz, Qualität, Technik und Werkzeuge mit begründeten Rollen, prüfbaren Ergebnissen und eindeutigen Übergaben ab."
       : `Ein nachvollziehbarer Arbeitsstand für „${desiredOutcome}“ liegt mit Prüfnachweis und offenem Entscheidungspunkt vor.`;
     const jamalDecisionQuestion = taskType === TASK_TYPES[0]
-      ? "Soll dieser Agenten-Einsatzplan in dieser Rollenverteilung später manuell freigegeben werden?"
-      : "Soll dieser begrenzte Arbeitsvorschlag später manuell zur Ausführung freigegeben werden?";
+      ? (blueprint.signals.health
+        ? "Soll die Zentrale mit diesem Agententeam die nächste Health-Prüfphase vorbereiten?"
+        : "Soll die Zentrale mit diesem Agententeam den nächsten Arbeitsschritt vorbereiten?")
+      : "Soll die Zentrale diesen fachlich begrenzten Arbeitsplan als nächsten Schritt vorbereiten?";
     let next = clone(run);
     next.dailyOutcome = { desiredOutcome, reason: `Das gewünschte Ergebnis für ${projectName} soll heute in einen realistischen, sicheren Arbeitsumfang übersetzt werden.`, acceptanceCriterion };
     next.boundary.prohibitedToday = [...new Set([...next.boundary.prohibitedToday, ...textList(prohibitedToday)])];
@@ -343,27 +437,36 @@
       understoodGoal: desiredOutcome,
       realisticDayScope: realisticScope,
       repositoryWorkRequired: blueprint.repositoryWorkRequired,
-      leadAgent: blueprint.leadAgent,
-      agentPlan: blueprint.agents.map(([agent, role, subtask], index) => ({
-        agent,
-        role,
-        subtask,
-        handoffTo: blueprint.agents[index + 1]?.[0] || "Jamal zur Entscheidung",
-      })),
-      sequence: blueprint.agents.map(([agent], index) => `${index + 1}. ${agent}`).concat("Abschluss: Jamal entscheidet manuell"),
-      toolCategories: blueprint.tools,
-      fileOrDataAreas: blueprint.areas,
-      testsAndQuality: blueprint.quality,
+      canonicalAgentRegistryCount: CANONICAL_AGENTS.length,
+      selectedAgentIds: blueprint.selectedAgentIds,
+      leadAgentId: blueprint.leadAgentId,
+      leadAgent: leadAgent.name,
+      leadAgentRole: leadAgent.role,
+      leadSelectionReason: agentPlan.find((item) => item.agentId === blueprint.leadAgentId)?.selectionReason,
+      agentPlan,
+      excludedAgentCount: CANONICAL_AGENTS.length - blueprint.selectedAgentIds.length,
+      exclusionReason: "Nicht ausgewählt, wenn die Rolle für Projekt, Ergebniswunsch, Risiko oder aktuellen Umfang keinen konkreten Mehrwert liefert.",
+      workStructure: {
+        prerequisites: agentPlan.filter((item) => item.executionMode === "prerequisite").map((item) => item.agentId),
+        parallelTasks: agentPlan.filter((item) => item.executionMode === "parallel").map((item) => item.agentId),
+        dependentReviews: agentPlan.filter((item) => item.executionMode === "dependent-review").map((item) => item.agentId),
+        finalConsolidation: blueprint.leadAgentId,
+      },
+      toolReview: buildToolReview(blueprint),
+      toolCategories: buildToolReview(blueprint).toolCategories,
+      fileOrDataAreas: blueprint.repositoryWorkRequired ? ["Freigegebene Projektdateien und lokale Prüfnachweise"] : ["Kanonische Projektakte", "strukturierter Agenten-Einsatzplan", "keine Produktions- oder Kundendaten"],
+      testsAndQuality: [acceptanceCriterion, "Jeder ausgewählte Agent liefert Begründung, Teilauftrag, Ergebnis, Prüfkriterium und Übergabe.", ...(blueprint.signals.designRelevant || blueprint.signals.health ? ["Verständnis und Vertrauen jeweils mindestens 8 von 10."] : [])],
+      designQualityFramework: (blueprint.signals.designRelevant || blueprint.signals.health) ? ["Apple statt Dubai", "hochwertig, ruhig, warm und mediterran", "natürliche Menschen statt Stock-Gesichter", "klare Verständlichkeit und Premiumwirkung", "Verständnis und Vertrauen jeweils mindestens 8/10"] : [],
       safetyAndApproval: blueprint.safety.concat(prohibitedToday ? [`Zusätzliche Grenze: ${prohibitedToday}`] : []),
       acceptanceCriterion,
       jamalDecisionQuestion,
     };
     next.codexPreparation = {
       projectPath: blueprint.repositoryWorkRequired ? (next.canonicalSnapshot.localPath || "UNGEKLÄRT") : "Nicht erforderlich – kein Repository-Auftrag",
-      allowedFiles: blueprint.areas,
+      allowedFiles: blueprint.repositoryWorkRequired ? ["Nur später ausdrücklich freigegebene Projektdateien"] : ["Kanonische Projektakte und strukturierter Einsatzplan"],
       forbiddenFiles: ["Alle nicht ausdrücklich freigegebenen Dateien oder Daten", "Produktions-, Kunden- und sensible Gesundheitsdaten"],
       targetChange: blueprint.repositoryWorkRequired ? realisticScope : `Kein Repository-Auftrag; ${taskType} als rein vorbereitenden Arbeitsplan erstellen.`,
-      tests: blueprint.quality,
+      tests: [acceptanceCriterion, "Agenten-IDs gegen das kanonische 25-Agenten-Register prüfen", "Übergaben und Abhängigkeiten vollständig prüfen"],
       gitRules: ["kein Branchwechsel", "kein Commit", "kein Push", "kein Deployment", "kein Reset"],
       fallback: "Vorschlag verwerfen oder manuell überarbeiten; keine externe oder technische Aktion wurde ausgelöst.",
       preparedPrompt: "",
@@ -452,6 +555,26 @@
     if (run.boundary?.agentExecutionBlocked !== true) errors.push("Agentenausführung ist nicht blockiert.");
     if (run.boundary?.automaticGitBlocked !== true) errors.push("Automatische Git-Aktion ist nicht blockiert.");
     if (run.boundary?.deploymentBlocked !== true) errors.push("Deployment ist nicht blockiert.");
+    errors.push(...validateAgentPlan(run.workProposal));
+    return errors;
+  }
+
+  function validateAgentPlan(proposal) {
+    if (!proposal?.selectedAgentIds) return [];
+    const errors = [];
+    const selectedIds = proposal.selectedAgentIds;
+    if (!Array.isArray(selectedIds) || selectedIds.length === 0) return ["Agentenauswahl fehlt."];
+    if (new Set(selectedIds).size !== selectedIds.length) errors.push("Agentenauswahl enthält Duplikate.");
+    if (selectedIds.some((id) => !AGENTS_BY_ID.has(id))) errors.push("Agentenauswahl enthält einen nicht-kanonischen Agenten.");
+    if (!selectedIds.includes(proposal.leadAgentId)) errors.push("Hauptverantwortlicher fehlt in der Agentenauswahl.");
+    if (!Array.isArray(proposal.agentPlan) || proposal.agentPlan.length !== selectedIds.length) errors.push("Strukturierter Agentenplan ist unvollständig.");
+    (proposal.agentPlan || []).forEach((item) => {
+      ["agentId", "selectionReason", "roleInRun", "subtask", "expectedResult", "acceptanceCheck", "safetyBoundary", "executionMode"].forEach((field) => {
+        if (!item?.[field]) errors.push(`${item?.agentId || "Agent"}: ${field} fehlt.`);
+      });
+      if (!Array.isArray(item?.dependsOn)) errors.push(`${item?.agentId || "Agent"}: dependsOn fehlt.`);
+      if (!item?.handoffTo) errors.push(`${item?.agentId || "Agent"}: handoffTo fehlt.`);
+    });
     return errors;
   }
 
@@ -491,23 +614,40 @@
     const outcome = run.dailyOutcome || {};
     const prep = run.codexPreparation || {};
     const proposal = run.workProposal || {};
-    if (proposal.taskType === TASK_TYPES[0]) {
+    if (Array.isArray(proposal.agentPlan) && proposal.agentPlan.length > 0) {
+      const planningOnly = proposal.repositoryWorkRequired === false;
       return [
-        "Bereite ausschließlich einen Agenten- und Einsatzplan vor. Dies ist kein Codex- oder Repository-Auftrag.",
+        planningOnly
+          ? "Bereite ausschließlich einen Agenten- und Einsatzplan vor. Dies ist kein Codex- oder Repository-Auftrag."
+          : "Bereite ausschließlich einen fachlichen Arbeits- und Einsatzplan vor. Codex ist nur ein späteres Werkzeug des zuständigen Agenten und wird nicht gestartet.",
         "",
         `Fokusprojekt: ${run.canonicalSnapshot?.displayName || run.focusProjectId || "UNGEKLÄRT"}`,
+        `Auftragstyp: ${proposal.taskType || "UNGEKLÄRT"}`,
         `Verstandenes Ziel: ${proposal.understoodGoal || outcome.desiredOutcome || "UNGEKLÄRT"}`,
         `Realistischer Tagesumfang: ${proposal.realisticDayScope || "UNGEKLÄRT"}`,
+        `Hauptverantwortung: ${proposal.leadAgent || "UNGEKLÄRT"} (${proposal.leadAgentId || "UNGEKLÄRT"})`,
         "",
-        "Agenten, Rollen, Teilaufgaben und Übergaben:",
-        ...(proposal.agentPlan || []).map((item) => `- ${item.agent} | ${item.role} | ${item.subtask} | Übergabe an: ${item.handoffTo}`),
+        "Ausgewählte Agenten, Begründungen, Teilaufträge und Übergaben:",
+        ...(proposal.agentPlan || []).map((item) => [
+          `- ${item.agentName || item.agent || item.agentId} | ${item.roleInRun || item.role || "Rolle ungeklärt"}`,
+          `  Warum: ${item.selectionReason || "UNGEKLÄRT"}`,
+          `  Teilauftrag: ${item.subtask || "UNGEKLÄRT"}`,
+          `  Erwartetes Ergebnis: ${item.expectedResult || "UNGEKLÄRT"}`,
+          `  Prüfkriterium: ${item.acceptanceCheck || "UNGEKLÄRT"}`,
+          `  Modus: ${item.executionMode || "UNGEKLÄRT"}; wartet auf: ${(item.dependsOn || []).join(", ") || "nichts"}; Übergabe an: ${item.handoffTo || "UNGEKLÄRT"}`,
+        ].join("\n")),
+        "",
+        "Plugin- und Werkzeugprüfung:",
+        `- Erforderlich: ${proposal.toolReview?.required ? "ja" : "nein"}`,
+        ...textList(proposal.toolReview?.toolCategories).map((item) => `- Kategorie: ${item}`),
+        `- Auswahlgrenze: ${proposal.toolReview?.approvalBoundary || "Keine Werkzeugausführung."}`,
         "",
         "Sicherheits- und Freigabegrenzen:",
         ...textList(proposal.safetyAndApproval).map((item) => `- ${item}`),
         "",
         `Abnahmekriterium: ${proposal.acceptanceCriterion || outcome.acceptanceCriterion || "UNGEKLÄRT"}`,
         `Jamal-Entscheidungsfrage: ${proposal.jamalDecisionQuestion || run.decision?.jamalDecisionQuestion || "UNGEKLÄRT"}`,
-        "Keine Agentenausführung und keine externe Aktion. Dieser Text ist nur eine manuell kopierbare Planungsvorlage.",
+        "Keine Agenten-, Codex- oder Plugin-Ausführung und keine externe Aktion. Dieser Text ist nur eine manuell kopierbare Planungsvorlage.",
       ].join("\n");
     }
     return [
@@ -662,6 +802,7 @@
     setResultReturn,
     transitionRun,
     upsertRun,
+    validateAgentPlan,
     validateReadyForCodex,
   });
 });

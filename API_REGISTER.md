@@ -4,7 +4,7 @@
 
 `server.js` registriert **41 tatsächlich vorhandene API-Routen**, alle mit Methode `GET`. Jede andere HTTP-Methode wird vor dem Routing abgewiesen. Es gibt keine API-Schreibroute.
 
-V6.40.1 ergänzt **keine neue API-Route**. Der vereinfachte Tagesstart nutzt ausschließlich `GET /api/projects` für den aktuellen kanonischen Projektstand. Aufgabenerkennung, Agentenplanung und technische Vorbelegung laufen lokal und starten keine Codex-, Agenten-, Git-, Netzwerk- oder externe Aktion. Seine Managementdaten werden nur lokal im Browser gespeichert.
+V6.40.2 ergänzt **keine neue API-Route**. Der vertiefte Einsatzplan nutzt weiterhin ausschließlich `GET /api/projects` für den aktuellen kanonischen Projektstand. Das statisch ausgelieferte `agent-registry.js` ist die gemeinsame codebasierte Quelle der vorhandenen 25 Agenten; Agentenauswahl und Werkzeugprüfung laufen lokal und starten keine Codex-, Agenten-, Plugin-, Git-, Netzwerk- oder externe Aktion. Managementdaten werden nur lokal im Browser gespeichert.
 
 Nur `/api/agents/plugin-readiness` liest HTTP-Query-Parameter. Lokale Serverkonfiguration ist eine Abhängigkeit, keine HTTP-Eingabe. Standardausgabe ist JSON. `Schreiben` bedeutet fachliche oder externe Schreibwirkung, nicht das Senden einer HTTP-Antwort.
 
@@ -56,7 +56,7 @@ Die beiden V6.39.0-Routen lesen ausschließlich die beim Serverstart geladene In
 
 ## Statische Auslieferung
 
-GET `/` und `/index.html` liefern `index.html`; GET `/daily-work-run.js` liefert das lokale, aktionsfreie Tageslaufmodell; GET `/app.js` liefert `app.js`; GET `/styles.css` liefert `styles.css`. Die statische Modulauslieferung ist keine zusätzliche API-Route. Andere statische Pfade sind nicht freigegeben.
+GET `/` und `/index.html` liefern `index.html`; GET `/agent-registry.js` liefert das kanonische 25-Agenten-Register; GET `/daily-work-run.js` liefert das lokale, aktionsfreie Tageslaufmodell; GET `/app.js` liefert `app.js`; GET `/styles.css` liefert `styles.css`. Die statische Modulauslieferung ist keine zusätzliche API-Route. Andere statische Pfade sind nicht freigegeben.
 
 ## Sicherheitsstatus
 

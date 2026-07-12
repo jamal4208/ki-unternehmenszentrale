@@ -4695,12 +4695,37 @@ function renderDailyWorkRunPreparation(run) {
 }
 
 function renderDailyWorkProposal(proposal) {
+  const plan = proposal.agentPlan || [];
+  const nameById = new Map(plan.map((item) => [item.agentId, item.agentName || item.agent || item.agentId]));
+  const modeLabel = (mode) => ({
+    prerequisite: "muss vorher erfolgen",
+    parallel: "parallel möglich",
+    "dependent-review": "wartet auf Ergebnisse",
+    "final-consolidation": "abschließende Zusammenführung",
+  })[mode] || mode || "Reihenfolge vorbereitet";
+  const displayAgent = (id) => id === "jamal" ? "Jamal" : (nameById.get(id) || id || "UNGEKLÄRT");
   const agents = (proposal.agentPlan || []).map((item) => `
-    <article class="daily-work-run-agent-card">
-      <strong>${escapeHtml(item.agent)}</strong><span>${escapeHtml(item.role)}</span>
-      <p>${escapeHtml(item.subtask)}</p><small>Übergabe an: ${escapeHtml(item.handoffTo)}</small>
+    <article class="daily-work-run-agent-card${item.agentId === proposal.leadAgentId ? " is-lead" : ""}">
+      <header>
+        <div><strong>${escapeHtml(item.agentName || item.agent || item.agentId)}</strong><span>${escapeHtml(item.roleInRun || item.role || item.canonicalRole || "Fachrolle")}</span></div>
+        <span class="daily-work-run-mode-tag">${escapeHtml(modeLabel(item.executionMode))}</span>
+      </header>
+      ${item.selectionReason ? `<p><b>Warum jetzt:</b> ${escapeHtml(item.selectionReason)}</p>` : ""}
+      <p><b>Teilauftrag:</b> ${escapeHtml(item.subtask)}</p>
+      <details>
+        <summary>Ergebnis, Prüfung und Übergabe</summary>
+        <dl>
+          <div><dt>Erwartetes Ergebnis</dt><dd>${escapeHtml(item.expectedResult || "UNGEKLÄRT")}</dd></div>
+          <div><dt>Prüfkriterium</dt><dd>${escapeHtml(item.acceptanceCheck || "UNGEKLÄRT")}</dd></div>
+          <div><dt>Sicherheitsgrenze</dt><dd>${escapeHtml(item.safetyBoundary || "Keine automatische Ausführung.")}</dd></div>
+          <div><dt>Wartet auf</dt><dd>${escapeHtml((item.dependsOn || []).map(displayAgent).join(", ") || "keine Vorarbeit")}</dd></div>
+          <div><dt>Übergabe an</dt><dd>${escapeHtml(displayAgent(item.handoffTo))}</dd></div>
+        </dl>
+      </details>
     </article>
   `).join("");
+  const workStructure = proposal.workStructure || {};
+  const toolReview = proposal.toolReview || {};
   return `
     <section class="daily-work-run-proposal" aria-labelledby="daily-work-proposal-title">
       <header><div><p class="eyebrow">Automatisch abgeleitet · nur Vorschlag</p><h4 id="daily-work-proposal-title">Arbeitsvorschlag</h4></div><span class="daily-work-run-mode">${escapeHtml(proposal.taskType)}</span></header>
@@ -4708,15 +4733,29 @@ function renderDailyWorkProposal(proposal) {
       <dl class="daily-work-run-facts">
         <div><dt>Verstandenes Ziel</dt><dd>${escapeHtml(proposal.understoodGoal)}</dd></div>
         <div><dt>Realistischer Tagesumfang</dt><dd>${escapeHtml(proposal.realisticDayScope)}</dd></div>
-        <div><dt>Federführung</dt><dd>${escapeHtml(proposal.leadAgent)}</dd></div>
+        <div><dt>Hauptverantwortlicher Agent</dt><dd><strong>${escapeHtml(proposal.leadAgent)}</strong><br>${escapeHtml(proposal.leadSelectionReason || proposal.leadAgentRole || "Einsatzleitung")}</dd></div>
         <div><dt>Abnahmekriterium</dt><dd>${escapeHtml(proposal.acceptanceCriterion)}</dd></div>
+        ${proposal.selectedAgentIds ? `<div><dt>Bewusst ausgewählt</dt><dd>${proposal.selectedAgentIds.length} von ${proposal.canonicalAgentRegistryCount} kanonischen Agenten</dd></div><div><dt>Bewusst nicht benötigt</dt><dd>${proposal.excludedAgentCount} · ${escapeHtml(proposal.exclusionReason)}</dd></div>` : ""}
       </dl>
       <div><h5>Benötigte Agenten, Rollen und Teilaufgaben</h5><div class="daily-work-run-agent-grid">${agents}</div></div>
       <div class="daily-work-run-proposal-grid">
-        <div><h5>Reihenfolge und Übergaben</h5>${dailyWorkRunList(proposal.sequence)}</div>
-        <div><h5>Plugins und Werkzeugkategorien</h5>${dailyWorkRunList(proposal.toolCategories)}</div>
+        <div><h5>Arbeitsstruktur</h5>
+          <p><b>Muss vorher erfolgen:</b> ${(workStructure.prerequisites || []).map(displayAgent).map(escapeHtml).join(", ") || "keine"}</p>
+          <p><b>Parallel möglich:</b> ${(workStructure.parallelTasks || []).map(displayAgent).map(escapeHtml).join(", ") || "keine"}</p>
+          <p><b>Wartet auf Ergebnisse:</b> ${(workStructure.dependentReviews || []).map(displayAgent).map(escapeHtml).join(", ") || "keine"}</p>
+          <p><b>Zusammenführung:</b> ${escapeHtml(displayAgent(workStructure.finalConsolidation))}</p>
+        </div>
+        <div><h5>Plugin- und Werkzeugprüfung</h5>
+          <p><b>Zuständig:</b> ${escapeHtml(displayAgent(toolReview.responsibleAgentId))}</p>
+          <p>${escapeHtml(toolReview.neededCapability || "Für diesen Umfang ist keine eigene Werkzeugprüfung nötig.")}</p>
+          ${dailyWorkRunList(toolReview.toolCategories || proposal.toolCategories)}
+          <p><b>Auswahl:</b> ${escapeHtml((toolReview.selectionCriteria || []).join(" · "))}</p>
+          <p><b>Grenze:</b> ${escapeHtml(toolReview.approvalBoundary || "Keine Werkzeugausführung.")}</p>
+          <p><b>Ersatz:</b> ${escapeHtml(toolReview.fallback || "Manuelle lokale Vorlage.")}</p>
+        </div>
         <div><h5>Dateien und Datenbereiche</h5>${dailyWorkRunList(proposal.fileOrDataAreas)}</div>
         <div><h5>Tests und Qualität</h5>${dailyWorkRunList(proposal.testsAndQuality)}</div>
+        ${(proposal.designQualityFramework || []).length ? `<div><h5>Design-Qualitätsrahmen</h5>${dailyWorkRunList(proposal.designQualityFramework)}</div>` : ""}
         <div><h5>Sicherheit und Freigabe</h5>${dailyWorkRunList(proposal.safetyAndApproval)}</div>
         <div><h5>Eine Entscheidung für Jamal</h5><p>${escapeHtml(proposal.jamalDecisionQuestion)}</p></div>
       </div>
@@ -18593,33 +18632,10 @@ function renderDemoCockpit() {
   `;
 }
 
-const PRODUCTIVE_AGENT_REGISTRY = [
-  { id: "strategy-agent", name: "Strategie-Agent", role: "Bewertet Ziel, Richtung und Priorität", category: "strategy", active: true, readOnly: true },
-  { id: "product-agent", name: "Produkt-Agent", role: "Ordnet Auftrag produktlogisch ein", category: "product", active: true, readOnly: true },
-  { id: "project-status-agent", name: "Projektstatus-Agent", role: "Verdichtet Ist-Stand und Fortschritt", category: "project", active: true, readOnly: true },
-  { id: "prioritization-agent", name: "Priorisierungs-Agent", role: "Sortiert Aufgaben nach Dringlichkeit und Nutzen", category: "prioritization", active: true, readOnly: true },
-  { id: "ui-agent", name: "UI-Agent", role: "Prüft UI-Bezug und Darstellungsfolgen", category: "ui", active: true, readOnly: true },
-  { id: "api-agent", name: "API-Agent", role: "Prüft API-Bezug und Antwortstruktur", category: "api", active: true, readOnly: true },
-  { id: "security-agent", name: "Sicherheits-Agent", role: "Bewertet Sicherheitsgrenzen und Risiken", category: "security", active: true, readOnly: true },
-  { id: "quality-test-agent", name: "QS-/Test-Agent", role: "Empfiehlt Prüf- und Testschritte", category: "quality", active: true, readOnly: true },
-  { id: "documentation-agent", name: "Dokumentations-Agent", role: "Strukturiert Übergabe und Dokumentation", category: "documentation", active: true, readOnly: true },
-  { id: "release-agent", name: "Release-Agent", role: "Bewertet Finish- und Release-Reife", category: "release", active: true, readOnly: true },
-  { id: "health-compass-agent", name: "Health-Kompass-Agent", role: "Ordnet Health-Upgrade-Kompass-Bezug ein", category: "health", active: true, readOnly: true },
-  { id: "customer-value-agent", name: "Kundenwert-Agent", role: "Bewertet Nutzen aus Kundensicht", category: "customer", active: true, readOnly: true },
-  { id: "risk-agent", name: "Risiko-Agent", role: "Identifiziert auftragsbezogene Risiken", category: "risk", active: true, readOnly: true },
-  { id: "decision-agent", name: "Entscheidungs-Agent", role: "Formuliert Entscheidungsoptionen read-only", category: "decision", active: true, readOnly: true },
-  { id: "next-actions-agent", name: "Nächste-Aktionen-Agent", role: "Leitet konkrete nächste Schritte ab", category: "actions", active: true, readOnly: true },
-  { id: "open-points-agent", name: "Open-Points-Agent", role: "Sammelt offene Klärungspunkte", category: "open-points", active: true, readOnly: true },
-  { id: "workflow-agent", name: "Workflow-Agent", role: "Bewertet Ablauf und Reihenfolge", category: "workflow", active: true, readOnly: true },
-  { id: "data-structure-agent", name: "Datenstruktur-Agent", role: "Prüft Daten- und Ergebnisstruktur", category: "data", active: true, readOnly: true },
-  { id: "integration-agent", name: "Integrations-Agent", role: "Bewertet Integrationsbezug ohne Ausführung", category: "integration", active: true, readOnly: true },
-  { id: "communication-agent", name: "Kommunikations-Agent", role: "Formuliert Übergabe und Kommunikation", category: "communication", active: true, readOnly: true },
-  { id: "operations-agent", name: "Betriebs-Agent", role: "Bewertet Betriebs- und Nutzbarkeit", category: "operations", active: true, readOnly: true },
-  { id: "error-analysis-agent", name: "Fehleranalyse-Agent", role: "Analysiert Fehlerursachen read-only", category: "error", active: true, readOnly: true },
-  { id: "review-agent", name: "Review-Agent", role: "Führt read-only Qualitätsreview durch", category: "review", active: true, readOnly: true },
-  { id: "closure-agent", name: "Abschluss-Agent", role: "Bewertet Abschluss- und Finish-Fähigkeit", category: "closure", active: true, readOnly: true },
-  { id: "orchestrator-agent", name: "Orchestrator-Agent", role: "Koordiniert Agentenperspektiven read-only", category: "orchestration", active: true, readOnly: true },
-];
+const PRODUCTIVE_AGENT_REGISTRY = window.AgentRegistry?.PRODUCTIVE_AGENT_REGISTRY || [];
+if (PRODUCTIVE_AGENT_REGISTRY.length !== 25) {
+  throw new Error("Das kanonische Register mit 25 Hauptagenten ist nicht verfügbar.");
+}
 
 const AGENT_INTENT_ROUTING = {
   "project-status": [
