@@ -2,14 +2,31 @@
 
 ## Git- und Versionsstand
 
-- Version: **V6.40.3 – Kontrollierte Agenten-Prüfphase**
-- Ausgangs-HEAD für V6.40.3: `8dc8ef9`
-- Produktstand V6.40.2: `8dc8ef9` (auf `origin/main` gesichert)
+- Version: **V6.41.0 – Lokale Datensicherung**
+- Ausgangs-HEAD für V6.41.0: `a7a149f`
+- Produktstand V6.40.3: `a7a149f` (auf `origin/main` gesichert)
 - Branch: `main`
-- Upstream vor Beginn: `origin/main` auf `8dc8ef9`, synchron
-- Working Tree vor V6.40.3: sauber; V6.40.3 bleibt auftragsgemäß uncommitted und ungepusht
+- Upstream: `origin/main` auf `a7a149f`, synchron
+- Working Tree: lokal geändert für V6.41.0; noch nicht committed
 
-## V6.40.3 – aktueller Funktionsstand
+## V6.41.0 – aktueller Funktionsstand
+
+- `local-data-backup.js` exportiert und importiert ausschließlich `ki-unternehmenszentrale-v1` und `ki-unternehmenszentrale-daily-work-runs-v1`.
+- Export als JSON mit Formatversion, Zeitpunkt, Prüfinformation und Sicherheitshinweis.
+- Import prüft vollständig vor jeder Änderung, zeigt Vorschau und erfordert Jamals ausdrückliche Bestätigung.
+- Vor Import wird der bestehende lokale Zustand intern gesichert; bei Schreibfehlern erfolgt Rollback.
+- Kein `localStorage.clear()`, kein pauschales Löschen, keine Überschreibung kanonischer Register.
+- UI-Anbindung minimal im Tageslaufbereich unter „Lokale Datensicherung“.
+- 17 Projekte, 25 Agenten, 41 GET-Routen und alle Ausführungsverbote bleiben erhalten.
+
+## Architektur-Freeze
+
+- Keine weiteren verschachtelten Vorbereitungskarten.
+- Neue Kernfunktionen als eigenständige Module.
+- `app.js` und `server.js` nicht unkontrolliert vergrößern.
+- Agenten-Laufzeit und Plugins erst nach Datensicherung und Modularisierung.
+
+## V6.40.3 – gesicherter Ausgangsstand
 
 - Ein gültiger V6.40.2-Agentenplan kann ausschließlich nach Jamals ausdrücklicher Freigabe in interne Arbeitskarten überführt werden.
 - Arbeitskarten entstehen nur für ausgewählte Agenten und enthalten Rolle, Teilauftrag, Ergebnisziel, Prüfkriterium, Sicherheitsgrenze, Abhängigkeiten, Übergabe, Quelle, Status und manuelle Befundfelder.
@@ -63,7 +80,9 @@
 - `project-registry.test.js` – automatisierte Register-, API- und Persistenzgrenzen
 - `agent-registry.js` – einziges kanonisches Register für 25 Hauptagenten und Rollen-Zuordnungen
 - `daily-work-run.js` – Tageslaufmodell, Agentenauswahl und manuelle Statusübergänge
-- `daily-work-run.test.js` – 64 automatisierte Tageslauf-, Agenten-, Eingabe-, Speicher- und Sicherheitsprüfungen
+- `daily-work-run.test.js` – automatisierte Tageslauf-, Agenten-, Eingabe-, Speicher- und Sicherheitsprüfungen
+- `local-data-backup.js` – Export, Import, Validierung und Rollback für lokale Browserdaten
+- `local-data-backup.test.js` – automatisierte Datensicherungsprüfungen
 - `styles.css` – Designsystem und Oberflächenregeln
 - `package.json` – Start- und Syntaxprüfungen
 - `package-lock.json` – Lockfile ohne installierte Paketabhängigkeiten
@@ -80,6 +99,7 @@ Die Zentrale ist als lokaler read-only Arbeits-, Entscheidungs- und Demo-Stand p
 
 - `npm test` → 20 Register-, Health-, API- und localStorage-Prüfpunkte
 - `npm test` führt zusätzlich 96 Tageslauf-, Agentenplan- und Prüfphasen-Prüfpunkte aus
+- `npm test` führt zusätzlich 17 Datensicherungs-Prüfpunkte aus
 - `npm run check` prüft Agentenregister, Tageslauf, UI, Server und Projektregister syntaktisch
 - `npm start` → `node server.js`
 - manuelle lokale Browser- und GET-API-Prüfungen

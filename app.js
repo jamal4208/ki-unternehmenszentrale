@@ -11,6 +11,15 @@ const dailyWorkRunUiState = {
   error: null,
 };
 
+const localDataBackupUiState = {
+  pendingExport: null,
+  preview: null,
+  statusMessage: null,
+  statusType: null,
+  importToken: null,
+  lastCompletedImportToken: null,
+};
+
 const projectLifecycleStatuses = [
   "Idee",
   "Analyse",
@@ -4994,12 +5003,84 @@ function renderDailyWorkRunClosure(run) {
   `;
 }
 
+function localDataBackupApi() {
+  return window.LocalDataBackup || null;
+}
+
+function resetLocalDataBackupFlow() {
+  localDataBackupUiState.pendingExport = null;
+  localDataBackupUiState.preview = null;
+  localDataBackupUiState.importToken = null;
+}
+
+function reloadApplicationStateFromStorage() {
+  const fresh = loadState();
+  state.projects = fresh.projects;
+  state.tickets = fresh.tickets;
+  state.knowledge = fresh.knowledge;
+  state.selectedDraftId = fresh.selectedDraftId;
+  state.selectedDetailId = fresh.selectedDetailId;
+  state.dailyFocusProjectId = fresh.dailyFocusProjectId;
+  state.dailyFocusReasons = fresh.dailyFocusReasons;
+  state.dailyFocusQuestions = fresh.dailyFocusQuestions;
+  state.dailyFocusDecisionTemplates = fresh.dailyFocusDecisionTemplates;
+  state.dailyFocusDecisionStatuses = fresh.dailyFocusDecisionStatuses;
+  if (window.DailyWorkRun) {
+    dailyWorkRunUiState.store = window.DailyWorkRun.loadDailyStore(window.localStorage);
+  }
+  renderAll();
+}
+
+function renderLocalDataBackupSection() {
+  const backupApi = localDataBackupApi();
+  if (!backupApi) {
+    return `<p class="daily-work-run-storage-note">Datensicherung ist derzeit nicht verfügbar.</p>`;
+  }
+  const preview = localDataBackupUiState.preview;
+  const statusClass =
+    localDataBackupUiState.statusType === "success"
+      ? "daily-work-run-backup-status daily-work-run-backup-status--success"
+      : localDataBackupUiState.statusType === "error"
+        ? "daily-work-run-backup-status daily-work-run-backup-status--error"
+        : "daily-work-run-backup-status";
+  return `
+    <details class="daily-work-run-backup">
+      <summary>Lokale Datensicherung</summary>
+      <p class="daily-work-run-storage-note">Exportiert und stellt ausschließlich lokale Browser-Arbeitsdaten wieder her. Kanonische Projekt- und Agentenregister bleiben unverändert.</p>
+      <div class="daily-work-run-backup-actions">
+        <button class="secondary-button" type="button" data-export-local-backup>Daten exportieren</button>
+        <label class="daily-work-run-backup-file">
+          <span class="secondary-button">Sicherung auswählen</span>
+          <input type="file" accept="application/json,.json" data-import-local-backup-file hidden />
+        </label>
+      </div>
+      ${preview ? `
+        <article class="daily-work-run-backup-preview" aria-live="polite">
+          <p class="eyebrow">Import-Vorschau · noch nicht übernommen</p>
+          <dl class="daily-work-run-facts">
+            <div><dt>Exportzeitpunkt</dt><dd>${escapeHtml(preview.exportedAt)}</dd></div>
+            <div><dt>Enthaltene Bereiche</dt><dd>${escapeHtml(preview.storageAreas.map((entry) => `${entry.label}${entry.emptyInBackup ? " (leer)" : ""}`).join(" · "))}</dd></div>
+            <div><dt>Tagesläufe in Sicherung</dt><dd>${escapeHtml(String(preview.dailyRunCount))}</dd></div>
+            <div><dt>Überschreibt vorhandene Daten</dt><dd>${escapeHtml([preview.overwrite.management ? "Managementdaten" : null, preview.overwrite.daily ? "Tagesläufe" : null].filter(Boolean).join(" · ") || "Keine vorhandenen lokalen Daten")}</dd></div>
+          </dl>
+          <p class="daily-work-run-backup-warning">${escapeHtml(preview.safetyNotice)}</p>
+          <div class="daily-work-run-backup-actions">
+            <button class="primary-button" type="button" data-confirm-local-backup-import>Import ausdrücklich bestätigen</button>
+            <button class="secondary-button" type="button" data-cancel-local-backup-import>Abbrechen</button>
+          </div>
+        </article>
+      ` : ""}
+      ${localDataBackupUiState.statusMessage ? `<p class="${statusClass}">${escapeHtml(localDataBackupUiState.statusMessage)}</p>` : ""}
+    </details>
+  `;
+}
+
 function renderDailyWorkRun() {
   const output = byId("daily-work-run-output");
   if (!output) return;
   const api = dailyWorkRunApi();
   if (!api) {
-    output.innerHTML = `<article class="daily-work-run-notice daily-work-run-notice--warning"><strong>UNGEKLÄRT</strong><p>Tagesarbeitslauf-Modul ist nicht verfügbar.</p></article>`;
+    output.innerHTML = `<article class="daily-work-run-notice daily-work-run-notice--warning"><strong>UNGEKLÄRT</strong><p>Tagesarbeitslauf-Modul ist nicht verfügbar.</p></article>${renderLocalDataBackupSection()}`;
     return;
   }
 
@@ -5013,6 +5094,7 @@ function renderDailyWorkRun() {
         <button class="primary-button" type="button" data-start-daily-work-run>Tageslauf manuell beginnen</button>
       </article>
       <p class="daily-work-run-storage-note">Arbeitsdaten werden lokal in diesem Browser gespeichert. Kanonische Projekt-, Git- und Testdaten werden dadurch nicht verändert.</p>
+      ${renderLocalDataBackupSection()}
     `;
     return;
   }
@@ -5066,7 +5148,105 @@ function renderDailyWorkRun() {
     ${run.workProposal?.taskType === "Agenten- und Einsatzplanung" ? "" : renderDailyWorkRunResultReturn(run)}
     ${run.workProposal?.taskType === "Agenten- und Einsatzplanung" ? "" : renderDailyWorkRunClosure(run)}
     <p class="daily-work-run-storage-note">Arbeitsdaten werden lokal in diesem Browser gespeichert. Kanonische Projekt-, Git- und Testdaten werden dadurch nicht verändert.</p>
+    ${renderLocalDataBackupSection()}
   `;
+}
+
+function setupLocalDataBackup() {
+  document.addEventListener("click", (event) => {
+    const exportButton = event.target.closest("[data-export-local-backup]");
+    if (exportButton) {
+      try {
+        const backupApi = localDataBackupApi();
+        if (!backupApi) throw new Error("Datensicherung ist nicht verfügbar.");
+        const json = backupApi.exportLocalDataJson(window.localStorage);
+        const blob = new Blob([json], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `ki-unternehmenszentrale-backup-${new Date().toISOString().slice(0, 10)}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+        localDataBackupUiState.statusType = "success";
+        localDataBackupUiState.statusMessage = "Sicherung exportiert. Es wurde keine externe Aktion ausgelöst.";
+        renderDailyWorkRun();
+        showToast("Lokale Datensicherung exportiert.");
+      } catch (error) {
+        localDataBackupUiState.statusType = "error";
+        localDataBackupUiState.statusMessage = error.message;
+        renderDailyWorkRun();
+        showToast(error.message);
+      }
+      return;
+    }
+
+    const cancelButton = event.target.closest("[data-cancel-local-backup-import]");
+    if (cancelButton) {
+      resetLocalDataBackupFlow();
+      localDataBackupUiState.statusType = null;
+      localDataBackupUiState.statusMessage = "Import abgebrochen. Bestehende lokale Daten bleiben unverändert.";
+      renderDailyWorkRun();
+      showToast("Import abgebrochen.");
+      return;
+    }
+
+    const confirmButton = event.target.closest("[data-confirm-local-backup-import]");
+    if (confirmButton) {
+      try {
+        const backupApi = localDataBackupApi();
+        if (!backupApi || !localDataBackupUiState.pendingExport) {
+          throw new Error("Es liegt keine geprüfte Import-Vorschau vor.");
+        }
+        const token = localDataBackupUiState.importToken;
+        backupApi.importLocalData(window.localStorage, localDataBackupUiState.pendingExport, {
+          confirmed: true,
+          importToken: token,
+          lastCompletedImportToken: localDataBackupUiState.lastCompletedImportToken,
+        });
+        localDataBackupUiState.lastCompletedImportToken = token;
+        resetLocalDataBackupFlow();
+        reloadApplicationStateFromStorage();
+        localDataBackupUiState.statusType = "success";
+        localDataBackupUiState.statusMessage = "Import abgeschlossen. Bitte bei Bedarf per Reload prüfen.";
+        renderDailyWorkRun();
+        showToast("Lokale Sicherung importiert. Keine Agenten- oder externe Aktion ausgelöst.");
+      } catch (error) {
+        localDataBackupUiState.statusType = "error";
+        localDataBackupUiState.statusMessage = error.message;
+        renderDailyWorkRun();
+        showToast(error.message);
+      }
+    }
+  });
+
+  document.addEventListener("change", async (event) => {
+    if (!event.target.matches("[data-import-local-backup-file]")) return;
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const backupApi = localDataBackupApi();
+      if (!backupApi) throw new Error("Datensicherung ist nicht verfügbar.");
+      const text = await file.text();
+      const parsed = backupApi.parseExportJson(text);
+      if (!parsed.ok) throw new Error(parsed.error);
+      const validation = backupApi.validateImportPayload(parsed.export, window.localStorage);
+      if (!validation.ok) throw new Error(validation.error);
+      localDataBackupUiState.pendingExport = parsed.export;
+      localDataBackupUiState.preview = validation.preview;
+      localDataBackupUiState.importToken = `import-${Date.now()}`;
+      localDataBackupUiState.statusType = null;
+      localDataBackupUiState.statusMessage = null;
+      renderDailyWorkRun();
+      showToast("Import-Vorschau bereit. Bitte ausdrücklich bestätigen.");
+    } catch (error) {
+      resetLocalDataBackupFlow();
+      localDataBackupUiState.statusType = "error";
+      localDataBackupUiState.statusMessage = error.message;
+      renderDailyWorkRun();
+      showToast(error.message);
+    }
+  });
 }
 
 function setupDailyWorkRun() {
@@ -50962,6 +51142,7 @@ function restoreDraft() {
 setupNavigation();
 setupForms();
 setupDailyWorkRun();
+setupLocalDataBackup();
 renderAll();
 refreshCanonicalProjectRegistry();
 refreshCockpitWorkData();
