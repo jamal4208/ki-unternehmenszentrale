@@ -4,6 +4,8 @@
 
 `server.js` registriert **41 tatsächlich vorhandene API-Routen**, alle mit Methode `GET`. Jede andere HTTP-Methode wird vor dem Routing abgewiesen. Es gibt keine API-Schreibroute.
 
+V6.40.0 ergänzt **keine neue API-Route**. Der geführte Tagesarbeitslauf nutzt ausschließlich `GET /api/projects` für den aktuellen kanonischen Projektstand. Der Lauf startet keine Codex-, Agenten-, Git-, Netzwerk- oder externe Aktion. Seine Managementdaten werden nur lokal im Browser gespeichert.
+
 Nur `/api/agents/plugin-readiness` liest HTTP-Query-Parameter. Lokale Serverkonfiguration ist eine Abhängigkeit, keine HTTP-Eingabe. Standardausgabe ist JSON. `Schreiben` bedeutet fachliche oder externe Schreibwirkung, nicht das Senden einer HTTP-Antwort.
 
 | Nr. | GET-Pfad | Zweck / Modul | HTTP-Eingaben → Ausgabe | Sicherheitsstatus | Extern | Schreiben | Reifegrad / Abhängigkeiten |
@@ -54,7 +56,7 @@ Die beiden V6.39.0-Routen lesen ausschließlich die beim Serverstart geladene In
 
 ## Statische Auslieferung
 
-GET `/` und `/index.html` liefern `index.html`; GET `/app.js` liefert `app.js`; GET `/styles.css` liefert `styles.css`. Andere statische Pfade sind nicht freigegeben.
+GET `/` und `/index.html` liefern `index.html`; GET `/daily-work-run.js` liefert das lokale, aktionsfreie Tageslaufmodell; GET `/app.js` liefert `app.js`; GET `/styles.css` liefert `styles.css`. Die statische Modulauslieferung ist keine zusätzliche API-Route. Andere statische Pfade sind nicht freigegeben.
 
 ## Sicherheitsstatus
 

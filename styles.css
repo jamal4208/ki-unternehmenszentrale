@@ -66,6 +66,369 @@
   --badge-blocked-fg: #8f5a50;
 }
 
+/* V6.40.0 — geführter Tagesarbeitslauf */
+.daily-work-run-section {
+  display: grid;
+  gap: 18px;
+  margin-bottom: 24px;
+  padding: clamp(18px, 3vw, 30px);
+  border: 1px solid var(--line-strong);
+  border-radius: 20px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(247, 243, 236, 0.96));
+  box-shadow: 0 20px 50px rgba(50, 39, 25, 0.08);
+}
+
+.daily-work-run-head,
+.daily-work-run-toolbar,
+.daily-work-run-project-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.daily-work-run-head h3,
+.daily-work-run-stage h4,
+.daily-work-run-project-card h4,
+.daily-work-run-start-card h4,
+.daily-work-run-prompt h4 {
+  margin: 4px 0 8px;
+}
+
+.daily-work-run-head p,
+.daily-work-run-stage p,
+.daily-work-run-project-card p,
+.daily-work-run-start-card p,
+.daily-work-run-prompt p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.daily-work-run-output {
+  display: grid;
+  gap: 16px;
+}
+
+.daily-work-run-start-card,
+.daily-work-run-notice,
+.daily-work-run-prompt,
+.daily-work-run-stage,
+.daily-work-run-project-card,
+.daily-work-run-snapshot {
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
+}
+
+.daily-work-run-start-card,
+.daily-work-run-notice,
+.daily-work-run-prompt,
+.daily-work-run-project-card,
+.daily-work-run-snapshot {
+  padding: 18px;
+}
+
+.daily-work-run-start-card {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+}
+
+.daily-work-run-notice--warning,
+.daily-work-run-error {
+  border-color: #e3bd78;
+  background: var(--amber-soft);
+  color: #69440a;
+}
+
+.daily-work-run-error {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid #e3bd78;
+  border-radius: 10px;
+}
+
+.daily-work-run-toolbar {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-strong);
+}
+
+.daily-work-run-toolbar > div:first-child {
+  display: grid;
+  gap: 5px;
+}
+
+.daily-work-run-status,
+.daily-work-run-mode {
+  display: inline-flex;
+  width: fit-content;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: var(--teal-soft);
+  color: var(--teal);
+  font-size: var(--text-xs);
+  font-weight: 750;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.daily-work-run-progress {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.daily-work-run-progress span {
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: var(--badge-neutral-bg);
+  color: var(--badge-neutral-fg);
+  font-size: var(--text-xs);
+}
+
+.daily-work-run-progress .is-current {
+  background: var(--blue-soft);
+  color: var(--blue);
+  font-weight: 700;
+}
+
+.daily-work-run-progress .is-complete {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.daily-work-run-stage {
+  display: grid;
+  grid-template-columns: 44px repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  padding: 18px;
+}
+
+.daily-work-run-stage-number {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  grid-row: 1 / span 2;
+  border-radius: 11px;
+  background: var(--executive-ink);
+  color: #fff;
+  font-weight: 750;
+}
+
+.daily-work-run-stage > div:nth-child(2) {
+  grid-column: 2 / -1;
+}
+
+.daily-work-run-field--wide {
+  grid-column: 2 / -1;
+}
+
+.daily-work-run-field {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  color: var(--ink);
+  font-size: var(--text-sm);
+  font-weight: 650;
+}
+
+.daily-work-run-field input,
+.daily-work-run-field select,
+.daily-work-run-field textarea,
+.daily-work-run-prompt textarea {
+  width: 100%;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  padding: 11px 12px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.daily-work-run-field input:focus,
+.daily-work-run-field select:focus,
+.daily-work-run-field textarea:focus,
+.daily-work-run-prompt textarea:focus {
+  outline: none;
+  box-shadow: var(--focus);
+}
+
+.daily-work-run-field input:disabled,
+.daily-work-run-field select:disabled,
+.daily-work-run-field textarea:disabled {
+  opacity: 0.78;
+  background: var(--card-bg-muted);
+}
+
+.daily-work-run-form {
+  display: contents;
+}
+
+.daily-work-run-boundaries {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.daily-work-run-boundaries span {
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: var(--red-soft);
+  color: var(--red);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+
+.daily-work-run-project-card {
+  display: grid;
+  gap: 14px;
+}
+
+.daily-work-run-project-card.is-health-pilot {
+  border-color: rgba(15, 118, 110, 0.38);
+  box-shadow: 0 14px 34px rgba(15, 118, 110, 0.08);
+}
+
+.daily-work-run-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.daily-work-run-facts > div {
+  min-width: 0;
+  padding: 11px 12px;
+  border-radius: 9px;
+  background: var(--card-bg-muted);
+}
+
+.daily-work-run-facts dt {
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 650;
+}
+
+.daily-work-run-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.daily-work-run-snapshot-note,
+.daily-work-run-health-boundary,
+.daily-work-run-storage-note {
+  padding: 11px 13px;
+  border-radius: 9px;
+  background: var(--blue-soft);
+  color: #23446c;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.daily-work-run-health-boundary {
+  background: var(--teal-soft);
+  color: #165e58;
+}
+
+.daily-work-run-health-boundary p + p {
+  margin-top: 7px;
+}
+
+.daily-work-run-storage-note {
+  margin: 0;
+  border: 1px solid rgba(37, 90, 155, 0.18);
+}
+
+.daily-work-run-snapshot summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.daily-work-run-snapshot[open] summary {
+  margin-bottom: 12px;
+}
+
+.daily-work-run-prompt {
+  display: grid;
+  gap: 12px;
+  border-color: rgba(109, 63, 179, 0.3);
+}
+
+.daily-work-run-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
+.daily-work-run-history-preview {
+  display: grid;
+  gap: 9px;
+}
+
+.daily-work-run-history-preview pre {
+  max-width: 100%;
+  margin: 0;
+  overflow: auto;
+  padding: 13px;
+  border-radius: 9px;
+  background: #171512;
+  color: #f7f2e9;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.daily-work-run-stage.is-final {
+  border-color: rgba(63, 125, 70, 0.35);
+}
+
+.daily-work-run-empty {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+@media (max-width: 760px) {
+  .daily-work-run-head,
+  .daily-work-run-toolbar,
+  .daily-work-run-project-card > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .daily-work-run-progress {
+    justify-content: flex-start;
+  }
+
+  .daily-work-run-stage {
+    grid-template-columns: 38px minmax(0, 1fr);
+    padding: 15px;
+  }
+
+  .daily-work-run-stage > div:nth-child(2),
+  .daily-work-run-field,
+  .daily-work-run-field--wide {
+    grid-column: 2 / -1;
+  }
+
+  .daily-work-run-facts {
+    grid-template-columns: 1fr;
+  }
+}
+
 * {
   box-sizing: border-box;
 }

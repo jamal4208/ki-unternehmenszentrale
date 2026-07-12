@@ -6,6 +6,11 @@ const canonicalProjectRegistryState = {
   error: null,
 };
 
+const dailyWorkRunUiState = {
+  store: null,
+  error: null,
+};
+
 const projectLifecycleStatuses = [
   "Idee",
   "Analyse",
@@ -1811,6 +1816,12 @@ const defaultKnowledge = [
 ];
 
 const state = loadState();
+
+if (window.DailyWorkRun) {
+  dailyWorkRunUiState.store = window.DailyWorkRun.loadDailyStore(window.localStorage);
+} else {
+  dailyWorkRunUiState.error = "Tagesarbeitslauf-Modul ist nicht verfügbar.";
+}
 
 function mergeDefaultKnowledge(knowledge) {
   const existing = Array.isArray(knowledge) ? knowledge : [];
@@ -4471,7 +4482,588 @@ function assignAgents(idea) {
   return [...new Set(assigned)];
 }
 
+function dailyWorkRunApi() {
+  return window.DailyWorkRun || null;
+}
+
+function getActiveDailyWorkRun() {
+  const api = dailyWorkRunApi();
+  return api && dailyWorkRunUiState.store ? api.getActiveRun(dailyWorkRunUiState.store) : null;
+}
+
+function saveDailyWorkRun(run) {
+  const api = dailyWorkRunApi();
+  if (!api) throw new Error("Tagesarbeitslauf-Modul ist nicht verfügbar.");
+  dailyWorkRunUiState.store = api.saveDailyStore(
+    window.localStorage,
+    api.upsertRun(dailyWorkRunUiState.store || api.createStore(), run),
+  );
+  dailyWorkRunUiState.error = null;
+  renderDailyWorkRun();
+  return run;
+}
+
+function canonicalProjectsForDailyWorkRun() {
+  const payload = canonicalProjectRegistryState.payload;
+  if (
+    canonicalProjectRegistryState.status !== "ready" ||
+    payload?.writeOperationsBlocked !== true ||
+    payload?.madeExternalRequest !== false ||
+    !Array.isArray(payload?.projects)
+  ) {
+    return [];
+  }
+  return payload.projects.slice();
+}
+
+function currentCanonicalDailyProject(projectId) {
+  const api = dailyWorkRunApi();
+  if (!api) return { available: false, status: "UNGEKLÄRT", project: null };
+  return api.currentCanonicalProject(canonicalProjectRegistryState.payload, projectId);
+}
+
+function localManagementProjectForCanonical(canonicalProject) {
+  if (!canonicalProject) return null;
+  const keys = new Set(
+    [canonicalProject.id, canonicalProject.displayName, ...(canonicalProject.aliases || []), ...(canonicalProject.legacyIds || [])]
+      .map(comparableText)
+      .filter(Boolean),
+  );
+  return state.projects.find((project) =>
+    [project.id, project.title, project.name]
+      .map(comparableText)
+      .filter(Boolean)
+      .some((key) => keys.has(key)),
+  ) || null;
+}
+
+function dailyWorkRunLines(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item || "").trim()).filter(Boolean);
+  return String(value || "").split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+}
+
+function dailyWorkRunList(value, fallback = "UNGEKLÄRT") {
+  const items = dailyWorkRunLines(value);
+  if (items.length === 0) return `<p class="daily-work-run-empty">${escapeHtml(fallback)}</p>`;
+  return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+}
+
+function dailyWorkRunRemoteRefs(remoteRefs) {
+  const entries = Object.entries(remoteRefs || {});
+  if (entries.length === 0) return "UNGEKLÄRT";
+  return entries.map(([name, value]) => `${escapeHtml(name)} → ${escapeHtml(value)}`).join("<br>");
+}
+
+function dailyWorkRunStatusLabel(status) {
+  const labels = {
+    DRAFT: "Vorbereitung offen",
+    READY_FOR_CODEX: "Codex-Auftrag manuell vorbereitet",
+    RESULT_RECORDED: "Ergebnis manuell zurückgeführt",
+    CLOSED: "Tageslauf abgeschlossen",
+    OPEN: "Tageslauf bewusst offen",
+  };
+  return labels[status] || "UNGEKLÄRT";
+}
+
+function dailyWorkRunStepClass(run, step) {
+  const order = { DRAFT: 1, READY_FOR_CODEX: 2, RESULT_RECORDED: 3, CLOSED: 4, OPEN: 4 };
+  const current = order[run.status] || 1;
+  return current > step ? "is-complete" : current === step ? "is-current" : "";
+}
+
+function renderDailyWorkRunCurrentProject(run) {
+  if (!run.focusProjectId) {
+    return `
+      <article class="daily-work-run-notice">
+        <strong>Noch kein Fokusprojekt ausgewählt.</strong>
+        <p>Es wird bewusst kein Projekt automatisch gesetzt. Health Upgrade Kompass ist nur die empfohlene erste Pilotwahl.</p>
+      </article>
+    `;
+  }
+
+  const current = currentCanonicalDailyProject(run.focusProjectId);
+  if (!current.available) {
+    return `
+      <article class="daily-work-run-notice daily-work-run-notice--warning">
+        <strong>Aktueller verifizierter Stand: UNGEKLÄRT</strong>
+        <p>Die kanonische Register-API ist nicht verfügbar. Gespeicherte localStorage-Werte werden nicht als technische Wahrheit verwendet.</p>
+      </article>
+      ${renderDailyWorkRunSnapshot(run.canonicalSnapshot)}
+    `;
+  }
+
+  const project = current.project;
+  const healthPilot = project.id === "health-upgrade-kompass";
+  return `
+    <article class="daily-work-run-project-card${healthPilot ? " is-health-pilot" : ""}">
+      <header>
+        <div>
+          <p class="eyebrow">${healthPilot ? "Empfohlener technischer Pilot" : "Kanonisches Fokusprojekt"}</p>
+          <h4>${escapeHtml(project.displayName)}</h4>
+        </div>
+        <span class="daily-work-run-mode">${escapeHtml(project.portfolioMode || "UNGEKLÄRT")}</span>
+      </header>
+      <p>${escapeHtml(project.currentStatus || "UNGEKLÄRT")}</p>
+      <dl class="daily-work-run-facts">
+        <div><dt>Verifizierung</dt><dd>${escapeHtml(project.verificationStatus || "UNGEKLÄRT")}</dd></div>
+        <div><dt>Letzte Verifizierung</dt><dd>${escapeHtml(project.lastVerifiedAt || "UNGEKLÄRT")}</dd></div>
+        <div><dt>Projektordner</dt><dd>${escapeHtml(project.localPath || "UNGEKLÄRT")}</dd></div>
+        <div><dt>Repository</dt><dd>${escapeHtml(project.repositoryUrl || "UNGEKLÄRT")}</dd></div>
+        <div><dt>Branch</dt><dd>${escapeHtml(project.localBranch || "UNGEKLÄRT")}</dd></div>
+        <div><dt>HEAD</dt><dd>${escapeHtml(project.localHead || "UNGEKLÄRT")}</dd></div>
+        <div><dt>Remote-Referenzen</dt><dd>${dailyWorkRunRemoteRefs(project.remoteRefs)}</dd></div>
+        <div><dt>Testbefehl</dt><dd>${escapeHtml(project.testCommand || "UNGEKLÄRT")}</dd></div>
+        <div><dt>Letzter Teststand</dt><dd>${escapeHtml(project.testStatus || "UNGEKLÄRT")}</dd></div>
+        <div><dt>Consent-Fix</dt><dd>${escapeHtml(project.consentFixStatus || "nicht projektspezifisch dokumentiert")}</dd></div>
+      </dl>
+      <div class="daily-work-run-snapshot-note">${escapeHtml(canonicalProjectRegistryState.payload?.snapshotNotice || "Technische Momentaufnahme; keine automatische Live-Aktualisierung.")}</div>
+      ${healthPilot ? `
+        <div class="daily-work-run-health-boundary">
+          <strong>Health-Grenze</strong>
+          <p>Nur technischer Pilot. Health und Expansion bleiben fachlich getrennt, obwohl die technische Basis teilweise gemeinsam ist.</p>
+          <p>Keine Gesundheits- oder Kundendaten. Keine medizinische, fachliche, rechtliche oder öffentliche Freigabe. Kein Deployment.</p>
+        </div>
+      ` : ""}
+      ${dailyWorkRunList(project.notes, "Keine zusätzlichen Projektnotizen.")}
+    </article>
+    ${renderDailyWorkRunSnapshot(run.canonicalSnapshot)}
+  `;
+}
+
+function renderDailyWorkRunSnapshot(snapshot) {
+  if (!snapshot?.capturedAt) return "";
+  return `
+    <details class="daily-work-run-snapshot">
+      <summary>Historische Tagesstart-Momentaufnahme anzeigen</summary>
+      <p><strong>${escapeHtml(snapshot.snapshotNotice)}</strong></p>
+      <dl class="daily-work-run-facts">
+        <div><dt>Erfasst</dt><dd>${escapeHtml(snapshot.capturedAt)}</dd></div>
+        <div><dt>Modus</dt><dd>${escapeHtml(snapshot.portfolioMode || "UNGEKLÄRT")}</dd></div>
+        <div><dt>Branch</dt><dd>${escapeHtml(snapshot.localBranch || "UNGEKLÄRT")}</dd></div>
+        <div><dt>HEAD</dt><dd>${escapeHtml(snapshot.localHead || "UNGEKLÄRT")}</dd></div>
+        <div><dt>Teststand</dt><dd>${escapeHtml(snapshot.testStatus || "UNGEKLÄRT")}</dd></div>
+      </dl>
+    </details>
+  `;
+}
+
+function renderDailyWorkRunPreparation(run) {
+  const locked = run.status !== "DRAFT";
+  const prep = run.codexPreparation || {};
+  const defaultForbidden = prep.forbiddenFiles?.length ? prep.forbiddenFiles.join("\n") : "Alle nicht ausdrücklich erlaubten Dateien";
+  const defaultTests = prep.tests?.length ? prep.tests.join("\n") : "npm test\nnpm run check\ngit diff --check\ngit status --short";
+  const defaultGitRules = prep.gitRules?.length ? prep.gitRules.join("\n") : "kein Branchwechsel\nkein Commit\nkein Push\nkein Deployment\nkein Reset";
+  const defaultFallback = prep.fallback || "Änderung nur über einen geprüften Patch oder später freigegebenen Revert zurücknehmen; kein git reset.";
+  return `
+    <form class="daily-work-run-form" id="daily-work-run-preparation-form">
+      <section class="daily-work-run-stage" aria-labelledby="daily-outcome-title">
+        <div class="daily-work-run-stage-number">B</div>
+        <div>
+          <h4 id="daily-outcome-title">Tagesergebnis</h4>
+          <p>Genau ein Ergebnis bestimmt, was heute zählt.</p>
+        </div>
+        <label class="daily-work-run-field daily-work-run-field--wide">
+          Genau ein gewünschtes Tagesergebnis
+          <textarea name="desiredOutcome" rows="3" required ${locked ? "disabled" : ""}>${escapeHtml(run.dailyOutcome.desiredOutcome)}</textarea>
+        </label>
+        <label class="daily-work-run-field">
+          Begründung
+          <textarea name="reason" rows="3" required ${locked ? "disabled" : ""}>${escapeHtml(run.dailyOutcome.reason)}</textarea>
+        </label>
+        <label class="daily-work-run-field">
+          Genau ein Abnahmekriterium
+          <textarea name="acceptanceCriterion" rows="3" required ${locked ? "disabled" : ""}>${escapeHtml(run.dailyOutcome.acceptanceCriterion)}</textarea>
+        </label>
+      </section>
+
+      <section class="daily-work-run-stage" aria-labelledby="daily-boundary-title">
+        <div class="daily-work-run-stage-number">C</div>
+        <div>
+          <h4 id="daily-boundary-title">Grenze</h4>
+          <p>Diese Sperren gelten unabhängig vom Projekt.</p>
+        </div>
+        <div class="daily-work-run-boundaries daily-work-run-field--wide">
+          <span>Externe Aktionen blockiert</span>
+          <span>Codex-Ausführung blockiert</span>
+          <span>Agentenausführung blockiert</span>
+          <span>Automatische Git-Aktion blockiert</span>
+          <span>Deployment blockiert</span>
+        </div>
+        <div class="daily-work-run-field">
+          <strong>Heute nicht erlaubt</strong>
+          ${dailyWorkRunList(run.boundary.prohibitedToday)}
+        </div>
+        <div class="daily-work-run-field">
+          <strong>Projektspezifische Regeln</strong>
+          ${dailyWorkRunList(run.boundary.projectSafetyRules)}
+        </div>
+      </section>
+
+      <section class="daily-work-run-stage" aria-labelledby="daily-decision-title">
+        <div class="daily-work-run-stage-number">D</div>
+        <div>
+          <h4 id="daily-decision-title">Blocker und Entscheidung</h4>
+          <p>Genau eine Frage bleibt bei Jamal.</p>
+        </div>
+        <div class="daily-work-run-field">
+          <strong>Aktueller Blocker</strong>
+          <p>${escapeHtml(run.decision.blocker || "UNGEKLÄRT")}</p>
+        </div>
+        <label class="daily-work-run-field">
+          Genau eine offene Entscheidung durch Jamal
+          <textarea name="jamalDecisionQuestion" rows="3" required ${locked ? "disabled" : ""}>${escapeHtml(run.decision.jamalDecisionQuestion)}</textarea>
+        </label>
+      </section>
+
+      <section class="daily-work-run-stage" aria-labelledby="daily-codex-title">
+        <div class="daily-work-run-stage-number">E</div>
+        <div>
+          <h4 id="daily-codex-title">Codex-Vorbereitung</h4>
+          <p>Nur eine kopierbare Auftragsvorlage. Es wird nichts ausgeführt.</p>
+        </div>
+        <label class="daily-work-run-field daily-work-run-field--wide">
+          Projektordner
+          <input name="projectPath" value="${escapeHtml(prep.projectPath || run.canonicalSnapshot.localPath || "")}" required ${locked ? "disabled" : ""} />
+        </label>
+        <label class="daily-work-run-field">
+          Erlaubte Dateien – eine pro Zeile
+          <textarea name="allowedFiles" rows="5" required ${locked ? "disabled" : ""}>${escapeHtml((prep.allowedFiles || []).join("\n"))}</textarea>
+        </label>
+        <label class="daily-work-run-field">
+          Nicht erlaubte Dateien – eine pro Zeile
+          <textarea name="forbiddenFiles" rows="5" required ${locked ? "disabled" : ""}>${escapeHtml(defaultForbidden)}</textarea>
+        </label>
+        <label class="daily-work-run-field daily-work-run-field--wide">
+          Zieländerung
+          <textarea name="targetChange" rows="3" required ${locked ? "disabled" : ""}>${escapeHtml(prep.targetChange)}</textarea>
+        </label>
+        <label class="daily-work-run-field">
+          Tests – einer pro Zeile
+          <textarea name="tests" rows="5" required ${locked ? "disabled" : ""}>${escapeHtml(defaultTests)}</textarea>
+        </label>
+        <label class="daily-work-run-field">
+          Git-Regeln – eine pro Zeile
+          <textarea name="gitRules" rows="5" required ${locked ? "disabled" : ""}>${escapeHtml(defaultGitRules)}</textarea>
+        </label>
+        <label class="daily-work-run-field daily-work-run-field--wide">
+          Rückfallmöglichkeit
+          <textarea name="fallback" rows="3" required ${locked ? "disabled" : ""}>${escapeHtml(defaultFallback)}</textarea>
+        </label>
+        ${locked ? "" : `
+          <div class="daily-work-run-actions daily-work-run-field--wide">
+            <button class="primary-button" type="submit" ${run.focusProjectId ? "" : "disabled"}>Codex-Auftrag manuell vorbereiten</button>
+            <span>Der Status ändert sich nur durch diesen bewussten Klick.</span>
+          </div>
+        `}
+      </section>
+    </form>
+  `;
+}
+
+function renderDailyWorkRunPrompt(run) {
+  if (!["READY_FOR_CODEX", "RESULT_RECORDED", "CLOSED", "OPEN"].includes(run.status)) return "";
+  return `
+    <section class="daily-work-run-prompt" aria-labelledby="daily-work-run-prompt-title">
+      <div>
+        <p class="eyebrow">Manuell kopierbare Vorlage</p>
+        <h4 id="daily-work-run-prompt-title">Vorbereiteter Codex-Auftrag</h4>
+        <p>Keine Codex-API, kein Agentenstart und keine automatische Ausführung.</p>
+      </div>
+      <textarea id="daily-work-run-prompt-text" rows="18" readonly>${escapeHtml(run.codexPreparation.preparedPrompt)}</textarea>
+      <div class="daily-work-run-actions">
+        <button class="secondary-button" type="button" data-copy-daily-work-prompt>Auftrag kopieren</button>
+        <span data-daily-work-copy-status>Noch nicht kopiert.</span>
+      </div>
+    </section>
+  `;
+}
+
+function renderDailyWorkRunResultReturn(run) {
+  if (run.status === "DRAFT") return "";
+  const locked = run.status !== "READY_FOR_CODEX";
+  const result = run.resultReturn;
+  return `
+    <section class="daily-work-run-stage" aria-labelledby="daily-result-return-title">
+      <div class="daily-work-run-stage-number">F</div>
+      <div>
+        <h4 id="daily-result-return-title">Ergebnisrückführung</h4>
+        <p>Ergebnis und Git-Stand werden ausschließlich manuell eingetragen.</p>
+      </div>
+      <form class="daily-work-run-form daily-work-run-field--wide" id="daily-work-run-result-form">
+        <label class="daily-work-run-field daily-work-run-field--wide">Ergebniszusammenfassung<textarea name="summary" rows="4" required ${locked ? "disabled" : ""}>${escapeHtml(result.summary)}</textarea></label>
+        <label class="daily-work-run-field">Geänderte Dateien – eine pro Zeile<textarea name="changedFiles" rows="5" ${locked ? "disabled" : ""}>${escapeHtml(result.changedFiles.join("\n"))}</textarea></label>
+        <label class="daily-work-run-field">Tests – einer pro Zeile<textarea name="tests" rows="5" required ${locked ? "disabled" : ""}>${escapeHtml(result.tests.join("\n"))}</textarea></label>
+        <label class="daily-work-run-field">Git-Branch<input name="gitBranch" value="${escapeHtml(result.gitBranch || "main")}" required ${locked ? "disabled" : ""} /></label>
+        <label class="daily-work-run-field">Commit<select name="commitStatus" ${locked ? "disabled" : ""}><option ${result.commitStatus === "kein Commit" ? "selected" : ""}>kein Commit</option><option ${result.commitStatus === "Commit vorhanden" ? "selected" : ""}>Commit vorhanden</option></select></label>
+        <label class="daily-work-run-field">Push<select name="pushStatus" ${locked ? "disabled" : ""}><option ${result.pushStatus === "kein Push" ? "selected" : ""}>kein Push</option><option ${result.pushStatus === "Push vorhanden" ? "selected" : ""}>Push vorhanden</option></select></label>
+        <label class="daily-work-run-field">Risiken – eines pro Zeile<textarea name="risks" rows="4" ${locked ? "disabled" : ""}>${escapeHtml(result.risks.join("\n"))}</textarea></label>
+        <label class="daily-work-run-field">Offene Punkte – einer pro Zeile<textarea name="openPoints" rows="4" ${locked ? "disabled" : ""}>${escapeHtml(result.openPoints.join("\n"))}</textarea></label>
+        ${locked ? "" : `<div class="daily-work-run-actions daily-work-run-field--wide"><button class="primary-button" type="submit">Ergebnis manuell zurückführen</button><span>Keine automatische Projektänderung.</span></div>`}
+      </form>
+    </section>
+  `;
+}
+
+function renderDailyWorkRunClosure(run) {
+  if (!["RESULT_RECORDED", "CLOSED", "OPEN"].includes(run.status)) return "";
+  const final = ["CLOSED", "OPEN"].includes(run.status);
+  if (!final) {
+    return `
+      <section class="daily-work-run-stage" aria-labelledby="daily-closure-title">
+        <div class="daily-work-run-stage-number">G</div>
+        <div><h4 id="daily-closure-title">Tagesabschluss</h4><p>Jamal entscheidet und hält genau einen nächsten Schritt fest.</p></div>
+        <form class="daily-work-run-form daily-work-run-field--wide" id="daily-work-run-closure-form">
+          <label class="daily-work-run-field">Status<select name="status" required><option value="">Bitte wählen</option><option value="CLOSED">abgeschlossen</option><option value="OPEN">offen</option></select></label>
+          <label class="daily-work-run-field">Jamals Entscheidung<textarea name="jamalDecision" rows="3" required></textarea></label>
+          <label class="daily-work-run-field daily-work-run-field--wide">Genau ein nächster sicherer Schritt<textarea name="nextSafeStep" rows="3" required></textarea></label>
+          <div class="daily-work-run-actions daily-work-run-field--wide"><button class="primary-button" type="submit">Tagesabschluss lokal bestätigen</button><span>Erst danach kann ein Verlaufseintrag übernommen werden.</span></div>
+        </form>
+      </section>
+    `;
+  }
+
+  const entry = dailyWorkRunApi().createHistoryEntry(run, true);
+  return `
+    <section class="daily-work-run-stage is-final" aria-labelledby="daily-closure-title">
+      <div class="daily-work-run-stage-number">G</div>
+      <div><h4 id="daily-closure-title">Tagesabschluss</h4><p>${escapeHtml(dailyWorkRunStatusLabel(run.status))}</p></div>
+      <dl class="daily-work-run-facts daily-work-run-field--wide">
+        <div><dt>Jamals Entscheidung</dt><dd>${escapeHtml(run.closure.jamalDecision)}</dd></div>
+        <div><dt>Nächster sicherer Schritt</dt><dd>${escapeHtml(run.closure.nextSafeStep)}</dd></div>
+        <div><dt>Abschlusszeit</dt><dd>${escapeHtml(run.closure.closedAt || "UNGEKLÄRT")}</dd></div>
+      </dl>
+      <div class="daily-work-run-history-preview daily-work-run-field--wide">
+        <strong>Vorschau des Verlaufseintrags</strong>
+        <pre>${escapeHtml(entry?.description || "Kein Verlaufseintrag verfügbar.")}</pre>
+      </div>
+      <div class="daily-work-run-actions daily-work-run-field--wide">
+        <button class="secondary-button" type="button" data-transfer-daily-work-history ${run.closure.historyTransferredAt ? "disabled" : ""}>${run.closure.historyTransferredAt ? "Verlaufseintrag bereits übernommen" : "Verlaufseintrag bewusst lokal übernehmen"}</button>
+        <button class="secondary-button" type="button" data-start-daily-work-run>Neuen Tageslauf beginnen</button>
+      </div>
+    </section>
+  `;
+}
+
+function renderDailyWorkRun() {
+  const output = byId("daily-work-run-output");
+  if (!output) return;
+  const api = dailyWorkRunApi();
+  if (!api) {
+    output.innerHTML = `<article class="daily-work-run-notice daily-work-run-notice--warning"><strong>UNGEKLÄRT</strong><p>Tagesarbeitslauf-Modul ist nicht verfügbar.</p></article>`;
+    return;
+  }
+
+  const run = getActiveDailyWorkRun();
+  if (!run) {
+    output.innerHTML = `
+      <article class="daily-work-run-start-card">
+        <p class="eyebrow">Bereit für einen bewussten Start</p>
+        <h4>Noch kein Tageslauf begonnen</h4>
+        <p>Es wird kein Fokusprojekt automatisch gewählt. Health Upgrade Kompass ist der empfohlene erste technische Pilot.</p>
+        <button class="primary-button" type="button" data-start-daily-work-run>Tageslauf manuell beginnen</button>
+      </article>
+      <p class="daily-work-run-storage-note">Arbeitsdaten werden lokal in diesem Browser gespeichert. Kanonische Projekt-, Git- und Testdaten werden dadurch nicht verändert.</p>
+    `;
+    return;
+  }
+
+  const projects = canonicalProjectsForDailyWorkRun();
+  const focusOptions = [
+    `<option value="">Kein Fokusprojekt ausgewählt</option>`,
+    ...projects
+      .slice()
+      .sort((a, b) => {
+        if (a.id === "health-upgrade-kompass") return -1;
+        if (b.id === "health-upgrade-kompass") return 1;
+        return a.displayName.localeCompare(b.displayName, "de");
+      })
+      .map((project) => `<option value="${escapeHtml(project.id)}" ${project.id === run.focusProjectId ? "selected" : ""}>${escapeHtml(project.displayName)}${project.id === "health-upgrade-kompass" ? " · empfohlener Pilot" : ""}</option>`),
+  ].join("");
+
+  output.innerHTML = `
+    <div class="daily-work-run-toolbar">
+      <div>
+        <span class="daily-work-run-status">${escapeHtml(dailyWorkRunStatusLabel(run.status))}</span>
+        <strong>${escapeHtml(run.workDate)}</strong>
+      </div>
+      <div class="daily-work-run-progress" aria-label="Fortschritt">
+        <span class="${dailyWorkRunStepClass(run, 1)}">1 Vorbereitung</span>
+        <span class="${dailyWorkRunStepClass(run, 2)}">2 Codex-Paket</span>
+        <span class="${dailyWorkRunStepClass(run, 3)}">3 Rückführung</span>
+        <span class="${dailyWorkRunStepClass(run, 4)}">4 Abschluss</span>
+      </div>
+    </div>
+    ${dailyWorkRunUiState.error ? `<p class="daily-work-run-error">${escapeHtml(dailyWorkRunUiState.error)}</p>` : ""}
+    <section class="daily-work-run-stage" aria-labelledby="daily-start-title">
+      <div class="daily-work-run-stage-number">A</div>
+      <div><h4 id="daily-start-title">Tagesstart</h4><p>Genau ein Fokusprojekt wird bewusst ausgewählt.</p></div>
+      <label class="daily-work-run-field daily-work-run-field--wide">
+        Fokusprojekt
+        <select data-daily-work-focus ${run.status === "DRAFT" && projects.length > 0 ? "" : "disabled"}>${focusOptions}</select>
+      </label>
+      <div class="daily-work-run-field--wide">${renderDailyWorkRunCurrentProject(run)}</div>
+    </section>
+    ${renderDailyWorkRunPreparation(run)}
+    ${renderDailyWorkRunPrompt(run)}
+    ${renderDailyWorkRunResultReturn(run)}
+    ${renderDailyWorkRunClosure(run)}
+    <p class="daily-work-run-storage-note">Arbeitsdaten werden lokal in diesem Browser gespeichert. Kanonische Projekt-, Git- und Testdaten werden dadurch nicht verändert.</p>
+  `;
+}
+
+function setupDailyWorkRun() {
+  document.addEventListener("click", async (event) => {
+    const startButton = event.target.closest("[data-start-daily-work-run]");
+    if (startButton) {
+      const api = dailyWorkRunApi();
+      const run = api.createDraftRun();
+      saveDailyWorkRun(run);
+      showToast("Neuer Tageslauf lokal begonnen. Noch kein Fokusprojekt gewählt.");
+      return;
+    }
+
+    const copyButton = event.target.closest("[data-copy-daily-work-prompt]");
+    if (copyButton) {
+      const text = byId("daily-work-run-prompt-text")?.value || "";
+      const status = document.querySelector("[data-daily-work-copy-status]");
+      try {
+        if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
+        await navigator.clipboard.writeText(text);
+        if (status) status.textContent = "Auftrag lokal kopiert. Keine Ausführung gestartet.";
+        showToast("Codex-Auftrag kopiert. Keine Ausführung gestartet.");
+      } catch (_error) {
+        byId("daily-work-run-prompt-text")?.select();
+        if (status) status.textContent = "Bitte den markierten Text manuell kopieren.";
+      }
+      return;
+    }
+
+    const transferButton = event.target.closest("[data-transfer-daily-work-history]");
+    if (transferButton) {
+      try {
+        const api = dailyWorkRunApi();
+        let run = getActiveDailyWorkRun();
+        const current = currentCanonicalDailyProject(run.focusProjectId);
+        const localProject = localManagementProjectForCanonical(current.project);
+        if (!localProject) throw new Error("Keine getrennte lokale Managementakte für dieses Projekt vorhanden.");
+        const entry = api.createHistoryEntry(run, true);
+        if (!entry) throw new Error("Verlaufseintrag ist noch nicht freigegeben.");
+        localProject.history = api.applyHistoryEntryOnce(getProjectHistory(localProject), entry);
+        run = api.markHistoryTransferred(run, entry);
+        saveState();
+        saveDailyWorkRun(run);
+        showToast("Tagesabschluss einmalig lokal in den Projektverlauf übernommen.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        showToast(error.message);
+      }
+    }
+  });
+
+  document.addEventListener("change", (event) => {
+    if (!event.target.matches("[data-daily-work-focus]")) return;
+    try {
+      const projectId = event.target.value;
+      const current = currentCanonicalDailyProject(projectId);
+      if (!current.available) throw new Error("Kanonisches Projekt ist aktuell UNGEKLÄRT.");
+      const run = dailyWorkRunApi().setFocusProject(
+        getActiveDailyWorkRun(),
+        current.project,
+        canonicalProjectRegistryState.payload.snapshotNotice,
+      );
+      saveDailyWorkRun(run);
+      showToast(`${current.project.displayName} wurde bewusst als Fokus gewählt.`);
+    } catch (error) {
+      dailyWorkRunUiState.error = error.message;
+      renderDailyWorkRun();
+      showToast(error.message);
+    }
+  });
+
+  document.addEventListener("submit", (event) => {
+    if (event.target.id === "daily-work-run-preparation-form") {
+      event.preventDefault();
+      try {
+        const api = dailyWorkRunApi();
+        const data = new FormData(event.target);
+        let run = getActiveDailyWorkRun();
+        run = api.setDailyOutcome(run, {
+          desiredOutcome: data.get("desiredOutcome"),
+          reason: data.get("reason"),
+          acceptanceCriterion: data.get("acceptanceCriterion"),
+          jamalDecisionQuestion: data.get("jamalDecisionQuestion"),
+        });
+        run = api.setCodexPreparation(run, {
+          projectPath: data.get("projectPath"),
+          allowedFiles: data.get("allowedFiles"),
+          forbiddenFiles: data.get("forbiddenFiles"),
+          targetChange: data.get("targetChange"),
+          tests: data.get("tests"),
+          gitRules: data.get("gitRules"),
+          fallback: data.get("fallback"),
+        });
+        run = api.transitionRun(run, "READY_FOR_CODEX");
+        saveDailyWorkRun(run);
+        showToast("Codex-Auftrag manuell vorbereitet. Keine Ausführung gestartet.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        showToast(error.message);
+      }
+      return;
+    }
+
+    if (event.target.id === "daily-work-run-result-form") {
+      event.preventDefault();
+      try {
+        const api = dailyWorkRunApi();
+        const data = new FormData(event.target);
+        let run = api.setResultReturn(getActiveDailyWorkRun(), {
+          summary: data.get("summary"),
+          changedFiles: data.get("changedFiles"),
+          tests: data.get("tests"),
+          gitBranch: data.get("gitBranch"),
+          commitStatus: data.get("commitStatus"),
+          pushStatus: data.get("pushStatus"),
+          risks: data.get("risks"),
+          openPoints: data.get("openPoints"),
+        });
+        run = api.transitionRun(run, "RESULT_RECORDED");
+        saveDailyWorkRun(run);
+        showToast("Ergebnis manuell zurückgeführt. Keine Projektänderung ausgelöst.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        showToast(error.message);
+      }
+      return;
+    }
+
+    if (event.target.id === "daily-work-run-closure-form") {
+      event.preventDefault();
+      try {
+        const api = dailyWorkRunApi();
+        const data = new FormData(event.target);
+        let run = api.setClosure(getActiveDailyWorkRun(), {
+          status: data.get("status"),
+          jamalDecision: data.get("jamalDecision"),
+          nextSafeStep: data.get("nextSafeStep"),
+        });
+        run = api.transitionRun(run, run.closure.status);
+        saveDailyWorkRun(run);
+        showToast("Tagesabschluss lokal bestätigt. Verlauf noch nicht übernommen.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        showToast(error.message);
+      }
+    }
+  });
+}
+
 function renderAll() {
+  renderDailyWorkRun();
   renderDemoCockpit();
   renderExecutiveMode();
   renderMetrics();
@@ -44995,6 +45587,7 @@ async function refreshCanonicalProjectRegistry() {
 
   const activeFilter = document.querySelector(".segment.is-active")?.dataset.filter || "all";
   renderPortfolio(activeFilter);
+  renderDailyWorkRun();
 }
 
 function renderPortfolio(filter = "all") {
@@ -50089,6 +50682,7 @@ function restoreDraft() {
 
 setupNavigation();
 setupForms();
+setupDailyWorkRun();
 renderAll();
 refreshCanonicalProjectRegistry();
 refreshCockpitWorkData();

@@ -13,6 +13,7 @@ const rootDir = __dirname;
 const allowedFiles = new Map([
   ["/", "index.html"],
   ["/index.html", "index.html"],
+  ["/daily-work-run.js", "daily-work-run.js"],
   ["/app.js", "app.js"],
   ["/styles.css", "styles.css"],
 ]);

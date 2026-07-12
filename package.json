@@ -1,7 +1,7 @@
 {
   "scripts": {
     "start": "node server.js",
-    "test": "node project-registry.test.js",
-    "check": "node --check app.js && node --check server.js"
+    "test": "node project-registry.test.js && node daily-work-run.test.js",
+    "check": "node --check daily-work-run.js && node --check daily-work-run.test.js && node --check app.js && node --check server.js"
   }
 }

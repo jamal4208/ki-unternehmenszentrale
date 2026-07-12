@@ -1,12 +1,14 @@
 # PROJECT MASTER
 
-## Verbindlicher Versionsstand V6.39.0
+## Verbindlicher Versionsstand V6.40.0
 
-Die KI-Unternehmenszentrale verwendet `project-registry.js` als einzige kanonische technische Quelle für **17 Projekte mit stabilen IDs**. Die Oberfläche unterscheidet `DEMO`, `PLANUNG`, `REAL_VERIFIZIERT` und `UNGEKLÄRT`. Health Upgrade Kompass ist der erste technisch real verifizierte Pilot; Git- und Testdaten sind bestätigte Momentaufnahmen und keine automatische Live-Prüfung.
+Die KI-Unternehmenszentrale führt Jamal in V6.40.0 durch genau einen vollständigen, lokalen Tagesarbeitslauf: ein bewusst gewähltes Fokusprojekt, ein gewünschtes Tagesergebnis, eine Jamal-Entscheidungsfrage, eine nur kopierbare Codex-Auftragsvorlage, eine manuelle Ergebnisrückführung und genau ein nächster sicherer Schritt.
 
-Health und Expansion bleiben fachlich getrennt, obwohl sie aktuell teilweise denselben Projektordner und Code nutzen. Work bleibt technisch `UNGEKLÄRT`, Codex bleibt manuell kontrolliert. Lokale Managementdaten werden im Browser per `localStorage` gespeichert, ohne die kanonische technische Akte zu überschreiben.
+`project-registry.js` bleibt unverändert die einzige kanonische technische Quelle für **17 Projekte mit stabilen IDs**. Die Oberfläche unterscheidet `DEMO`, `PLANUNG`, `REAL_VERIFIZIERT` und `UNGEKLÄRT`. Health Upgrade Kompass bleibt der erste technisch real verifizierte Pilot; Git- und Testdaten sind bestätigte Momentaufnahmen und keine automatische Live-Prüfung.
 
-V6.39.0 erteilt keine medizinische, fachliche, rechtliche, öffentliche oder produktive Freigabe. Die Zentrale bleibt eine lokale, kontrollierte Arbeitsoberfläche: keine autonome Produktivplattform, keine automatische externe Aktion, keine automatische Git-Aktion, keine Agentenausführung und keine Deploymentfreigabe.
+Health und Expansion bleiben fachlich getrennt, obwohl sie aktuell teilweise denselben Projektordner und Code nutzen. Work bleibt technisch `UNGEKLÄRT`, Codex bleibt manuell kontrolliert. Bestehende Managementdaten bleiben im bisherigen Browser-Speicher erhalten. Tagesläufe verwenden getrennt `ki-unternehmenszentrale-daily-work-runs-v1`; keine lokale Momentaufnahme darf die kanonische technische Akte überschreiben.
+
+V6.40.0 erteilt keine medizinische, fachliche, rechtliche, öffentliche oder produktive Freigabe. Der vorbereitete Codex-Auftrag ist ausschließlich kopierbarer Text und startet nichts. Die Zentrale bleibt eine lokale, kontrollierte Arbeitsoberfläche: keine autonome Produktivplattform, keine automatische externe Aktion, keine automatische Git-Aktion, keine Agentenausführung und keine Deploymentfreigabe.
 
 ## Projekt
 
