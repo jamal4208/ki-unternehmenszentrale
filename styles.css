@@ -66,7 +66,7 @@
   --badge-blocked-fg: #8f5a50;
 }
 
-/* V6.40.0 — geführter Tagesarbeitslauf */
+/* V6.40.1 — vereinfachter geführter Tagesarbeitslauf */
 .daily-work-run-section {
   display: grid;
   gap: 18px;
@@ -365,6 +365,101 @@
   border-color: rgba(109, 63, 179, 0.3);
 }
 
+.daily-work-run-primary-field {
+  font-size: 1rem;
+}
+
+.daily-work-run-primary-field textarea {
+  min-height: 116px;
+  border-width: 2px;
+  font-size: 1rem;
+}
+
+.daily-work-run-optional {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 550;
+}
+
+.daily-work-run-create-button {
+  min-height: 48px;
+  padding-inline: 24px;
+  font-size: 0.96rem;
+}
+
+.daily-work-run-technical-details {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card-bg-muted);
+}
+
+.daily-work-run-technical-details summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.daily-work-run-technical-details[open] summary {
+  margin-bottom: 14px;
+}
+
+.daily-work-run-proposal {
+  display: grid;
+  gap: 18px;
+  padding: 20px;
+  border: 1px solid rgba(15, 118, 110, 0.34);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: 0 14px 34px rgba(15, 118, 110, 0.07);
+}
+
+.daily-work-run-proposal > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.daily-work-run-proposal h4,
+.daily-work-run-proposal h5 {
+  margin: 4px 0 8px;
+}
+
+.daily-work-run-proposal p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.daily-work-run-no-repo {
+  padding: 12px 14px;
+  border-radius: 9px;
+  background: var(--teal-soft);
+  color: #165e58;
+}
+
+.daily-work-run-agent-grid,
+.daily-work-run-proposal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.daily-work-run-agent-card,
+.daily-work-run-proposal-grid > div {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card-bg-muted);
+}
+
+.daily-work-run-agent-card span,
+.daily-work-run-agent-card small {
+  color: var(--muted);
+}
+
 .daily-work-run-actions {
   display: flex;
   align-items: center;
@@ -425,6 +520,16 @@
   }
 
   .daily-work-run-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .daily-work-run-proposal > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .daily-work-run-agent-grid,
+  .daily-work-run-proposal-grid {
     grid-template-columns: 1fr;
   }
 }

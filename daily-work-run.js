@@ -20,6 +20,16 @@
     "OPEN",
   ]);
   const FINAL_STATUS_VALUES = Object.freeze(["CLOSED", "OPEN"]);
+  const TASK_TYPES = Object.freeze([
+    "Agenten- und Einsatzplanung",
+    "Entwicklung/Codex",
+    "Design",
+    "Content",
+    "Recherche",
+    "Strategie/Entscheidung",
+    "Qualität/Prüfung",
+    "Plugin-/Werkzeugauswahl",
+  ]);
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
@@ -98,6 +108,7 @@
         reason: "",
         acceptanceCriterion: "",
       },
+      workProposal: null,
       boundary: {
         prohibitedToday: [],
         projectSafetyRules: [],
@@ -211,6 +222,153 @@
       "jamalDecisionQuestion",
       true,
     );
+    return next;
+  }
+
+  function detectTaskType(value) {
+    const text = singleText(value, "desiredOutcome", true).toLowerCase();
+    if (/agent(en)?|einsatzplan|rollenverteilung|wer\s+(soll|kann)|welche\s+rollen/.test(text)) return TASK_TYPES[0];
+    if (/plugin|werkzeug|tool|integration|airtable|github|vercel/.test(text)) return TASK_TYPES[7];
+    if (/code|codex|entwick|programm|bug|fehler|repository|repo|api|frontend|backend|datei/.test(text)) return TASK_TYPES[1];
+    if (/design|ui|ux|layout|bild|grafik|marke|visual/.test(text)) return TASK_TYPES[2];
+    if (/content|text|copy|artikel|beitrag|skript|formul|präsentation/.test(text)) return TASK_TYPES[3];
+    if (/recherch|quelle|marktanal|vergleich|untersuch|herausfind/.test(text)) return TASK_TYPES[4];
+    if (/qualität|prüf|test|review|abnahme|kontroll|validier/.test(text)) return TASK_TYPES[6];
+    return TASK_TYPES[5];
+  }
+
+  function proposalBlueprint(taskType) {
+    const commonSafety = [
+      "Keine automatische Codex- oder Agentenausführung",
+      "Keine externe Aktion ohne Jamals Freigabe",
+      "Kein automatischer Commit, Push oder Deployment",
+      "Kanonische Projekt- und Sicherheitsgrenzen einhalten",
+    ];
+    const blueprints = {
+      [TASK_TYPES[0]]: {
+        repositoryWorkRequired: false,
+        leadAgent: "Orchestrator-Agent",
+        agents: [
+          ["Orchestrator-Agent", "Einsatzleitung", "Ziel in Rollen, Teilaufgaben und Übergaben zerlegen"],
+          ["Fach-Agent des Fokusprojekts", "Fachliche Verantwortung", "Projektkontext und fachliche Grenzen einbringen"],
+          ["QS-/Test-Agent", "Qualitätssicherung", "Vollständigkeit, Überschneidungen und Abnahmekriterium prüfen"],
+        ],
+        tools: ["Agentenregister", "kanonische Projektakte", "Prüfcheckliste"],
+        areas: ["Projektkontext und Agentenrollen", "keine Repository- oder Produktionsdatenänderung"],
+        quality: ["Jede Teilaufgabe hat genau eine verantwortliche Rolle", "Übergaben und Abschlussprüfung sind benannt"],
+      },
+      [TASK_TYPES[1]]: {
+        repositoryWorkRequired: true,
+        leadAgent: "API-Agent",
+        agents: [["API-Agent", "Technische Umsetzung", "Begrenzte technische Änderung vorbereiten"], ["QS-/Test-Agent", "Qualitätssicherung", "Tests und Diff gegen das Ziel prüfen"]],
+        tools: ["Codex", "Repository-Werkzeuge", "Test- und Diff-Prüfung"],
+        areas: ["Projektdateien innerhalb einer expliziten Allowlist", "lokale Tests und Git-Diff"],
+        quality: ["Projektchecks erfolgreich", "Diff enthält nur die freigegebene Zieländerung"],
+      },
+      [TASK_TYPES[2]]: {
+        repositoryWorkRequired: false,
+        leadAgent: "UI-Agent",
+        agents: [["UI-Agent", "Gestaltungsleitung", "Gestaltungsrichtung und Qualitätsmaßstab festlegen"], ["Review-Agent", "Qualitätsprüfung", "Lesbarkeit, Konsistenz und Zielbezug prüfen"]],
+        tools: ["Designwerkzeug", "bestehendes Markensystem", "visuelle Qualitätsprüfung"],
+        areas: ["Design-Briefing und freigegebene Assets"],
+        quality: ["Gestaltung erfüllt Ziel, Format und Markenrahmen"],
+      },
+      [TASK_TYPES[3]]: {
+        repositoryWorkRequired: false,
+        leadAgent: "Kommunikations-Agent",
+        agents: [["Kommunikations-Agent", "Redaktion", "Kernaussage und Inhalt ausarbeiten"], ["Risiko-Agent", "Grenzprüfung", "Aussagen und sensible Inhalte prüfen"]],
+        tools: ["Redaktionsvorlage", "Projektwissen", "Qualitätscheck"],
+        areas: ["freigegebene Inhalte und Projektwissen"],
+        quality: ["Inhalt ist verständlich, zielgerichtet und sachlich geprüft"],
+      },
+      [TASK_TYPES[4]]: {
+        repositoryWorkRequired: false,
+        leadAgent: "Dokumentations-Agent",
+        agents: [["Dokumentations-Agent", "Recherche", "Fragestellung, Quellen und Befunde strukturieren"], ["Review-Agent", "Quellenprüfung", "Nachvollziehbarkeit und Widersprüche prüfen"]],
+        tools: ["Recherchewerkzeuge", "Quellenregister", "Vergleichsmatrix"],
+        areas: ["öffentliche oder ausdrücklich freigegebene Quellen"],
+        quality: ["Befunde sind belegt und Unsicherheiten sichtbar"],
+      },
+      [TASK_TYPES[5]]: {
+        repositoryWorkRequired: false,
+        leadAgent: "Strategie-Agent",
+        agents: [["Strategie-Agent", "Entscheidungsvorbereitung", "Optionen, Wirkung und Entscheidungspunkt strukturieren"], ["Entscheidungs-Agent", "Entscheidungsprüfung", "Konsequenzen und nächste Schritte bewerten"]],
+        tools: ["Entscheidungsvorlage", "Projektakte", "Risikoabwägung"],
+        areas: ["Projektziele, Entscheidungen und bekannte Risiken"],
+        quality: ["Optionen, Konsequenzen und eine klare Entscheidung sind sichtbar"],
+      },
+      [TASK_TYPES[6]]: {
+        repositoryWorkRequired: false,
+        leadAgent: "QS-/Test-Agent",
+        agents: [["QS-/Test-Agent", "Prüfleitung", "Prüfumfang, Kriterien und Nachweise festlegen"], ["Review-Agent", "Fachprüfung", "Ergebnis gegen fachliche Grenzen prüfen"]],
+        tools: ["Prüfcheckliste", "Testnachweise", "Abnahmeprotokoll"],
+        areas: ["freigegebene Ergebnisse und Prüfnachweise"],
+        quality: ["Jedes Kriterium hat einen nachvollziehbaren Nachweis"],
+      },
+      [TASK_TYPES[7]]: {
+        repositoryWorkRequired: false,
+        leadAgent: "Integrations-Agent",
+        agents: [["Integrations-Agent", "Werkzeugauswahl", "Geeignete Kategorien und Kandidaten vergleichen"], ["Sicherheits-Agent", "Sicherheitsprüfung", "Datenzugriff, Freigaben und externe Wirkung prüfen"]],
+        tools: ["Plugin-Register", "Anforderungskatalog", "Sicherheitsprüfung"],
+        areas: ["Werkzeugmetadaten und freigegebene Integrationsanforderungen"],
+        quality: ["Empfehlung nennt Nutzen, Grenzen, Datenzugriff und Alternative"],
+      },
+    };
+    return { ...blueprints[taskType], safety: commonSafety };
+  }
+
+  function createWorkProposal(run, values = {}) {
+    if (run.status !== "DRAFT") throw new Error("Ein Arbeitsvorschlag kann nur im Status DRAFT erstellt werden.");
+    if (!singleText(run.focusProjectId, "focusProjectId")) throw new Error("Fokusprojekt muss bewusst ausgewählt werden.");
+    const desiredOutcome = singleText(values.desiredOutcome, "desiredOutcome", true);
+    const prohibitedToday = singleText(values.prohibitedToday, "prohibitedToday");
+    const taskType = detectTaskType(desiredOutcome);
+    const blueprint = proposalBlueprint(taskType);
+    const focusAgent = run.focusProjectId === "health-upgrade-kompass" ? "Health-Kompass-Agent" : "Projektstatus-Agent";
+    blueprint.agents = blueprint.agents.map((entry) => entry[0] === "Fach-Agent des Fokusprojekts" ? [focusAgent, entry[1], entry[2]] : entry);
+    const projectName = run.canonicalSnapshot?.displayName || run.focusProjectId;
+    const realisticScope = `Heute einen prüfbaren ${taskType === TASK_TYPES[0] ? "Einsatzplan" : "Arbeitsstand"} für „${desiredOutcome}“ vorbereiten; keine automatische Ausführung.`;
+    const acceptanceCriterion = taskType === TASK_TYPES[0]
+      ? "Ein klarer Einsatzplan benennt benötigte Agenten, eindeutige Teilaufgaben, Übergaben, Sicherheitsgrenzen und die abschließende Prüfung."
+      : `Ein nachvollziehbarer Arbeitsstand für „${desiredOutcome}“ liegt mit Prüfnachweis und offenem Entscheidungspunkt vor.`;
+    const jamalDecisionQuestion = taskType === TASK_TYPES[0]
+      ? "Soll dieser Agenten-Einsatzplan in dieser Rollenverteilung später manuell freigegeben werden?"
+      : "Soll dieser begrenzte Arbeitsvorschlag später manuell zur Ausführung freigegeben werden?";
+    let next = clone(run);
+    next.dailyOutcome = { desiredOutcome, reason: `Das gewünschte Ergebnis für ${projectName} soll heute in einen realistischen, sicheren Arbeitsumfang übersetzt werden.`, acceptanceCriterion };
+    next.boundary.prohibitedToday = [...new Set([...next.boundary.prohibitedToday, ...textList(prohibitedToday)])];
+    next.decision.jamalDecisionQuestion = jamalDecisionQuestion;
+    next.workProposal = {
+      taskType,
+      understoodGoal: desiredOutcome,
+      realisticDayScope: realisticScope,
+      repositoryWorkRequired: blueprint.repositoryWorkRequired,
+      leadAgent: blueprint.leadAgent,
+      agentPlan: blueprint.agents.map(([agent, role, subtask], index) => ({
+        agent,
+        role,
+        subtask,
+        handoffTo: blueprint.agents[index + 1]?.[0] || "Jamal zur Entscheidung",
+      })),
+      sequence: blueprint.agents.map(([agent], index) => `${index + 1}. ${agent}`).concat("Abschluss: Jamal entscheidet manuell"),
+      toolCategories: blueprint.tools,
+      fileOrDataAreas: blueprint.areas,
+      testsAndQuality: blueprint.quality,
+      safetyAndApproval: blueprint.safety.concat(prohibitedToday ? [`Zusätzliche Grenze: ${prohibitedToday}`] : []),
+      acceptanceCriterion,
+      jamalDecisionQuestion,
+    };
+    next.codexPreparation = {
+      projectPath: blueprint.repositoryWorkRequired ? (next.canonicalSnapshot.localPath || "UNGEKLÄRT") : "Nicht erforderlich – kein Repository-Auftrag",
+      allowedFiles: blueprint.areas,
+      forbiddenFiles: ["Alle nicht ausdrücklich freigegebenen Dateien oder Daten", "Produktions-, Kunden- und sensible Gesundheitsdaten"],
+      targetChange: blueprint.repositoryWorkRequired ? realisticScope : `Kein Repository-Auftrag; ${taskType} als rein vorbereitenden Arbeitsplan erstellen.`,
+      tests: blueprint.quality,
+      gitRules: ["kein Branchwechsel", "kein Commit", "kein Push", "kein Deployment", "kein Reset"],
+      fallback: "Vorschlag verwerfen oder manuell überarbeiten; keine externe oder technische Aktion wurde ausgelöst.",
+      preparedPrompt: "",
+    };
+    next.codexPreparation.preparedPrompt = buildCodexPrompt(next);
     return next;
   }
 
@@ -332,6 +490,26 @@
   function buildCodexPrompt(run) {
     const outcome = run.dailyOutcome || {};
     const prep = run.codexPreparation || {};
+    const proposal = run.workProposal || {};
+    if (proposal.taskType === TASK_TYPES[0]) {
+      return [
+        "Bereite ausschließlich einen Agenten- und Einsatzplan vor. Dies ist kein Codex- oder Repository-Auftrag.",
+        "",
+        `Fokusprojekt: ${run.canonicalSnapshot?.displayName || run.focusProjectId || "UNGEKLÄRT"}`,
+        `Verstandenes Ziel: ${proposal.understoodGoal || outcome.desiredOutcome || "UNGEKLÄRT"}`,
+        `Realistischer Tagesumfang: ${proposal.realisticDayScope || "UNGEKLÄRT"}`,
+        "",
+        "Agenten, Rollen, Teilaufgaben und Übergaben:",
+        ...(proposal.agentPlan || []).map((item) => `- ${item.agent} | ${item.role} | ${item.subtask} | Übergabe an: ${item.handoffTo}`),
+        "",
+        "Sicherheits- und Freigabegrenzen:",
+        ...textList(proposal.safetyAndApproval).map((item) => `- ${item}`),
+        "",
+        `Abnahmekriterium: ${proposal.acceptanceCriterion || outcome.acceptanceCriterion || "UNGEKLÄRT"}`,
+        `Jamal-Entscheidungsfrage: ${proposal.jamalDecisionQuestion || run.decision?.jamalDecisionQuestion || "UNGEKLÄRT"}`,
+        "Keine Agentenausführung und keine externe Aktion. Dieser Text ist nur eine manuell kopierbare Planungsvorlage.",
+      ].join("\n");
+    }
     return [
       `Arbeite ausschließlich im Projekt: ${prep.projectPath || run.canonicalSnapshot?.localPath || "UNGEKLÄRT"}`,
       "",
@@ -362,7 +540,7 @@
   }
 
   function createStore(value = {}) {
-    const runs = Array.isArray(value.runs) ? value.runs.map(clone) : [];
+    const runs = Array.isArray(value.runs) ? value.runs.map((run) => ({ ...clone(run), workProposal: run.workProposal ? clone(run.workProposal) : null })) : [];
     const activeRunId = runs.some((run) => run.id === value.activeRunId) ? value.activeRunId : null;
     return {
       schemaVersion: SCHEMA_VERSION,
@@ -463,16 +641,19 @@
     LEGACY_MANAGEMENT_STORAGE_KEY,
     SCHEMA_VERSION,
     STATUS_VALUES,
+    TASK_TYPES,
     applyHistoryEntryOnce,
     buildCodexPrompt,
     captureCanonicalSnapshot,
     createDraftRun,
     createHistoryEntry,
+    createWorkProposal,
     createStore,
     currentCanonicalProject,
     getActiveRun,
     loadDailyStore,
     markHistoryTransferred,
+    detectTaskType,
     saveDailyStore,
     setClosure,
     setCodexPreparation,

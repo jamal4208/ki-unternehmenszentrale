@@ -1,14 +1,14 @@
 # PROJECT MASTER
 
-## Verbindlicher Versionsstand V6.40.0
+## Verbindlicher Versionsstand V6.40.1
 
-Die KI-Unternehmenszentrale führt Jamal in V6.40.0 durch genau einen vollständigen, lokalen Tagesarbeitslauf: ein bewusst gewähltes Fokusprojekt, ein gewünschtes Tagesergebnis, eine Jamal-Entscheidungsfrage, eine nur kopierbare Codex-Auftragsvorlage, eine manuelle Ergebnisrückführung und genau ein nächster sicherer Schritt.
+Die KI-Unternehmenszentrale führt Jamal in V6.40.1 durch einen vereinfachten lokalen Tagesstart: Fokusprojekt bewusst wählen, genau einen Ergebniswunsch formulieren und optional eine zusätzliche Verbotsgrenze nennen. Daraus entsteht ein rein vorbereitender Arbeitsvorschlag mit Aufgabentyp, Tagesumfang, Agentenrollen, Teilaufgaben, Übergaben, Werkzeugkategorien, Datenbereichen, Qualitätsprüfung, Sicherheitsgrenzen, Abnahmekriterium und genau einer Jamal-Frage. Technische Details sind automatisch vorbelegt und standardmäßig geschlossen.
 
 `project-registry.js` bleibt unverändert die einzige kanonische technische Quelle für **17 Projekte mit stabilen IDs**. Die Oberfläche unterscheidet `DEMO`, `PLANUNG`, `REAL_VERIFIZIERT` und `UNGEKLÄRT`. Health Upgrade Kompass bleibt der erste technisch real verifizierte Pilot; Git- und Testdaten sind bestätigte Momentaufnahmen und keine automatische Live-Prüfung.
 
 Health und Expansion bleiben fachlich getrennt, obwohl sie aktuell teilweise denselben Projektordner und Code nutzen. Work bleibt technisch `UNGEKLÄRT`, Codex bleibt manuell kontrolliert. Bestehende Managementdaten bleiben im bisherigen Browser-Speicher erhalten. Tagesläufe verwenden getrennt `ki-unternehmenszentrale-daily-work-runs-v1`; keine lokale Momentaufnahme darf die kanonische technische Akte überschreiben.
 
-V6.40.0 erteilt keine medizinische, fachliche, rechtliche, öffentliche oder produktive Freigabe. Der vorbereitete Codex-Auftrag ist ausschließlich kopierbarer Text und startet nichts. Die Zentrale bleibt eine lokale, kontrollierte Arbeitsoberfläche: keine autonome Produktivplattform, keine automatische externe Aktion, keine automatische Git-Aktion, keine Agentenausführung und keine Deploymentfreigabe.
+V6.40.1 erteilt keine medizinische, fachliche, rechtliche, öffentliche oder produktive Freigabe. Agenten- und Einsatzplanung bleibt ausdrücklich ein Rollen- und Arbeitsplan und wird nicht in einen Codex-/Repository-Auftrag umgedeutet. Kopierbare Arbeitsvorlagen starten nichts. Die Zentrale bleibt eine lokale, kontrollierte Arbeitsoberfläche: keine autonome Produktivplattform, keine automatische externe Aktion, keine automatische Git-Aktion, keine Agentenausführung und keine Deploymentfreigabe.
 
 ## Projekt
 
@@ -88,4 +88,4 @@ Ein Versionsschritt ist abgeschlossen, wenn Ziel und Nicht-Ziele erfüllt, betro
 
 ## Entscheidung durch Jamal erforderlich
 
-Jamal nimmt V6.39.0 manuell ab und entscheidet später separat über offene Projektidentitäten sowie Commit, Push und produktive Nutzung.
+Jamal nimmt V6.40.1 manuell ab und entscheidet später separat über Commit, Push und produktive Nutzung.

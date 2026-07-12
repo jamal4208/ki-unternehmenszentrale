@@ -4,7 +4,7 @@
 
 `server.js` registriert **41 tatsächlich vorhandene API-Routen**, alle mit Methode `GET`. Jede andere HTTP-Methode wird vor dem Routing abgewiesen. Es gibt keine API-Schreibroute.
 
-V6.40.0 ergänzt **keine neue API-Route**. Der geführte Tagesarbeitslauf nutzt ausschließlich `GET /api/projects` für den aktuellen kanonischen Projektstand. Der Lauf startet keine Codex-, Agenten-, Git-, Netzwerk- oder externe Aktion. Seine Managementdaten werden nur lokal im Browser gespeichert.
+V6.40.1 ergänzt **keine neue API-Route**. Der vereinfachte Tagesstart nutzt ausschließlich `GET /api/projects` für den aktuellen kanonischen Projektstand. Aufgabenerkennung, Agentenplanung und technische Vorbelegung laufen lokal und starten keine Codex-, Agenten-, Git-, Netzwerk- oder externe Aktion. Seine Managementdaten werden nur lokal im Browser gespeichert.
 
 Nur `/api/agents/plugin-readiness` liest HTTP-Query-Parameter. Lokale Serverkonfiguration ist eine Abhängigkeit, keine HTTP-Eingabe. Standardausgabe ist JSON. `Schreiben` bedeutet fachliche oder externe Schreibwirkung, nicht das Senden einer HTTP-Antwort.
 

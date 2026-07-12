@@ -4557,7 +4557,7 @@ function dailyWorkRunRemoteRefs(remoteRefs) {
 function dailyWorkRunStatusLabel(status) {
   const labels = {
     DRAFT: "Vorbereitung offen",
-    READY_FOR_CODEX: "Codex-Auftrag manuell vorbereitet",
+    READY_FOR_CODEX: "Arbeitsvorschlag erstellt",
     RESULT_RECORDED: "Ergebnis manuell zurückgeführt",
     CLOSED: "Tageslauf abgeschlossen",
     OPEN: "Tageslauf bewusst offen",
@@ -4650,113 +4650,77 @@ function renderDailyWorkRunSnapshot(snapshot) {
 function renderDailyWorkRunPreparation(run) {
   const locked = run.status !== "DRAFT";
   const prep = run.codexPreparation || {};
-  const defaultForbidden = prep.forbiddenFiles?.length ? prep.forbiddenFiles.join("\n") : "Alle nicht ausdrücklich erlaubten Dateien";
-  const defaultTests = prep.tests?.length ? prep.tests.join("\n") : "npm test\nnpm run check\ngit diff --check\ngit status --short";
-  const defaultGitRules = prep.gitRules?.length ? prep.gitRules.join("\n") : "kein Branchwechsel\nkein Commit\nkein Push\nkein Deployment\nkein Reset";
-  const defaultFallback = prep.fallback || "Änderung nur über einen geprüften Patch oder später freigegebenen Revert zurücknehmen; kein git reset.";
+  const proposal = run.workProposal;
   return `
     <form class="daily-work-run-form" id="daily-work-run-preparation-form">
-      <section class="daily-work-run-stage" aria-labelledby="daily-outcome-title">
+      <section class="daily-work-run-stage daily-work-run-simple-start" aria-labelledby="daily-outcome-title">
         <div class="daily-work-run-stage-number">B</div>
         <div>
-          <h4 id="daily-outcome-title">Tagesergebnis</h4>
-          <p>Genau ein Ergebnis bestimmt, was heute zählt.</p>
+          <h4 id="daily-outcome-title">Gewünschtes Ergebnis</h4>
+          <p>Ein Satz genügt. Aufgabentyp, Umfang, Agenten, Übergaben und Prüfungen werden daraus vorbereitet.</p>
         </div>
-        <label class="daily-work-run-field daily-work-run-field--wide">
-          Genau ein gewünschtes Tagesergebnis
-          <textarea name="desiredOutcome" rows="3" required ${locked ? "disabled" : ""}>${escapeHtml(run.dailyOutcome.desiredOutcome)}</textarea>
-        </label>
-        <label class="daily-work-run-field">
-          Begründung
-          <textarea name="reason" rows="3" required ${locked ? "disabled" : ""}>${escapeHtml(run.dailyOutcome.reason)}</textarea>
-        </label>
-        <label class="daily-work-run-field">
-          Genau ein Abnahmekriterium
-          <textarea name="acceptanceCriterion" rows="3" required ${locked ? "disabled" : ""}>${escapeHtml(run.dailyOutcome.acceptanceCriterion)}</textarea>
-        </label>
-      </section>
-
-      <section class="daily-work-run-stage" aria-labelledby="daily-boundary-title">
-        <div class="daily-work-run-stage-number">C</div>
-        <div>
-          <h4 id="daily-boundary-title">Grenze</h4>
-          <p>Diese Sperren gelten unabhängig vom Projekt.</p>
-        </div>
-        <div class="daily-work-run-boundaries daily-work-run-field--wide">
-          <span>Externe Aktionen blockiert</span>
-          <span>Codex-Ausführung blockiert</span>
-          <span>Agentenausführung blockiert</span>
-          <span>Automatische Git-Aktion blockiert</span>
-          <span>Deployment blockiert</span>
-        </div>
-        <div class="daily-work-run-field">
-          <strong>Heute nicht erlaubt</strong>
-          ${dailyWorkRunList(run.boundary.prohibitedToday)}
-        </div>
-        <div class="daily-work-run-field">
-          <strong>Projektspezifische Regeln</strong>
-          ${dailyWorkRunList(run.boundary.projectSafetyRules)}
-        </div>
-      </section>
-
-      <section class="daily-work-run-stage" aria-labelledby="daily-decision-title">
-        <div class="daily-work-run-stage-number">D</div>
-        <div>
-          <h4 id="daily-decision-title">Blocker und Entscheidung</h4>
-          <p>Genau eine Frage bleibt bei Jamal.</p>
-        </div>
-        <div class="daily-work-run-field">
-          <strong>Aktueller Blocker</strong>
-          <p>${escapeHtml(run.decision.blocker || "UNGEKLÄRT")}</p>
-        </div>
-        <label class="daily-work-run-field">
-          Genau eine offene Entscheidung durch Jamal
-          <textarea name="jamalDecisionQuestion" rows="3" required ${locked ? "disabled" : ""}>${escapeHtml(run.decision.jamalDecisionQuestion)}</textarea>
-        </label>
-      </section>
-
-      <section class="daily-work-run-stage" aria-labelledby="daily-codex-title">
-        <div class="daily-work-run-stage-number">E</div>
-        <div>
-          <h4 id="daily-codex-title">Codex-Vorbereitung</h4>
-          <p>Nur eine kopierbare Auftragsvorlage. Es wird nichts ausgeführt.</p>
-        </div>
-        <label class="daily-work-run-field daily-work-run-field--wide">
-          Projektordner
-          <input name="projectPath" value="${escapeHtml(prep.projectPath || run.canonicalSnapshot.localPath || "")}" required ${locked ? "disabled" : ""} />
-        </label>
-        <label class="daily-work-run-field">
-          Erlaubte Dateien – eine pro Zeile
-          <textarea name="allowedFiles" rows="5" required ${locked ? "disabled" : ""}>${escapeHtml((prep.allowedFiles || []).join("\n"))}</textarea>
-        </label>
-        <label class="daily-work-run-field">
-          Nicht erlaubte Dateien – eine pro Zeile
-          <textarea name="forbiddenFiles" rows="5" required ${locked ? "disabled" : ""}>${escapeHtml(defaultForbidden)}</textarea>
+        <label class="daily-work-run-field daily-work-run-field--wide daily-work-run-primary-field">
+          Welches Ergebnis möchtest du erreichen?
+          <textarea name="desiredOutcome" rows="4" required ${locked ? "disabled" : ""} placeholder="Zum Beispiel: Erstelle einen Einsatzplan, welche Agenten für Health benötigt werden und wer was prüft.">${escapeHtml(run.dailyOutcome.desiredOutcome)}</textarea>
         </label>
         <label class="daily-work-run-field daily-work-run-field--wide">
-          Zieländerung
-          <textarea name="targetChange" rows="3" required ${locked ? "disabled" : ""}>${escapeHtml(prep.targetChange)}</textarea>
-        </label>
-        <label class="daily-work-run-field">
-          Tests – einer pro Zeile
-          <textarea name="tests" rows="5" required ${locked ? "disabled" : ""}>${escapeHtml(defaultTests)}</textarea>
-        </label>
-        <label class="daily-work-run-field">
-          Git-Regeln – eine pro Zeile
-          <textarea name="gitRules" rows="5" required ${locked ? "disabled" : ""}>${escapeHtml(defaultGitRules)}</textarea>
-        </label>
-        <label class="daily-work-run-field daily-work-run-field--wide">
-          Rückfallmöglichkeit
-          <textarea name="fallback" rows="3" required ${locked ? "disabled" : ""}>${escapeHtml(defaultFallback)}</textarea>
+          Was darf auf keinen Fall passieren? <span class="daily-work-run-optional">optional</span>
+          <textarea name="prohibitedToday" rows="3" ${locked ? "disabled" : ""} placeholder="Zusätzliche Grenze für heute">${escapeHtml((run.boundary.prohibitedToday || []).filter((item) => !["Keine automatische Codex- oder Agentenausführung", "Keine externe Aktion", "Kein automatischer Commit oder Push", "Kein Deployment"].includes(item)).join("\n"))}</textarea>
         </label>
         ${locked ? "" : `
           <div class="daily-work-run-actions daily-work-run-field--wide">
-            <button class="primary-button" type="submit" ${run.focusProjectId ? "" : "disabled"}>Codex-Auftrag manuell vorbereiten</button>
-            <span>Der Status ändert sich nur durch diesen bewussten Klick.</span>
+            <button class="primary-button daily-work-run-create-button" type="submit" ${run.focusProjectId ? "" : "disabled"}>Arbeitsvorschlag erstellen</button>
+            <span>Nur Vorbereitung – keine Agenten-, Codex- oder externe Aktion.</span>
           </div>
         `}
+        <div class="daily-work-run-boundaries daily-work-run-field--wide">
+          <span>Externe Aktionen blockiert</span><span>Codex-Ausführung blockiert</span><span>Agentenausführung blockiert</span><span>Git und Deployment blockiert</span>
+        </div>
+        <details class="daily-work-run-technical-details daily-work-run-field--wide">
+          <summary>Technische Details anzeigen</summary>
+          <dl class="daily-work-run-facts">
+            <div><dt>Projektordner</dt><dd>${escapeHtml(prep.projectPath || run.canonicalSnapshot.localPath || "wird automatisch abgeleitet")}</dd></div>
+            <div><dt>Zieländerung</dt><dd>${escapeHtml(prep.targetChange || "wird automatisch abgeleitet")}</dd></div>
+            <div><dt>Erlaubte Dateien/Datenbereiche</dt><dd>${dailyWorkRunList(prep.allowedFiles, "wird automatisch abgeleitet")}</dd></div>
+            <div><dt>Nicht erlaubte Bereiche</dt><dd>${dailyWorkRunList(prep.forbiddenFiles, "wird automatisch abgeleitet")}</dd></div>
+            <div><dt>Tests und Qualitätsprüfung</dt><dd>${dailyWorkRunList(prep.tests, "wird automatisch abgeleitet")}</dd></div>
+            <div><dt>Git-Regeln</dt><dd>${dailyWorkRunList(prep.gitRules, "kein Commit, Push oder Deployment")}</dd></div>
+            <div><dt>Rückfallmöglichkeit</dt><dd>${escapeHtml(prep.fallback || "Vorschlag verwerfen; keine Aktion wurde ausgelöst.")}</dd></div>
+          </dl>
+        </details>
       </section>
     </form>
+    ${proposal ? renderDailyWorkProposal(proposal) : ""}
+  `;
+}
+
+function renderDailyWorkProposal(proposal) {
+  const agents = (proposal.agentPlan || []).map((item) => `
+    <article class="daily-work-run-agent-card">
+      <strong>${escapeHtml(item.agent)}</strong><span>${escapeHtml(item.role)}</span>
+      <p>${escapeHtml(item.subtask)}</p><small>Übergabe an: ${escapeHtml(item.handoffTo)}</small>
+    </article>
+  `).join("");
+  return `
+    <section class="daily-work-run-proposal" aria-labelledby="daily-work-proposal-title">
+      <header><div><p class="eyebrow">Automatisch abgeleitet · nur Vorschlag</p><h4 id="daily-work-proposal-title">Arbeitsvorschlag</h4></div><span class="daily-work-run-mode">${escapeHtml(proposal.taskType)}</span></header>
+      ${proposal.repositoryWorkRequired === false ? `<p class="daily-work-run-no-repo"><strong>Kein Codex-/Repository-Auftrag.</strong> Dieser Vorschlag plant Rollen und Arbeit, ohne technische Ausführung.</p>` : ""}
+      <dl class="daily-work-run-facts">
+        <div><dt>Verstandenes Ziel</dt><dd>${escapeHtml(proposal.understoodGoal)}</dd></div>
+        <div><dt>Realistischer Tagesumfang</dt><dd>${escapeHtml(proposal.realisticDayScope)}</dd></div>
+        <div><dt>Federführung</dt><dd>${escapeHtml(proposal.leadAgent)}</dd></div>
+        <div><dt>Abnahmekriterium</dt><dd>${escapeHtml(proposal.acceptanceCriterion)}</dd></div>
+      </dl>
+      <div><h5>Benötigte Agenten, Rollen und Teilaufgaben</h5><div class="daily-work-run-agent-grid">${agents}</div></div>
+      <div class="daily-work-run-proposal-grid">
+        <div><h5>Reihenfolge und Übergaben</h5>${dailyWorkRunList(proposal.sequence)}</div>
+        <div><h5>Plugins und Werkzeugkategorien</h5>${dailyWorkRunList(proposal.toolCategories)}</div>
+        <div><h5>Dateien und Datenbereiche</h5>${dailyWorkRunList(proposal.fileOrDataAreas)}</div>
+        <div><h5>Tests und Qualität</h5>${dailyWorkRunList(proposal.testsAndQuality)}</div>
+        <div><h5>Sicherheit und Freigabe</h5>${dailyWorkRunList(proposal.safetyAndApproval)}</div>
+        <div><h5>Eine Entscheidung für Jamal</h5><p>${escapeHtml(proposal.jamalDecisionQuestion)}</p></div>
+      </div>
+    </section>
   `;
 }
 
@@ -4766,12 +4730,12 @@ function renderDailyWorkRunPrompt(run) {
     <section class="daily-work-run-prompt" aria-labelledby="daily-work-run-prompt-title">
       <div>
         <p class="eyebrow">Manuell kopierbare Vorlage</p>
-        <h4 id="daily-work-run-prompt-title">Vorbereiteter Codex-Auftrag</h4>
+        <h4 id="daily-work-run-prompt-title">Vorbereiteter Arbeitsvorschlag</h4>
         <p>Keine Codex-API, kein Agentenstart und keine automatische Ausführung.</p>
       </div>
       <textarea id="daily-work-run-prompt-text" rows="18" readonly>${escapeHtml(run.codexPreparation.preparedPrompt)}</textarea>
       <div class="daily-work-run-actions">
-        <button class="secondary-button" type="button" data-copy-daily-work-prompt>Auftrag kopieren</button>
+        <button class="secondary-button" type="button" data-copy-daily-work-prompt>Arbeitsvorschlag kopieren</button>
         <span data-daily-work-copy-status>Noch nicht kopiert.</span>
       </div>
     </section>
@@ -4888,11 +4852,18 @@ function renderDailyWorkRun() {
       </div>
       <div class="daily-work-run-progress" aria-label="Fortschritt">
         <span class="${dailyWorkRunStepClass(run, 1)}">1 Vorbereitung</span>
-        <span class="${dailyWorkRunStepClass(run, 2)}">2 Codex-Paket</span>
+        <span class="${dailyWorkRunStepClass(run, 2)}">2 Arbeitsvorschlag</span>
         <span class="${dailyWorkRunStepClass(run, 3)}">3 Rückführung</span>
         <span class="${dailyWorkRunStepClass(run, 4)}">4 Abschluss</span>
       </div>
     </div>
+    ${["READY_FOR_CODEX", "RESULT_RECORDED"].includes(run.status) ? `
+      <article class="daily-work-run-start-card">
+        <strong>Dieser gespeicherte Lauf ist nach der Vorschlagserstellung nicht mehr editierbar.</strong>
+        <p>Beginne einen neuen Tageslauf, um einen neuen Ergebniswunsch einzugeben. Der vorhandene Lauf bleibt vollständig erhalten.</p>
+        <button class="primary-button" type="button" data-start-daily-work-run>Neuen Tageslauf beginnen</button>
+      </article>
+    ` : ""}
     ${dailyWorkRunUiState.error ? `<p class="daily-work-run-error">${escapeHtml(dailyWorkRunUiState.error)}</p>` : ""}
     <section class="daily-work-run-stage" aria-labelledby="daily-start-title">
       <div class="daily-work-run-stage-number">A</div>
@@ -4929,8 +4900,8 @@ function setupDailyWorkRun() {
       try {
         if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
         await navigator.clipboard.writeText(text);
-        if (status) status.textContent = "Auftrag lokal kopiert. Keine Ausführung gestartet.";
-        showToast("Codex-Auftrag kopiert. Keine Ausführung gestartet.");
+        if (status) status.textContent = "Arbeitsvorschlag lokal kopiert. Keine Ausführung gestartet.";
+        showToast("Arbeitsvorschlag kopiert. Keine Ausführung gestartet.");
       } catch (_error) {
         byId("daily-work-run-prompt-text")?.select();
         if (status) status.textContent = "Bitte den markierten Text manuell kopieren.";
@@ -4987,25 +4958,13 @@ function setupDailyWorkRun() {
       try {
         const api = dailyWorkRunApi();
         const data = new FormData(event.target);
-        let run = getActiveDailyWorkRun();
-        run = api.setDailyOutcome(run, {
+        let run = api.createWorkProposal(getActiveDailyWorkRun(), {
           desiredOutcome: data.get("desiredOutcome"),
-          reason: data.get("reason"),
-          acceptanceCriterion: data.get("acceptanceCriterion"),
-          jamalDecisionQuestion: data.get("jamalDecisionQuestion"),
-        });
-        run = api.setCodexPreparation(run, {
-          projectPath: data.get("projectPath"),
-          allowedFiles: data.get("allowedFiles"),
-          forbiddenFiles: data.get("forbiddenFiles"),
-          targetChange: data.get("targetChange"),
-          tests: data.get("tests"),
-          gitRules: data.get("gitRules"),
-          fallback: data.get("fallback"),
+          prohibitedToday: data.get("prohibitedToday"),
         });
         run = api.transitionRun(run, "READY_FOR_CODEX");
         saveDailyWorkRun(run);
-        showToast("Codex-Auftrag manuell vorbereitet. Keine Ausführung gestartet.");
+        showToast("Arbeitsvorschlag erstellt. Keine Ausführung gestartet.");
       } catch (error) {
         dailyWorkRunUiState.error = error.message;
         renderDailyWorkRun();

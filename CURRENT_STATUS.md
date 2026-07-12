@@ -2,26 +2,29 @@
 
 ## Git- und Versionsstand
 
-- Version: **V6.40.0 – Geführter Tagesarbeitslauf**
-- Ausgangs-HEAD: `bc7a260`
-- Produktstand V6.39.0: `bc7a260`
+- Version: **V6.40.1 – Vereinfachter Tagesstart**
+- Ausgangs-HEAD für V6.40.1: `6978ce3`
+- Produktstand V6.40.0: `6978ce3` (auf `origin/main` gesichert)
 - Branch: `main`
-- Upstream vor Beginn: `origin/main` auf `bc7a260`, synchron
-- Working Tree vor V6.40.0: sauber; V6.40.0 ist noch nicht committed
+- Upstream vor Beginn: `origin/main` auf `6978ce3`, synchron
+- Working Tree vor V6.40.1: sauber; V6.40.1 bleibt auftragsgemäß uncommitted und ungepusht
 
-## V6.40.0 – aktueller Funktionsstand
+## V6.40.1 – aktueller Funktionsstand
 
 - Ein neuer kompakter Hauptarbeitsweg steht im Cockpit vor den historischen Detailkarten.
-- Ein Tageslauf enthält genau ein bewusst gewähltes Fokusprojekt und genau ein gewünschtes Tagesergebnis.
-- Tagesergebnis, Begründung, Abnahmekriterium, eine Jamal-Frage, Codex-Vorbereitung, Ergebnisrückführung und Abschluss werden als zusammenhängender lokaler Lauf geführt.
-- Der Codex-Auftrag wird nur als kopierbarer Text vorbereitet; es gibt keinen Codex-Aufruf und keinen Agentenstart.
+- Ein Tageslauf enthält genau ein bewusst gewähltes Fokusprojekt, ein großes Pflichtfeld für das gewünschte Ergebnis und eine optionale Verbotsgrenze.
+- Die frühere normale Eingabe von Begründung, Abnahmekriterium, Jamal-Frage, Allowlist, Tests, Git-Regeln und Rückfallweg entfällt; diese Angaben werden nachvollziehbar abgeleitet.
+- Acht Aufgabentypen werden erkannt: Agenten-/Einsatzplanung, Entwicklung/Codex, Design, Content, Recherche, Strategie/Entscheidung, Qualität/Prüfung und Plugin-/Werkzeugauswahl.
+- Der Arbeitsvorschlag enthält Zielverständnis, realistischen Tagesumfang, federführenden und weitere Agenten, Rollen, Teilaufgaben, Reihenfolge, Übergaben, Werkzeugkategorien, Dateien/Datenbereiche, Tests, Sicherheitsgrenzen, Abnahmekriterium und eine Jamal-Frage.
+- Agenten- und Einsatzplanung bleibt ausdrücklich ohne Codex-/Repository-Auftrag; technische Arbeitsdetails stehen standardmäßig geschlossen unter „Technische Details anzeigen“.
+- Die Vorlage wird nur als kopierbarer Text vorbereitet; es gibt keinen Codex-Aufruf und keinen Agentenstart.
 - Jeder Statusübergang benötigt Jamals bewusste Bedienung.
 - Tagesläufe werden getrennt unter `ki-unternehmenszentrale-daily-work-runs-v1` gespeichert.
 - Der bestehende Managementspeicher `ki-unternehmenszentrale-v1` wird weder gelöscht noch pauschal migriert.
 - Ein Projektverlauf wird erst nach bestätigtem Tagesabschluss und separater manueller Übernahme ergänzt; doppelte Einträge werden verhindert.
 - Bei nicht verfügbarer Register-API erscheint der aktuelle technische Stand als `UNGEKLÄRT`; gespeicherte Momentaufnahmen dienen nicht als Ersatz.
 - Keine neue API: weiterhin 41 GET-Routen, 404 für unbekannte Projekt-ID und 405 für andere Methoden.
-- Browserabnahme erfolgreich: manueller Start ohne Autofokus, Health-Auswahl, vollständiger Lauf, Reload-Persistenz, Abschlussblockade bei fehlenden Pflichtangaben, einmalige Verlaufübernahme, fehlerfreie Konsole und verständliche mobile Darstellung geprüft.
+- Browserabnahme V6.40.1 erfolgreich: neuer Lauf ohne Autofokus, manuelle Health-Auswahl, Ergebniswunsch und optionale Grenze, Agenten-/Einsatzplanung ohne Repository-Auftrag, geschlossene Technikdetails, Reload-Persistenz und fehlerfreie Konsole geprüft. Ein bestehender abgeschlossener V6.40.0-Lauf blieb vollständig lesbar.
 
 ## Unveränderter V6.39.0-Registerstand
 
@@ -42,7 +45,7 @@
 - `project-registry.js` – kanonisches Register für exakt 17 Projekte
 - `project-registry.test.js` – automatisierte Register-, API- und Persistenzgrenzen
 - `daily-work-run.js` – isoliertes Tageslaufmodell und manuelle Statusübergänge
-- `daily-work-run.test.js` – 33 automatisierte Tageslauf-, Speicher- und Sicherheitsprüfungen
+- `daily-work-run.test.js` – 44 automatisierte Tageslauf-, Eingabe-, Erkennungs-, Speicher- und Sicherheitsprüfungen
 - `styles.css` – Designsystem und Oberflächenregeln
 - `package.json` – Start- und Syntaxprüfungen
 - `package-lock.json` – Lockfile ohne installierte Paketabhängigkeiten
@@ -58,7 +61,7 @@ Die Zentrale ist als lokaler read-only Arbeits-, Entscheidungs- und Demo-Stand p
 ## Tests
 
 - `npm test` → 20 Register-, Health-, API- und localStorage-Prüfpunkte
-- `npm test` führt zusätzlich 33 Tageslauf-Prüfpunkte aus
+- `npm test` führt zusätzlich 44 Tageslauf-Prüfpunkte aus
 - `npm run check` → `node --check app.js && node --check server.js`
 - `npm start` → `node server.js`
 - manuelle lokale Browser- und GET-API-Prüfungen
@@ -66,7 +69,7 @@ Die Zentrale ist als lokaler read-only Arbeits-, Entscheidungs- und Demo-Stand p
 
 ## Weiterhin fehlende Tests
 
-Keine Coverage-, Lint-, HTML-/CSS- oder CI-Test-Suite ist im Bestand nachgewiesen. V6.40.0 ergänzt begrenzte Unit- und manuelle Browserprüfungen für den Tagesarbeitslauf.
+Keine Coverage-, Lint-, HTML-/CSS- oder CI-Test-Suite ist im Bestand nachgewiesen. V6.40.1 ergänzt begrenzte Unit- und manuelle Browserprüfungen für den vereinfachten Tagesstart.
 
 ## Technische Risiken
 
@@ -79,13 +82,13 @@ Keine Coverage-, Lint-, HTML-/CSS- oder CI-Test-Suite ist im Bestand nachgewiese
 
 ## Bekannte Versionswidersprüche
 
-- Neuer Tageslaufstand V6.40.0, historische Cockpit- und Modulkennzeichnungen teilweise V6.38.x oder älter.
+- Neuer Tageslaufstand V6.40.1, historische Cockpit- und Modulkennzeichnungen teilweise V6.38.x oder älter.
 - Zwei Commits tragen V6.37.0; V6.37.2 erscheint in der Historie vor V6.37.1.
 - Viele historische V4.x-, V5.x- und V6.x-Bezeichnungen bleiben parallel sichtbar.
 
 ## Genau ein empfohlener nächster Produktentwicklungsschritt
 
-V6.40.0 manuell im Browser abnehmen; danach separat entscheiden, ob der uncommittete Stand gesichert werden soll.
+V6.40.1 manuell im Browser abnehmen; danach separat entscheiden, ob der uncommittete Stand gesichert werden soll.
 
 ## Bekannte Widersprüche
 
@@ -97,4 +100,4 @@ Historische Versionskennzeichnungen, Namensvarianten und nicht-kanonische Altreg
 
 ## Entscheidung durch Jamal erforderlich
 
-Manuelle Abnahme von V6.40.0 sowie jede spätere Commit-, Push- oder Deploymententscheidung.
+Manuelle Abnahme von V6.40.1 sowie jede spätere Commit-, Push- oder Deploymententscheidung.

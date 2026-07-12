@@ -55,20 +55,9 @@ function validDraft() {
     "Bestätigte technische Momentaufnahme; keine automatische Live-Aktualisierung.",
     "2026-07-11T08:00:00Z",
   );
-  run = DailyWorkRun.setDailyOutcome(run, {
-    desiredOutcome: "Einen technisch begrenzten Health-Prüfauftrag vorbereiten.",
-    reason: "Health ist der erste technisch verifizierte Pilot.",
-    acceptanceCriterion: "Der Auftrag enthält Ziel, Allowlist, Tests und Sicherheitsgrenzen.",
-    jamalDecisionQuestion: "Soll dieser begrenzte Auftrag manuell an Codex übergeben werden?",
-  });
-  run = DailyWorkRun.setCodexPreparation(run, {
-    projectPath: health.localPath,
-    allowedFiles: ["README.md"],
-    forbiddenFiles: ["src/data/demoData.js"],
-    targetChange: "Nur eine technische Dokumentationsprüfung vorbereiten.",
-    tests: ["npm test"],
-    gitRules: ["kein Commit", "kein Push"],
-    fallback: "Änderung über einen geprüften Patch zurücknehmen.",
+  run = DailyWorkRun.createWorkProposal(run, {
+    desiredOutcome: "Einen technisch begrenzten Codex-Prüfauftrag für die Health-Dokumentation vorbereiten.",
+    prohibitedToday: "Keine fachliche Health-Freigabe",
   });
   return run;
 }
@@ -80,6 +69,44 @@ function runTests() {
   check("genau ein Tagesergebnis", () => assert.throws(() => DailyWorkRun.setDailyOutcome(draft, { desiredOutcome: ["a", "b"] }), /Textwert/));
   check("genau ein Abnahmekriterium", () => assert.throws(() => DailyWorkRun.setDailyOutcome(draft, { desiredOutcome: "a", reason: "b", acceptanceCriterion: [] }), /Textwert/));
   check("genau eine Jamal-Entscheidungsfrage", () => assert.throws(() => DailyWorkRun.setDailyOutcome(draft, { desiredOutcome: "a", reason: "b", acceptanceCriterion: "c", jamalDecisionQuestion: ["x"] }), /Textwert/));
+
+  const health = getProjectById("health-upgrade-kompass");
+  const focused = DailyWorkRun.setFocusProject(draft, health, "Testmomentaufnahme", "2026-07-11T08:00:00Z");
+  check("im normalen Start ist nur der Ergebniswunsch erforderlich", () => {
+    const proposed = DailyWorkRun.createWorkProposal(focused, { desiredOutcome: "Bereite eine Strategieentscheidung vor" });
+    assert.strictEqual(proposed.dailyOutcome.desiredOutcome, "Bereite eine Strategieentscheidung vor");
+    assert.ok(proposed.dailyOutcome.acceptanceCriterion);
+    assert.ok(proposed.decision.jamalDecisionQuestion);
+  });
+  check("fehlender Ergebniswunsch wird abgelehnt", () => assert.throws(() => DailyWorkRun.createWorkProposal(focused, {}), /desiredOutcome/));
+  check("optionale Verbotsgrenze ist nicht erforderlich", () => assert.doesNotThrow(() => DailyWorkRun.createWorkProposal(focused, { desiredOutcome: "Bereite eine Entscheidung vor" })));
+  check("alle acht Aufgabentypen werden erkannt", () => {
+    const cases = [
+      ["Welche Agenten werden benötigt und wer prüft?", "Agenten- und Einsatzplanung"],
+      ["Entwickle mit Codex eine API", "Entwicklung/Codex"],
+      ["Erstelle ein UX Design", "Design"],
+      ["Formuliere einen Content Text", "Content"],
+      ["Recherchiere belastbare Quellen", "Recherche"],
+      ["Bereite eine Strategieentscheidung vor", "Strategie/Entscheidung"],
+      ["Prüfe Qualität und Tests", "Qualität/Prüfung"],
+      ["Wähle ein passendes Plugin oder Werkzeug", "Plugin-/Werkzeugauswahl"],
+    ];
+    assert.deepStrictEqual(cases.map(([text]) => DailyWorkRun.detectTaskType(text)), cases.map(([, type]) => type));
+  });
+  const agentPlanning = DailyWorkRun.createWorkProposal(focused, {
+    desiredOutcome: "Erstelle einen Einsatzplan, welche Agenten für Health benötigt werden und wer was prüft.",
+  });
+  check("Agentenplanung wird nicht zum Codex- oder Repository-Auftrag", () => {
+    assert.strictEqual(agentPlanning.workProposal.taskType, "Agenten- und Einsatzplanung");
+    assert.strictEqual(agentPlanning.workProposal.repositoryWorkRequired, false);
+    assert.match(agentPlanning.codexPreparation.preparedPrompt, /kein Codex- oder Repository-Auftrag/i);
+    assert.doesNotMatch(agentPlanning.codexPreparation.preparedPrompt, /Arbeite ausschließlich im Projekt/);
+  });
+  check("Agentenplanung enthält Rollen, Teilaufgaben und Übergaben", () => {
+    assert.ok(agentPlanning.workProposal.agentPlan.length >= 3);
+    assert.ok(agentPlanning.workProposal.agentPlan.every((item) => item.agent && item.role && item.subtask && item.handoffTo));
+    assert.ok(agentPlanning.workProposal.agentPlan.some((item) => item.agent === "Health-Kompass-Agent"));
+  });
 
   const preparedDraft = validDraft();
   check("vollständige Pflichtfelder", () => assert.deepStrictEqual(DailyWorkRun.validateReadyForCodex(preparedDraft), []));
@@ -112,6 +139,58 @@ function runTests() {
   check("Codex-Auftrag ist nur Textvorlage", () => {
     assert.strictEqual(typeof preparedDraft.codexPreparation.preparedPrompt, "string");
     assert.match(preparedDraft.codexPreparation.preparedPrompt, /ausschließlich eine manuell kopierbare Auftragsvorlage/);
+  });
+
+  const appSource = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
+  check("technische Details sind standardmäßig geschlossen", () => {
+    assert.match(appSource, /<details class="daily-work-run-technical-details daily-work-run-field--wide">/);
+    assert.doesNotMatch(appSource, /<details class="daily-work-run-technical-details[^>]*\sopen/);
+  });
+  check("normaler Start zeigt genau ein erforderliches Ergebnisfeld", () => {
+    const preparationSource = appSource.slice(appSource.indexOf("function renderDailyWorkRunPreparation"), appSource.indexOf("function renderDailyWorkProposal"));
+    assert.strictEqual((preparationSource.match(/<textarea[^>]*required/g) || []).length, 1);
+    assert.match(preparationSource, /Arbeitsvorschlag erstellen/);
+  });
+  check("Ergebnis- und Verbotsfeld sind im neuen Tageslauf editierbar", () => {
+    const preparationSource = appSource.slice(appSource.indexOf("function renderDailyWorkRunPreparation"), appSource.indexOf("function renderDailyWorkProposal"));
+    const renderPreparation = new Function(
+      "escapeHtml",
+      "dailyWorkRunList",
+      "renderDailyWorkProposal",
+      `${preparationSource}; return renderDailyWorkRunPreparation;`,
+    )(
+      (value) => String(value ?? ""),
+      () => "",
+      () => "",
+    );
+    const html = renderPreparation(focused);
+    const desiredOutcomeField = html.match(/<textarea name="desiredOutcome"[^>]*>/)?.[0] || "";
+    const prohibitedTodayField = html.match(/<textarea name="prohibitedToday"[^>]*>/)?.[0] || "";
+    assert.ok(desiredOutcomeField);
+    assert.ok(prohibitedTodayField);
+    assert.doesNotMatch(desiredOutcomeField, /\sdisabled(?:\s|>)/);
+    assert.doesNotMatch(desiredOutcomeField, /\sreadonly(?:\s|>)/);
+    assert.doesNotMatch(prohibitedTodayField, /\sdisabled(?:\s|>)/);
+    assert.doesNotMatch(prohibitedTodayField, /\sreadonly(?:\s|>)/);
+  });
+  check("eingegebener Health-Ergebnistext wird unverändert übernommen", () => {
+    const desiredOutcome = "Ich möchte wissen, welche Agenten jetzt beim Health Upgrade Kompass eingesetzt werden müssen und was jeder davon prüfen soll.";
+    const proposed = DailyWorkRun.createWorkProposal(focused, { desiredOutcome });
+    assert.strictEqual(proposed.dailyOutcome.desiredOutcome, desiredOutcome);
+    assert.strictEqual(proposed.workProposal.understoodGoal, desiredOutcome);
+    assert.strictEqual(proposed.workProposal.taskType, "Agenten- und Einsatzplanung");
+    assert.strictEqual(proposed.workProposal.repositoryWorkRequired, false);
+    assert.strictEqual(proposed.boundary.codexExecutionBlocked, true);
+  });
+  check("gesperrter gespeicherter Lauf bietet einen verlustfreien Neustart", () => {
+    assert.match(appSource, /\["READY_FOR_CODEX", "RESULT_RECORDED"\]\.includes\(run\.status\)/);
+    assert.match(appSource, /Der vorhandene Lauf bleibt vollständig erhalten/);
+    const readyRun = DailyWorkRun.transitionRun(preparedDraft, "READY_FOR_CODEX");
+    let restartStore = DailyWorkRun.upsertRun(DailyWorkRun.createStore(), readyRun);
+    restartStore = DailyWorkRun.upsertRun(restartStore, DailyWorkRun.createDraftRun({ id: "run-neustart", workDate: "2026-07-12" }));
+    assert.strictEqual(restartStore.runs.length, 2);
+    assert.strictEqual(DailyWorkRun.getActiveRun(restartStore).status, "DRAFT");
+    assert.ok(restartStore.runs.some((run) => run.id === readyRun.id && run.status === "READY_FOR_CODEX"));
   });
 
   let ready = DailyWorkRun.transitionRun(preparedDraft, "READY_FOR_CODEX");
@@ -154,10 +233,10 @@ function runTests() {
   check("writeOperationsBlocked bleibt true", () => assert.strictEqual(API_SECURITY_FLAGS.writeOperationsBlocked, true));
   check("madeExternalRequest bleibt false", () => assert.strictEqual(API_SECURITY_FLAGS.madeExternalRequest, false));
 
-  assert.strictEqual(passed, 33);
+  assert.strictEqual(passed, 44);
   assert.strictEqual(DailyWorkRun.getActiveRun(stored).id, preparedDraft.id);
   assert.strictEqual(PROJECT_REGISTRY.length, 17);
-  console.log("daily-work-run.test.js: 33 Prüfpunkte erfolgreich");
+  console.log("daily-work-run.test.js: 44 Prüfpunkte erfolgreich");
 }
 
 runTests();
