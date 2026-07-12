@@ -243,10 +243,15 @@ function runTests() {
   });
 
   const appSource = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
+  const uiSource = fs.readFileSync(path.join(__dirname, "daily-work-run-ui.js"), "utf8");
   check("app.js bindet Datensicherung minimal an", () => {
-    assert.match(appSource, /LocalDataBackup/);
-    assert.match(appSource, /renderLocalDataBackupSection/);
+    assert.match(appSource, /DailyWorkRunUi/);
+    assert.match(appSource, /DailyWorkRunUi\.init\(/);
     assert.doesNotMatch(appSource, /function exportLocalData\(/);
+  });
+  check("Datensicherungs-UI liegt im Tageslauf-UI-Modul", () => {
+    assert.match(uiSource, /renderLocalDataBackupSection/);
+    assert.match(uiSource, /LocalDataBackup/);
   });
 
   console.log(`local-data-backup.test.js: ${passed} Prüfpunkte erfolgreich`);

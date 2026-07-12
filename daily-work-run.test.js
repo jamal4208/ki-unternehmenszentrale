@@ -120,7 +120,7 @@ function runTests() {
     assert.doesNotMatch(serverSource, /const PRODUCTIVE_AGENT_REGISTRY = \[/);
     assert.match(browserSource, /window\.AgentRegistry\?\.PRODUCTIVE_AGENT_REGISTRY/);
     assert.doesNotMatch(browserSource, /const PRODUCTIVE_AGENT_REGISTRY = \[/);
-    assert.match(htmlSource, /<script src="agent-registry\.js"><\/script>\s*<script src="daily-work-run\.js"><\/script>/);
+    assert.match(htmlSource, /<script src="agent-registry\.js"><\/script>\s*<script src="daily-work-run\.js"><\/script>\s*<script src="local-data-backup\.js"><\/script>\s*<script src="daily-work-run-ui\.js"><\/script>/);
   });
   check("Health-Pilot wählt mehr als drei passende Agenten", () => assert.ok(agentPlanning.workProposal.selectedAgentIds.length > 3));
   check("Health-Pilot wählt bewusst nicht alle Agenten", () => assert.ok(agentPlanning.workProposal.selectedAgentIds.length < AgentRegistry.CANONICAL_AGENT_COUNT));
@@ -184,7 +184,7 @@ function runTests() {
     assert.deepStrictEqual(DailyWorkRun.getActiveRun(oldStore).workProposal, oldRun.workProposal);
   });
   check("keine Löschung und keine automatische Agenten-, Codex- oder Plugin-Ausführung", () => {
-    const sources = ["daily-work-run.js", "app.js", "agent-registry.js"].map((file) => fs.readFileSync(path.join(__dirname, file), "utf8")).join("\n");
+    const sources = ["daily-work-run.js", "daily-work-run-ui.js", "app.js", "agent-registry.js"].map((file) => fs.readFileSync(path.join(__dirname, file), "utf8")).join("\n");
     assert.doesNotMatch(sources, /localStorage\.(?:clear|removeItem)/);
     assert.strictEqual(agentPlanning.boundary.agentExecutionBlocked, true);
     assert.strictEqual(agentPlanning.boundary.codexExecutionBlocked, true);
@@ -417,18 +417,20 @@ function runTests() {
     assert.match(preparedDraft.codexPreparation.preparedPrompt, /manuell kopierbare Planungsvorlage/);
   });
 
-  const appSource = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
+  const uiSource = fs.readFileSync(path.join(__dirname, "daily-work-run-ui.js"), "utf8");
   check("technische Details sind standardmäßig geschlossen", () => {
-    assert.match(appSource, /<details class="daily-work-run-technical-details daily-work-run-field--wide">/);
-    assert.doesNotMatch(appSource, /<details class="daily-work-run-technical-details[^>]*\sopen/);
+    assert.match(uiSource, /<details class="daily-work-run-technical-details daily-work-run-field--wide">/);
+    assert.doesNotMatch(uiSource, /<details class="daily-work-run-technical-details[^>]*\sopen/);
   });
   check("normaler Start zeigt genau ein erforderliches Ergebnisfeld", () => {
-    const preparationSource = appSource.slice(appSource.indexOf("function renderDailyWorkRunPreparation"), appSource.indexOf("function renderDailyWorkProposal"));
+    const preparationSource = uiSource.slice(uiSource.indexOf("function renderDailyWorkRunPreparation"), uiSource.indexOf("function renderDailyWorkProposal"));
     assert.strictEqual((preparationSource.match(/<textarea[^>]*required/g) || []).length, 1);
     assert.match(preparationSource, /Arbeitsvorschlag erstellen/);
   });
   check("Ergebnis- und Verbotsfeld sind im neuen Tageslauf editierbar", () => {
-    const preparationSource = appSource.slice(appSource.indexOf("function renderDailyWorkRunPreparation"), appSource.indexOf("function renderDailyWorkProposal"));
+    const preparationSource = uiSource
+      .slice(uiSource.indexOf("function renderDailyWorkRunPreparation"), uiSource.indexOf("function renderDailyWorkProposal"))
+      .replace(/deps\.escapeHtml/g, "escapeHtml");
     const renderPreparation = new Function(
       "escapeHtml",
       "dailyWorkRunList",
@@ -459,8 +461,8 @@ function runTests() {
     assert.strictEqual(proposed.boundary.codexExecutionBlocked, true);
   });
   check("gesperrter gespeicherter Lauf bietet einen verlustfreien Neustart", () => {
-    assert.match(appSource, /\["READY_FOR_CODEX", "RESULT_RECORDED"\]\.includes\(run\.status\)/);
-    assert.match(appSource, /Der vorhandene Lauf bleibt vollständig erhalten/);
+    assert.match(uiSource, /\["READY_FOR_CODEX", "RESULT_RECORDED"\]\.includes\(run\.status\)/);
+    assert.match(uiSource, /Der vorhandene Lauf bleibt vollständig erhalten/);
     const readyRun = DailyWorkRun.transitionRun(preparedDraft, "READY_FOR_CODEX");
     let restartStore = DailyWorkRun.upsertRun(DailyWorkRun.createStore(), readyRun);
     restartStore = DailyWorkRun.upsertRun(restartStore, DailyWorkRun.createDraftRun({ id: "run-neustart", workDate: "2026-07-12" }));

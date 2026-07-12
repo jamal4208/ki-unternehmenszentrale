@@ -17,6 +17,7 @@ const allowedFiles = new Map([
   ["/agent-registry.js", "agent-registry.js"],
   ["/daily-work-run.js", "daily-work-run.js"],
   ["/local-data-backup.js", "local-data-backup.js"],
+  ["/daily-work-run-ui.js", "daily-work-run-ui.js"],
   ["/app.js", "app.js"],
   ["/styles.css", "styles.css"],
 ]);

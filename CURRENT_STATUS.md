@@ -2,14 +2,23 @@
 
 ## Git- und Versionsstand
 
-- Version: **V6.41.0 – Lokale Datensicherung**
-- Ausgangs-HEAD für V6.41.0: `a7a149f`
-- Produktstand V6.40.3: `a7a149f` (auf `origin/main` gesichert)
+- Version: **V6.42.0 – Tageslauf-UI modularisiert**
+- Ausgangs-HEAD für V6.42.0: `d4b4977`
+- Produktstand V6.41.0: `d4b4977` (auf `origin/main` gesichert)
 - Branch: `main`
-- Upstream: `origin/main` auf `a7a149f`, synchron
-- Working Tree: lokal geändert für V6.41.0; noch nicht committed
+- Upstream: `origin/main` auf `d4b4977`, synchron
+- Working Tree: lokal geändert für V6.42.0; noch nicht committed
 
-## V6.41.0 – aktueller Funktionsstand
+## V6.42.0 – aktueller Funktionsstand
+
+- `daily-work-run-ui.js` enthält die komplette Tageslauf-Präsentations- und Bedienlogik aus dem bisherigen `app.js`-Monolithen.
+- `app.js` initialisiert das UI-Modul über `DailyWorkRunUi.init(...)` und ruft `DailyWorkRunUi.render()` aus `renderAll()` sowie nach Register-Refresh auf.
+- `daily-work-run.js` bleibt Domänen- und Persistenzmodul; `local-data-backup.js` bleibt Datensicherungsmodul.
+- Keine neue Produktfunktion, keine Verhaltensänderung, keine neue Vorbereitungskarte, keine Migration.
+- Script-Reihenfolge: `agent-registry.js` → `daily-work-run.js` → `local-data-backup.js` → `daily-work-run-ui.js` → `app.js`.
+- 17 Projekte, 25 Agenten, 41 GET-Routen, beide localStorage-Schlüssel und alle Ausführungsverbote bleiben erhalten.
+
+## V6.41.0 – gesicherter Ausgangsstand
 
 - `local-data-backup.js` exportiert und importiert ausschließlich `ki-unternehmenszentrale-v1` und `ki-unternehmenszentrale-daily-work-runs-v1`.
 - Export als JSON mit Formatversion, Zeitpunkt, Prüfinformation und Sicherheitshinweis.
@@ -17,7 +26,6 @@
 - Vor Import wird der bestehende lokale Zustand intern gesichert; bei Schreibfehlern erfolgt Rollback.
 - Kein `localStorage.clear()`, kein pauschales Löschen, keine Überschreibung kanonischer Register.
 - UI-Anbindung minimal im Tageslaufbereich unter „Lokale Datensicherung“.
-- 17 Projekte, 25 Agenten, 41 GET-Routen und alle Ausführungsverbote bleiben erhalten.
 
 ## Architektur-Freeze
 
@@ -74,13 +82,15 @@
 ## Hauptdateien
 
 - `index.html` – Grundstruktur und Ansichten
-- `app.js` – Frontend-, Register-, Zustands- und Renderinglogik
+- `app.js` – App-Shell, Zustandsintegration und Initialisierung des Tageslauf-UI-Moduls
 - `server.js` – lokaler HTTP-Server, APIs und Geschäftslogik
 - `project-registry.js` – kanonisches Register für exakt 17 Projekte
 - `project-registry.test.js` – automatisierte Register-, API- und Persistenzgrenzen
 - `agent-registry.js` – einziges kanonisches Register für 25 Hauptagenten und Rollen-Zuordnungen
 - `daily-work-run.js` – Tageslaufmodell, Agentenauswahl und manuelle Statusübergänge
+- `daily-work-run-ui.js` – Tageslauf-Rendering, Event-Bindings und Backup-UI-Anbindung
 - `daily-work-run.test.js` – automatisierte Tageslauf-, Agenten-, Eingabe-, Speicher- und Sicherheitsprüfungen
+- `daily-work-run-ui.test.js` – automatisierte Modulgrenzen-, Initialisierungs- und Integrationsprüfungen
 - `local-data-backup.js` – Export, Import, Validierung und Rollback für lokale Browserdaten
 - `local-data-backup.test.js` – automatisierte Datensicherungsprüfungen
 - `styles.css` – Designsystem und Oberflächenregeln
@@ -99,7 +109,8 @@ Die Zentrale ist als lokaler read-only Arbeits-, Entscheidungs- und Demo-Stand p
 
 - `npm test` → 20 Register-, Health-, API- und localStorage-Prüfpunkte
 - `npm test` führt zusätzlich 96 Tageslauf-, Agentenplan- und Prüfphasen-Prüfpunkte aus
-- `npm test` führt zusätzlich 17 Datensicherungs-Prüfpunkte aus
+- `npm test` führt zusätzlich 18 Datensicherungs-Prüfpunkte aus
+- `npm test` führt zusätzlich 16 Tageslauf-UI-Modulprüfungen aus
 - `npm run check` prüft Agentenregister, Tageslauf, UI, Server und Projektregister syntaktisch
 - `npm start` → `node server.js`
 - manuelle lokale Browser- und GET-API-Prüfungen
@@ -111,7 +122,7 @@ Keine Coverage-, Lint-, HTML-/CSS- oder CI-Test-Suite ist im Bestand nachgewiese
 
 ## Technische Risiken
 
-- sehr große Monolithen: `app.js`, `server.js` und `styles.css`
+- sehr große Monolithen: `app.js`, `server.js` und `styles.css` (Tageslauf-UI seit V6.42.0 ausgelagert)
 - historische Register-, Status- und Sicherheitsstrukturen bleiben in Frontend und Server sichtbar; technische Projektverifizierung stammt ausschließlich aus `project-registry.js`
 - zahlreiche historische Versionsschichten im laufenden Code
 - uneinheitliche Agenten- und Projektnamen
