@@ -172,6 +172,7 @@
         openPoints: [],
       },
       agentReviewPhase: createAgentReviewPhase(),
+      agentRuntimePilot: null,
       closure: {
         status: "",
         jamalDecision: "",
@@ -735,9 +736,21 @@
     if (!phase.preparedAt) throw new Error("Die Agentenaufträge sind noch nicht vorbereitet.");
     const item = phase.workItems.find((entry) => entry.agentId === agentId);
     if (!item) throw new Error("Arbeitskarte gehört nicht zu diesem Agentenplan.");
-    if (item.isLead || item.agentId === "quality-test-agent") throw new Error("QA und Zusammenführung besitzen eigene kontrollierte Rückführungen.");
+    const runtimePilotAcceptance = values.runtimePilotAcceptance === true;
+    if (runtimePilotAcceptance) {
+      if (values.pilotAgentId !== agentId) throw new Error("Runtime-Übernahme gehört nicht zum Pilot-Agenten.");
+      if (item.agentId !== values.pilotAgentId) throw new Error("Runtime-Übernahme passt nicht zur Arbeitskarte.");
+    }
+    if ((item.isLead || item.agentId === "quality-test-agent") && !runtimePilotAcceptance) {
+      throw new Error("QA und Zusammenführung besitzen eigene kontrollierte Rückführungen.");
+    }
     if (item.resultConfirmedAt) throw new Error("Dieses Ergebnis wurde bereits bestätigt und wird nicht überschrieben.");
-    if (item.status !== "READY") throw new Error("Die Voraussetzungen für diesen Agentenbefund fehlen noch.");
+    if (!runtimePilotAcceptance && item.status !== "READY") {
+      throw new Error("Die Voraussetzungen für diesen Agentenbefund fehlen noch.");
+    }
+    if (runtimePilotAcceptance && !["READY", "WAITING"].includes(item.status)) {
+      throw new Error("Die Runtime-Übernahme ist für diesen Arbeitskartenstatus nicht erlaubt.");
+    }
     if (values.confirmed !== true) throw new Error("Das Ergebnis muss bewusst bestätigt werden.");
     item.resultText = singleText(values.resultText, "resultText", true);
     item.openPoints = textList(values.openPoints);

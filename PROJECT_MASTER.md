@@ -1,10 +1,20 @@
 # PROJECT MASTER
 
-## Verbindlicher Versionsstand V6.42.1
+## Verbindlicher Versionsstand V6.43.0
 
-V6.42.1 modularisiert die allgemeine HTTP-Routing-, Methoden- und statische Dateiauslieferungslogik als eigenständiges Modul `server-http-router.js`. `server.js` bleibt für Serverstart, Konfiguration, Handler und Antwortdaten zuständig und übergibt eine explizite Route- und Asset-Tabelle an den Router. Es gibt keine neue Produktfunktion, keine Verhaltensänderung, keine neue Route und keine Schreibmöglichkeit.
+V6.43.0 ergänzt eine kontrollierte Agenten-Laufzeit mit lokalem deterministischen Pilot-Executor als eigenständiges Modul `agent-runtime.js`. Der erste Executor prüft ausschließlich die Qualität und Vollständigkeit des vorbereiteten Projektmanager-Arbeitsauftrags. Es gibt keine externe KI-Ausführung, keine Plugin-Ausführung, keine Dateischreibvorgänge, keine Netzwerkzugriffe und keine Außenwirkung.
 
-## Architektur-Freeze ab V6.42.1
+Jamal muss den Piloten explizit vorbereiten, freigeben, starten und ein Ergebnis bewusst annehmen, bevor es über die bestehende manuelle Ergebnisrückführung in die Agenten-Prüfphase übernommen wird. Timeout, Abbruch und ein append-only Audit-Verlauf sind vorhanden. Der Pilot ist in V6.43.0 nur für Health Upgrade Kompass mit vorbereiteter Agenten-Prüfphase und Projektmanager-Arbeitskarte verfügbar.
+
+## Architektur-Freeze ab V6.43.0
+
+- `agent-runtime.js` enthält Laufzeit-Datenmodell, Snapshot, Fingerprint, Freigabelogik, Statusmaschine, Executor-Schnittstelle, Timeout, Abbruch, Audit und Ergebnisvalidierung.
+- `daily-work-run.js` bleibt Domänen- und Persistenzmodul; Runtime-Zustand liegt additiv unter `agentRuntimePilot` im bestehenden Tageslauf-Datensatz.
+- `daily-work-run-ui.js` rendert und bedient den Runtime-Piloten in der bestehenden Agenten-Prüfphase ohne kopierte Geschäftslogik.
+- Keine neue API-Route, keine Schreib-API, kein Deployment, keine Autonomieerhöhung.
+- Nächster Schritt nach Jamals Abnahme: weiterer kontrollierter Executor nur nach expliziter Freigabe; nicht automatisch freigegeben.
+
+## Gesicherter Ausgangsstand V6.42.1
 
 - Keine weiteren verschachtelten Vorbereitungs-, Simulations- oder Abschlusskarten als Ersatz für echte Funktionen.
 - Neue Kernfunktionen werden grundsätzlich als eigenständige Module umgesetzt; `app.js` und `server.js` werden nicht unkontrolliert vergrößert.

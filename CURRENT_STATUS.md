@@ -2,14 +2,23 @@
 
 ## Git- und Versionsstand
 
-- Version: **V6.42.1 – Server-Router modularisiert**
-- Ausgangs-HEAD für V6.42.1: `76e21be`
-- Produktstand V6.42.0: `76e21be` (auf `origin/main` gesichert)
+- Version: **V6.43.0 – kontrollierte Agenten-Laufzeit mit lokalem Pilot-Executor**
+- Ausgangs-HEAD für V6.43.0: `e22555e`
+- Produktstand V6.42.1: `e22555e` (auf `origin/main` gesichert)
 - Branch: `main`
-- Upstream: `origin/main` auf `76e21be`, synchron
-- Working Tree: lokal geändert für V6.42.1; noch nicht committed
+- Upstream: `origin/main` auf `e22555e`, synchron
+- Working Tree: lokal geändert für V6.43.0; noch nicht committed
 
-## V6.42.1 – aktueller Funktionsstand
+## V6.43.0 – aktueller Funktionsstand
+
+- `agent-runtime.js` implementiert die Runtime-Infrastruktur: Snapshot, Fingerprint, Jamal-Freigabe, Statusmaschine, lokaler deterministischer Pilot-Executor, Timeout, Abbruch, Audit und Ergebnisprüfung.
+- Erster Executor: `LOCAL_DETERMINISTIC_PILOT` prüft nur den vorbereiteten Projektmanager-Arbeitsauftrag; keine externe KI, kein Plugin, keine Außenwirkung.
+- Pilot-Agent: kanonischer Projektmanager-Agent über `ROLE_NAME_MAPPING` → `orchestrator-agent`.
+- Persistenz additiv unter `agentRuntimePilot` im bestehenden Tageslauf (`schemaVersion: 1`, gleicher localStorage-Schlüssel).
+- UI-Integration zurückhaltend in der bestehenden Agenten-Prüfphase; separater Start, keine automatische Ergebnisübernahme.
+- 232 automatisierte Prüfpunkte (182 bestehend + 50 Runtime); 41 GET-Routen; POST 405; `writeOperationsBlocked: true`; `madeExternalRequest: false`.
+
+## V6.42.1 – gesicherter Ausgangsstand
 
 - `server-http-router.js` enthält HTTP-Dispatch, Methodenprüfung, statische Asset-Auslieferung, 404/405 und kontrollierte interne Fehlergrenzen.
 - `server.js` bleibt für Serverstart, Konfiguration, Handler, Antwortdaten und die explizite Übergabe von `getRoutes`, `routePrefixHandlers` und `staticAssets` zuständig.

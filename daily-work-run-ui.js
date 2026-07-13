@@ -9,14 +9,18 @@
     typeof module === "object" && module.exports
       ? require("./local-data-backup")
       : root?.LocalDataBackup;
-  const api = factory(dailyWorkRunModule, localDataBackupModule);
+  const agentRuntimeModule =
+    typeof module === "object" && module.exports
+      ? require("./agent-runtime")
+      : root?.AgentRuntime;
+  const api = factory(dailyWorkRunModule, localDataBackupModule, agentRuntimeModule);
   if (typeof module === "object" && module.exports) {
     module.exports = api;
   }
   if (root) {
     root.DailyWorkRunUi = api;
   }
-})(typeof globalThis !== "undefined" ? globalThis : this, function createDailyWorkRunUi(DailyWorkRun, LocalDataBackup) {
+})(typeof globalThis !== "undefined" ? globalThis : this, function createDailyWorkRunUi(DailyWorkRun, LocalDataBackup, AgentRuntime) {
   const REQUIRED_DEPS = [
     "byId",
     "escapeHtml",
@@ -43,6 +47,12 @@
     statusType: null,
     importToken: null,
     lastCompletedImportToken: null,
+  };
+
+  const agentRuntimeUiState = {
+    runningAttemptId: null,
+    abortController: null,
+    error: null,
   };
 
   let deps = null;
@@ -338,6 +348,141 @@ function renderDailyWorkProposal(proposal) {
   `;
 }
 
+function agentRuntimeApi() {
+  return AgentRuntime || null;
+}
+
+function saveRunWithRuntimePilot(run, pilot) {
+  const runtime = agentRuntimeApi();
+  const nextRun = runtime ? runtime.attachRuntimePilot(run, pilot) : { ...run, agentRuntimePilot: pilot };
+  return saveDailyWorkRun(nextRun);
+}
+
+function renderAgentRuntimePilot(run) {
+  const runtime = agentRuntimeApi();
+  if (!runtime || !run.workProposal?.selectedAgentIds || run.status !== "READY_FOR_CODEX") return "";
+
+  const phase = dailyWorkRunApi().getAgentReviewPhase(run);
+  if (!phase.preparedAt) return "";
+
+  const availability = runtime.evaluateAvailability(run);
+  const pilot = run.agentRuntimePilot || null;
+
+  const statusLabels = {
+    PREPARED: "Vorbereitet",
+    AWAITING_JAMAL_APPROVAL: "Wartet auf Jamal-Freigabe",
+    APPROVED: "Freigegeben",
+    QUEUED: "In Warteschlange",
+    RUNNING: "Lokaler Pilot läuft",
+    RESULT_REVIEW_REQUIRED: "Ergebnis prüfpflichtig",
+    ACCEPTED: "Ergebnis übernommen",
+    REJECTED: "Ergebnis abgelehnt",
+    FAILED: "Fehlgeschlagen",
+    CANCELLED: "Abgebrochen",
+    TIMED_OUT: "Zeitüberschreitung",
+  };
+
+  const pilotAgent = runtime.getProjektmanagerAgent();
+  const snapshot = pilot?.inputSnapshot;
+  const approval = pilot?.approval;
+  const result = pilot?.result;
+  const canPrepare = availability.available && (!pilot || runtime.isRuntimeTerminal(pilot));
+  const canApprove = pilot && ["PREPARED", "AWAITING_JAMAL_APPROVAL"].includes(pilot.status);
+  const canStart = pilot?.status === "APPROVED" && !agentRuntimeUiState.runningAttemptId;
+  const canCancel = pilot && runtime.isRuntimeActive(pilot);
+  const canAccept = pilot?.status === "RESULT_REVIEW_REQUIRED" && result;
+  const canReject = pilot?.status === "RESULT_REVIEW_REQUIRED";
+
+  return `
+    <section class="daily-work-runtime-pilot" aria-labelledby="daily-agent-runtime-title">
+      <header>
+        <div>
+          <p class="eyebrow">V6.43.0 · kontrollierte Laufzeit</p>
+          <h4 id="daily-agent-runtime-title">Agenten-Laufzeit-Pilot</h4>
+        </div>
+        <span class="daily-work-run-mode">${deps.escapeHtml(pilot ? statusLabels[pilot.status] || pilot.status : "Noch nicht vorbereitet")}</span>
+      </header>
+      <article class="daily-work-run-notice daily-work-run-runtime-notice">
+        <strong>Lokaler deterministischer Pilot – keine externe KI, kein Plugin, keine Außenwirkung.</strong>
+        <p>Dieser Pilot prüft ausschließlich die Qualität und Vollständigkeit des vorbereiteten Arbeitsauftrags. Es arbeitet kein externer KI-Agent, es werden keine Projektdateien gelesen und keine Netzwerkzugriffe ausgeführt.</p>
+      </article>
+      <dl class="daily-work-run-facts">
+        <div><dt>Pilot-Agent</dt><dd>${deps.escapeHtml(pilotAgent.agent?.name || pilotAgent.agentId)} · ${deps.escapeHtml(runtime.PROJEKTMANAGER_ROLE_NAME)}</dd></div>
+        <div><dt>Arbeitsauftrag</dt><dd>${deps.escapeHtml(availability.workItem?.subtask || "UNGEKLÄRT")}</dd></div>
+      </dl>
+      ${!availability.available && !pilot ? `
+        <p class="daily-work-run-empty">${deps.escapeHtml(availability.reasons.join(" "))}</p>
+      ` : ""}
+      ${agentRuntimeUiState.error ? `<p class="daily-work-run-error">${deps.escapeHtml(agentRuntimeUiState.error)}</p>` : ""}
+      ${snapshot ? `
+        <details class="daily-work-run-runtime-snapshot">
+          <summary>Eingabe-Snapshot anzeigen</summary>
+          <dl class="daily-work-run-facts">
+            <div><dt>Fingerprint</dt><dd><code>${deps.escapeHtml(snapshot.inputFingerprint)}</code></dd></div>
+            <div><dt>Ergebnisziel</dt><dd>${deps.escapeHtml(snapshot.expectedResult)}</dd></div>
+            <div><dt>Prüfkriterien</dt><dd>${deps.escapeHtml(snapshot.reviewCriteria)}</dd></div>
+            <div><dt>Sicherheitsgrenze</dt><dd>${deps.escapeHtml(snapshot.safetyBoundary)}</dd></div>
+            <div><dt>Abhängigkeiten</dt><dd>${deps.escapeHtml((snapshot.dependencies || []).join(", ") || "keine")}</dd></div>
+            <div><dt>Arbeitskartenstatus</dt><dd>${deps.escapeHtml(snapshot.workItemStatus)}</dd></div>
+            <div><dt>Tagesergebnis</dt><dd>${deps.escapeHtml(snapshot.desiredDailyOutcome)}</dd></div>
+            <div><dt>Vorbereitet</dt><dd>${deps.escapeHtml(snapshot.preparedAt)}</dd></div>
+          </dl>
+        </details>
+      ` : ""}
+      ${approval ? `
+        <article class="daily-work-runtime-approval">
+          <strong>Jamal-Freigabe</strong>
+          <p>${deps.escapeHtml(approval.explanation)}</p>
+          <dl class="daily-work-run-facts">
+            <div><dt>Freigegeben von</dt><dd>${deps.escapeHtml(approval.approvedBy)}</dd></div>
+            <div><dt>Freigegeben am</dt><dd>${deps.escapeHtml(approval.approvedAt)}</dd></div>
+            <div><dt>Scope</dt><dd>${deps.escapeHtml(approval.scope)}</dd></div>
+            <div><dt>Fingerprint</dt><dd><code>${deps.escapeHtml(approval.inputFingerprint)}</code></dd></div>
+          </dl>
+        </article>
+      ` : ""}
+      <div class="daily-work-run-actions daily-work-runtime-actions">
+        ${canPrepare ? `<button class="secondary-button" type="button" data-runtime-prepare>Pilot vorbereiten</button>` : ""}
+        ${canApprove ? `<button class="primary-button" type="button" data-runtime-approve>Jamal-Freigabe erteilen</button>` : ""}
+        ${canStart ? `<button class="primary-button" type="button" data-runtime-start>Lokalen Pilot starten</button>` : ""}
+        ${canCancel ? `<button class="secondary-button" type="button" data-runtime-cancel>Lauf abbrechen</button>` : ""}
+      </div>
+      ${result ? `
+        <article class="daily-work-runtime-result">
+          <strong>Prüfpflichtiges Ergebnis</strong>
+          <p>${deps.escapeHtml(result.summary)}</p>
+          ${dailyWorkRunList(result.completenessFindings, "Keine Vollständigkeitsbefunde.")}
+          ${dailyWorkRunList(result.openPoints, "Keine offenen Punkte.")}
+          ${dailyWorkRunList(result.blockers, "Keine Blocker.")}
+          <p><b>Empfohlener nächster Schritt:</b> ${deps.escapeHtml(result.recommendedNextStep)}</p>
+          <div class="daily-work-run-actions">
+            ${canAccept ? `
+              <form class="daily-work-runtime-accept-form" id="daily-work-runtime-accept-form">
+                <label class="daily-work-review-confirm"><input type="checkbox" name="confirmed" required> Ergebnis bewusst übernehmen</label>
+                <button class="primary-button" type="submit">Ergebnis akzeptieren</button>
+              </form>
+            ` : ""}
+            ${canReject ? `
+              <form class="daily-work-runtime-reject-form" id="daily-work-runtime-reject-form">
+                <label>Ablehnungsgrund <textarea name="reason" rows="2" placeholder="Optional"></textarea></label>
+                <button class="secondary-button" type="submit">Ergebnis ablehnen</button>
+              </form>
+            ` : ""}
+          </div>
+        </article>
+      ` : ""}
+      <details class="daily-work-run-technical-details">
+        <summary>Audit-Verlauf</summary>
+        ${pilot?.auditLog?.length ? `
+          <ol class="daily-work-runtime-audit">
+            ${pilot.auditLog.map((entry) => `<li><strong>${deps.escapeHtml(entry.eventType)}</strong> · ${deps.escapeHtml(entry.timestamp)} · ${deps.escapeHtml(entry.message)}</li>`).join("")}
+          </ol>
+        ` : `<p class="daily-work-run-empty">Noch keine Audit-Ereignisse.</p>`}
+      </details>
+    </section>
+  `;
+}
+
 function renderDailyWorkAgentReviewPhase(run) {
   if (!run.workProposal?.selectedAgentIds || run.status !== "READY_FOR_CODEX") return "";
   const api = dailyWorkRunApi();
@@ -481,6 +626,7 @@ function renderDailyWorkAgentReviewPhase(run) {
         </div>
       ` : ""}
       <details class="daily-work-run-technical-details"><summary>Technische Prüfphasendetails</summary><p>Status: ${deps.escapeHtml(phase.status)} · vorbereitet: ${deps.escapeHtml(phase.preparedAt)} · Agentenausführung: blockiert</p></details>
+      ${renderAgentRuntimePilot(run)}
     </section>
   `;
 }
@@ -895,6 +1041,114 @@ function setupDailyWorkRun() {
       return;
     }
 
+    const runtimePrepareButton = event.target.closest("[data-runtime-prepare]");
+    if (runtimePrepareButton) {
+      try {
+        const runtime = agentRuntimeApi();
+        if (!runtime) throw new Error("Agenten-Laufzeit ist nicht verfügbar.");
+        const run = getActiveDailyWorkRun();
+        const pilot = runtime.createRuntimePilot(run, { actor: "Jamal" });
+        saveRunWithRuntimePilot(run, pilot);
+        agentRuntimeUiState.error = null;
+        deps.showToast("Runtime-Pilot vorbereitet. Kein Lauf gestartet.");
+      } catch (error) {
+        agentRuntimeUiState.error = error.message;
+        renderDailyWorkRun();
+        deps.showToast(error.message);
+      }
+      return;
+    }
+
+    const runtimeApproveButton = event.target.closest("[data-runtime-approve]");
+    if (runtimeApproveButton) {
+      try {
+        const runtime = agentRuntimeApi();
+        const run = getActiveDailyWorkRun();
+        let pilot = runtime.refreshRuntimePilot(run) || run.agentRuntimePilot;
+        if (pilot !== run.agentRuntimePilot) {
+          saveRunWithRuntimePilot(run, pilot);
+        }
+        pilot = runtime.grantJamalApproval(getActiveDailyWorkRun().agentRuntimePilot, { actor: "Jamal" });
+        saveRunWithRuntimePilot(getActiveDailyWorkRun(), pilot);
+        agentRuntimeUiState.error = null;
+        deps.showToast("Jamal-Freigabe gespeichert. Der Lauf startet nicht automatisch.");
+      } catch (error) {
+        agentRuntimeUiState.error = error.message;
+        renderDailyWorkRun();
+        deps.showToast(error.message);
+      }
+      return;
+    }
+
+    const runtimeStartButton = event.target.closest("[data-runtime-start]");
+    if (runtimeStartButton) {
+      const runtime = agentRuntimeApi();
+      if (!runtime || agentRuntimeUiState.runningAttemptId) return;
+      try {
+        const run = getActiveDailyWorkRun();
+        let pilot = runtime.refreshRuntimePilot(run) || run.agentRuntimePilot;
+        if (pilot !== run.agentRuntimePilot) {
+          saveRunWithRuntimePilot(run, pilot);
+        }
+        pilot = getActiveDailyWorkRun().agentRuntimePilot;
+        if (pilot.status !== "APPROVED") {
+          throw new Error("Start ist ohne Freigabe nicht erlaubt.");
+        }
+        agentRuntimeUiState.runningAttemptId = pilot.runtimeAttemptId;
+        const abortController = typeof AbortController !== "undefined" ? new AbortController() : null;
+        agentRuntimeUiState.abortController = abortController;
+        agentRuntimeUiState.error = null;
+        renderDailyWorkRun();
+        runtime
+          .runWithExecutor(pilot, runtime.createLocalDeterministicPilotExecutor(), {
+            abortController,
+            actor: "Jamal",
+          })
+          .then((finishedPilot) => {
+            agentRuntimeUiState.runningAttemptId = null;
+            agentRuntimeUiState.abortController = null;
+            if (!finishedPilot) return;
+            saveRunWithRuntimePilot(getActiveDailyWorkRun(), finishedPilot);
+            deps.showToast("Lokaler Pilot abgeschlossen. Ergebnis ist prüfpflichtig.");
+          })
+          .catch((error) => {
+            agentRuntimeUiState.runningAttemptId = null;
+            agentRuntimeUiState.abortController = null;
+            agentRuntimeUiState.error = error.message;
+            renderDailyWorkRun();
+            deps.showToast(error.message);
+          });
+      } catch (error) {
+        agentRuntimeUiState.runningAttemptId = null;
+        agentRuntimeUiState.abortController = null;
+        agentRuntimeUiState.error = error.message;
+        renderDailyWorkRun();
+        deps.showToast(error.message);
+      }
+      return;
+    }
+
+    const runtimeCancelButton = event.target.closest("[data-runtime-cancel]");
+    if (runtimeCancelButton) {
+      try {
+        const runtime = agentRuntimeApi();
+        const run = getActiveDailyWorkRun();
+        agentRuntimeUiState.abortController?.abort();
+        let pilot = runtime.requestCancel(run.agentRuntimePilot, { actor: "Jamal" });
+        pilot = runtime.markCancelled(pilot, { actor: "Jamal", cancelRequested: true });
+        agentRuntimeUiState.runningAttemptId = null;
+        agentRuntimeUiState.abortController = null;
+        saveRunWithRuntimePilot(run, pilot);
+        agentRuntimeUiState.error = null;
+        deps.showToast("Lauf abgebrochen. Keine Ergebnisübernahme.");
+      } catch (error) {
+        agentRuntimeUiState.error = error.message;
+        renderDailyWorkRun();
+        deps.showToast(error.message);
+      }
+      return;
+    }
+
     const copyButton = event.target.closest("[data-copy-daily-work-prompt]");
     if (copyButton) {
       const text = deps.byId("daily-work-run-prompt-text")?.value || "";
@@ -1082,6 +1336,44 @@ function setupDailyWorkRun() {
         deps.showToast("Ergebnis manuell zurückgeführt. Keine Projektänderung ausgelöst.");
       } catch (error) {
         dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        deps.showToast(error.message);
+      }
+      return;
+    }
+
+    if (event.target.id === "daily-work-runtime-accept-form") {
+      event.preventDefault();
+      try {
+        const runtime = agentRuntimeApi();
+        const data = new FormData(event.target);
+        const run = getActiveDailyWorkRun();
+        const accepted = runtime.acceptResult(run, run.agentRuntimePilot, {
+          confirmed: data.get("confirmed") === "on",
+        });
+        saveRunWithRuntimePilot(accepted.run, accepted.pilot);
+        agentRuntimeUiState.error = null;
+        deps.showToast("Runtime-Ergebnis übernommen. Arbeitskarte wurde einmalig aktualisiert.");
+      } catch (error) {
+        agentRuntimeUiState.error = error.message;
+        renderDailyWorkRun();
+        deps.showToast(error.message);
+      }
+      return;
+    }
+
+    if (event.target.id === "daily-work-runtime-reject-form") {
+      event.preventDefault();
+      try {
+        const runtime = agentRuntimeApi();
+        const data = new FormData(event.target);
+        const run = getActiveDailyWorkRun();
+        const pilot = runtime.rejectResult(run.agentRuntimePilot, { reason: data.get("reason") });
+        saveRunWithRuntimePilot(run, pilot);
+        agentRuntimeUiState.error = null;
+        deps.showToast("Runtime-Ergebnis abgelehnt. Arbeitskarte bleibt unverändert.");
+      } catch (error) {
+        agentRuntimeUiState.error = error.message;
         renderDailyWorkRun();
         deps.showToast(error.message);
       }

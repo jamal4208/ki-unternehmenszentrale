@@ -60,7 +60,7 @@ Die beiden V6.39.0-Routen lesen ausschließlich die beim Serverstart geladene In
 
 ## Statische Auslieferung
 
-`server-http-router.js` liefert ausschließlich explizit freigegebene lokale Assets aus. GET `/` und `/index.html` liefern `index.html`; GET `/agent-registry.js` liefert das kanonische 25-Agenten-Register; GET `/daily-work-run.js` liefert das lokale Tageslaufmodell; GET `/daily-work-run-ui.js` liefert das Tageslauf-UI-Modul; GET `/local-data-backup.js` liefert das Datensicherungsmodul; GET `/app.js` liefert `app.js`; GET `/styles.css` liefert `styles.css`. Die statische Modulauslieferung ist keine zusätzliche API-Route. Andere statische Pfade, `.env`, `.git`, Testdateien und Dokumentationen sind nicht freigegeben.
+`server-http-router.js` liefert ausschließlich explizit freigegebene lokale Assets aus. GET `/` und `/index.html` liefern `index.html`; GET `/agent-registry.js` liefert das kanonische 25-Agenten-Register; GET `/daily-work-run.js` liefert das lokale Tageslaufmodell; GET `/agent-runtime.js` liefert das Runtime-Modul; GET `/daily-work-run-ui.js` liefert das Tageslauf-UI-Modul; GET `/local-data-backup.js` liefert das Datensicherungsmodul; GET `/app.js` liefert `app.js`; GET `/styles.css` liefert `styles.css`. Die statische Modulauslieferung ist keine zusätzliche API-Route. Andere statische Pfade, `.env`, `.git`, Testdateien und Dokumentationen sind nicht freigegeben.
 
 ## Sicherheitsstatus
 

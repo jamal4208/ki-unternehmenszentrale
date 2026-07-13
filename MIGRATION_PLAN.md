@@ -1,5 +1,20 @@
 # MIGRATION PLAN
 
+## V6.43.0 – Agenten-Laufzeit-Pilot
+
+V6.43.0 führt kein neues Speicherformat und keinen neuen localStorage-Schlüssel ein. Runtime-Zustand wird additiv als `agentRuntimePilot` im bestehenden Tageslauf gespeichert. Alte Läufe ohne dieses Feld bleiben unverändert nutzbar; Backup und Restore übernehmen den Runtime-Zustand automatisch mit.
+
+| Bereich | Regel |
+|---|---|
+| Runtime-Modul | Snapshot, Freigabe, Statusmaschine, Executor, Audit, Timeout, Abbruch |
+| daily-work-run.js | Domäne, Prüfphase, bestehende Ergebnisrückführung inkl. Runtime-Akzeptanzpfad |
+| daily-work-run-ui.js | Darstellung und Bedienung ohne kopierte Runtime-Geschäftslogik |
+| Verboten | externe KI, Plugins, Netzwerk, Dateischreiben, automatische Ergebnisübernahme |
+
+Rückfall: uncommittete V6.43.0-Dateiänderungen kontrolliert verwerfen; Tagesläufe ohne `agentRuntimePilot` bleiben lesbar.
+
+Nächster Schritt nach Jamals Abnahme: weiterer Executor nur nach expliziter Freigabe; nicht automatisch freigegeben.
+
 ## V6.42.1 – Server-Router modularisieren
 
 V6.42.1 führt keine neue Route, kein neues API-Verhalten und keine Schreibmöglichkeit ein. Die Extraktion verschiebt ausschließlich allgemeine HTTP-Verantwortung aus `server.js` nach `server-http-router.js`: Methodenprüfung, Pfadauswertung, statische Asset-Auslieferung, 404/405 und kontrollierte interne Fehlerantworten. Handler, Antwortdaten, Projektregister, Agentenregister und Plugin-Vorbereitungen bleiben in `server.js`.

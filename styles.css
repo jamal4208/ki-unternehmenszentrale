@@ -598,6 +598,47 @@
   background: linear-gradient(150deg, #fff, rgba(230, 246, 243, 0.5));
 }
 
+.daily-work-runtime-pilot {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 18px;
+  border: 1px dashed rgba(15, 118, 110, 0.45);
+  border-radius: 12px;
+  background: linear-gradient(150deg, #fff, rgba(236, 248, 255, 0.65));
+}
+
+.daily-work-runtime-pilot > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.daily-work-run-runtime-notice {
+  border-left: 3px solid rgba(15, 118, 110, 0.55);
+}
+
+.daily-work-runtime-actions,
+.daily-work-runtime-result,
+.daily-work-runtime-approval,
+.daily-work-runtime-accept-form,
+.daily-work-runtime-reject-form {
+  display: grid;
+  gap: 12px;
+}
+
+.daily-work-runtime-audit {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+}
+
+.daily-work-run-runtime-snapshot code {
+  word-break: break-all;
+}
+
 .daily-work-review-phase > header,
 .daily-work-review-card > header {
   display: flex;
@@ -780,7 +821,8 @@
     flex-direction: column;
   }
 
-  .daily-work-review-phase {
+  .daily-work-review-phase,
+  .daily-work-runtime-pilot {
     padding: 14px;
   }
 }

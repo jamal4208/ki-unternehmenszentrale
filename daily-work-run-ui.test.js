@@ -156,7 +156,7 @@ function runTests() {
   check("script-Reihenfolge ist korrekt", () => {
     assert.match(
       htmlSource,
-      /<script src="daily-work-run\.js"><\/script>\s*<script src="local-data-backup\.js"><\/script>\s*<script src="daily-work-run-ui\.js"><\/script>\s*<script src="app\.js"><\/script>/,
+      /<script src="daily-work-run\.js"><\/script>\s*<script src="agent-runtime\.js"><\/script>\s*<script src="local-data-backup\.js"><\/script>\s*<script src="daily-work-run-ui\.js"><\/script>\s*<script src="app\.js"><\/script>/,
     );
   });
 

@@ -339,6 +339,16 @@ async function runTests() {
       assert.strictEqual(dailyUi.statusCode, 200),
     );
 
+    const agentRuntime = await httpGet(integrationPort, "/agent-runtime.js");
+    check("Integration: GET /agent-runtime.js liefert 200", () =>
+      assert.strictEqual(agentRuntime.statusCode, 200),
+    );
+
+    const runtimeTest = await httpGet(integrationPort, "/agent-runtime.test.js");
+    check("Integration: Testdatei wird nicht ausgeliefert", () =>
+      assert.strictEqual(runtimeTest.statusCode, 404),
+    );
+
     const backupJs = await httpGet(integrationPort, "/local-data-backup.js");
     check("Integration: GET /local-data-backup.js liefert 200", () =>
       assert.strictEqual(backupJs.statusCode, 200),
@@ -361,8 +371,8 @@ async function runTests() {
     assert.strictEqual(normalizeRequestPathname("/safe/path"), "/safe/path");
   });
 
-  assert.strictEqual(passed, 32);
-  console.log("server-http-router.test.js: 32 Prüfpunkte erfolgreich");
+  assert.strictEqual(passed, 34);
+  console.log("server-http-router.test.js: 34 Prüfpunkte erfolgreich");
 }
 
 runTests().catch((error) => {
