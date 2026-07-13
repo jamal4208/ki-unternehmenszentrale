@@ -2,7 +2,9 @@
 
 ## Überblick
 
-`server.js` registriert **41 tatsächlich vorhandene API-Routen**, alle mit Methode `GET`. Jede andere HTTP-Methode wird vor dem Routing abgewiesen. Es gibt keine API-Schreibroute.
+`server.js` registriert über `server-http-router.js` **41 tatsächlich vorhandene API-Routen**, alle mit Methode `GET`. Jede andere HTTP-Methode wird vor dem Routing abgewiesen. Es gibt keine API-Schreibroute.
+
+V6.42.1 ändert **keine Route und kein API-Verhalten**. Die technische Routerstruktur ist modularisiert: `server.js` übergibt eine explizite Handler-Tabelle und freigegebene statische Assets an `createHttpRouter(...)`. Der Router enthält keine Geschäftslogik, keine Secrets und keine zweite Routendefinition.
 
 V6.40.3 ergänzt **keine neue API-Route**. Freigabe, interne Arbeitskarten, manuelle Ergebnisrückführung, QA, Orchestrator und Jamals Abschlussentscheidung laufen im bestehenden lokalen Tageslaufmodell. `writeOperationsBlocked: true` und `madeExternalRequest: false` bleiben unverändert; keine Agenten-, Codex-, Plugin-, Git- oder externe Aktion wird ausgelöst.
 
@@ -58,7 +60,7 @@ Die beiden V6.39.0-Routen lesen ausschließlich die beim Serverstart geladene In
 
 ## Statische Auslieferung
 
-GET `/` und `/index.html` liefern `index.html`; GET `/agent-registry.js` liefert das kanonische 25-Agenten-Register; GET `/daily-work-run.js` liefert das lokale, aktionsfreie Tageslaufmodell; GET `/app.js` liefert `app.js`; GET `/styles.css` liefert `styles.css`. Die statische Modulauslieferung ist keine zusätzliche API-Route. Andere statische Pfade sind nicht freigegeben.
+`server-http-router.js` liefert ausschließlich explizit freigegebene lokale Assets aus. GET `/` und `/index.html` liefern `index.html`; GET `/agent-registry.js` liefert das kanonische 25-Agenten-Register; GET `/daily-work-run.js` liefert das lokale Tageslaufmodell; GET `/daily-work-run-ui.js` liefert das Tageslauf-UI-Modul; GET `/local-data-backup.js` liefert das Datensicherungsmodul; GET `/app.js` liefert `app.js`; GET `/styles.css` liefert `styles.css`. Die statische Modulauslieferung ist keine zusätzliche API-Route. Andere statische Pfade, `.env`, `.git`, Testdateien und Dokumentationen sind nicht freigegeben.
 
 ## Sicherheitsstatus
 

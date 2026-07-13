@@ -1,7 +1,7 @@
 {
   "scripts": {
     "start": "node server.js",
-    "test": "node project-registry.test.js && node daily-work-run.test.js && node local-data-backup.test.js && node daily-work-run-ui.test.js",
-    "check": "node --check agent-registry.js && node --check daily-work-run.js && node --check daily-work-run.test.js && node --check local-data-backup.js && node --check local-data-backup.test.js && node --check daily-work-run-ui.js && node --check daily-work-run-ui.test.js && node --check app.js && node --check server.js && node --check project-registry.js && node --check project-registry.test.js"
+    "test": "node project-registry.test.js && node daily-work-run.test.js && node local-data-backup.test.js && node daily-work-run-ui.test.js && node server-http-router.test.js",
+    "check": "node --check agent-registry.js && node --check daily-work-run.js && node --check daily-work-run.test.js && node --check local-data-backup.js && node --check local-data-backup.test.js && node --check daily-work-run-ui.js && node --check daily-work-run-ui.test.js && node --check server-http-router.js && node --check server-http-router.test.js && node --check app.js && node --check server.js && node --check project-registry.js && node --check project-registry.test.js"
   }
 }

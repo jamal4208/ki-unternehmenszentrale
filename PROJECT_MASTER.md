@@ -1,6 +1,18 @@
 # PROJECT MASTER
 
-## Verbindlicher Versionsstand V6.42.0
+## Verbindlicher Versionsstand V6.42.1
+
+V6.42.1 modularisiert die allgemeine HTTP-Routing-, Methoden- und statische Dateiauslieferungslogik als eigenständiges Modul `server-http-router.js`. `server.js` bleibt für Serverstart, Konfiguration, Handler und Antwortdaten zuständig und übergibt eine explizite Route- und Asset-Tabelle an den Router. Es gibt keine neue Produktfunktion, keine Verhaltensänderung, keine neue Route und keine Schreibmöglichkeit.
+
+## Architektur-Freeze ab V6.42.1
+
+- Keine weiteren verschachtelten Vorbereitungs-, Simulations- oder Abschlusskarten als Ersatz für echte Funktionen.
+- Neue Kernfunktionen werden grundsätzlich als eigenständige Module umgesetzt; `app.js` und `server.js` werden nicht unkontrolliert vergrößert.
+- Agenten-Laufzeit und Plugin-Gateway folgen erst nach Datensicherung und kontrollierter Modularisierung.
+- V6.42.1 ist reine Architekturmodularisierung ohne neue Ausführung.
+- Nächster geplanter Schritt: Agenten-Runtime-Pilot.
+
+## Gesicherter Ausgangsstand V6.42.0
 
 V6.42.0 modularisiert die Tageslauf-Oberfläche als eigenständiges Modul `daily-work-run-ui.js`. Rendering, Formularlogik, Event-Bindings und die Anbindung der lokalen Datensicherung im Tageslaufbereich liegen dort. `daily-work-run.js` bleibt Domänen- und Persistenzmodul, `local-data-backup.js` bleibt Datensicherungsmodul, `app.js` bleibt App-Shell mit Initialisierung und View-Koordination. Es gibt keine neue Produktfunktion, keine Verhaltensänderung und keine neue Vorbereitungskarte.
 

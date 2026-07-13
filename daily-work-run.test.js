@@ -504,7 +504,7 @@ function runTests() {
   check("bestehende Registertests bleiben eingebunden", () => assert.ok(fs.readFileSync(path.join(__dirname, "package.json"), "utf8").includes("project-registry.test.js")));
 
   const serverSource = fs.readFileSync(path.join(__dirname, "server.js"), "utf8");
-  const routeCount = (serverSource.match(/requestUrl\.pathname === "\/api\//g) || []).length;
+  const routeCount = (serverSource.match(/^\s+\["\/api\//gm) || []).length;
   check("41 GET-Routen bleiben erhalten", () => assert.strictEqual(routeCount, 41));
   check("unbekannte Projekt-ID bleibt 404", () => assert.strictEqual(invoke("GET", "/api/projects/unbekannt").statusCode, 404));
   check("POST bleibt 405", () => assert.strictEqual(invoke("POST", "/api/projects").statusCode, 405));

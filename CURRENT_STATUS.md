@@ -2,14 +2,23 @@
 
 ## Git- und Versionsstand
 
-- Version: **V6.42.0 – Tageslauf-UI modularisiert**
-- Ausgangs-HEAD für V6.42.0: `d4b4977`
-- Produktstand V6.41.0: `d4b4977` (auf `origin/main` gesichert)
+- Version: **V6.42.1 – Server-Router modularisiert**
+- Ausgangs-HEAD für V6.42.1: `76e21be`
+- Produktstand V6.42.0: `76e21be` (auf `origin/main` gesichert)
 - Branch: `main`
-- Upstream: `origin/main` auf `d4b4977`, synchron
-- Working Tree: lokal geändert für V6.42.0; noch nicht committed
+- Upstream: `origin/main` auf `76e21be`, synchron
+- Working Tree: lokal geändert für V6.42.1; noch nicht committed
 
-## V6.42.0 – aktueller Funktionsstand
+## V6.42.1 – aktueller Funktionsstand
+
+- `server-http-router.js` enthält HTTP-Dispatch, Methodenprüfung, statische Asset-Auslieferung, 404/405 und kontrollierte interne Fehlergrenzen.
+- `server.js` bleibt für Serverstart, Konfiguration, Handler, Antwortdaten und die explizite Übergabe von `getRoutes`, `routePrefixHandlers` und `staticAssets` zuständig.
+- `project-registry.js` bleibt kanonische Projektquelle; `agent-registry.js` bleibt kanonische Agentenquelle.
+- Keine neue Produktfunktion, keine Verhaltensänderung, keine neue Route, keine Schreib-API.
+- 17 Projekte, 25 Agenten, 41 GET-Routen, 8 freigegebene statische Pfade und alle Ausführungsverbote bleiben erhalten.
+- Nächster geplanter Schritt: Agenten-Runtime-Pilot.
+
+## V6.42.0 – gesicherter Ausgangsstand
 
 - `daily-work-run-ui.js` enthält die komplette Tageslauf-Präsentations- und Bedienlogik aus dem bisherigen `app.js`-Monolithen.
 - `app.js` initialisiert das UI-Modul über `DailyWorkRunUi.init(...)` und ruft `DailyWorkRunUi.render()` aus `renderAll()` sowie nach Register-Refresh auf.

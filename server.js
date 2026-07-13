@@ -9,9 +9,10 @@ const {
   buildProjectsResponse,
 } = require("./project-registry");
 const { PRODUCTIVE_AGENT_REGISTRY } = require("./agent-registry");
+const { createHttpRouter, buildRouteMap } = require("./server-http-router");
 
 const rootDir = __dirname;
-const allowedFiles = new Map([
+const staticAssets = new Map([
   ["/", "index.html"],
   ["/index.html", "index.html"],
   ["/agent-registry.js", "agent-registry.js"],
@@ -21830,260 +21831,71 @@ function handleFirstReadOnlyPreview(res) {
   request.end();
 }
 
-function serveStatic(reqPath, res) {
-  const fileName = allowedFiles.get(reqPath);
-  if (!fileName) {
-    sendText(res, 404, "Not found");
-    return;
-  }
+const getRoutes = buildRouteMap([
+  ["/api/projects", (res) => handleProjects(res)],
+  ["/api/projects/health-upgrade-kompass", (res) => handleHealthUpgradeKompassProject(res)],
+  ["/api/airtable/pilot-status", (res) => handlePilotStatus(res)],
+  ["/api/cockpit/todays-one-decision", (res) => handleTodaysOneDecision(res)],
+  ["/api/cockpit/todays-three-things", (res) => handleTodaysThreeThings(res)],
+  ["/api/airtable/test-connection", (res) => handleConnectionTest(res)],
+  ["/api/airtable/first-readonly-preview", (res) => handleFirstReadOnlyPreview(res)],
+  ["/api/agents/plugin-work-capability", (res) => handlePluginWorkCapability(res)],
+  ["/api/agents/projectmanager-plugin-task", (res) => handleProjectManagerPluginTask(res)],
+  ["/api/agents/projectmanager-plugin-task/chef-approval-preview", (res) => handleProjectManagerChefApprovalPreview(res)],
+  ["/api/agents/projectmanager-plugin-task/chef-output", (res) => handleProjectManagerChefOutput(res)],
+  ["/api/agents/projectmanager-plugin-task/daily-focus", (res) => handleProjectManagerDailyFocus(res)],
+  ["/api/agents/projectmanager-plugin-task/start-action", (res) => handleProjectManagerStartAction(res)],
+  ["/api/agents/projectmanager-plugin-task/workflow", (res) => handleProjectManagerWorkflow(res)],
+  ["/api/agents/projectmanager-plugin-task/workflow-result", (res) => handleProjectManagerWorkflowResult(res)],
+  ["/api/agents/hr-daily-training", (res) => handleHrDailyTraining(res)],
+  ["/api/agents/hr-daily-training-suggestion", (res) => handleHrDailyTrainingSuggestion(res)],
+  ["/api/agents/plugin-readiness", (res, context) => handlePluginReadiness(res, context.requestUrl)],
+  ["/api/agents/hr-autonomy-approval", (res) => handleHrAutonomyApproval(res)],
+  ["/api/agents/hr-all-agents-development", (res) => handleHrAllAgentsDevelopment(res)],
+  ["/api/agents/knowledge-archive-plugin-task", (res) => handleKnowledgeArchivePluginTask(res)],
+  ["/api/agents/knowledge-archive-plugin-task/knowledge-summary", (res) => handleKnowledgeArchiveSummary(res)],
+  ["/api/agents/knowledge-archive-plugin-task/workflow", (res) => handleKnowledgeArchiveWorkflow(res)],
+  ["/api/agents/knowledge-archive-plugin-task/workflow-result", (res) => handleKnowledgeArchiveWorkflowResult(res)],
+  ["/api/agents/knowledge-archive-plugin-task/projectmanager-start-action", (res) => handleKnowledgeToProjectManagerStartAction(res)],
+  ["/api/agents/system-flow/daily-decision", (res) => handleSystemFlowDailyDecision(res)],
+  ["/api/agents/system-flow/today-direction", (res) => handleSystemFlowTodayDirection(res)],
+  ["/api/agents/system-flow/next-agent-workflow", (res) => handleSystemFlowNextAgentWorkflow(res)],
+  ["/api/agents/content-design-plugin-task", (res) => handleContentDesignPluginTask(res)],
+  ["/api/agents/content-design-plugin-task/canva-brief", (res) => handleContentDesignCanvaBrief(res)],
+  ["/api/agents/content-design-plugin-task/workflow", (res) => handleContentDesignWorkflow(res)],
+  ["/api/agents/content-design-plugin-task/review-team", (res) => handleContentDesignReviewTeam(res)],
+  ["/api/agents/content-design-plugin-task/chef-decision", (res) => handleContentDesignChefDecision(res)],
+  ["/api/agents/content-design-plugin-task/follow-up-task", (res) => handleContentDesignFollowUpTask(res)],
+  ["/api/agents/content-design-plugin-task/follow-up-readiness", (res) => handleContentDesignFollowUpReadiness(res)],
+  ["/api/agents/content-design-plugin-task/refined-follow-up-task", (res) => handleContentDesignRefinedFollowUpTask(res)],
+  ["/api/agents/content-design-plugin-task/manual-team-review-prep", (res) => handleContentDesignManualTeamReviewPrep(res)],
+  ["/api/agents/content-design-plugin-task/manual-team-review-evaluation", (res) => handleContentDesignManualTeamReviewEvaluation(res)],
+  ["/api/agents/content-design-plugin-task/improvement-task", (res) => handleContentDesignImprovementTask(res)],
+  ["/api/agents/content-design-plugin-task/usable-canva-task", (res) => handleContentDesignUsableCanvaTask(res)],
+  ["/api/agents/projectmanager-plugin-task/autonomy-applied", (res) => handleProjectManagerAutonomyApplied(res)],
+]);
 
-  const filePath = path.join(rootDir, fileName);
-  fs.readFile(filePath, (error, content) => {
-    if (error) {
-      sendText(res, 500, "File could not be read");
-      return;
-    }
-
-    const contentType =
-      fileName.endsWith(".html")
-        ? "text/html; charset=utf-8"
-        : fileName.endsWith(".css")
-          ? "text/css; charset=utf-8"
-          : "application/javascript; charset=utf-8";
-
-    res.writeHead(200, {
-      "Content-Type": contentType,
-      "Cache-Control": "no-store",
-    });
-    res.end(content);
-  });
-}
-
-function requestHandler(req, res) {
-  const requestUrl = new URL(req.url, `http://${req.headers.host || "127.0.0.1"}`);
-
-  if (req.method !== "GET") {
-    sendJson(res, 405, {
-      ok: false,
-      message: "Nur sichere GET-Endpunkte sind vorbereitet.",
-      ...API_SECURITY_FLAGS,
-    });
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/projects") {
-    handleProjects(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/projects/health-upgrade-kompass") {
-    handleHealthUpgradeKompassProject(res);
-    return;
-  }
-
-  if (requestUrl.pathname.startsWith("/api/projects/")) {
-    const projectId = decodeURIComponent(requestUrl.pathname.slice("/api/projects/".length));
-    handleUnknownProject(res, projectId);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/airtable/pilot-status") {
-    handlePilotStatus(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/cockpit/todays-one-decision") {
-    handleTodaysOneDecision(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/cockpit/todays-three-things") {
-    handleTodaysThreeThings(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/airtable/test-connection") {
-    handleConnectionTest(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/airtable/first-readonly-preview") {
-    handleFirstReadOnlyPreview(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/plugin-work-capability") {
-    handlePluginWorkCapability(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/projectmanager-plugin-task") {
-    handleProjectManagerPluginTask(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/projectmanager-plugin-task/chef-approval-preview") {
-    handleProjectManagerChefApprovalPreview(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/projectmanager-plugin-task/chef-output") {
-    handleProjectManagerChefOutput(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/projectmanager-plugin-task/daily-focus") {
-    handleProjectManagerDailyFocus(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/projectmanager-plugin-task/start-action") {
-    handleProjectManagerStartAction(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/projectmanager-plugin-task/workflow") {
-    handleProjectManagerWorkflow(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/projectmanager-plugin-task/workflow-result") {
-    handleProjectManagerWorkflowResult(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/hr-daily-training") {
-    handleHrDailyTraining(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/hr-daily-training-suggestion") {
-    handleHrDailyTrainingSuggestion(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/plugin-readiness") {
-    handlePluginReadiness(res, requestUrl);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/hr-autonomy-approval") {
-    handleHrAutonomyApproval(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/hr-all-agents-development") {
-    handleHrAllAgentsDevelopment(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/knowledge-archive-plugin-task") {
-    handleKnowledgeArchivePluginTask(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/knowledge-archive-plugin-task/knowledge-summary") {
-    handleKnowledgeArchiveSummary(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/knowledge-archive-plugin-task/workflow") {
-    handleKnowledgeArchiveWorkflow(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/knowledge-archive-plugin-task/workflow-result") {
-    handleKnowledgeArchiveWorkflowResult(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/knowledge-archive-plugin-task/projectmanager-start-action") {
-    handleKnowledgeToProjectManagerStartAction(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/system-flow/daily-decision") {
-    handleSystemFlowDailyDecision(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/system-flow/today-direction") {
-    handleSystemFlowTodayDirection(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/system-flow/next-agent-workflow") {
-    handleSystemFlowNextAgentWorkflow(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/content-design-plugin-task") {
-    handleContentDesignPluginTask(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/content-design-plugin-task/canva-brief") {
-    handleContentDesignCanvaBrief(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/content-design-plugin-task/workflow") {
-    handleContentDesignWorkflow(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/content-design-plugin-task/review-team") {
-    handleContentDesignReviewTeam(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/content-design-plugin-task/chef-decision") {
-    handleContentDesignChefDecision(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/content-design-plugin-task/follow-up-task") {
-    handleContentDesignFollowUpTask(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/content-design-plugin-task/follow-up-readiness") {
-    handleContentDesignFollowUpReadiness(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/content-design-plugin-task/refined-follow-up-task") {
-    handleContentDesignRefinedFollowUpTask(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/content-design-plugin-task/manual-team-review-prep") {
-    handleContentDesignManualTeamReviewPrep(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/content-design-plugin-task/manual-team-review-evaluation") {
-    handleContentDesignManualTeamReviewEvaluation(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/content-design-plugin-task/improvement-task") {
-    handleContentDesignImprovementTask(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/content-design-plugin-task/usable-canva-task") {
-    handleContentDesignUsableCanvaTask(res);
-    return;
-  }
-
-  if (requestUrl.pathname === "/api/agents/projectmanager-plugin-task/autonomy-applied") {
-    handleProjectManagerAutonomyApplied(res);
-    return;
-  }
-
-  serveStatic(requestUrl.pathname, res);
-}
+const { requestHandler } = createHttpRouter({
+  getRoutes,
+  routePrefixHandlers: [
+    {
+      prefix: "/api/projects/",
+      handler: (res, context) => {
+        const projectId = decodeURIComponent(context.pathname.slice("/api/projects/".length));
+        handleUnknownProject(res, projectId);
+      },
+    },
+  ],
+  staticAssets,
+  rootDir,
+  sendJson,
+  sendText,
+  methodNotAllowedPayload: {
+    ok: false,
+    message: "Nur sichere GET-Endpunkte sind vorbereitet.",
+    ...API_SECURITY_FLAGS,
+  },
+});
 
 if (require.main === module) {
   const server = http.createServer(requestHandler);
