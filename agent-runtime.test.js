@@ -444,9 +444,34 @@ async function runTests() {
     assert.match(uiSource, /Agenten-Laufzeit-Pilot/);
   });
 
+  check("sichtbarer Rollenname bleibt Projektmanager-Agent", () => {
+    assert.match(uiSource, /PROJEKTMANAGER_ROLE_NAME/);
+    assert.match(uiSource, /<strong>\$\{deps\.escapeHtml\(runtime\.PROJEKTMANAGER_ROLE_NAME\)\}<\/strong>/);
+    assert.doesNotMatch(uiSource, /<strong>\$\{deps\.escapeHtml\(pilotAgent\.agent\?\.name/);
+  });
+
+  check("technische Agenten-ID wird zurückhaltend ergänzt", () => {
+    assert.match(uiSource, /Technische Agenten-ID:/);
+    assert.match(uiSource, /pilotAgent\.agentId/);
+    assert.match(uiSource, /daily-work-runtime-agent-meta/);
+  });
+
+  check("keine zweite Agentenquelle im UI-Modul", () => {
+    assert.doesNotMatch(uiSource, /ROLE_NAME_MAPPING/);
+    assert.doesNotMatch(uiSource, /CANONICAL_AGENT/);
+    assert.doesNotMatch(uiSource, /PRODUCTIVE_AGENT_REGISTRY/);
+  });
+
   check("UI behauptet keine externe KI-Ausführung", () => {
     assert.match(uiSource, /keine externe KI/);
     assert.doesNotMatch(uiSource, /KI-Agent arbeitet|selbstständig gearbeitet|externe KI-Ausführung/i);
+  });
+
+  check("Pilot bleibt auf kanonischen Projektmanager-Agenten beschränkt", () => {
+    assert.strictEqual(AgentRuntime.resolveProjektmanagerAgentId(), "orchestrator-agent");
+    assert.strictEqual(AgentRuntime.HEALTH_PILOT_PROJECT_ID, "health-upgrade-kompass");
+    const availability = AgentRuntime.evaluateAvailability(preparedRun);
+    assert.strictEqual(availability.pilotAgentId, "orchestrator-agent");
   });
 
   check("writeOperationsBlocked und madeExternalRequest bleiben unverändert", () => {
@@ -469,8 +494,8 @@ async function runTests() {
     assert.doesNotMatch(uiSource, /function createLocalDeterministicPilotExecutor/);
   });
 
-  assert.strictEqual(passed, 52);
-  console.log("agent-runtime.test.js: 52 Prüfpunkte erfolgreich");
+  assert.strictEqual(passed, 56);
+  console.log("agent-runtime.test.js: 56 Prüfpunkte erfolgreich");
 }
 
 runTests().catch((error) => {

@@ -1,10 +1,16 @@
 # PROJECT MASTER
 
-## Verbindlicher Versionsstand V6.43.0
+## Verbindlicher Versionsstand V6.43.1
 
-V6.43.0 ergänzt eine kontrollierte Agenten-Laufzeit mit lokalem deterministischen Pilot-Executor als eigenständiges Modul `agent-runtime.js`. Der erste Executor prüft ausschließlich die Qualität und Vollständigkeit des vorbereiteten Projektmanager-Arbeitsauftrags. Es gibt keine externe KI-Ausführung, keine Plugin-Ausführung, keine Dateischreibvorgänge, keine Netzwerkzugriffe und keine Außenwirkung.
+V6.43.1 schließt den in V6.43.0 (`daa96e9`, auf `origin/main` gesichert) eingeführten Runtime-Piloten abnahmefest ab. Es gibt keinen zweiten Executor, keine Autonomieerhöhung und keine neue produktive oder externe Ausführung.
 
-Jamal muss den Piloten explizit vorbereiten, freigeben, starten und ein Ergebnis bewusst annehmen, bevor es über die bestehende manuelle Ergebnisrückführung in die Agenten-Prüfphase übernommen wird. Timeout, Abbruch und ein append-only Audit-Verlauf sind vorhanden. Der Pilot ist in V6.43.0 nur für Health Upgrade Kompass mit vorbereiteter Agenten-Prüfphase und Projektmanager-Arbeitskarte verfügbar.
+Die Dokumentation ist auf den gesicherten Ist-Stand korrigiert. In der UI lautet die sichtbare Hauptbezeichnung **Projektmanager-Agent**; die kanonische technische ID **`orchestrator-agent`** erscheint ergänzend und zurückhaltend. Keine neue Agenten-ID, kein zweiter Registereintrag, keine Änderung des kanonischen Mappings.
+
+Der lokale deterministische Pilot-Executor in `agent-runtime.js` prüft nur die Qualität und Vollständigkeit des vorbereiteten Projektmanager-Arbeitsauftrags. Keine externe KI, kein Plugin, kein Netzwerk, kein Dateischreiben. Jamal-Freigabe vor Start; separate Jamal-Annahme vor Ergebnisübernahme. Timeout, Abbruch und Audit vorhanden. Nächster Schritt: **V1-Abschlussentscheidung**, nicht mehr die Abnahme von V6.40.3.
+
+## Verbindlicher Versionsstand V6.43.0 (Historie)
+
+V6.43.0 ergänzt eine kontrollierte Agenten-Laufzeit mit lokalem deterministischen Pilot-Executor als eigenständiges Modul `agent-runtime.js`. Gesichert mit Commit `daa96e9`. Der Pilot ist nur für Health Upgrade Kompass mit vorbereiteter Agenten-Prüfphase und Projektmanager-Arbeitskarte verfügbar.
 
 ## Architektur-Freeze ab V6.43.0
 
@@ -12,17 +18,17 @@ Jamal muss den Piloten explizit vorbereiten, freigeben, starten und ein Ergebnis
 - `daily-work-run.js` bleibt Domänen- und Persistenzmodul; Runtime-Zustand liegt additiv unter `agentRuntimePilot` im bestehenden Tageslauf-Datensatz.
 - `daily-work-run-ui.js` rendert und bedient den Runtime-Piloten in der bestehenden Agenten-Prüfphase ohne kopierte Geschäftslogik.
 - Keine neue API-Route, keine Schreib-API, kein Deployment, keine Autonomieerhöhung.
-- Nächster Schritt nach Jamals Abnahme: weiterer kontrollierter Executor nur nach expliziter Freigabe; nicht automatisch freigegeben.
+- Nächster Schritt: V1-Abschlussentscheidung durch Jamal; kein weiterer Executor ohne explizite Freigabe.
 
-## Gesicherter Ausgangsstand V6.42.1
+## Gesicherter Ausgangsstand V6.42.1 (Historie)
 
 - Keine weiteren verschachtelten Vorbereitungs-, Simulations- oder Abschlusskarten als Ersatz für echte Funktionen.
 - Neue Kernfunktionen werden grundsätzlich als eigenständige Module umgesetzt; `app.js` und `server.js` werden nicht unkontrolliert vergrößert.
 - Agenten-Laufzeit und Plugin-Gateway folgen erst nach Datensicherung und kontrollierter Modularisierung.
 - V6.42.1 ist reine Architekturmodularisierung ohne neue Ausführung.
-- Nächster geplanter Schritt: Agenten-Runtime-Pilot.
+- Nächster geplanter Schritt nach V6.42.1: Agenten-Runtime-Pilot (umgesetzt in V6.43.0).
 
-## Gesicherter Ausgangsstand V6.42.0
+## Gesicherter Ausgangsstand V6.42.0 (Historie)
 
 V6.42.0 modularisiert die Tageslauf-Oberfläche als eigenständiges Modul `daily-work-run-ui.js`. Rendering, Formularlogik, Event-Bindings und die Anbindung der lokalen Datensicherung im Tageslaufbereich liegen dort. `daily-work-run.js` bleibt Domänen- und Persistenzmodul, `local-data-backup.js` bleibt Datensicherungsmodul, `app.js` bleibt App-Shell mit Initialisierung und View-Koordination. Es gibt keine neue Produktfunktion, keine Verhaltensänderung und keine neue Vorbereitungskarte.
 
@@ -37,7 +43,7 @@ V6.42.0 modularisiert die Tageslauf-Oberfläche als eigenständiges Modul `daily
 
 V6.41.0 ergänzt eine echte lokale Datensicherung als eigenständiges Modul `local-data-backup.js`. Jamal kann die beiden bestehenden Browser-Speicherbereiche `ki-unternehmenszentrale-v1` und `ki-unternehmenszentrale-daily-work-runs-v1` als JSON exportieren, vor dem Import prüfen und nach ausdrücklicher Bestätigung verlustfrei wiederherstellen. Kanonische Projekt- und Agentenregister bleiben außerhalb dieser Sicherung.
 
-## Gesicherter Ausgangsstand V6.40.3
+## Gesicherter Ausgangsstand V6.40.3 (Historie)
 
 V6.40.3 ergänzt den abgenommenen Agenten-Einsatzplan um eine kontrollierte, ausschließlich lokale Agenten-Prüfphase. Nach Jamals ausdrücklicher Freigabe entstehen interne Arbeitskarten für genau die ausgewählten Agenten. Diese Karten bilden Auftrag, erwartetes Ergebnis, Prüfkriterium, Sicherheitsgrenze, gespeicherte Abhängigkeiten, Übergabe und manuelle Ergebnisrückführung ab. Sie starten keine Agenten und erzeugen keine simulierten Erfolgs- oder Ausführungsmeldungen.
 
@@ -135,4 +141,4 @@ Ein Versionsschritt ist abgeschlossen, wenn Ziel und Nicht-Ziele erfüllt, betro
 
 ## Entscheidung durch Jamal erforderlich
 
-Jamal nimmt V6.40.3 manuell ab und entscheidet später separat über Commit, Push und produktive Nutzung.
+**V1-Abschlussbewertung: V1 lokal fertig und betriebsbereit.** V6.43.1 bildet den gesicherten Abschluss des lokalen V1-Stands. Jede spätere produktive Außenwirkung, Deployment-, V2- oder Erweiterungsentscheidung benötigt eine neue ausdrückliche Freigabe durch Jamal.

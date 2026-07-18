@@ -4,6 +4,10 @@
 
 `server.js` registriert über `server-http-router.js` **41 tatsächlich vorhandene API-Routen**, alle mit Methode `GET`. Jede andere HTTP-Methode wird vor dem Routing abgewiesen. Es gibt keine API-Schreibroute.
 
+V6.43.0 ergänzt **keine neue API-Route**. Die kontrollierte Agenten-Laufzeit läuft ausschließlich im lokalen Browser-Tageslaufmodell unter `agentRuntimePilot`. Statisch ausgeliefert wird zusätzlich `agent-runtime.js`. `writeOperationsBlocked: true` und `madeExternalRequest: false` bleiben unverändert.
+
+V6.43.1 ändert **keine Route und kein API-Verhalten**. Es korrigiert Dokumentation und UI-Bezeichnung; der Runtime-Pilot bleibt lokal, deterministisch und ohne Außenwirkung.
+
 V6.42.1 ändert **keine Route und kein API-Verhalten**. Die technische Routerstruktur ist modularisiert: `server.js` übergibt eine explizite Handler-Tabelle und freigegebene statische Assets an `createHttpRouter(...)`. Der Router enthält keine Geschäftslogik, keine Secrets und keine zweite Routendefinition.
 
 V6.40.3 ergänzt **keine neue API-Route**. Freigabe, interne Arbeitskarten, manuelle Ergebnisrückführung, QA, Orchestrator und Jamals Abschlussentscheidung laufen im bestehenden lokalen Tageslaufmodell. `writeOperationsBlocked: true` und `madeExternalRequest: false` bleiben unverändert; keine Agenten-, Codex-, Plugin-, Git- oder externe Aktion wird ausgelöst.

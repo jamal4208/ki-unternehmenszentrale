@@ -1,6 +1,20 @@
 # MIGRATION PLAN
 
-## V6.43.0 – Agenten-Laufzeit-Pilot
+## V6.43.1 – Runtime-Pilot abnahmefest abschließen
+
+V6.43.1 führt kein neues Speicherformat, keinen neuen localStorage-Schlüssel und keinen zweiten Executor ein. V6.43.0 ist mit Commit `daa96e9` auf `origin/main` gesichert.
+
+| Bereich | Regel |
+|---|---|
+| Dokumentation | Ist-Stand `daa96e9`, 241 Prüfpunkte, V1-Abschlussbewertung: lokal fertig und betriebsbereit |
+| UI | Sichtbar „Projektmanager-Agent“; technische ID `orchestrator-agent` ergänzend |
+| Verboten | neue Agenten-ID, zweiter Executor, Autonomieerhöhung, externe Ausführung |
+
+Rückfall: kontrolliert auf den gesicherten V6.43.0-Stand `daa96e9` zurückgehen; lokale Browserdaten bleiben unangetastet.
+
+Nächster Schritt: **V1-Abschlussentscheidung durch Jamal** – nicht mehr die Abnahme von V6.40.3.
+
+## V6.43.0 – Agenten-Laufzeit-Pilot (Historie, gesichert `daa96e9`)
 
 V6.43.0 führt kein neues Speicherformat und keinen neuen localStorage-Schlüssel ein. Runtime-Zustand wird additiv als `agentRuntimePilot` im bestehenden Tageslauf gespeichert. Alte Läufe ohne dieses Feld bleiben unverändert nutzbar; Backup und Restore übernehmen den Runtime-Zustand automatisch mit.
 
@@ -11,11 +25,11 @@ V6.43.0 führt kein neues Speicherformat und keinen neuen localStorage-Schlüsse
 | daily-work-run-ui.js | Darstellung und Bedienung ohne kopierte Runtime-Geschäftslogik |
 | Verboten | externe KI, Plugins, Netzwerk, Dateischreiben, automatische Ergebnisübernahme |
 
-Rückfall: uncommittete V6.43.0-Dateiänderungen kontrolliert verwerfen; Tagesläufe ohne `agentRuntimePilot` bleiben lesbar.
+Rückfall: V6.43.0-Stand auf `daa96e9`; Tagesläufe ohne `agentRuntimePilot` bleiben lesbar.
 
-Nächster Schritt nach Jamals Abnahme: weiterer Executor nur nach expliziter Freigabe; nicht automatisch freigegeben.
+Nächster Schritt nach V6.43.0: V6.43.1 Abnahmefestigung (umgesetzt).
 
-## V6.42.1 – Server-Router modularisieren
+## V6.42.1 – Server-Router modularisieren (Historie)
 
 V6.42.1 führt keine neue Route, kein neues API-Verhalten und keine Schreibmöglichkeit ein. Die Extraktion verschiebt ausschließlich allgemeine HTTP-Verantwortung aus `server.js` nach `server-http-router.js`: Methodenprüfung, Pfadauswertung, statische Asset-Auslieferung, 404/405 und kontrollierte interne Fehlerantworten. Handler, Antwortdaten, Projektregister, Agentenregister und Plugin-Vorbereitungen bleiben in `server.js`.
 

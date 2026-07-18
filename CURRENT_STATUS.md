@@ -2,32 +2,39 @@
 
 ## Git- und Versionsstand
 
-- Version: **V6.43.0 – kontrollierte Agenten-Laufzeit mit lokalem Pilot-Executor**
-- Ausgangs-HEAD für V6.43.0: `e22555e`
-- Produktstand V6.42.1: `e22555e` (auf `origin/main` gesichert)
+- Version: **V6.43.1 – Runtime-Pilot abnahmefest und widerspruchsfrei**
+- Produktstand V6.43.0: `daa96e9` (Commit „V6.43.0 Kontrollierte Agenten-Laufzeit einfuehren“, auf `origin/main` gesichert)
 - Branch: `main`
-- Upstream: `origin/main` auf `e22555e`, synchron
-- Working Tree: lokal geändert für V6.43.0; noch nicht committed
+- Upstream: `origin/main` auf `daa96e9`, synchron
+- V6.43.1-Abnahmestand: vollständig geprüft und auf `main` als lokaler V1-Abschluss gesichert
 
-## V6.43.0 – aktueller Funktionsstand
+## V6.43.1 – aktueller Funktionsstand
 
-- `agent-runtime.js` implementiert die Runtime-Infrastruktur: Snapshot, Fingerprint, Jamal-Freigabe, Statusmaschine, lokaler deterministischer Pilot-Executor, Timeout, Abbruch, Audit und Ergebnisprüfung.
-- Erster Executor: `LOCAL_DETERMINISTIC_PILOT` prüft nur den vorbereiteten Projektmanager-Arbeitsauftrag; keine externe KI, kein Plugin, keine Außenwirkung.
-- Pilot-Agent: kanonischer Projektmanager-Agent über `ROLE_NAME_MAPPING` → `orchestrator-agent`.
-- Persistenz additiv unter `agentRuntimePilot` im bestehenden Tageslauf (`schemaVersion: 1`, gleicher localStorage-Schlüssel).
+- V6.43.0 ist committed und gepusht; V6.43.1 schließt Dokumentation, Agentenbezeichnung und Abnahme ohne neue Ausführung ab.
+- Runtime-Infrastruktur in `agent-runtime.js`; Tests in `agent-runtime.test.js`.
+- Pilot-Agent: sichtbar **Projektmanager-Agent**; kanonische technische ID **`orchestrator-agent`** (über `ROLE_NAME_MAPPING`, keine neue ID).
+- Runtime-Pilot nur für **Health Upgrade Kompass** mit vorbereiteter Agenten-Prüfphase und Projektmanager-Arbeitskarte.
+- Erster Executor: `LOCAL_DETERMINISTIC_PILOT` – keine externe KI, kein Plugin, kein Netzwerk, kein Dateischreiben.
+- Jamal-Freigabe vor Start; separate Jamal-Annahme vor Ergebnisübernahme; kein automatischer weiterer Executor.
+- Persistenz additiv unter `agentRuntimePilot` im bestehenden Tageslauf (`schemaVersion: 1`, Schlüssel `ki-unternehmenszentrale-daily-work-runs-v1`).
+- **241 automatisierte Prüfpunkte** (20 + 96 + 56 + 18 + 17 + 34); 41 GET-Routen; POST 405; `writeOperationsBlocked: true`; `madeExternalRequest: false`.
+
+## V6.43.0 – gesicherter Ausgangsstand (Historie)
+
+- `agent-runtime.js` implementiert Snapshot, Fingerprint, Jamal-Freigabe, Statusmaschine, lokalen deterministischen Pilot-Executor, Timeout, Abbruch, Audit und Ergebnisprüfung.
 - UI-Integration zurückhaltend in der bestehenden Agenten-Prüfphase; separater Start, keine automatische Ergebnisübernahme.
-- 232 automatisierte Prüfpunkte (182 bestehend + 50 Runtime); 41 GET-Routen; POST 405; `writeOperationsBlocked: true`; `madeExternalRequest: false`.
+- Gesichert mit Commit `daa96e9` auf `origin/main`.
 
-## V6.42.1 – gesicherter Ausgangsstand
+## V6.42.1 – gesicherter Ausgangsstand (Historie)
 
 - `server-http-router.js` enthält HTTP-Dispatch, Methodenprüfung, statische Asset-Auslieferung, 404/405 und kontrollierte interne Fehlergrenzen.
 - `server.js` bleibt für Serverstart, Konfiguration, Handler, Antwortdaten und die explizite Übergabe von `getRoutes`, `routePrefixHandlers` und `staticAssets` zuständig.
 - `project-registry.js` bleibt kanonische Projektquelle; `agent-registry.js` bleibt kanonische Agentenquelle.
 - Keine neue Produktfunktion, keine Verhaltensänderung, keine neue Route, keine Schreib-API.
 - 17 Projekte, 25 Agenten, 41 GET-Routen, 8 freigegebene statische Pfade und alle Ausführungsverbote bleiben erhalten.
-- Nächster geplanter Schritt: Agenten-Runtime-Pilot.
+- Nächster geplanter Schritt nach V6.43.0: Runtime-Pilot abnahmefest abschließen (V6.43.1).
 
-## V6.42.0 – gesicherter Ausgangsstand
+## V6.42.0 – gesicherter Ausgangsstand (Historie)
 
 - `daily-work-run-ui.js` enthält die komplette Tageslauf-Präsentations- und Bedienlogik aus dem bisherigen `app.js`-Monolithen.
 - `app.js` initialisiert das UI-Modul über `DailyWorkRunUi.init(...)` und ruft `DailyWorkRunUi.render()` aus `renderAll()` sowie nach Register-Refresh auf.
@@ -52,7 +59,7 @@
 - `app.js` und `server.js` nicht unkontrolliert vergrößern.
 - Agenten-Laufzeit und Plugins erst nach Datensicherung und Modularisierung.
 
-## V6.40.3 – gesicherter Ausgangsstand
+## V6.40.3 – gesicherter Ausgangsstand (Historie)
 
 - Ein gültiger V6.40.2-Agentenplan kann ausschließlich nach Jamals ausdrücklicher Freigabe in interne Arbeitskarten überführt werden.
 - Arbeitskarten entstehen nur für ausgewählte Agenten und enthalten Rolle, Teilauftrag, Ergebnisziel, Prüfkriterium, Sicherheitsgrenze, Abhängigkeiten, Übergabe, Quelle, Status und manuelle Befundfelder.
@@ -125,11 +132,8 @@ Die Zentrale ist als lokaler read-only Arbeits-, Entscheidungs- und Demo-Stand p
 
 ## Tests
 
-- `npm test` → 20 Register-, Health-, API- und localStorage-Prüfpunkte
-- `npm test` führt zusätzlich 96 Tageslauf-, Agentenplan- und Prüfphasen-Prüfpunkte aus
-- `npm test` führt zusätzlich 18 Datensicherungs-Prüfpunkte aus
-- `npm test` führt zusätzlich 16 Tageslauf-UI-Modulprüfungen aus
-- `npm run check` prüft Agentenregister, Tageslauf, UI, Server und Projektregister syntaktisch
+- `npm test` → **241 Prüfpunkte gesamt**: project-registry 20, daily-work-run 96, agent-runtime 56, local-data-backup 18, daily-work-run-ui 17, server-http-router 34
+- `npm run check` prüft alle betroffenen JavaScript-Module syntaktisch
 - `npm start` → `node server.js`
 - manuelle lokale Browser- und GET-API-Prüfungen
 - Airtable-Read-only-Prüfpfade mit separater Serverfreigabe
@@ -155,7 +159,7 @@ Keine Coverage-, Lint-, HTML-/CSS- oder CI-Test-Suite ist im Bestand nachgewiese
 
 ## Genau ein empfohlener nächster Produktentwicklungsschritt
 
-V6.40.3 manuell im Browser abnehmen; danach separat entscheiden, ob der uncommittete Stand gesichert werden soll.
+**V1-Abschlussbewertung: V1 lokal fertig und betriebsbereit.** Der erklärte lokale V1-Umfang ist vollständig abgenommen. Ein weiterer Executor, produktive Außenwirkung, Deployment oder eine Autonomieerhöhung gehören nicht zu diesem V1-Abschluss und benötigen später eine neue ausdrückliche Freigabe.
 
 ## Bekannte Widersprüche
 
@@ -167,4 +171,4 @@ Historische Versionskennzeichnungen, Namensvarianten und nicht-kanonische Altreg
 
 ## Entscheidung durch Jamal erforderlich
 
-Manuelle Abnahme von V6.40.3 sowie jede spätere Commit-, Push- oder Deploymententscheidung.
+Keine weitere Entscheidung für den lokalen V1-Abschluss. Jede spätere Deployment-, V2- oder Erweiterungsentscheidung benötigt eine neue ausdrückliche Freigabe.

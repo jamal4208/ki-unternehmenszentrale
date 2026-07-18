@@ -179,6 +179,12 @@ function runTests() {
     assert.match(uiSource, /Der vorhandene Lauf bleibt vollständig erhalten/);
   });
 
+  check("Runtime-Pilot zeigt Rollenname und technische ID getrennt", () => {
+    assert.match(uiSource, /Technische Agenten-ID:/);
+    assert.match(uiSource, /PROJEKTMANAGER_ROLE_NAME/);
+    assert.match(uiSource, /daily-work-runtime-agent-meta/);
+  });
+
   check("Import bleibt an LocalDataBackup gebunden", () => {
     const storage = mockStorage();
     const exportJson = LocalDataBackup.exportLocalDataJson(storage);
