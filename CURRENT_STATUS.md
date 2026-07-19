@@ -2,22 +2,30 @@
 
 ## Git- und Versionsstand
 
-- Version: **V6.44.0 – Lokale V1 einfrieren und Betriebsmodus festlegen**
-- Ausgangscommit für V6.44.0: `16bbf45` (V6.43.1 Runtime-Pilot abnahmefest abschliessen)
+- Version: **V6.44.1 – Health-Verifizierungsstand synchronisieren**
+- Ausgangscommit der Zentrale: `b2f618e` (V6.44.0 Lokale V1 einfrieren und Betriebsmodus festlegen)
 - Branch: `main`
-- Upstream: `origin/main` auf `16bbf45` zum Freeze-Ausgang, synchron
-- V6.44.0-Abnahmestand: vollständig geprüft und als lokaler V1-Betriebsfreeze gesichert
+- Upstream: `origin/main` auf `b2f618e` zum Sync-Ausgang, synchron
+- V6.44.1-Abnahmestand: vollständig geprüft; der lokale V1-Betriebsstand enthält die synchronisierte Health-Momentaufnahme
 - Verbindliche Aussage: **V1 lokal fertig und betriebsbereit**
 - Einstiegspunkte: `README.md`, `V1_BETRIEBSHANDBUCH.md`
 
-## V6.44.0 – aktueller Funktionsstand
+## V6.44.1 – aktueller Funktionsstand
+
+- Reine Synchronisierung der kanonischen technischen Health-Momentaufnahme; keine neue Produktfunktion.
+- Health vorher: `bc98b5c` → jetzt: `28cdcf7` (PR #1 gemergt, Arbeitscommit `8eadc46`).
+- Health Remote-Baseline `baseline/private-health-expansion-2026-07-11`: `28cdcf7`; `origin/main` bewusst `1f4f96d`.
+- Health Tests/Build grün inkl. Preview-Demodaten und Check-Datum; Verifizierung `2026-07-19`.
+- Expansion teilt die gemeinsamen technischen Git-Referenzen, bleibt **PLANUNG** ohne fachliche/regulatorische Freigabe.
+- Keine neue Route, kein neuer Speicher, keine Runtime-Änderung, keine Autonomieerhöhung, keine Außenwirkung.
+- Keine medizinische, fachliche, rechtliche oder regulatorische Freigabe.
+
+## V6.44.0 – gesicherter Ausgangsstand (Historie)
 
 - V1-Betriebsfreeze ohne neue Produktfunktion, ohne neue Runtime und ohne Autonomieerhöhung.
 - `README.md` und `V1_BETRIEBSHANDBUCH.md` sind die verbindlichen Einstiegspunkte für Start, Backup, Sicherheitsgrenzen und Fehlerfall.
 - Kompakter V1-Betriebshinweis in der Oberfläche: lokal fertig, Betrieb auf diesem Mac, Daten im Browser, Außenwirkung blockiert, nächster Schritt klar.
-- Keine neue Route, kein neuer Speicher, keine V2-Funktion, keine Außenwirkung.
-- Bestehende Runtime-, Backup- und Router-Grenzen bleiben unverändert.
-- Automatisierte Prüfpunkte: siehe Testabschnitt unten; 41 GET-Routen; POST 405; `writeOperationsBlocked: true`; `madeExternalRequest: false`.
+- Gesichert mit Commit `b2f618e` auf `origin/main`.
 
 ## V6.43.1 – gesicherter Ausgangsstand (Historie)
 
@@ -109,7 +117,7 @@
 - `project-registry.js` ist die einzige kanonische technische Quelle für 17 Projekte mit stabilen IDs.
 - Die sichtbaren Modi sind `DEMO`, `PLANUNG`, `REAL_VERIFIZIERT` und `UNGEKLÄRT`.
 - Health Upgrade Kompass ist der erste technisch `REAL_VERIFIZIERT` geführte Pilot.
-- Health-Pfad, Repository, Branch `main`, HEAD `bc98b5c`, Baseline-Commit `26f65fe` und Remote-Referenzen sind als bestätigte Momentaufnahme dokumentiert.
+- Health-Pfad, Repository, Branch `main`, HEAD `28cdcf7`, Baseline-Commit `26f65fe` und Remote-Referenzen (`origin/main` `1f4f96d`, Baseline `28cdcf7`) sind als bestätigte Momentaufnahme vom 2026-07-19 dokumentiert.
 - Health und Expansion bleiben fachlich getrennt; die technische Basis ist teilweise gemeinsam.
 - Work bleibt technisch `UNGEKLÄRT`; Codex bleibt manuell kontrolliert.
 - Manuelle Managementdaten werden weiter im Browser per `localStorage` gespeichert und getrennt von Kanondaten angezeigt.
@@ -170,7 +178,7 @@ Keine Coverage-, Lint-, HTML-/CSS- oder CI-Test-Suite ist im Bestand nachgewiese
 
 ## Genau ein empfohlener nächster Produktentwicklungsschritt
 
-Kein weiterer V1-Funktionsschritt. Spätere Erweiterungen gehören zu **V2** und benötigen eine neue ausdrückliche Freigabe durch Jamal.
+Kein weiterer V1-Funktionsschritt. Health: nächsten tatsächlichen Preview-Blocker aus dem Kernfluss einzeln prüfen. Spätere Erweiterungen gehören zu **V2** und benötigen eine neue ausdrückliche Freigabe durch Jamal.
 
 ## Bekannte Widersprüche
 
@@ -182,4 +190,4 @@ Historische Versionskennzeichnungen, Namensvarianten und nicht-kanonische Altreg
 
 ## Entscheidung durch Jamal erforderlich
 
-Commit und Push von V6.44.0 sowie jede spätere Deployment-, V2- oder Außenwirkungsentscheidung.
+Commit und Push von V6.44.1 sowie jede spätere Deployment-, V2- oder Außenwirkungsentscheidung.

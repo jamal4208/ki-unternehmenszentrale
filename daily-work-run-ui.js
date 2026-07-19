@@ -397,7 +397,7 @@ function renderAgentRuntimePilot(run) {
     <section class="daily-work-runtime-pilot" aria-labelledby="daily-agent-runtime-title">
       <header>
         <div>
-          <p class="eyebrow">V6.44.0 · kontrollierte Laufzeit</p>
+          <p class="eyebrow">V6.44.1 · kontrollierte Laufzeit</p>
           <h4 id="daily-agent-runtime-title">Agenten-Laufzeit-Pilot</h4>
         </div>
         <span class="daily-work-run-mode">${deps.escapeHtml(pilot ? statusLabels[pilot.status] || pilot.status : "Noch nicht vorbereitet")}</span>

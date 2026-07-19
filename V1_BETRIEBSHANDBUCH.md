@@ -3,7 +3,7 @@
 ## 1. Verbindlicher V1-Stand
 
 - **Aussage:** V1 lokal fertig und betriebsbereit
-- **Version:** V6.44.0 (V1-Betriebsfreeze)
+- **Version:** V6.44.1 (V1-Betriebsfreeze; Health-Momentaufnahme synchronisiert)
 - **Ausgangscommit für diesen Freeze:** `16bbf45` (V6.43.1 Runtime-Pilot abnahmefest abschliessen)
 - **Branch:** `main`, synchron mit `origin/main` zum Freeze-Ausgang
 - **Einstiegspunkte:** `README.md` (kurz) und dieses Handbuch (ausführlich)
@@ -133,7 +133,7 @@ Im Server-Terminal **Ctrl + C**. Keinen parallelen Server auf Port 4173 belassen
 
 ## 19. Update- und Versionsregel
 
-- V6.44.0 friert den lokalen V1-Betrieb ein
+- V6.44.0 friert den lokalen V1-Betrieb ein; V6.44.1 synchronisiert nur die Health-Verifizierungsmomentaufnahme
 - Kleine Korrekturen nur mit klarer Dokumentation und ohne Autonomieerhöhung
 - Neue Executoren, Plugins, Schreib-APIs oder Cloud gehören **nicht** in V1
 - Vor jedem Update: Backup exportieren

@@ -194,8 +194,8 @@ function runTests() {
     assert.strictEqual(validation.ok, true);
   });
 
-  check("V6.44.0 ist in der Oberfläche sichtbar", () => {
-    assert.match(htmlSource, /V6\.44\.0 · V1-Betriebsfreeze/);
+  check("V6.44.1 ist in der Oberfläche sichtbar", () => {
+    assert.match(htmlSource, /V6\.44\.1 · V1-Betriebsfreeze/);
   });
 
   check("V1-Betriebshinweis ist vorhanden", () => {

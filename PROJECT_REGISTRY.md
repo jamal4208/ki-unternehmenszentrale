@@ -29,18 +29,19 @@
 - lokaler Pfad: `/Users/jamal/Documents/New project/health-upgrade-kompass`
 - Repository: `https://github.com/jamal4208/health-upgrade-kompass.git`
 - lokal ausgecheckter Branch: `main`
-- lokaler HEAD / Merge-Commit: `bc98b5c`
+- lokaler HEAD / Merge-Commit: `28cdcf7`
 - erster privater Baseline-Commit: `26f65fe`
-- Remote-Referenz `baseline/private-health-expansion-2026-07-11`: `bc98b5c`
+- Remote-Referenz `baseline/private-health-expansion-2026-07-11`: `28cdcf7`
 - `origin/main`: `1f4f96d`
-- letzter bestätigter Working Tree: sauber
+- letzter bestätigter Working Tree: sauber (2026-07-19)
 - Testbefehl: `npm test`
-- bestätigte Tests: Check-Logik OK; exportReadiness tests passed; Consent-Persistenz OK
+- bestätigte Tests: Check-Logik OK; exportReadiness tests passed; Consent-Persistenz OK; Preview-Demodaten und Check-Datum OK; Static build erfolgreich
 - Consent-/localStorage-Widerspruch im Health-Projekt: behoben
+- PR #1 gemergt (Arbeitscommit `8eadc46`): Demo-Profil/Demo-Beraterin gekennzeichnet, relatives Check-Folgedatum
 - kein neues Produktionsdeployment, keine externe Aktion, keine öffentliche Freigabe
 - Archive, Backups, Outputs, Partnerunterlagen und ungeklärte Bildbestände bleiben außerhalb der privaten Baseline
 
-Diese Git- und Testwerte sind eine bestätigte Momentaufnahme vom **2026-07-11** und werden nicht automatisch live aktualisiert. `REAL_VERIFIZIERT` bezieht sich ausschließlich auf den technischen Projektstand. Medizinische, fachliche und rechtliche Freigaben sind ausdrücklich nicht erteilt; Produktinhalte bleiben teilweise ungeprüfte interne Prototypinhalte.
+Diese Git- und Testwerte sind eine bestätigte Momentaufnahme vom **2026-07-19** und werden nicht automatisch live aktualisiert. `REAL_VERIFIZIERT` bezieht sich ausschließlich auf den technischen Projektstand. Medizinische, fachliche und rechtliche Freigaben sind ausdrücklich nicht erteilt; Produktinhalte bleiben teilweise ungeprüfte interne Prototypinhalte.
 
 Health und Expansion bleiben fachlich getrennte Projekte mit getrennten stabilen IDs. Ihre technische Basis besteht derzeit teilweise aus demselben Ordner und Code. Das ist keine fachliche Zusammenführung und keine Freigabe.
 

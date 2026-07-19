@@ -4,6 +4,8 @@
 
 `server.js` registriert über `server-http-router.js` **41 tatsächlich vorhandene API-Routen**, alle mit Methode `GET`. Jede andere HTTP-Methode wird vor dem Routing abgewiesen. Es gibt keine API-Schreibroute.
 
+V6.44.1 ändert **keine Route und kein API-Verhalten**. Es synchronisiert nur die kanonische Health-/Expansion-Momentaufnahme im Projektregister; keine neue API, keine Schreibroute, keine Autonomieerhöhung.
+
 V6.44.0 ändert **keine Route und kein API-Verhalten**. Es ist ein V1-Betriebsfreeze mit Einstiegsdokumentation und sichtbarem Betriebsstatus; keine neue API, keine Schreibroute, keine Autonomieerhöhung.
 
 V6.43.0 ergänzt **keine neue API-Route**. Die kontrollierte Agenten-Laufzeit läuft ausschließlich im lokalen Browser-Tageslaufmodell unter `agentRuntimePilot`. Statisch ausgeliefert wird zusätzlich `agent-runtime.js`. `writeOperationsBlocked: true` und `madeExternalRequest: false` bleiben unverändert.

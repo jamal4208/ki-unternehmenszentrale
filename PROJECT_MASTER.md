@@ -1,10 +1,14 @@
 # PROJECT MASTER
 
-## Verbindlicher Versionsstand V6.44.0
+## Verbindlicher Versionsstand V6.44.1
 
-V6.44.0 friert den vollständig geprüften lokalen V1-Stand als Betriebsmodus ein. **V1 lokal fertig und betriebsbereit.** Ausgangscommit: `16bbf45` (V6.43.1). Es gibt keine neue große Produktfunktion, keine neue Runtime, keine Autonomieerhöhung und keine Außenwirkung.
+V6.44.1 synchronisiert ausschließlich die kanonische technische Health-Momentaufnahme mit dem bestätigten Health-Stand `28cdcf7` (PR #1, Arbeitscommit `8eadc46`). Ausgangscommit der Zentrale: `b2f618e` (V6.44.0). **V1 lokal fertig und betriebsbereit** bleibt erhalten.
 
-Verbindliche Einstiegspunkte: `README.md` (kurz) und `V1_BETRIEBSHANDBUCH.md` (ausführlich). Die Oberfläche zeigt einen kompakten V1-Betriebshinweis: lokal auf diesem Mac, Daten im Browser, Außenwirkung blockiert, nächster Schritt Fokusprojekt und Tagesergebnis.
+Keine neue Produktfunktion, keine Runtime-Änderung, keine Autonomieerhöhung, keine Außenwirkung und keine medizinische, fachliche, rechtliche oder regulatorische Freigabe. Expansion teilt die gemeinsamen technischen Git-Referenzen, bleibt aber **PLANUNG**.
+
+## Verbindlicher Versionsstand V6.44.0 (Historie)
+
+V6.44.0 friert den vollständig geprüften lokalen V1-Stand als Betriebsmodus ein. **V1 lokal fertig und betriebsbereit.** Gesichert mit Commit `b2f618e`. Einstiegspunkte: `README.md` und `V1_BETRIEBSHANDBUCH.md`.
 
 ## Verbindlicher Versionsstand V6.43.1 (Historie)
 
@@ -143,4 +147,4 @@ Ein Versionsschritt ist abgeschlossen, wenn Ziel und Nicht-Ziele erfüllt, betro
 
 ## Entscheidung durch Jamal erforderlich
 
-**V1 lokal eingefroren und betriebsbereit (V6.44.0).** Einstieg über `README.md` und `V1_BETRIEBSHANDBUCH.md`. Jede spätere produktive Außenwirkung, Deployment- oder V2-Entscheidung benötigt eine neue ausdrückliche Freigabe durch Jamal.
+**V1 lokal eingefroren und betriebsbereit (V6.44.0/V6.44.1).** Health-Verifizierungsstand auf `28cdcf7` synchronisiert. Einstieg über `README.md` und `V1_BETRIEBSHANDBUCH.md`. Jede spätere produktive Außenwirkung, Deployment- oder V2-Entscheidung benötigt eine neue ausdrückliche Freigabe durch Jamal.

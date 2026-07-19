@@ -60,13 +60,36 @@ function run() {
   // 6–11: Health-Pilot und zentraler Git-Snapshot.
   assert.strictEqual(health.portfolioMode, "REAL_VERIFIZIERT");
   assert.strictEqual(health.localBranch, "main");
-  assert.strictEqual(health.localHead, "bc98b5c");
+  assert.strictEqual(health.localHead, "28cdcf7");
   assert.strictEqual(health.remoteRefs["origin/main"], "1f4f96d");
   assert.strictEqual(
     health.remoteRefs["baseline/private-health-expansion-2026-07-11"],
-    "bc98b5c",
+    "28cdcf7",
+  );
+  assert.strictEqual(health.lastVerifiedAt, "2026-07-19");
+  assert.match(health.testStatus, /Preview-Demodaten und Check-Datum OK/);
+  assert.match(health.testStatus, /Static build erfolgreich/);
+  assert.ok(
+    health.notes.some((note) => /PR #1/i.test(note)),
+    "PR #1 beziehungsweise Preview-Fix muss dokumentiert sein.",
   );
   assert.strictEqual(central.localHead, "a5367f1");
+
+  // Expansion: gemeinsame technische Referenzen, aber PLANUNG ohne Freigabe.
+  assert.strictEqual(expansion.portfolioMode, "PLANUNG");
+  assert.strictEqual(expansion.localHead, "28cdcf7");
+  assert.strictEqual(expansion.remoteRefs["origin/main"], "1f4f96d");
+  assert.strictEqual(
+    expansion.remoteRefs["baseline/private-health-expansion-2026-07-11"],
+    "28cdcf7",
+  );
+  assert.strictEqual(expansion.lastVerifiedAt, "2026-07-19");
+  assert.ok(
+    expansion.notes.some((note) => /Health-PR #1/i.test(note)),
+    "Expansion muss die gemeinsame technische Basisaktualisierung dokumentieren.",
+  );
+  assert.doesNotMatch(expansion.portfolioMode, /REAL_VERIFIZIERT/);
+  assert.doesNotMatch(JSON.stringify(expansion.safetyProfile), /Länderfreigabe erteilt|regulatorisch freigegeben/i);
 
   // 12–14: Ungeklärte Angaben, Trennung und gemeinsame technische Basis.
   PROJECT_REGISTRY.filter((project) =>
@@ -158,9 +181,26 @@ function run() {
   assert.strictEqual(linked.unmatchedManualProjects.length, 1, "Manuelle Projekte müssen erhalten bleiben.");
   assert.strictEqual(linked.unmatchedManualProjects[0].id, "manual-project-1");
   const linkedHealth = linked.projects.find((entry) => entry.canonical.id === "health-upgrade-kompass");
-  assert.strictEqual(linkedHealth.canonical.localHead, "bc98b5c");
+  assert.strictEqual(linkedHealth.canonical.localHead, "28cdcf7");
   assert.strictEqual(linkedHealth.localManagement.localHead, "falscher-lokaler-wert");
   assert.strictEqual(linkedHealth.localManagement.history.length, 1);
+
+  const healthApiBody = healthApi.body.project;
+  assert.strictEqual(healthApiBody.localHead, "28cdcf7");
+  assert.strictEqual(healthApiBody.remoteRefs["origin/main"], "1f4f96d");
+  assert.strictEqual(
+    healthApiBody.remoteRefs["baseline/private-health-expansion-2026-07-11"],
+    "28cdcf7",
+  );
+  assert.strictEqual(healthApiBody.lastVerifiedAt, "2026-07-19");
+
+  const listedExpansion = listApi.body.projects.find((project) => project.id === "expansion-app");
+  assert.ok(listedExpansion, "Expansion muss in GET /api/projects enthalten sein.");
+  assert.strictEqual(listedExpansion.portfolioMode, "PLANUNG");
+  assert.strictEqual(listedExpansion.localHead, "28cdcf7");
+  assert.strictEqual(listedExpansion.lastVerifiedAt, "2026-07-19");
+  assert.strictEqual(listApi.body.writeOperationsBlocked, true);
+  assert.strictEqual(listApi.body.madeExternalRequest, false);
 
   const appSource = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
   assert.match(appSource, /localStorage\.setItem\(STORAGE_KEY/);

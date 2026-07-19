@@ -1,6 +1,20 @@
 # MIGRATION PLAN
 
-## V6.44.0 – Lokale V1 einfrieren und Betriebsmodus festlegen
+## V6.44.1 – Health-Verifizierungsstand synchronisieren
+
+V6.44.1 führt kein neues Speicherformat, keine neue Route und keine neue Runtime ein. Ausgangscommit der Zentrale: `b2f618e`. Health-Momentaufnahme: vorher `bc98b5c`, jetzt `28cdcf7` (PR #1 / `8eadc46`).
+
+| Bereich | Regel |
+|---|---|
+| project-registry.js | Health- und Expansion-Git-/Test-Momentaufnahme aktualisieren |
+| Expansion | gemeinsame Referenzen sync; Portfolio-Modus PLANUNG unverändert |
+| Verboten | Health-Repo ändern, Freigaben ableiten, neue API, Autonomie |
+
+Rückfall: kontrolliert auf den gesicherten V6.44.0-Stand `b2f618e` zurückgehen; lokale Browserdaten bleiben unangetastet.
+
+Nächster Schritt: Health Preview-Blocker einzeln prüfen; kein V1-Funktionsschritt.
+
+## V6.44.0 – Lokale V1 einfrieren und Betriebsmodus festlegen (Historie, gesichert `b2f618e`)
 
 V6.44.0 führt kein neues Speicherformat, keinen neuen localStorage-Schlüssel, keine neue Route und keine neue Runtime ein. Ausgangscommit: `16bbf45` (V6.43.1 gesichert).
 
@@ -12,7 +26,7 @@ V6.44.0 führt kein neues Speicherformat, keinen neuen localStorage-Schlüssel, 
 
 Rückfall: kontrolliert auf den gesicherten V6.43.1-Stand `16bbf45` zurückgehen; lokale Browserdaten bleiben unangetastet.
 
-Nächster Schritt: **kein weiterer V1-Funktionsschritt**; V2 nur nach ausdrücklicher Freigabe.
+Nächster Schritt nach V6.44.0: V6.44.1 Health-Verifizierungsstand synchronisieren (umgesetzt).
 
 ## V6.43.1 – Runtime-Pilot abnahmefest abschließen (Historie, gesichert `16bbf45`)
 

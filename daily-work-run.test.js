@@ -403,14 +403,14 @@ function runTests() {
   check("getrennte localStorage-Struktur", () => assert.notStrictEqual(DailyWorkRun.DAILY_STORAGE_KEY, DailyWorkRun.LEGACY_MANAGEMENT_STORAGE_KEY));
   check("bestehende manuelle Projekte bleiben erhalten", () => assert.strictEqual(storage.snapshot()[DailyWorkRun.LEGACY_MANAGEMENT_STORAGE_KEY], legacyJson));
   check("Notizen, Entscheidungen und Verläufe bleiben erhalten", () => assert.deepStrictEqual(JSON.parse(storage.snapshot()[DailyWorkRun.LEGACY_MANAGEMENT_STORAGE_KEY]), legacyState));
-  check("Kanondaten können nicht überschrieben werden", () => assert.strictEqual(getProjectById("health-upgrade-kompass").localHead, "bc98b5c"));
+  check("Kanondaten können nicht überschrieben werden", () => assert.strictEqual(getProjectById("health-upgrade-kompass").localHead, "28cdcf7"));
   check("API-Ausfall nutzt keinen localStorage-Technikstand", () => assert.deepStrictEqual(DailyWorkRun.currentCanonicalProject(null, "health-upgrade-kompass"), { available: false, status: "UNGEKLÄRT", project: null }));
 
   const apiPayload = buildProjectsResponse();
   const currentHealth = DailyWorkRun.currentCanonicalProject(apiPayload, "health-upgrade-kompass");
   check("Health über stabile kanonische ID", () => assert.strictEqual(currentHealth.project.id, "health-upgrade-kompass"));
   check("Health bleibt REAL_VERIFIZIERT", () => assert.strictEqual(currentHealth.project.portfolioMode, "REAL_VERIFIZIERT"));
-  check("Health-HEAD bleibt bc98b5c", () => assert.strictEqual(currentHealth.project.localHead, "bc98b5c"));
+  check("Health-HEAD bleibt 28cdcf7", () => assert.strictEqual(currentHealth.project.localHead, "28cdcf7"));
   check("Health und Expansion bleiben getrennt", () => assert.notStrictEqual(currentHealth.project.id, getProjectById("expansion-app").id));
   check("Codex-Auftrag ist nur Textvorlage", () => {
     assert.strictEqual(typeof preparedDraft.codexPreparation.preparedPrompt, "string");
