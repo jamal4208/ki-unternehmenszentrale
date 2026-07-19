@@ -2,13 +2,24 @@
 
 ## Git- und Versionsstand
 
-- Version: **V6.43.1 – Runtime-Pilot abnahmefest und widerspruchsfrei**
-- Produktstand V6.43.0: `daa96e9` (Commit „V6.43.0 Kontrollierte Agenten-Laufzeit einfuehren“, auf `origin/main` gesichert)
+- Version: **V6.44.0 – Lokale V1 einfrieren und Betriebsmodus festlegen**
+- Ausgangscommit für V6.44.0: `16bbf45` (V6.43.1 Runtime-Pilot abnahmefest abschliessen)
 - Branch: `main`
-- Upstream: `origin/main` auf `daa96e9`, synchron
-- V6.43.1-Abnahmestand: vollständig geprüft und auf `main` als lokaler V1-Abschluss gesichert
+- Upstream: `origin/main` auf `16bbf45` zum Freeze-Ausgang, synchron
+- V6.44.0-Abnahmestand: vollständig geprüft und als lokaler V1-Betriebsfreeze gesichert
+- Verbindliche Aussage: **V1 lokal fertig und betriebsbereit**
+- Einstiegspunkte: `README.md`, `V1_BETRIEBSHANDBUCH.md`
 
-## V6.43.1 – aktueller Funktionsstand
+## V6.44.0 – aktueller Funktionsstand
+
+- V1-Betriebsfreeze ohne neue Produktfunktion, ohne neue Runtime und ohne Autonomieerhöhung.
+- `README.md` und `V1_BETRIEBSHANDBUCH.md` sind die verbindlichen Einstiegspunkte für Start, Backup, Sicherheitsgrenzen und Fehlerfall.
+- Kompakter V1-Betriebshinweis in der Oberfläche: lokal fertig, Betrieb auf diesem Mac, Daten im Browser, Außenwirkung blockiert, nächster Schritt klar.
+- Keine neue Route, kein neuer Speicher, keine V2-Funktion, keine Außenwirkung.
+- Bestehende Runtime-, Backup- und Router-Grenzen bleiben unverändert.
+- Automatisierte Prüfpunkte: siehe Testabschnitt unten; 41 GET-Routen; POST 405; `writeOperationsBlocked: true`; `madeExternalRequest: false`.
+
+## V6.43.1 – gesicherter Ausgangsstand (Historie)
 
 - V6.43.0 ist committed und gepusht; V6.43.1 schließt Dokumentation, Agentenbezeichnung und Abnahme ohne neue Ausführung ab.
 - Runtime-Infrastruktur in `agent-runtime.js`; Tests in `agent-runtime.test.js`.
@@ -17,7 +28,7 @@
 - Erster Executor: `LOCAL_DETERMINISTIC_PILOT` – keine externe KI, kein Plugin, kein Netzwerk, kein Dateischreiben.
 - Jamal-Freigabe vor Start; separate Jamal-Annahme vor Ergebnisübernahme; kein automatischer weiterer Executor.
 - Persistenz additiv unter `agentRuntimePilot` im bestehenden Tageslauf (`schemaVersion: 1`, Schlüssel `ki-unternehmenszentrale-daily-work-runs-v1`).
-- **241 automatisierte Prüfpunkte** (20 + 96 + 56 + 18 + 17 + 34); 41 GET-Routen; POST 405; `writeOperationsBlocked: true`; `madeExternalRequest: false`.
+- Gesichert mit Commit `16bbf45` auf `origin/main`.
 
 ## V6.43.0 – gesicherter Ausgangsstand (Historie)
 
@@ -132,7 +143,7 @@ Die Zentrale ist als lokaler read-only Arbeits-, Entscheidungs- und Demo-Stand p
 
 ## Tests
 
-- `npm test` → **241 Prüfpunkte gesamt**: project-registry 20, daily-work-run 96, agent-runtime 56, local-data-backup 18, daily-work-run-ui 17, server-http-router 34
+- `npm test` → **247 Prüfpunkte gesamt**: project-registry 20, daily-work-run 96, agent-runtime 56, local-data-backup 18, daily-work-run-ui 21, server-http-router 36
 - `npm run check` prüft alle betroffenen JavaScript-Module syntaktisch
 - `npm start` → `node server.js`
 - manuelle lokale Browser- und GET-API-Prüfungen
@@ -159,7 +170,7 @@ Keine Coverage-, Lint-, HTML-/CSS- oder CI-Test-Suite ist im Bestand nachgewiese
 
 ## Genau ein empfohlener nächster Produktentwicklungsschritt
 
-**V1-Abschlussbewertung: V1 lokal fertig und betriebsbereit.** Der erklärte lokale V1-Umfang ist vollständig abgenommen. Ein weiterer Executor, produktive Außenwirkung, Deployment oder eine Autonomieerhöhung gehören nicht zu diesem V1-Abschluss und benötigen später eine neue ausdrückliche Freigabe.
+Kein weiterer V1-Funktionsschritt. Spätere Erweiterungen gehören zu **V2** und benötigen eine neue ausdrückliche Freigabe durch Jamal.
 
 ## Bekannte Widersprüche
 
@@ -171,4 +182,4 @@ Historische Versionskennzeichnungen, Namensvarianten und nicht-kanonische Altreg
 
 ## Entscheidung durch Jamal erforderlich
 
-Keine weitere Entscheidung für den lokalen V1-Abschluss. Jede spätere Deployment-, V2- oder Erweiterungsentscheidung benötigt eine neue ausdrückliche Freigabe.
+Commit und Push von V6.44.0 sowie jede spätere Deployment-, V2- oder Außenwirkungsentscheidung.

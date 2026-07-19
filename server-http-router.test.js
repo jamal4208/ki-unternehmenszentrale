@@ -349,6 +349,16 @@ async function runTests() {
       assert.strictEqual(runtimeTest.statusCode, 404),
     );
 
+    const readmeBlocked = await httpGet(integrationPort, "/README.md");
+    check("Integration: README.md wird nicht ausgeliefert", () =>
+      assert.strictEqual(readmeBlocked.statusCode, 404),
+    );
+
+    const handbookBlocked = await httpGet(integrationPort, "/V1_BETRIEBSHANDBUCH.md");
+    check("Integration: V1_BETRIEBSHANDBUCH.md wird nicht ausgeliefert", () =>
+      assert.strictEqual(handbookBlocked.statusCode, 404),
+    );
+
     const backupJs = await httpGet(integrationPort, "/local-data-backup.js");
     check("Integration: GET /local-data-backup.js liefert 200", () =>
       assert.strictEqual(backupJs.statusCode, 200),
@@ -371,8 +381,8 @@ async function runTests() {
     assert.strictEqual(normalizeRequestPathname("/safe/path"), "/safe/path");
   });
 
-  assert.strictEqual(passed, 34);
-  console.log("server-http-router.test.js: 34 Prüfpunkte erfolgreich");
+  assert.strictEqual(passed, 36);
+  console.log("server-http-router.test.js: 36 Prüfpunkte erfolgreich");
 }
 
 runTests().catch((error) => {

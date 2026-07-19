@@ -1,6 +1,20 @@
 # MIGRATION PLAN
 
-## V6.43.1 – Runtime-Pilot abnahmefest abschließen
+## V6.44.0 – Lokale V1 einfrieren und Betriebsmodus festlegen
+
+V6.44.0 führt kein neues Speicherformat, keinen neuen localStorage-Schlüssel, keine neue Route und keine neue Runtime ein. Ausgangscommit: `16bbf45` (V6.43.1 gesichert).
+
+| Bereich | Regel |
+|---|---|
+| Dokumentation | `README.md`, `V1_BETRIEBSHANDBUCH.md`, Status auf V1-Betriebsfreeze |
+| UI | kompakter V1-Betriebshinweis, Versionsanzeige V6.44.0 |
+| Verboten | zweiter Executor, externe KI, Plugins, Schreib-API, Cloud, Autonomieerhöhung |
+
+Rückfall: kontrolliert auf den gesicherten V6.43.1-Stand `16bbf45` zurückgehen; lokale Browserdaten bleiben unangetastet.
+
+Nächster Schritt: **kein weiterer V1-Funktionsschritt**; V2 nur nach ausdrücklicher Freigabe.
+
+## V6.43.1 – Runtime-Pilot abnahmefest abschließen (Historie, gesichert `16bbf45`)
 
 V6.43.1 führt kein neues Speicherformat, keinen neuen localStorage-Schlüssel und keinen zweiten Executor ein. V6.43.0 ist mit Commit `daa96e9` auf `origin/main` gesichert.
 
@@ -12,7 +26,7 @@ V6.43.1 führt kein neues Speicherformat, keinen neuen localStorage-Schlüssel u
 
 Rückfall: kontrolliert auf den gesicherten V6.43.0-Stand `daa96e9` zurückgehen; lokale Browserdaten bleiben unangetastet.
 
-Nächster Schritt: **V1-Abschlussentscheidung durch Jamal** – nicht mehr die Abnahme von V6.40.3.
+Nächster Schritt nach V6.43.1: V6.44.0 V1-Betriebsfreeze (umgesetzt).
 
 ## V6.43.0 – Agenten-Laufzeit-Pilot (Historie, gesichert `daa96e9`)
 

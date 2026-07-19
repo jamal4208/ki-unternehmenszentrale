@@ -194,6 +194,36 @@ function runTests() {
     assert.strictEqual(validation.ok, true);
   });
 
+  check("V6.44.0 ist in der Oberfläche sichtbar", () => {
+    assert.match(htmlSource, /V6\.44\.0 · V1-Betriebsfreeze/);
+  });
+
+  check("V1-Betriebshinweis ist vorhanden", () => {
+    assert.match(htmlSource, /v1-ops-status/);
+    assert.match(htmlSource, /V1 lokal fertig und betriebsbereit/);
+    assert.match(htmlSource, /Fokusprojekt wählen und Tagesergebnis formulieren/);
+  });
+
+  check("V1-Betriebshinweis behauptet keine Außenwirkung", () => {
+    const statusBlock = htmlSource.slice(
+      htmlSource.indexOf('class="v1-ops-status"'),
+      htmlSource.indexOf("daily-work-run-output"),
+    );
+    assert.match(statusBlock, /Außenwirkung[\s\S]*blockiert/);
+    assert.doesNotMatch(statusBlock, /extern(e|er)? KI|Plugin ausgeführt|veröffentlicht|Deployment freigegeben/i);
+  });
+
+  check("README und Betriebshandbuch sind vorhanden", () => {
+    assert.strictEqual(fs.existsSync(path.join(__dirname, "README.md")), true);
+    assert.strictEqual(fs.existsSync(path.join(__dirname, "V1_BETRIEBSHANDBUCH.md")), true);
+    const readme = fs.readFileSync(path.join(__dirname, "README.md"), "utf8");
+    const handbook = fs.readFileSync(path.join(__dirname, "V1_BETRIEBSHANDBUCH.md"), "utf8");
+    assert.match(readme, /V1 lokal fertig und betriebsbereit/);
+    assert.match(readme, /127\.0\.0\.1:4173/);
+    assert.match(handbook, /Grenze zwischen V1 und späterer V2/);
+    assert.match(handbook, /orchestrator-agent/);
+  });
+
   console.log(`daily-work-run-ui.test.js: ${passed} Prüfpunkte erfolgreich`);
 }
 

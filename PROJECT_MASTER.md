@@ -1,12 +1,14 @@
 # PROJECT MASTER
 
-## Verbindlicher Versionsstand V6.43.1
+## Verbindlicher Versionsstand V6.44.0
 
-V6.43.1 schließt den in V6.43.0 (`daa96e9`, auf `origin/main` gesichert) eingeführten Runtime-Piloten abnahmefest ab. Es gibt keinen zweiten Executor, keine Autonomieerhöhung und keine neue produktive oder externe Ausführung.
+V6.44.0 friert den vollständig geprüften lokalen V1-Stand als Betriebsmodus ein. **V1 lokal fertig und betriebsbereit.** Ausgangscommit: `16bbf45` (V6.43.1). Es gibt keine neue große Produktfunktion, keine neue Runtime, keine Autonomieerhöhung und keine Außenwirkung.
 
-Die Dokumentation ist auf den gesicherten Ist-Stand korrigiert. In der UI lautet die sichtbare Hauptbezeichnung **Projektmanager-Agent**; die kanonische technische ID **`orchestrator-agent`** erscheint ergänzend und zurückhaltend. Keine neue Agenten-ID, kein zweiter Registereintrag, keine Änderung des kanonischen Mappings.
+Verbindliche Einstiegspunkte: `README.md` (kurz) und `V1_BETRIEBSHANDBUCH.md` (ausführlich). Die Oberfläche zeigt einen kompakten V1-Betriebshinweis: lokal auf diesem Mac, Daten im Browser, Außenwirkung blockiert, nächster Schritt Fokusprojekt und Tagesergebnis.
 
-Der lokale deterministische Pilot-Executor in `agent-runtime.js` prüft nur die Qualität und Vollständigkeit des vorbereiteten Projektmanager-Arbeitsauftrags. Keine externe KI, kein Plugin, kein Netzwerk, kein Dateischreiben. Jamal-Freigabe vor Start; separate Jamal-Annahme vor Ergebnisübernahme. Timeout, Abbruch und Audit vorhanden. Nächster Schritt: **V1-Abschlussentscheidung**, nicht mehr die Abnahme von V6.40.3.
+## Verbindlicher Versionsstand V6.43.1 (Historie)
+
+V6.43.1 schließt den in V6.43.0 (`daa96e9`) eingeführten Runtime-Piloten abnahmefest ab und ist mit `16bbf45` auf `origin/main` gesichert. Sichtbarer Name **Projektmanager-Agent**, technische ID **`orchestrator-agent`**. Lokaler deterministischer Pilot ohne externe KI, Plugin oder Netzwerk.
 
 ## Verbindlicher Versionsstand V6.43.0 (Historie)
 
@@ -18,7 +20,7 @@ V6.43.0 ergänzt eine kontrollierte Agenten-Laufzeit mit lokalem deterministisch
 - `daily-work-run.js` bleibt Domänen- und Persistenzmodul; Runtime-Zustand liegt additiv unter `agentRuntimePilot` im bestehenden Tageslauf-Datensatz.
 - `daily-work-run-ui.js` rendert und bedient den Runtime-Piloten in der bestehenden Agenten-Prüfphase ohne kopierte Geschäftslogik.
 - Keine neue API-Route, keine Schreib-API, kein Deployment, keine Autonomieerhöhung.
-- Nächster Schritt: V1-Abschlussentscheidung durch Jamal; kein weiterer Executor ohne explizite Freigabe.
+- Nächster Schritt: V1 ist eingefroren; V2 nur nach ausdrücklicher Freigabe.
 
 ## Gesicherter Ausgangsstand V6.42.1 (Historie)
 
@@ -141,4 +143,4 @@ Ein Versionsschritt ist abgeschlossen, wenn Ziel und Nicht-Ziele erfüllt, betro
 
 ## Entscheidung durch Jamal erforderlich
 
-**V1-Abschlussbewertung: V1 lokal fertig und betriebsbereit.** V6.43.1 bildet den gesicherten Abschluss des lokalen V1-Stands. Jede spätere produktive Außenwirkung, Deployment-, V2- oder Erweiterungsentscheidung benötigt eine neue ausdrückliche Freigabe durch Jamal.
+**V1 lokal eingefroren und betriebsbereit (V6.44.0).** Einstieg über `README.md` und `V1_BETRIEBSHANDBUCH.md`. Jede spätere produktive Außenwirkung, Deployment- oder V2-Entscheidung benötigt eine neue ausdrückliche Freigabe durch Jamal.
