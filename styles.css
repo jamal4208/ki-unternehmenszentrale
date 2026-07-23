@@ -8632,3 +8632,19 @@ details.local-agent-assignment-details > summary {
   border-radius: 14px;
   background: #faf8f4;
 }
+
+.daily-work-hybrid-section .daily-work-hybrid-block {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(20, 40, 60, 0.12);
+}
+
+.daily-work-hybrid-gate {
+  margin: 0.75rem 0;
+}
+
+.daily-work-hybrid-gate-form {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}

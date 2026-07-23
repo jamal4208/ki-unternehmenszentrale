@@ -120,7 +120,7 @@ function runTests() {
     assert.doesNotMatch(serverSource, /const PRODUCTIVE_AGENT_REGISTRY = \[/);
     assert.match(browserSource, /window\.AgentRegistry\?\.PRODUCTIVE_AGENT_REGISTRY/);
     assert.doesNotMatch(browserSource, /const PRODUCTIVE_AGENT_REGISTRY = \[/);
-    assert.match(htmlSource, /<script src="agent-registry\.js"><\/script>\s*<script src="daily-work-run\.js"><\/script>\s*<script src="agent-runtime\.js"><\/script>\s*<script src="local-data-backup\.js"><\/script>\s*<script src="daily-work-run-ui\.js"><\/script>/);
+    assert.match(htmlSource, /<script src="agent-registry\.js"><\/script>\s*<script src="health-hybrid-work\.js"><\/script>\s*<script src="daily-work-run\.js"><\/script>\s*<script src="agent-runtime\.js"><\/script>\s*<script src="local-data-backup\.js"><\/script>\s*<script src="daily-work-run-ui\.js"><\/script>/);
   });
   check("normaler Health-Tageslauf wählt höchstens fünf Kernagenten", () => {
     assert.strictEqual(agentPlanning.workProposal.selectedAgentIds.length, 5);
@@ -946,7 +946,7 @@ function runTests() {
 
   const serverSource = fs.readFileSync(path.join(__dirname, "server.js"), "utf8");
   const routeCount = (serverSource.match(/^\s+\["\/api\//gm) || []).length;
-  check("41 GET-Routen bleiben erhalten", () => assert.strictEqual(routeCount, 41));
+  check("42 GET-Routen bleiben erhalten", () => assert.strictEqual(routeCount, 42));
   check("unbekannte Projekt-ID bleibt 404", () => assert.strictEqual(invoke("GET", "/api/projects/unbekannt").statusCode, 404));
   check("POST bleibt 405", () => assert.strictEqual(invoke("POST", "/api/projects").statusCode, 405));
   check("writeOperationsBlocked bleibt true", () => assert.strictEqual(API_SECURITY_FLAGS.writeOperationsBlocked, true));

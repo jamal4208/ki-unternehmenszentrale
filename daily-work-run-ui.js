@@ -55,6 +55,15 @@
     error: null,
   };
 
+  const healthHybridUiState = {
+    liveStatus: null,
+    liveStatusError: null,
+    liveStatusLoading: false,
+    resultPreview: null,
+    resultPreviewError: null,
+    rawResultDraft: "",
+  };
+
   let deps = null;
   let initialized = false;
   let eventsBound = false;
@@ -446,7 +455,7 @@ function renderAgentRuntimePilot(run) {
     <section class="daily-work-runtime-pilot" aria-labelledby="daily-agent-runtime-title">
       <header>
         <div>
-          <p class="eyebrow">V6.45.0 · kontrollierte Laufzeit</p>
+          <p class="eyebrow">V6.46.0 · kontrollierte Laufzeit</p>
           <h4 id="daily-agent-runtime-title">Agenten-Laufzeit-Pilot</h4>
         </div>
         <span class="daily-work-run-mode">${deps.escapeHtml(pilot ? statusLabels[pilot.status] || pilot.status : "Noch nicht vorbereitet")}</span>
@@ -592,6 +601,15 @@ function renderDailyWorkAgentReviewPhase(run) {
             <p class="daily-work-run-field-hint">Diese Evidenz ersetzt nicht die manuelle Projektmanager-Zusammenführung nach QA.</p>
           </div>
         ` : ""}
+        ${item.externalExecutionEvidence?.adoptedIntoReviewAt && !item.resultConfirmed ? `
+          <div class="daily-work-review-result daily-work-review-external-evidence">
+            <strong>Externe Ausführungs-Evidenz · übernommen, noch nicht als Fachbefund bestätigt</strong>
+            <p>${deps.escapeHtml(item.externalExecutionEvidence.summary || "")}</p>
+            ${dailyWorkRunList(item.externalExecutionEvidence.openPoints, "Keine offenen Punkte in der externen Evidenz.")}
+            ${dailyWorkRunList(item.externalExecutionEvidence.hardBlockers, "Keine harten Blocker in der externen Evidenz.")}
+            <p class="daily-work-run-field-hint">Übernahme ersetzt keinen bestätigten Fachbefund. Bei Status READY bitte unten manuell bestätigen.</p>
+          </div>
+        ` : ""}
         ${item.resultConfirmed ? `
           <div class="daily-work-review-result">
             <strong>Manuell bestätigter Befund</strong>
@@ -601,9 +619,9 @@ function renderDailyWorkAgentReviewPhase(run) {
           </div>
         ` : (!isSpecial && ready ? `
           <form class="daily-work-review-result-form" data-agent-result-form data-agent-id="${deps.escapeHtml(item.agentId)}">
-            <label>Ergebnis oder Befund<textarea name="resultText" rows="3" required></textarea></label>
-            <label>Wichtigste offene Punkte<textarea name="openPoints" rows="2"></textarea></label>
-            <label>Blocker<textarea name="blockers" rows="2"></textarea><span class="daily-work-run-field-hint">Leer lassen, wenn keine Blocker vorliegen.</span></label>
+            <label>Ergebnis oder Befund<textarea name="resultText" rows="3" required>${deps.escapeHtml(item.resultText || item.externalExecutionEvidence?.summary || "")}</textarea></label>
+            <label>Wichtigste offene Punkte<textarea name="openPoints" rows="2">${deps.escapeHtml((item.openPoints || item.externalExecutionEvidence?.openPoints || []).join("\n"))}</textarea></label>
+            <label>Blocker<textarea name="blockers" rows="2">${deps.escapeHtml((item.blockers || item.externalExecutionEvidence?.hardBlockers || []).join("\n"))}</textarea><span class="daily-work-run-field-hint">Leer lassen, wenn keine Blocker vorliegen.</span></label>
             <label class="daily-work-review-confirm"><input type="checkbox" name="confirmed" required> Ergebnis bewusst bestätigen</label>
             <button class="secondary-button" type="submit">Befund lokal speichern</button>
           </form>
@@ -748,6 +766,141 @@ function renderDailyWorkRunPrompt(run) {
         <button class="secondary-button" type="button" data-copy-daily-work-prompt>Arbeitsvorschlag kopieren</button>
         <span data-daily-work-copy-status>Noch nicht kopiert.</span>
       </div>
+    </section>
+  `;
+}
+
+function renderHealthHybridWorkSection(run) {
+  if (run.focusProjectId !== "health-upgrade-kompass") return "";
+  if (!["READY_FOR_CODEX", "RESULT_RECORDED", "CLOSED", "OPEN"].includes(run.status)) return "";
+  const api = dailyWorkRunApi();
+  const live = healthHybridUiState.liveStatus;
+  const pkg = run.executionPackage;
+  const gates = run.releaseGates || api?.ensureReleaseGates?.(run)?.releaseGates;
+  const phase = api?.getAgentReviewPhase?.(run);
+  const responsibleItem = phase?.workItems?.find((item) => item.agentId === pkg?.responsibleAgentId);
+  const evidence = responsibleItem?.externalExecutionEvidence || run.pendingExternalExecutionEvidence;
+  const preview = healthHybridUiState.resultPreview;
+
+  const gateRows = ["commitDecision", "pushDecision", "deployDecision", "externalWriteDecision"]
+    .map((key) => {
+      const decision = gates?.[key] || { status: "PENDING", reason: "" };
+      const label = api?.releaseGateDecisionLabel?.(key, decision.status) || decision.status;
+      return `
+        <article class="daily-work-hybrid-gate">
+          <strong>${deps.escapeHtml(label)}</strong>
+          <p>${deps.escapeHtml(decision.reason || "Noch keine Begründung.")}</p>
+          ${run.status === "RESULT_RECORDED" || run.status === "READY_FOR_CODEX" ? `
+            <form class="daily-work-hybrid-gate-form" data-release-gate-form="${deps.escapeHtml(key)}">
+              <label>Entscheidung
+                <select name="status" required>
+                  <option value="PENDING" ${decision.status === "PENDING" ? "selected" : ""}>ausstehend</option>
+                  <option value="APPROVED" ${decision.status === "APPROVED" ? "selected" : ""}>freigeben (noch nicht ausführen)</option>
+                  <option value="DECLINED" ${decision.status === "DECLINED" ? "selected" : ""}>nicht freigeben</option>
+                </select>
+              </label>
+              <label>Begründung<textarea name="reason" rows="2">${deps.escapeHtml(decision.reason || "")}</textarea></label>
+              <button class="secondary-button" type="submit">Entscheidung speichern</button>
+            </form>
+          ` : ""}
+        </article>
+      `;
+    })
+    .join("");
+
+  return `
+    <section class="daily-work-run-stage daily-work-hybrid-section" aria-labelledby="daily-health-hybrid-title">
+      <div class="daily-work-run-stage-number">H</div>
+      <div>
+        <p class="eyebrow">V6.46.0 · Health Hybrid</p>
+        <h4 id="daily-health-hybrid-title">Kontrollierte externe Umsetzung</h4>
+        <p>Live-Status lesen, Auftragspaket kopieren, Ergebnis strukturiert zurückführen. Die Zentrale startet keinen Agenten und keinen Testprozess.</p>
+      </div>
+
+      <article class="daily-work-hybrid-block daily-work-run-field--wide">
+        <h5>1. Live-Status</h5>
+        <div class="daily-work-run-actions">
+          <button class="secondary-button" type="button" data-health-live-status-refresh ${healthHybridUiState.liveStatusLoading ? "disabled" : ""}>Stand erneut lesen</button>
+          <span>Nur Branch, HEAD und Working-Tree · kein Testlauf</span>
+        </div>
+        ${healthHybridUiState.liveStatusError ? `<p class="daily-work-run-error">${deps.escapeHtml(healthHybridUiState.liveStatusError)}</p>` : ""}
+        ${live ? `
+          <dl class="daily-work-run-facts">
+            <div><dt>Verfügbar</dt><dd>${deps.escapeHtml(String(live.available))}</dd></div>
+            <div><dt>Branch</dt><dd>${deps.escapeHtml(live.live?.branch || "UNGEKLÄRT")}</dd></div>
+            <div><dt>HEAD</dt><dd><code>${deps.escapeHtml(live.live?.head || "UNGEKLÄRT")}</code></dd></div>
+            <div><dt>Working Tree</dt><dd>${deps.escapeHtml(live.live?.workingTreeClean === true ? "sauber" : live.live?.workingTreeClean === false ? "nicht sauber" : "UNGEKLÄRT")}</dd></div>
+            <div><dt>Hinweis</dt><dd>${deps.escapeHtml(live.live?.message || "")}</dd></div>
+          </dl>
+        ` : `<p class="daily-work-run-empty">Noch kein Live-Status gelesen.</p>`}
+      </article>
+
+      <article class="daily-work-hybrid-block daily-work-run-field--wide">
+        <h5>2. Auftrags- und Grenzpaket</h5>
+        <form id="daily-health-package-form" class="daily-work-run-form daily-work-run-field--wide">
+          <label class="daily-work-run-field daily-work-run-field--wide">Erlaubte Dateien – relative Repo-Pfade, eine pro Zeile<textarea name="allowedFiles" rows="4" required>${deps.escapeHtml((pkg?.allowedFiles || ["README.md", "package.json"]).join("\n"))}</textarea></label>
+          <label class="daily-work-run-field daily-work-run-field--wide">Verbotene Pfade<textarea name="forbiddenPaths" rows="3" required>${deps.escapeHtml((pkg?.forbiddenPaths || [".env", ".env.local"]).join("\n"))}</textarea></label>
+          <div class="daily-work-run-actions daily-work-run-field--wide">
+            <button class="secondary-button" type="submit">Paket aus Live-Stand erzeugen</button>
+            <button class="primary-button" type="button" data-health-package-approve ${pkg ? "" : "disabled"}>Freigeben und kopierfertig machen</button>
+            <button class="secondary-button" type="button" data-health-package-copy ${pkg?.status === "READY_TO_COPY" || pkg?.status === "IN_EXTERNAL_WORK" ? "" : "disabled"}>Paketprompt kopieren</button>
+            <button class="secondary-button" type="button" data-health-package-abort ${pkg && pkg.status !== "ABORTED" ? "" : "disabled"}>Paket abbrechen</button>
+          </div>
+        </form>
+        ${pkg ? `
+          <dl class="daily-work-run-facts">
+            <div><dt>Status</dt><dd>${deps.escapeHtml(pkg.status)}</dd></div>
+            <div><dt>executionPackageId</dt><dd><code>${deps.escapeHtml(pkg.executionPackageId)}</code></dd></div>
+            <div><dt>Fingerprint</dt><dd><code>${deps.escapeHtml(pkg.executionPackageFingerprint)}</code></dd></div>
+            <div><dt>responsibleAgentId</dt><dd>${deps.escapeHtml(pkg.responsibleAgentId)}</dd></div>
+            <div><dt>baseCommit</dt><dd><code>${deps.escapeHtml(pkg.baseCommit)}</code></dd></div>
+            <div><dt>allowedBranch</dt><dd>${deps.escapeHtml(pkg.allowedBranch)}</dd></div>
+            <div><dt>testCommand</dt><dd>${deps.escapeHtml(pkg.testCommand)} <em>(außerhalb ausführen)</em></dd></div>
+          </dl>
+          <textarea rows="12" readonly>${deps.escapeHtml(pkg.preparedPrompt || "")}</textarea>
+        ` : `<p class="daily-work-run-empty">Noch kein Auftragspaket erzeugt.</p>`}
+      </article>
+
+      <article class="daily-work-hybrid-block daily-work-run-field--wide">
+        <h5>3. Ergebnisrückführung</h5>
+        <p>JSON einfügen → Vorschau → Jamal bestätigt. Paste allein ändert keinen Status. Evidenz landet auf der Agentenkarte und setzt sie nicht auf ACCEPTED.</p>
+        <label class="daily-work-run-field daily-work-run-field--wide">Ergebnis-JSON
+          <textarea id="daily-health-result-json" rows="10">${deps.escapeHtml(healthHybridUiState.rawResultDraft)}</textarea>
+        </label>
+        <div class="daily-work-run-actions">
+          <button class="secondary-button" type="button" data-health-result-preview>Vorschau prüfen</button>
+          <button class="primary-button" type="button" data-health-result-confirm ${preview?.ok || preview?.blocked ? "" : "disabled"}>Rückführung speichern</button>
+          <button class="secondary-button" type="button" data-health-evidence-adopt ${evidence?.recordedAt && !evidence?.adoptedIntoReviewAt && !(evidence?.hardBlockers || []).length ? "" : "disabled"}>Evidenz in Prüfphase übernehmen</button>
+        </div>
+        ${healthHybridUiState.resultPreviewError ? `<p class="daily-work-run-error">${deps.escapeHtml(healthHybridUiState.resultPreviewError)}</p>` : ""}
+        ${preview ? `
+          <article class="daily-work-run-notice ${preview.blocked ? "daily-work-run-notice--warning" : ""}">
+            <strong>${deps.escapeHtml(preview.message)}</strong>
+            <p>Blocker: ${deps.escapeHtml((preview.evidence?.hardBlockers || []).join(" · ") || "keine")}</p>
+            <p>Summary: ${deps.escapeHtml(preview.evidence?.summary || "")}</p>
+          </article>
+        ` : ""}
+        ${evidence ? `
+          <dl class="daily-work-run-facts">
+            <div><dt>Gespeicherte Evidenz</dt><dd>${deps.escapeHtml(evidence.recordedAt || "UNGEKLÄRT")}</dd></div>
+            <div><dt>Übernommen</dt><dd>${deps.escapeHtml(evidence.adoptedIntoReviewAt || "noch nicht")}</dd></div>
+            <div><dt>Agent</dt><dd>${deps.escapeHtml(evidence.responsibleAgentId || pkg?.responsibleAgentId || "")}</dd></div>
+            <div><dt>Kartenstatus</dt><dd>${deps.escapeHtml(responsibleItem?.status || "noch keine Prüfkarte")}</dd></div>
+            <div><dt>Fachbefund</dt><dd>${deps.escapeHtml(responsibleItem?.resultConfirmed ? "manuell bestätigt" : evidence.adoptedIntoReviewAt ? "übernommen, noch nicht bestätigt" : "noch offen")}</dd></div>
+          </dl>
+        ` : ""}
+      </article>
+
+      <article class="daily-work-hybrid-block daily-work-run-field--wide">
+        <h5>4. Freigabestufen</h5>
+        <p>Nur Entscheidungen. Kein Commit, Push oder Deployment wird ausgeführt.</p>
+        ${gateRows}
+        <form class="daily-work-run-form" id="daily-health-observed-evidence-form">
+          <label>Optional beobachteter Commit-Hash (getrennt von Freigabe)<input name="commitHash" value="${deps.escapeHtml(gates?.observedEvidence?.commitHash || "")}" /></label>
+          <label>Notiz<textarea name="note" rows="2">${deps.escapeHtml(gates?.observedEvidence?.note || "")}</textarea></label>
+          <button class="secondary-button" type="submit">Beobachtungsnachweis speichern</button>
+        </form>
+      </article>
     </section>
   `;
 }
@@ -959,6 +1112,7 @@ function renderDailyWorkRun() {
     </section>
     ${renderDailyWorkRunPreparation(run)}
     ${renderDailyWorkAgentReviewPhase(run)}
+    ${renderHealthHybridWorkSection(run)}
     ${run.workProposal?.taskType === "Agenten- und Einsatzplanung" ? "" : renderDailyWorkRunPrompt(run)}
     ${run.workProposal?.taskType === "Agenten- und Einsatzplanung" ? "" : renderDailyWorkRunResultReturn(run)}
     ${run.workProposal?.taskType === "Agenten- und Einsatzplanung" ? "" : renderDailyWorkRunClosure(run)}
@@ -1064,6 +1218,44 @@ function setupLocalDataBackup() {
   });
 }
 
+function liveStatusForPackage() {
+  const payload = healthHybridUiState.liveStatus;
+  if (!payload) return null;
+  return {
+    ok: payload.ok === true,
+    available: payload.available === true,
+    branch: payload.live?.branch || null,
+    head: payload.live?.head || null,
+    workingTreeClean: payload.live?.workingTreeClean,
+    shortStatus: payload.live?.shortStatus || null,
+  };
+}
+
+async function refreshHealthLiveStatus() {
+  healthHybridUiState.liveStatusLoading = true;
+  healthHybridUiState.liveStatusError = null;
+  renderDailyWorkRun();
+  try {
+    const response = await fetch("/api/projects/health-upgrade-kompass/live-status", {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload?.message || "Live-Status konnte nicht gelesen werden.");
+    }
+    healthHybridUiState.liveStatus = payload;
+    deps.showToast("Health-Live-Status gelesen. Kein Testprozess gestartet.");
+  } catch (error) {
+    healthHybridUiState.liveStatusError = error.message;
+    deps.showToast(error.message);
+  } finally {
+    healthHybridUiState.liveStatusLoading = false;
+    renderDailyWorkRun();
+  }
+}
+
 function setupDailyWorkRun() {
   document.addEventListener("click", async (event) => {
     const startButton = event.target.closest("[data-start-daily-work-run]");
@@ -1072,6 +1264,128 @@ function setupDailyWorkRun() {
       const run = api.createDraftRun();
       saveDailyWorkRun(run);
       deps.showToast("Neuer Tageslauf lokal begonnen. Noch kein Fokusprojekt gewählt.");
+      return;
+    }
+
+    const healthLiveRefresh = event.target.closest("[data-health-live-status-refresh]");
+    if (healthLiveRefresh) {
+      await refreshHealthLiveStatus();
+      return;
+    }
+
+    const healthPackageApprove = event.target.closest("[data-health-package-approve]");
+    if (healthPackageApprove) {
+      try {
+        const live = liveStatusForPackage();
+        if (!live) throw new Error("Zuerst den Live-Status erneut lesen.");
+        const run = dailyWorkRunApi().approveHealthExecutionPackageForCopy(getActiveDailyWorkRun(), live, {
+          approved: true,
+        });
+        saveDailyWorkRun(run);
+        deps.showToast("Auftragspaket freigegeben – kopierfertig. Kein Agent gestartet.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        deps.showToast(error.message);
+      }
+      return;
+    }
+
+    const healthPackageCopy = event.target.closest("[data-health-package-copy]");
+    if (healthPackageCopy) {
+      try {
+        const run = getActiveDailyWorkRun();
+        const text = run?.executionPackage?.preparedPrompt || "";
+        if (!text) throw new Error("Kein kopierfertiges Paket vorhanden.");
+        await navigator.clipboard.writeText(text);
+        let marked = run;
+        if (run.executionPackage?.status === "READY_TO_COPY") {
+          marked = dailyWorkRunApi().markHealthExecutionPackageInExternalWork(run);
+          saveDailyWorkRun(marked);
+        }
+        deps.showToast("Auftragspaket kopiert. Umsetzung erfolgt außerhalb der Zentrale.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        deps.showToast(error.message);
+      }
+      return;
+    }
+
+    const healthPackageAbort = event.target.closest("[data-health-package-abort]");
+    if (healthPackageAbort) {
+      try {
+        const run = dailyWorkRunApi().abortHealthExecutionPackage(getActiveDailyWorkRun(), {
+          reason: "Manuell abgebrochen",
+        });
+        saveDailyWorkRun(run);
+        deps.showToast("Auftragspaket abgebrochen. Tageslaufdaten bleiben erhalten.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        deps.showToast(error.message);
+      }
+      return;
+    }
+
+    const healthResultPreview = event.target.closest("[data-health-result-preview]");
+    if (healthResultPreview) {
+      try {
+        const raw = document.getElementById("daily-health-result-json")?.value || "";
+        healthHybridUiState.rawResultDraft = raw;
+        const preview = dailyWorkRunApi().previewExternalExecutionResult(
+          getActiveDailyWorkRun(),
+          raw,
+          liveStatusForPackage(),
+        );
+        healthHybridUiState.resultPreview = preview;
+        healthHybridUiState.resultPreviewError = null;
+        renderDailyWorkRun();
+        deps.showToast(preview.message);
+      } catch (error) {
+        healthHybridUiState.resultPreview = null;
+        healthHybridUiState.resultPreviewError = error.message;
+        renderDailyWorkRun();
+        deps.showToast(error.message);
+      }
+      return;
+    }
+
+    const healthResultConfirm = event.target.closest("[data-health-result-confirm]");
+    if (healthResultConfirm) {
+      try {
+        const raw = document.getElementById("daily-health-result-json")?.value || healthHybridUiState.rawResultDraft;
+        healthHybridUiState.rawResultDraft = raw;
+        const run = dailyWorkRunApi().confirmExternalExecutionEvidence(
+          getActiveDailyWorkRun(),
+          raw,
+          liveStatusForPackage(),
+          { confirmed: true },
+        );
+        healthHybridUiState.resultPreview = null;
+        saveDailyWorkRun(run);
+        deps.showToast("Externe Evidenz gespeichert. Arbeitskarte nicht auf ACCEPTED gesetzt.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        deps.showToast(error.message);
+      }
+      return;
+    }
+
+    const healthEvidenceAdopt = event.target.closest("[data-health-evidence-adopt]");
+    if (healthEvidenceAdopt) {
+      try {
+        const run = dailyWorkRunApi().adoptExternalExecutionEvidenceIntoReview(getActiveDailyWorkRun(), {
+          adopt: true,
+        });
+        saveDailyWorkRun(run);
+        deps.showToast("Evidenz in Prüfphase übernommen. QA und PM bleiben getrennte Schritte.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        deps.showToast(error.message);
+      }
       return;
     }
 
@@ -1324,6 +1638,63 @@ function setupDailyWorkRun() {
         run = api.transitionRun(run, "READY_FOR_CODEX");
         saveDailyWorkRun(run);
         deps.showToast("Arbeitsvorschlag erstellt. Keine Ausführung gestartet.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        deps.showToast(error.message);
+      }
+      return;
+    }
+
+    if (event.target.id === "daily-health-package-form") {
+      event.preventDefault();
+      try {
+        const live = liveStatusForPackage();
+        if (!live) throw new Error("Zuerst den Live-Status erneut lesen.");
+        const data = new FormData(event.target);
+        const run = dailyWorkRunApi().createHealthExecutionPackage(getActiveDailyWorkRun(), live, {
+          allowedFiles: data.get("allowedFiles"),
+          forbiddenPaths: data.get("forbiddenPaths"),
+        });
+        saveDailyWorkRun(run);
+        deps.showToast("Auftragspaket erzeugt (DRAFT). Noch nicht kopierfertig.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        deps.showToast(error.message);
+      }
+      return;
+    }
+
+    if (event.target.matches("[data-release-gate-form]")) {
+      event.preventDefault();
+      try {
+        const data = new FormData(event.target);
+        const gateKey = event.target.getAttribute("data-release-gate-form");
+        const run = dailyWorkRunApi().setReleaseGateDecision(getActiveDailyWorkRun(), gateKey, {
+          status: data.get("status"),
+          reason: data.get("reason"),
+        });
+        saveDailyWorkRun(run);
+        deps.showToast("Freigabeentscheidung gespeichert – noch nicht ausgeführt.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        deps.showToast(error.message);
+      }
+      return;
+    }
+
+    if (event.target.id === "daily-health-observed-evidence-form") {
+      event.preventDefault();
+      try {
+        const data = new FormData(event.target);
+        const run = dailyWorkRunApi().setReleaseGateObservedEvidence(getActiveDailyWorkRun(), {
+          commitHash: data.get("commitHash"),
+          note: data.get("note"),
+        });
+        saveDailyWorkRun(run);
+        deps.showToast("Beobachtungsnachweis getrennt von der Freigabe gespeichert.");
       } catch (error) {
         dailyWorkRunUiState.error = error.message;
         renderDailyWorkRun();

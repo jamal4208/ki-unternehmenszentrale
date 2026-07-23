@@ -285,10 +285,32 @@ async function runTests() {
 
   const serverSource = fs.readFileSync(path.join(__dirname, "server.js"), "utf8");
   const routeCount = (serverSource.match(/^\s+\["\/api\//gm) || []).length;
-  check("bestehende 41 GET-Routen bleiben registriert", () => assert.strictEqual(routeCount, 41));
+  check("bestehende 42 GET-Routen bleiben registriert", () => assert.strictEqual(routeCount, 42));
 
   const postOnKnown = await invokeJson(requestHandler, "POST", "/api/projects");
   check("POST auf bestehende Route bleibt 405", () => assert.strictEqual(postOnKnown.statusCode, 405));
+
+  const liveStatusGet = await invokeJson(requestHandler, "GET", "/api/projects/health-upgrade-kompass/live-status");
+  check("Health live-status GET antwortet kontrolliert", () => {
+    assert.strictEqual(liveStatusGet.statusCode, 200);
+    assert.strictEqual(liveStatusGet.json.writeOperationsBlocked, true);
+    assert.strictEqual(liveStatusGet.json.madeExternalRequest, false);
+    assert.strictEqual(liveStatusGet.json.testExecutionStarted, false);
+    assert.strictEqual(liveStatusGet.json.gitWriteStarted, false);
+    assert.strictEqual(liveStatusGet.json.projectId, "health-upgrade-kompass");
+  });
+
+  const liveStatusPost = await invokeJson(requestHandler, "POST", "/api/projects/health-upgrade-kompass/live-status");
+  check("POST auf Health live-status bleibt 405", () => assert.strictEqual(liveStatusPost.statusCode, 405));
+
+  const hybridAsset = await invoke(requestHandler, "GET", "/health-hybrid-work.js");
+  check("health-hybrid-work.js wird ausgeliefert", () => {
+    assert.strictEqual(hybridAsset.statusCode, 200);
+    assert.match(hybridAsset.body, /HealthHybridWork|createHealthExecutionPackage/);
+  });
+
+  const hybridTestAsset = await invoke(requestHandler, "GET", "/health-hybrid-work.test.js");
+  check("Testdatei health-hybrid-work.test.js bleibt gesperrt", () => assert.strictEqual(hybridTestAsset.statusCode, 404));
 
   const appSource = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
   check("app.js enthält keine zweite Server-Routinglogik", () => {
@@ -381,8 +403,8 @@ async function runTests() {
     assert.strictEqual(normalizeRequestPathname("/safe/path"), "/safe/path");
   });
 
-  assert.strictEqual(passed, 36);
-  console.log("server-http-router.test.js: 36 Prüfpunkte erfolgreich");
+  assert.strictEqual(passed, 40);
+  console.log("server-http-router.test.js: 40 Prüfpunkte erfolgreich");
 }
 
 runTests().catch((error) => {

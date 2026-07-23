@@ -1,10 +1,18 @@
 # PROJECT MASTER
 
-## Verbindlicher Versionsstand V6.45.0
+## Verbindlicher Arbeitsstand V6.46.0
 
-V6.45.0 bündelt den V1-Finish-Sprint für den geführten Tageslauf. Der Projektmanager-Agent führt und koordiniert jetzt durchgehend; der QS-/Test-Agent verantwortet Qualitätsprüfung, Abnahmekriterien und Abschlussprüfung über die verbindliche Quelle `approvalAgentId` und übernimmt keine Führungsrolle. Normale Tagesläufe verwenden höchstens fünf Kernagenten plus optional begründete Zusatzrollen. UI- und Kommunikations-Agent werden XOR gewählt. Explizite Risikoaufträge wählen den Risiko-Agenten; Datenschutz allein tut das nicht. Plugin- und Werkzeugprüfung ist entweder dem Plugin-/Tool-Radar-Agenten zugewiesen oder ausdrücklich als „nicht benötigt“ ohne Agentenzuweisung markiert. Direkt nach der Planerstellung steht die primäre Aktion „Prüfphase vorbereiten“ mit kompakter Führung und den unveränderten Ausführungsgrenzen oben bereit. V6.45.0 ist bis zum Commit ein lokaler Finish-Kandidat auf Basis von `5602cfa`.
+V6.46.0 führt den ersten Health-only Hybrid-End-to-End-Pilot ein und ist umgesetzt sowie vollständig browserseitig abgenommen. Die Zentrale liest Branch, HEAD und Working-Tree des kanonischen Health-Repositories lokal read-only. Cursor/Codex arbeitet außerhalb. Die Zentrale startet keinen Testprozess, keinen Cursor-/Codex-/KI-Agenten und kein Git-Schreiben. Auftrags-/Grenzpakete tragen Identität und Fingerprint; Rückführungen landen als `externalExecutionEvidence` auf der zuständigen Agentenkarte ohne Auto-`ACCEPTED`. Externe Evidenz ist kein automatisch bestätigter Fachbefund. QA, Projektmanager-Zusammenführung und Jamals Abschlussentscheidung bleiben getrennt. Jamal-Freigaben für Commit/Push/Deploy bleiben reine Entscheidungen ohne Ausführungsvortäuschung. Der frühere V6.46.0-WIP-Evidenz-Deadlock ist behoben; betroffene WIP-Läufe werden defensiv geheilt. Andere Projekte erhalten noch keinen Health-Live- oder Ausführungspaketpfad.
 
-Keine API, kein Speicherformat und keine Runtime-Autonomie wurden erweitert. Agenten-, Codex-, Repository-, Plugin- und externe Ausführung, Deployment, automatische Freigaben sowie automatische Git-Aktionen bleiben blockiert.
+## Vorheriger gesicherter Ausgangsstand V6.45.2
+
+V6.45.2 entkoppelt Runtime-Pilot-Annahme und finale Projektmanager-Zusammenführung. Gesichert mit Commit **`fb9aa0d`**. `runtimePilotEvidence` bleibt getrennt von Orchestrierung und von der neuen externen Evidenz in V6.46.0.
+
+## Vorheriger Versionsstand V6.45.0 (Historie)
+
+V6.45.0 bündelt den V1-Finish-Sprint für den geführten Tageslauf. Der Projektmanager-Agent führt und koordiniert jetzt durchgehend; der QS-/Test-Agent verantwortet Qualitätsprüfung, Abnahmekriterien und Abschlussprüfung über die verbindliche Quelle `approvalAgentId` und übernimmt keine Führungsrolle. Normale Tagesläufe verwenden höchstens fünf Kernagenten plus optional begründete Zusatzrollen. UI- und Kommunikations-Agent werden XOR gewählt. Explizite Risikoaufträge wählen den Risiko-Agenten; Datenschutz allein tut das nicht. Plugin- und Werkzeugprüfung ist entweder dem Plugin-/Tool-Radar-Agenten zugewiesen oder ausdrücklich als „nicht benötigt“ ohne Agentenzuweisung markiert. Direkt nach der Planerstellung steht die primäre Aktion „Prüfphase vorbereiten“ mit kompakter Führung und den unveränderten Ausführungsgrenzen oben bereit. Der gesicherte Folgestand ist V6.45.2/`fb9aa0d`.
+
+Keine Runtime-Autonomieerhöhung. Agenten-, Codex-, Repository-, Plugin- und externe Ausführung, Deployment, automatische Freigaben sowie automatische Git-Aktionen bleiben blockiert; V6.46.0 ergänzt nur den kontrollierten Hybrid-Lesepfad und die manuelle Rückführung.
 
 ## Vorheriger Versionsstand V6.44.1
 

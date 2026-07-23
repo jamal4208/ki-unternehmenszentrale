@@ -418,9 +418,9 @@ async function runTests() {
 
   check("17 Projekte bleiben erhalten", () => assert.strictEqual(PROJECT_REGISTRY.length, 17));
   check("25 Agenten bleiben erhalten", () => assert.strictEqual(AgentRegistry.CANONICAL_AGENT_COUNT, 25));
-  check("41 GET-Routen bleiben erhalten", () => {
+  check("42 GET-Routen bleiben erhalten", () => {
     const routeCount = (fs.readFileSync(path.join(__dirname, "server.js"), "utf8").match(/^\s+\["\/api\//gm) || []).length;
-    assert.strictEqual(routeCount, 41);
+    assert.strictEqual(routeCount, 42);
   });
   check("POST bleibt 405", () => assert.strictEqual(invoke("POST", "/api/projects").statusCode, 405));
 
@@ -486,7 +486,7 @@ async function runTests() {
   check("script-Reihenfolge enthält agent-runtime.js", () => {
     assert.match(
       htmlSource,
-      /<script src="daily-work-run\.js"><\/script>\s*<script src="agent-runtime\.js"><\/script>\s*<script src="local-data-backup\.js"><\/script>/,
+      /<script src="health-hybrid-work\.js"><\/script>\s*<script src="daily-work-run\.js"><\/script>\s*<script src="agent-runtime\.js"><\/script>\s*<script src="local-data-backup\.js"><\/script>/,
     );
   });
 

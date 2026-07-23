@@ -3,11 +3,11 @@
 ## 1. Verbindlicher V1-Stand
 
 - **Aussage:** V1 lokal fertig und betriebsbereit
-- **Aktuelle Arbeitsversion:** **V6.45.0** (V1-Finish-Sprint für den geführten Tageslauf; noch uncommitteter Finish-Kandidat)
-- **Aktueller Git-HEAD der Basis:** `5602cfa` (V6.44.1 Health-Verifizierungsstand synchronisieren)
-- **Historischer Freeze-Ausgang:** `16bbf45` (V6.43.1 Runtime-Pilot abnahmefest abschliessen) – nur Historie, nicht der aktuelle V6.45.0-Stand
-- **Branch:** `main`, Upstream auf `5602cfa`; V6.45.0-Änderungen liegen lokal unstaged
-- **Freigabe:** erst nach Browser-Abnahme, finaler Prüfung und ausdrücklichem Commit
+- **Aktuelle Arbeitsversion:** **V6.46.0** (Health Hybrid End-to-End-Pilot; umgesetzt und browserseitig abgenommen)
+- **Gesicherter vorheriger Ausgangsstand:** **V6.45.2** / Commit **`fb9aa0d`**
+- **Historischer Freeze-Ausgang:** `16bbf45` (V6.43.1) – nur Historie
+- **Branch:** `main`
+- **Hybrid-Grenzen:** Health-Live-Status nur read-only; Cursor/Codex außerhalb; keine Test-/Git-Schreibprozesse aus der Zentrale; externe Evidenz kein Auto-Fachbefund; Gates nur Entscheidungen
 - **Einstiegspunkte:** `README.md` (kurz) und dieses Handbuch (ausführlich)
 - **Betrieb:** lokal auf diesem Mac, Daten im Browser, Außenwirkung blockiert
 

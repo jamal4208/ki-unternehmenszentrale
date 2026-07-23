@@ -1,6 +1,24 @@
 # MIGRATION PLAN
 
-## V6.45.0 – V1-Finish-Sprint für den geführten Tageslauf
+## V6.46.0 – Health Hybrid End-to-End-Pilot (umgesetzt und abgenommen)
+
+V6.46.0 bleibt speicherkompatibel (`schemaVersion: 1`). Neue Felder `executionPackage`, `releaseGates` und `externalExecutionEvidence` sind additiv; alte Tagesläufe ohne diese Felder bleiben lesbar. Neue GET-Route: `/api/projects/health-upgrade-kompass/live-status` (nur Health, nur Git-Read). Kein Testprozess und kein Git-Schreiben aus der Zentrale. Vorheriger gesicherter Ausgang: V6.45.2 / `fb9aa0d`. Externe Evidenz ist kein automatisch bestätigter Fachbefund; der frühere V6.46.0-WIP-Evidenz-Deadlock ist behoben, betroffene WIP-Läufe werden defensiv geheilt. Andere Projekte erhalten noch keinen Hybrid-Pfad.
+
+| Bereich | Regel |
+|---|---|
+| health-repo-status.js | nur kanonischer Health-Pfad, realpath, feste Lese-Args |
+| executionPackage | ID + Fingerprint; READY_TO_COPY nur bei sauberer Basis |
+| Ergebnisrückführung | Vorschau → Jamal-Bestätigung → Evidenz, kein Auto-ACCEPTED |
+| releaseGates | nur Entscheidungstexte, keine Ausführung |
+| Verboten | Agentenstart, npm test aus Zentrale, Reset/Clean, stille Allowlist-Erweiterung |
+
+Rückfall: uncommittete Änderungen kontrolliert einzeln zurücknehmen; Browserdaten nicht löschen und kein `git reset` verwenden. Browser-End-to-End-Abnahme bestanden.
+
+## V6.45.2 – Runtime-Pilot und Zusammenführung entkoppeln (vorheriger gesicherter Stand `fb9aa0d`)
+
+V6.45.2 ändert weder Speicherformat-Schlüssel noch API. Additive Trennung von `runtimePilotEvidence` und finaler Orchestrierung. Vorhandene Tagesläufe bleiben lesbar.
+
+## V6.45.0 – V1-Finish-Sprint für den geführten Tageslauf (Historie)
 
 V6.45.0 ändert weder Speicherformat noch API. Vorhandene Tagesläufe bleiben lesbar. Neue Arbeitsvorschläge führen `orchestrator-agent` sichtbar und fachlich als Projektmanager-Agent; `approvalAgentId` ist die einzige verbindliche Abnahmequelle und muss `quality-test-agent` sein. Anzeigename und Rolle werden aus der ID und dem kanonischen Register abgeleitet; widersprüchliche `approvalAgent`-Textfelder werden abgewiesen. Die Auswahl trennt `coreAgentIds` (höchstens fünf, eindeutige IDs) und `additionalAgentIds` (keine Überschneidung, exakte Mengenabdeckung von `selectedAgentIds`). UI- und Kommunikations-Agent werden XOR gewählt. Explizite Risiko-Signale wählen den Risiko-Agenten; Datenschutz allein nicht. Zusätzliche Rollen entstehen ausschließlich aus konkreten Ziel-, Risiko-, Daten-, Dokumentations-, Technik-, Kosten- oder Werkzeugsignalen.
 

@@ -4,14 +4,17 @@
   const agentRegistry = typeof module === "object" && module.exports
     ? require("./agent-registry")
     : root?.AgentRegistry;
-  const api = factory(agentRegistry);
+  const healthHybridWork = typeof module === "object" && module.exports
+    ? require("./health-hybrid-work")
+    : root?.HealthHybridWork || null;
+  const api = factory(agentRegistry, healthHybridWork);
   if (typeof module === "object" && module.exports) {
     module.exports = api;
   }
   if (root) {
     root.DailyWorkRun = api;
   }
-})(typeof globalThis !== "undefined" ? globalThis : this, function createDailyWorkRunApi(agentRegistryApi) {
+})(typeof globalThis !== "undefined" ? globalThis : this, function createDailyWorkRunApi(agentRegistryApi, healthHybridWorkApi) {
   const SCHEMA_VERSION = 1;
   const DAILY_STORAGE_KEY = "ki-unternehmenszentrale-daily-work-runs-v1";
   const LEGACY_MANAGEMENT_STORAGE_KEY = "ki-unternehmenszentrale-v1";
@@ -204,6 +207,17 @@
       },
       agentReviewPhase: createAgentReviewPhase(),
       agentRuntimePilot: null,
+      executionPackage: null,
+      pendingExternalExecutionEvidence: null,
+      releaseGates: healthHybridWorkApi?.createEmptyReleaseGates
+        ? healthHybridWorkApi.createEmptyReleaseGates()
+        : {
+            commitDecision: { status: "PENDING", decidedAt: null, reason: "" },
+            pushDecision: { status: "PENDING", decidedAt: null, reason: "" },
+            deployDecision: { status: "PENDING", decidedAt: null, reason: "" },
+            externalWriteDecision: { status: "PENDING", decidedAt: null, reason: "" },
+            observedEvidence: { commitHash: null, notedAt: null, note: "" },
+          },
       closure: {
         status: "",
         jamalDecision: "",
@@ -1002,6 +1016,25 @@
     return phase;
   }
 
+  // V6.46.0-WIP: Übernahme setzte fälschlich RESULT_RECORDED ohne Bestätigung.
+  // Nur diesen Deadlock heilen — echte bestätigte Befunde bleiben unangetastet.
+  function healAdoptedExternalEvidenceDeadlock(phase) {
+    phase.workItems = phase.workItems.map((item) => {
+      if (item.status === "ACCEPTED") return item;
+      if (!item.externalExecutionEvidence?.adoptedIntoReviewAt) return item;
+      if (item.resultConfirmedAt || item.resultConfirmed === true) return item;
+      if (item.status !== "RESULT_RECORDED") return item;
+      return {
+        ...item,
+        status: "WAITING",
+        resultConfirmed: false,
+        resultConfirmedAt: null,
+        resultRecordedAt: null,
+      };
+    });
+    return phase;
+  }
+
   function refreshAgentReviewPhase(phaseValue, proposal) {
     let phase = createAgentReviewPhase(phaseValue);
     const leadId = proposal?.leadAgentId;
@@ -1009,6 +1042,7 @@
     const approvalId = approval.ok ? approval.approvalAgentId : null;
 
     phase = healLeadRuntimePilotDeadlock(phase, proposal);
+    phase = healAdoptedExternalEvidenceDeadlock(phase);
 
     phase.workItems = phase.workItems.map((item) => {
       const nextItem = { ...item, blockers: normalizeBlockerList(item.blockers) };
@@ -1432,7 +1466,22 @@
 
   function getActiveRun(store) {
     const normalized = createStore(store);
-    return clone(normalized.runs.find((run) => run.id === normalized.activeRunId) || null);
+    const run = clone(normalized.runs.find((entry) => entry.id === normalized.activeRunId) || null);
+    if (!run) return null;
+    if (run.executionPackage === undefined) run.executionPackage = null;
+    if (run.pendingExternalExecutionEvidence === undefined) run.pendingExternalExecutionEvidence = null;
+    if (healthHybridWorkApi?.ensureReleaseGates) {
+      run.releaseGates = healthHybridWorkApi.ensureReleaseGates(run);
+    } else if (!run.releaseGates) {
+      run.releaseGates = {
+        commitDecision: { status: "PENDING", decidedAt: null, reason: "" },
+        pushDecision: { status: "PENDING", decidedAt: null, reason: "" },
+        deployDecision: { status: "PENDING", decidedAt: null, reason: "" },
+        externalWriteDecision: { status: "PENDING", decidedAt: null, reason: "" },
+        observedEvidence: { commitHash: null, notedAt: null, note: "" },
+      };
+    }
+    return run;
   }
 
   function currentCanonicalProject(apiPayload, projectId) {
@@ -1487,6 +1536,65 @@
     return next;
   }
 
+  function requireHealthHybridWork() {
+    if (!healthHybridWorkApi) {
+      throw new Error("Health-Hybrid-Modul ist nicht verfügbar.");
+    }
+    return healthHybridWorkApi;
+  }
+
+  function createHealthExecutionPackage(run, liveStatus, values = {}) {
+    return requireHealthHybridWork().createHealthExecutionPackage(run, liveStatus, values);
+  }
+
+  function approveHealthExecutionPackageForCopy(run, liveStatus, values = {}) {
+    return requireHealthHybridWork().approveHealthExecutionPackageForCopy(run, liveStatus, values);
+  }
+
+  function markHealthExecutionPackageInExternalWork(run) {
+    return requireHealthHybridWork().markHealthExecutionPackageInExternalWork(run);
+  }
+
+  function abortHealthExecutionPackage(run, values = {}) {
+    return requireHealthHybridWork().abortHealthExecutionPackage(run, values);
+  }
+
+  function previewExternalExecutionResult(run, rawText, liveStatus = null) {
+    return requireHealthHybridWork().previewExternalExecutionResult(run, rawText, liveStatus);
+  }
+
+  function confirmExternalExecutionEvidence(run, rawText, liveStatus, values = {}) {
+    return requireHealthHybridWork().confirmExternalExecutionEvidence(run, rawText, liveStatus, values);
+  }
+
+  function adoptExternalExecutionEvidenceIntoReview(run, values = {}) {
+    const next = requireHealthHybridWork().adoptExternalExecutionEvidenceIntoReview(run, values);
+    if (!next.agentReviewPhase?.preparedAt) return next;
+    const refreshed = clone(next);
+    refreshed.agentReviewPhase = refreshAgentReviewPhase(refreshed.agentReviewPhase, refreshed.workProposal);
+    return refreshed;
+  }
+
+  function setReleaseGateDecision(run, gateKey, values = {}) {
+    return requireHealthHybridWork().setReleaseGateDecision(run, gateKey, values);
+  }
+
+  function setReleaseGateObservedEvidence(run, values = {}) {
+    return requireHealthHybridWork().setReleaseGateObservedEvidence(run, values);
+  }
+
+  function releaseGateDecisionLabel(gateKey, decision) {
+    return requireHealthHybridWork().releaseGateDecisionLabel(gateKey, decision);
+  }
+
+  function ensureReleaseGates(run) {
+    const next = clone(run);
+    next.releaseGates = requireHealthHybridWork().ensureReleaseGates(next);
+    if (next.executionPackage === undefined) next.executionPackage = null;
+    if (next.pendingExternalExecutionEvidence === undefined) next.pendingExternalExecutionEvidence = null;
+    return next;
+  }
+
   return Object.freeze({
     AGENT_REVIEW_PHASE_STATUSES,
     AGENT_WORK_ITEM_STATUSES,
@@ -1532,5 +1640,16 @@
     upsertRun,
     validateAgentPlan,
     validateReadyForCodex,
+    createHealthExecutionPackage,
+    approveHealthExecutionPackageForCopy,
+    markHealthExecutionPackageInExternalWork,
+    abortHealthExecutionPackage,
+    previewExternalExecutionResult,
+    confirmExternalExecutionEvidence,
+    adoptExternalExecutionEvidenceIntoReview,
+    setReleaseGateDecision,
+    setReleaseGateObservedEvidence,
+    releaseGateDecisionLabel,
+    ensureReleaseGates,
   });
 });

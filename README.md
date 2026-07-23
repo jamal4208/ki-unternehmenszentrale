@@ -3,7 +3,8 @@
 ## Status
 
 - **V1 lokal fertig und betriebsbereit**
-- Version: **V6.45.0**
+- Version: **V6.46.0** – Health Hybrid End-to-End-Pilot (umgesetzt und abgenommen)
+- Gesicherter vorheriger Ausgang: **V6.45.2** / `fb9aa0d`
 - Betrieb nur lokal auf diesem Mac – kein Cloud- oder Deploymentbetrieb
 
 ## Projektordner

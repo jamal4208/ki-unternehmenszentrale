@@ -10,6 +10,10 @@ const {
 } = require("./project-registry");
 const { PRODUCTIVE_AGENT_REGISTRY } = require("./agent-registry");
 const { createHttpRouter, buildRouteMap } = require("./server-http-router");
+const {
+  readHealthRepoStatus,
+  buildHealthLiveStatusResponse,
+} = require("./health-repo-status");
 
 const rootDir = __dirname;
 const staticAssets = new Map([
@@ -17,6 +21,7 @@ const staticAssets = new Map([
   ["/index.html", "index.html"],
   ["/agent-registry.js", "agent-registry.js"],
   ["/daily-work-run.js", "daily-work-run.js"],
+  ["/health-hybrid-work.js", "health-hybrid-work.js"],
   ["/agent-runtime.js", "agent-runtime.js"],
   ["/local-data-backup.js", "local-data-backup.js"],
   ["/daily-work-run-ui.js", "daily-work-run-ui.js"],
@@ -76,6 +81,23 @@ function handleProjects(res) {
 
 function handleHealthUpgradeKompassProject(res) {
   sendJson(res, 200, buildProjectResponse("health-upgrade-kompass"));
+}
+
+async function handleHealthUpgradeKompassLiveStatus(res) {
+  try {
+    const status = await readHealthRepoStatus();
+    sendJson(res, 200, buildHealthLiveStatusResponse(status));
+  } catch (_error) {
+    sendJson(res, 200, buildHealthLiveStatusResponse({
+      ok: false,
+      available: false,
+      status: "UNGEKLÄRT",
+      readAt: new Date().toISOString(),
+      errorCode: "GIT_FAILED",
+      message: "Health-Live-Status ist derzeit ungeklärt.",
+      canonicalSnapshot: null,
+    }));
+  }
 }
 
 function handleUnknownProject(res, projectId) {
@@ -21835,6 +21857,9 @@ function handleFirstReadOnlyPreview(res) {
 const getRoutes = buildRouteMap([
   ["/api/projects", (res) => handleProjects(res)],
   ["/api/projects/health-upgrade-kompass", (res) => handleHealthUpgradeKompassProject(res)],
+  ["/api/projects/health-upgrade-kompass/live-status", (res) => {
+    handleHealthUpgradeKompassLiveStatus(res);
+  }],
   ["/api/airtable/pilot-status", (res) => handlePilotStatus(res)],
   ["/api/cockpit/todays-one-decision", (res) => handleTodaysOneDecision(res)],
   ["/api/cockpit/todays-three-things", (res) => handleTodaysThreeThings(res)],

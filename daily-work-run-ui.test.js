@@ -156,7 +156,7 @@ function runTests() {
   check("script-Reihenfolge ist korrekt", () => {
     assert.match(
       htmlSource,
-      /<script src="daily-work-run\.js"><\/script>\s*<script src="agent-runtime\.js"><\/script>\s*<script src="local-data-backup\.js"><\/script>\s*<script src="daily-work-run-ui\.js"><\/script>\s*<script src="app\.js"><\/script>/,
+      /<script src="health-hybrid-work\.js"><\/script>\s*<script src="daily-work-run\.js"><\/script>\s*<script src="agent-runtime\.js"><\/script>\s*<script src="local-data-backup\.js"><\/script>\s*<script src="daily-work-run-ui\.js"><\/script>\s*<script src="app\.js"><\/script>/,
     );
   });
 
@@ -194,8 +194,8 @@ function runTests() {
     assert.strictEqual(validation.ok, true);
   });
 
-  check("V6.45.0 ist in der Oberfläche sichtbar", () => {
-    assert.match(htmlSource, /V6\.45\.0 · V1-Finish-Sprint/);
+  check("V6.46.0 ist in der Oberfläche sichtbar", () => {
+    assert.match(htmlSource, /V6\.46\.0 · Health Hybrid E2E/);
   });
 
   check("primäre Prüfphasen-Aktion steht direkt im Arbeitsvorschlag", () => {
@@ -232,6 +232,10 @@ function runTests() {
     assert.match(reviewSource, /orchestrationConfirmed/);
     assert.match(reviewSource, /Laufzeit-Pilot-Evidenz/);
     assert.match(reviewSource, /ersetzt nicht die manuelle Projektmanager-Zusammenführung/);
+    assert.match(reviewSource, /Externe Ausführungs-Evidenz · übernommen, noch nicht als Fachbefund bestätigt/);
+    assert.match(reviewSource, /Übernahme ersetzt keinen bestätigten Fachbefund/);
+    assert.match(reviewSource, /externalExecutionEvidence\?\.summary/);
+    assert.doesNotMatch(reviewSource, /automatisch bestätigt|Erfolg automatisch/);
   });
 
   check("unten kein zweiter gleichwertiger Hauptbutton für die Prüfphase", () => {
