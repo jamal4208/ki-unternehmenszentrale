@@ -194,8 +194,114 @@ function runTests() {
     assert.strictEqual(validation.ok, true);
   });
 
-  check("V6.44.1 ist in der Oberfläche sichtbar", () => {
-    assert.match(htmlSource, /V6\.44\.1 · V1-Betriebsfreeze/);
+  check("V6.45.0 ist in der Oberfläche sichtbar", () => {
+    assert.match(htmlSource, /V6\.45\.0 · V1-Finish-Sprint/);
+  });
+
+  check("primäre Prüfphasen-Aktion steht direkt im Arbeitsvorschlag", () => {
+    const proposalSource = uiSource.slice(uiSource.indexOf("function renderDailyWorkProposal"), uiSource.indexOf("function agentRuntimeApi"));
+    assert.match(proposalSource, /Oben arbeiten\. Unten nachschauen\./);
+    assert.match(proposalSource, /data-prepare-agent-review>Prüfphase vorbereiten/);
+    assert.match(proposalSource, /Noch kein Agent gestartet\. Keine externe Aktion\. Es werden nur interne Prüfkarten vorbereitet\./);
+    assert.match(proposalSource, /daily-work-run-primary-next-action/);
+    assert.match(proposalSource, /Hauptverantwortlicher/);
+    assert.match(proposalSource, /Kernagenten/);
+    assert.match(proposalSource, /Sicherheitsgrenze/);
+  });
+
+  check("Rollen und Werkzeugstatus sind im Arbeitsvorschlag eindeutig", () => {
+    assert.match(uiSource, /Abnahmeverantwortlicher Agent/);
+    assert.match(uiSource, /toolReview\.statusLabel/);
+    assert.match(uiSource, /nicht benötigt/);
+    assert.match(uiSource, /keine Agentenzuweisung/);
+    assert.match(uiSource, /Projektmanager-Zusammenführung/);
+  });
+
+  check("unten kein zweiter gleichwertiger Hauptbutton für die Prüfphase", () => {
+    const reviewSource = uiSource.slice(uiSource.indexOf("function renderDailyWorkAgentReviewPhase"), uiSource.indexOf("function renderDailyWorkRunPrompt"));
+    assert.match(reviewSource, /primaryPrepareShownAbove/);
+    assert.match(reviewSource, /secondary-button" type="button" data-prepare-agent-review/);
+  });
+
+  check("READY_FOR_CODEX rendert obere Prüfphasen-Hauptaktion verhaltensnah", () => {
+    const output = require("child_process").execFileSync(
+      process.execPath,
+      [
+        "-e",
+        `
+          const assert = require("assert");
+          const DailyWorkRun = require(${JSON.stringify(path.join(__dirname, "daily-work-run.js"))});
+          const DailyWorkRunUi = require(${JSON.stringify(path.join(__dirname, "daily-work-run-ui.js"))});
+          const { getProjectById } = require(${JSON.stringify(path.join(__dirname, "project-registry.js"))});
+          const container = { innerHTML: "" };
+          const data = new Map();
+          const localStorage = {
+            getItem(key) { return data.has(key) ? data.get(key) : null; },
+            setItem(key, value) { data.set(key, String(value)); },
+          };
+          const deps = {
+            byId: (id) => (id === "daily-work-run-output" ? container : null),
+            escapeHtml: (value) => String(value ?? ""),
+            comparableText: (value) => String(value ?? "").trim().toLowerCase(),
+            showToast: () => {},
+            getCanonicalProjectRegistryState: () => ({
+              status: "ready",
+              payload: { writeOperationsBlocked: true, madeExternalRequest: false, projects: [getProjectById("health-upgrade-kompass")], snapshotNotice: "Test" },
+              error: null,
+            }),
+            getAppState: () => ({ projects: [] }),
+            loadState: () => ({ projects: [] }),
+            saveState: () => {},
+            getProjectHistory: () => [],
+            renderAll: () => {},
+            localStorage,
+          };
+          DailyWorkRunUi.init(deps);
+          DailyWorkRunUi.render();
+          assert.doesNotMatch(container.innerHTML, /data-prepare-agent-review>Prüfphase vorbereiten/);
+
+          let run = DailyWorkRun.createDraftRun({ id: "ui-ready-run", workDate: "2026-07-23" });
+          run = DailyWorkRun.setFocusProject(run, getProjectById("health-upgrade-kompass"), "Snap", "2026-07-11T08:00:00Z");
+          run = DailyWorkRun.createWorkProposal(run, {
+            desiredOutcome: "Ich möchte wissen, welche Agenten jetzt beim Health Upgrade Kompass eingesetzt werden müssen und was jeder davon prüfen soll.",
+          });
+          run = DailyWorkRun.transitionRun(run, "READY_FOR_CODEX");
+          DailyWorkRunUi.getInternalState().dailyWorkRunUiState.store = DailyWorkRun.upsertRun(DailyWorkRun.createStore(), run);
+          DailyWorkRunUi.render();
+          assert.match(container.innerHTML, /daily-work-run-primary-next-action/);
+          assert.match(container.innerHTML, /Prüfphase vorbereiten/);
+          assert.match(container.innerHTML, /Noch kein Agent gestartet\\. Keine externe Aktion\\. Es werden nur interne Prüfkarten vorbereitet\\./);
+          assert.match(container.innerHTML, /Kernagenten/);
+          assert.doesNotMatch(container.innerHTML, /10 Kernagenten/);
+          const primaryPrepare = (container.innerHTML.match(/class="primary-button"[^>]*data-prepare-agent-review/g) || []).length;
+          assert.strictEqual(primaryPrepare, 1);
+
+          run = DailyWorkRun.prepareAgentReviewPhase(run, { approved: true, now: "2026-07-23T10:00:00Z" });
+          DailyWorkRunUi.getInternalState().dailyWorkRunUiState.store = DailyWorkRun.upsertRun(DailyWorkRun.createStore(), run);
+          DailyWorkRunUi.render();
+          assert.match(container.innerHTML, /Manuelle Prüfkarten bearbeiten und Befunde zurückführen/);
+          assert.doesNotMatch(container.innerHTML, /daily-work-run-primary-next-action[\\s\\S]*data-prepare-agent-review>Prüfphase vorbereiten/);
+        `,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.strictEqual(output, "");
+  });
+
+  check("Action-ID Prüfphase ist an prepareAgentReviewPhase gebunden", () => {
+    assert.match(uiSource, /data-prepare-agent-review/);
+    assert.match(uiSource, /prepareAgentReviewPhase\(/);
+    assert.match(uiSource, /closest\("\[data-prepare-agent-review\]"\)/);
+  });
+
+  check("Kern- und Zusatzrollen werden in der UI getrennt dargestellt", () => {
+    const proposalSource = uiSource.slice(uiSource.indexOf("function renderDailyWorkProposal"), uiSource.indexOf("function agentRuntimeApi"));
+    assert.match(proposalSource, /normalizeRolePartitions/);
+    assert.match(proposalSource, /getApprovalAgentDisplay/);
+    assert.match(proposalSource, /Zusatzrollen/);
+    assert.match(uiSource, /approvalAgentId/);
+    assert.match(uiSource, /Abnahmeverantwortlicher Agent/);
+    assert.doesNotMatch(proposalSource, /proposal\.approvalAgent \|\| "QS-\/Test-Agent"/);
   });
 
   check("V1-Betriebshinweis ist vorhanden", () => {
@@ -211,6 +317,111 @@ function runTests() {
     );
     assert.match(statusBlock, /Außenwirkung[\s\S]*blockiert/);
     assert.doesNotMatch(statusBlock, /extern(e|er)? KI|Plugin ausgeführt|veröffentlicht|Deployment freigegeben/i);
+  });
+
+  check("Plugin-Bereich zeigt bei nicht benötigter Prüfung kein UNGEKLÄRT", () => {
+    const output = require("child_process").execFileSync(
+      process.execPath,
+      [
+        "-e",
+        `
+          const assert = require("assert");
+          const DailyWorkRun = require(${JSON.stringify(path.join(__dirname, "daily-work-run.js"))});
+          const DailyWorkRunUi = require(${JSON.stringify(path.join(__dirname, "daily-work-run-ui.js"))});
+          const { getProjectById } = require(${JSON.stringify(path.join(__dirname, "project-registry.js"))});
+
+          function pluginSection(html) {
+            const match = html.match(/Plugin- und Werkzeugprüfung<\\/h5>([\\s\\S]*?)<\\/div>\\s*<div><h5>Dateien und Datenbereiche/);
+            return match ? match[1] : "";
+          }
+
+          function renderReadyProposal({ desiredOutcome, projectId, runId }, shared) {
+            let run = DailyWorkRun.createDraftRun({ id: runId, workDate: "2026-07-23" });
+            run = DailyWorkRun.setFocusProject(run, getProjectById(projectId), "Snap", "2026-07-11T08:00:00Z");
+            run = DailyWorkRun.createWorkProposal(run, { desiredOutcome });
+            run = DailyWorkRun.transitionRun(run, "READY_FOR_CODEX");
+            shared.store = DailyWorkRun.upsertRun(DailyWorkRun.createStore(), run);
+            DailyWorkRunUi.getInternalState().dailyWorkRunUiState.store = shared.store;
+            DailyWorkRunUi.render();
+            return { html: shared.container.innerHTML, proposal: run.workProposal };
+          }
+
+          const shared = {
+            container: { innerHTML: "" },
+            store: DailyWorkRun.createStore(),
+          };
+          const data = new Map();
+          const localStorage = {
+            getItem(key) { return data.has(key) ? data.get(key) : null; },
+            setItem(key, value) { data.set(key, String(value)); },
+          };
+          DailyWorkRunUi.init({
+            byId: (id) => (id === "daily-work-run-output" ? shared.container : null),
+            escapeHtml: (value) => String(value ?? ""),
+            comparableText: (value) => String(value ?? "").trim().toLowerCase(),
+            showToast: () => {},
+            getCanonicalProjectRegistryState: () => ({
+              status: "ready",
+              payload: {
+                writeOperationsBlocked: true,
+                madeExternalRequest: false,
+                projects: [getProjectById("health-upgrade-kompass"), getProjectById("expansion-app")],
+                snapshotNotice: "Test",
+              },
+              error: null,
+            }),
+            getAppState: () => ({ projects: [] }),
+            loadState: () => ({ projects: [] }),
+            saveState: () => {},
+            getProjectHistory: () => [],
+            renderAll: () => {},
+            localStorage,
+          });
+
+          const healthFinish = renderReadyProposal({
+            runId: "ui-plugin-health",
+            projectId: "health-upgrade-kompass",
+            desiredOutcome: "Den Health Upgrade Kompass als stabile und verständliche Demo vollständig prüfen und den nächsten sicheren Fertigstellungsschritt festlegen.",
+          }, shared);
+          const healthPlugin = pluginSection(healthFinish.html);
+          assert.match(healthPlugin, /nicht benötigt/);
+          assert.match(healthPlugin, /keine Agentenzuweisung/);
+          assert.match(healthPlugin, /keine Plugins oder Werkzeuge benötigt/);
+          assert.doesNotMatch(healthPlugin, /UNGEKLÄRT/);
+          assert.doesNotMatch(healthPlugin, /<b>Auswahl:<\\/b>/);
+          assert.strictEqual(healthFinish.proposal.toolReview.required, false);
+
+          const privacyOnly = renderReadyProposal({
+            runId: "ui-plugin-privacy",
+            projectId: "health-upgrade-kompass",
+            desiredOutcome: "Prüfe Datenschutz für den Tagesauftrag.",
+          }, shared);
+          const privacyPlugin = pluginSection(privacyOnly.html);
+          assert.match(privacyPlugin, /nicht benötigt/);
+          assert.match(privacyPlugin, /keine Agentenzuweisung/);
+          assert.doesNotMatch(privacyPlugin, /UNGEKLÄRT/);
+          assert.doesNotMatch(privacyPlugin, /<b>Auswahl:<\\/b>/);
+          assert.strictEqual(privacyOnly.proposal.toolReview.required, false);
+
+          const pluginOrder = renderReadyProposal({
+            runId: "ui-plugin-explicit",
+            projectId: "expansion-app",
+            desiredOutcome: "Wähle ein passendes Plugin oder Werkzeug",
+          }, shared);
+          const explicitPlugin = pluginSection(pluginOrder.html);
+          assert.match(explicitPlugin, /Plugin-\\/Tool-Radar-Agent zuständig/);
+          assert.match(explicitPlugin, /Plugin-\\/Tool-Radar-Agent/);
+          assert.match(explicitPlugin, /<b>Auswahl:<\\/b>/);
+          assert.match(explicitPlugin, /Ergebnisqualität/);
+          assert.match(explicitPlugin, /Keine Werkzeugausführung|Keine automatische Festlegung auf Canva/);
+          assert.doesNotMatch(explicitPlugin, /UNGEKLÄRT/);
+          assert.strictEqual(pluginOrder.proposal.toolReview.required, true);
+          assert.strictEqual(pluginOrder.proposal.toolReview.responsibleAgentId, "integration-agent");
+        `,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.strictEqual(output, "");
   });
 
   check("README und Betriebshandbuch sind vorhanden", () => {

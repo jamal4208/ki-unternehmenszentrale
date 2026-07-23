@@ -2,15 +2,30 @@
 
 ## Git- und Versionsstand
 
-- Version: **V6.44.1 – Health-Verifizierungsstand synchronisieren**
-- Ausgangscommit der Zentrale: `b2f618e` (V6.44.0 Lokale V1 einfrieren und Betriebsmodus festlegen)
+- Version: **V6.45.0 – geführten Tageslauf als V1-Finish bündeln**
+- Ausgangscommit der Zentrale: `5602cfa` (V6.44.1 Health-Verifizierungsstand synchronisieren)
 - Branch: `main`
-- Upstream: `origin/main` auf `b2f618e` zum Sync-Ausgang, synchron
+- Upstream: `origin/main` auf `5602cfa`, synchron
 - V6.44.1-Abnahmestand: vollständig geprüft; der lokale V1-Betriebsstand enthält die synchronisierte Health-Momentaufnahme
 - Verbindliche Aussage: **V1 lokal fertig und betriebsbereit**
 - Einstiegspunkte: `README.md`, `V1_BETRIEBSHANDBUCH.md`
 
-## V6.44.1 – aktueller Funktionsstand
+## V6.45.0 – aktueller Funktionsstand
+
+- Projektmanager-Agent ist in Ergebniswunsch, Einsatzplan, Prüfkarten, Zusammenführung und kompaktem Arbeitsweg durchgehend Hauptverantwortlicher.
+- QS-/Test-Agent bleibt über `approvalAgentId` separat für Qualitätsprüfung, Abnahmekriterien und Abschlussprüfung verantwortlich und übernimmt keine Führungsrolle.
+- Ein normaler Health-Tageslauf wählt fünf Kernagenten: Projektmanager, Health-Kompass, Produkt, QS/Test und UI beziehungsweise Kommunikation.
+- UI-Agent und Kommunikations-Agent werden nicht pauschal gleichzeitig ausgewählt.
+- Explizite Risiko-Signale (Risiko, Risiken, Risiko-Prüfung, Risikobewertung, Risikocheck) wählen den Risiko-Agenten; Datenschutz allein nicht.
+- Zusätzliche Risiko-, Sicherheits-, Dokumentations-, Technik-, Betriebs- oder Werkzeugrollen benötigen ein konkretes Signal im Ergebniswunsch; eine nachvollziehbar komplexere Aufgabe darf dadurch mehr als fünf Rollen erhalten.
+- Darstellung trennt Kernagenten und Zusatzrollen; nicht ausgewählte Rollen bleiben „nicht benötigt“.
+- Plugin-/Werkzeugprüfung zeigt „nicht benötigt“ ohne Agentenzuweisung oder weist den Plugin-/Tool-Radar-Agenten zu; keine Plugin-Ausführung, Installation oder Verbindung wird ausgelöst.
+- „Prüfphase vorbereiten“ steht direkt oben im Arbeitsvorschlag mit kompakter Führung (Fokusprojekt, Ergebnis, Hauptverantwortlicher, Kernagenten, nächster Schritt, Sicherheitsgrenze). Der Hinweis nennt ausdrücklich: kein Agent gestartet, keine externe Aktion, nur interne Prüfkarten.
+- Autonomie- und Sicherheitsgrenzen bleiben unverändert.
+- Keine API-Änderung; `API_REGISTER.md` bleibt unverändert.
+- Stand: lokaler uncommitteter Finish-Kandidat auf Basis von `5602cfa`.
+
+## V6.44.1 – vorheriger Funktionsstand
 
 - Reine Synchronisierung der kanonischen technischen Health-Momentaufnahme; keine neue Produktfunktion.
 - Health vorher: `bc98b5c` → jetzt: `28cdcf7` (PR #1 gemergt, Arbeitscommit `8eadc46`).
@@ -151,7 +166,7 @@ Die Zentrale ist als lokaler read-only Arbeits-, Entscheidungs- und Demo-Stand p
 
 ## Tests
 
-- `npm test` → **247 Prüfpunkte gesamt**: project-registry 20, daily-work-run 96, agent-runtime 56, local-data-backup 18, daily-work-run-ui 21, server-http-router 36
+- `npm test` → **282 Prüfpunkte gesamt**: project-registry 20, daily-work-run 125, agent-runtime 56, local-data-backup 18, daily-work-run-ui 27, server-http-router 36
 - `npm run check` prüft alle betroffenen JavaScript-Module syntaktisch
 - `npm start` → `node server.js`
 - manuelle lokale Browser- und GET-API-Prüfungen
@@ -190,4 +205,4 @@ Historische Versionskennzeichnungen, Namensvarianten und nicht-kanonische Altreg
 
 ## Entscheidung durch Jamal erforderlich
 
-Commit und Push von V6.44.1 sowie jede spätere Deployment-, V2- oder Außenwirkungsentscheidung.
+Commit und Push von V6.45.0 sowie jede spätere Deployment-, V2- oder Außenwirkungsentscheidung.

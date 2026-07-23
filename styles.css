@@ -562,6 +562,22 @@
   color: #165e58;
 }
 
+.daily-work-run-primary-next-action {
+  border-color: rgba(15, 118, 110, 0.45);
+  background: linear-gradient(180deg, rgba(15, 118, 110, 0.1), rgba(255, 255, 255, 0.92));
+  box-shadow: 0 10px 28px rgba(15, 118, 110, 0.12);
+}
+
+.daily-work-run-primary-next-action > strong {
+  display: block;
+  margin: 4px 0 10px;
+  font-size: 1.15rem;
+}
+
+.daily-work-run-guide-facts {
+  margin: 0 0 12px;
+}
+
 .daily-work-run-agent-grid,
 .daily-work-run-proposal-grid {
   display: grid;

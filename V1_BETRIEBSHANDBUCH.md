@@ -3,9 +3,11 @@
 ## 1. Verbindlicher V1-Stand
 
 - **Aussage:** V1 lokal fertig und betriebsbereit
-- **Version:** V6.44.1 (V1-Betriebsfreeze; Health-Momentaufnahme synchronisiert)
-- **Ausgangscommit für diesen Freeze:** `16bbf45` (V6.43.1 Runtime-Pilot abnahmefest abschliessen)
-- **Branch:** `main`, synchron mit `origin/main` zum Freeze-Ausgang
+- **Aktuelle Arbeitsversion:** **V6.45.0** (V1-Finish-Sprint für den geführten Tageslauf; noch uncommitteter Finish-Kandidat)
+- **Aktueller Git-HEAD der Basis:** `5602cfa` (V6.44.1 Health-Verifizierungsstand synchronisieren)
+- **Historischer Freeze-Ausgang:** `16bbf45` (V6.43.1 Runtime-Pilot abnahmefest abschliessen) – nur Historie, nicht der aktuelle V6.45.0-Stand
+- **Branch:** `main`, Upstream auf `5602cfa`; V6.45.0-Änderungen liegen lokal unstaged
+- **Freigabe:** erst nach Browser-Abnahme, finaler Prüfung und ausdrücklichem Commit
 - **Einstiegspunkte:** `README.md` (kurz) und dieses Handbuch (ausführlich)
 - **Betrieb:** lokal auf diesem Mac, Daten im Browser, Außenwirkung blockiert
 
@@ -134,9 +136,11 @@ Im Server-Terminal **Ctrl + C**. Keinen parallelen Server auf Port 4173 belassen
 ## 19. Update- und Versionsregel
 
 - V6.44.0 friert den lokalen V1-Betrieb ein; V6.44.1 synchronisiert nur die Health-Verifizierungsmomentaufnahme
+- V6.45.0 bündelt den Finish-Sprint für Führung, Agentenauswahl und Nutzerführung im Tageslauf; Autonomie- und Sicherheitsgrenzen bleiben unverändert
 - Kleine Korrekturen nur mit klarer Dokumentation und ohne Autonomieerhöhung
 - Neue Executoren, Plugins, Schreib-APIs oder Cloud gehören **nicht** in V1
 - Vor jedem Update: Backup exportieren
+- V6.45.0 erst nach Browser-Abnahme und ausdrücklichem Commit als verbindlichen Stand behandeln; bis dahin ist es ein lokaler Finish-Kandidat auf Basis von `5602cfa`
 
 ## 20. Grenze zwischen V1 und späterer V2
 

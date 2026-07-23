@@ -128,7 +128,7 @@ async function runTests() {
   });
 
   check("bestätigter bestehender Befund blockiert Vorbereitung", () => {
-  let blockedRun = DailyWorkRun.recordAgentWorkResult(healthRun, "project-status-agent", {
+  let blockedRun = DailyWorkRun.recordAgentWorkResult(healthRun, "product-agent", {
       resultText: "Grundlage",
       confirmed: true,
       now: "2026-07-13T09:01:00Z",

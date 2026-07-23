@@ -58,6 +58,10 @@
     throw new Error("Das kanonische Register mit 25 Hauptagenten ist nicht verfügbar.");
   }
   const AGENTS_BY_ID = new Map(CANONICAL_AGENTS.map((agent) => [agent.id, agent]));
+  const PROJECT_MANAGER_AGENT_ID = "orchestrator-agent";
+  const PROJECT_MANAGER_AGENT_NAME = "Projektmanager-Agent";
+  const QA_AGENT_ID = "quality-test-agent";
+  const TOOL_RADAR_AGENT_NAME = "Plugin-/Tool-Radar-Agent";
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
@@ -307,6 +311,27 @@
     return TASK_TYPES[5];
   }
 
+  function choosePresentationAgentId(text, taskType) {
+    const contentHeavy = taskType === TASK_TYPES[3]
+      || /text|copy|wording|verständ|formul|claim|kommunik|nutzertext/.test(text);
+    const uiHeavy = taskType === TASK_TYPES[2]
+      || /design|ui|ux|layout|hierarchie|bedienung|nutzerführung|visual|demo/.test(text);
+    if (contentHeavy && !uiHeavy) return "communication-agent";
+    if (uiHeavy && !contentHeavy) return "ui-agent";
+    if (contentHeavy) return "communication-agent";
+    if (uiHeavy) return "ui-agent";
+    return null;
+  }
+
+  function enforcePresentationXor(selected, preferredId) {
+    const hasUi = selected.has("ui-agent");
+    const hasComm = selected.has("communication-agent");
+    if (hasUi && hasComm) {
+      const keep = preferredId === "communication-agent" ? "communication-agent" : "ui-agent";
+      selected.delete(keep === "ui-agent" ? "communication-agent" : "ui-agent");
+    }
+  }
+
   function proposalBlueprint(taskType, run, desiredOutcome) {
     const commonSafety = [
       "Keine automatische Codex- oder Agentenausführung",
@@ -315,81 +340,174 @@
       "Kein automatischer Commit, Push oder Deployment",
       "Kanonische Projekt- und Sicherheitsgrenzen einhalten",
     ];
+    // Schlanke Basen: PM wird immer separat ergänzt. UI und Kommunikation nie pauschal parallel.
     const routes = {
       [TASK_TYPES[0]]: {
         repositoryWorkRequired: false,
-        leadAgentId: "orchestrator-agent",
-        baseAgentIds: ["project-status-agent", "workflow-agent", "quality-test-agent"],
+        baseAgentIds: ["product-agent", QA_AGENT_ID],
       },
       [TASK_TYPES[1]]: {
         repositoryWorkRequired: true,
-        leadAgentId: "orchestrator-agent",
-        baseAgentIds: ["product-agent", "api-agent", "documentation-agent", "quality-test-agent", "integration-agent"],
+        baseAgentIds: ["product-agent", "api-agent", QA_AGENT_ID],
       },
       [TASK_TYPES[2]]: {
         repositoryWorkRequired: false,
-        leadAgentId: "ui-agent",
-        baseAgentIds: ["product-agent", "communication-agent", "integration-agent", "quality-test-agent", "review-agent"],
+        baseAgentIds: ["product-agent", QA_AGENT_ID],
       },
       [TASK_TYPES[3]]: {
         repositoryWorkRequired: false,
-        leadAgentId: "communication-agent",
-        baseAgentIds: ["product-agent", "documentation-agent", "risk-agent", "review-agent", "quality-test-agent"],
+        baseAgentIds: ["product-agent", "communication-agent", QA_AGENT_ID],
       },
       [TASK_TYPES[4]]: {
         repositoryWorkRequired: false,
-        leadAgentId: "documentation-agent",
-        baseAgentIds: ["project-status-agent", "open-points-agent", "risk-agent", "review-agent", "quality-test-agent"],
+        baseAgentIds: ["project-status-agent", "open-points-agent", QA_AGENT_ID],
       },
       [TASK_TYPES[5]]: {
         repositoryWorkRequired: false,
-        leadAgentId: "strategy-agent",
-        baseAgentIds: ["decision-agent", "product-agent", "prioritization-agent", "risk-agent", "documentation-agent"],
+        baseAgentIds: ["strategy-agent", "product-agent", QA_AGENT_ID],
       },
       [TASK_TYPES[6]]: {
         repositoryWorkRequired: false,
-        leadAgentId: "quality-test-agent",
-        baseAgentIds: ["review-agent", "project-status-agent", "security-agent", "documentation-agent"],
+        baseAgentIds: ["product-agent", QA_AGENT_ID],
       },
       [TASK_TYPES[7]]: {
         repositoryWorkRequired: false,
-        leadAgentId: "integration-agent",
-        baseAgentIds: ["security-agent", "operations-agent", "quality-test-agent", "risk-agent"],
+        baseAgentIds: ["integration-agent", QA_AGENT_ID],
       },
     };
     const route = routes[taskType] || routes[TASK_TYPES[5]];
     const text = desiredOutcome.toLowerCase();
-    const selected = new Set([route.leadAgentId, ...route.baseAgentIds]);
+    const selected = new Set([PROJECT_MANAGER_AGENT_ID, ...route.baseAgentIds]);
     const health = run.focusProjectId === "health-upgrade-kompass";
-    const toolRelevant = /plugin|werkzeug|tool|canva|heygen|github|airtable|video|präsent|design|bild|codex|browser/.test(text);
-    const designRelevant = /design|ui|ux|layout|bild|premium|verständ|nutzer|text/.test(text);
-    const technicalRelevant = /code|codex|entwick|api|frontend|backend|techn|repository|git|browser/.test(text);
+    const toolRelevant = /plugin|werkzeug|tool|canva|heygen|github|airtable|browser-werkzeug/.test(text);
+    const designRelevant = /design|ui|ux|layout|bild|premium|verständ|nutzer|text|demo|bedienung/.test(text);
+    const technicalRelevant = /code|codex|entwick|api|frontend|backend|techn|repository|git/.test(text);
     const sensitive = health || /gesund|medizin|daten|einwillig|datenschutz|recht|claim|risiko/.test(text);
     const costRelevant = /kosten|budget|preis|geschäftsmodell|betrieb|skalier/.test(text);
+    const securityNeeded = /datenschutz|einwillig|security|sicherheitsprüfung|datenabfluss/.test(text);
+    // Expliziter Risikoauftrag: Risiko/Risiken sowie zusammengesetzte Risiko-* Formen.
+    // Datenschutz allein reicht nicht; allgemeine Sicherheitsgrenzen sind kein Risikoauftrag.
+    const riskNeeded = /recht|compliance|claim|heilversprechen|\b(risiko|risiken)\b|risiko[\s-]?prüfung|risikobewertung|risikocheck/.test(text);
+    const documentationNeeded = /dokumentation|protokoll|archiv|wissensübergabe/.test(text);
+    const independentReviewNeeded = /zweitmeinung|unabhängiges review|gegenprüfung/.test(text);
 
-    if (health) {
-      ["health-compass-agent", "product-agent", "risk-agent", "security-agent"].forEach((id) => selected.add(id));
-      if (taskType === TASK_TYPES[0]) {
-        ["ui-agent", "communication-agent", "api-agent", "integration-agent", "documentation-agent"].forEach((id) => selected.add(id));
+    if (health) selected.add("health-compass-agent");
+
+    const preferredPresentationId = choosePresentationAgentId(text, taskType) || "ui-agent";
+    const needsPresentation = designRelevant
+      || taskType === TASK_TYPES[0]
+      || taskType === TASK_TYPES[2]
+      || taskType === TASK_TYPES[6]
+      || (health && !([TASK_TYPES[1], TASK_TYPES[4], TASK_TYPES[5], TASK_TYPES[7]].includes(taskType)));
+    if (needsPresentation) selected.add(preferredPresentationId);
+    enforcePresentationXor(selected, preferredPresentationId);
+
+    const additional = new Set();
+    const addAdditional = (id) => {
+      if (!selected.has(id)) additional.add(id);
+      selected.add(id);
+    };
+
+    // Konkrete Zusatzrollen nur bei erkennbarem Bedarf – dürfen den Standardumfang überschreiten.
+    if (toolRelevant) addAdditional("integration-agent");
+    if (technicalRelevant && taskType !== TASK_TYPES[1]) addAdditional("api-agent");
+    if (securityNeeded) addAdditional("security-agent");
+    if (riskNeeded) addAdditional("risk-agent");
+    if (documentationNeeded) addAdditional("documentation-agent");
+    if (costRelevant) addAdditional("operations-agent");
+    if (independentReviewNeeded) addAdditional("review-agent");
+
+    const concreteExtraCount = additional.size;
+
+    // Kernstruktur ohne Zusatzsignale auf höchstens fünf Rollen begrenzen.
+    if (concreteExtraCount === 0) {
+      if (health && ![TASK_TYPES[1], TASK_TYPES[7]].includes(taskType)) {
+        const fifth = taskType === TASK_TYPES[5]
+          ? "strategy-agent"
+          : taskType === TASK_TYPES[4]
+            ? "open-points-agent"
+            : taskType === TASK_TYPES[3]
+              ? "communication-agent"
+              : preferredPresentationId;
+        selected.clear();
+        [
+          PROJECT_MANAGER_AGENT_ID,
+          "health-compass-agent",
+          "product-agent",
+          QA_AGENT_ID,
+          fifth,
+        ].forEach((id) => selected.add(id));
+      } else if (selected.size > 5) {
+        const dropOrder = [
+          "review-agent",
+          "project-status-agent",
+          "open-points-agent",
+          "decision-agent",
+          "documentation-agent",
+          "operations-agent",
+          "strategy-agent",
+          "api-agent",
+        ];
+        for (const id of dropOrder) {
+          if (selected.size <= 5) break;
+          selected.delete(id);
+        }
       }
+      enforcePresentationXor(selected, preferredPresentationId);
     }
-    if (toolRelevant) selected.add("integration-agent");
-    if (designRelevant) ["ui-agent", "communication-agent"].forEach((id) => selected.add(id));
-    if (technicalRelevant) ["api-agent", "integration-agent"].forEach((id) => selected.add(id));
-    if (sensitive) ["risk-agent", "security-agent"].forEach((id) => selected.add(id));
-    if (costRelevant) ["operations-agent", "strategy-agent"].forEach((id) => selected.add(id));
 
     const selectedAgentIds = [...selected].filter((id) => AGENTS_BY_ID.has(id));
+    let additionalAgentIds = selectedAgentIds.filter((id) => additional.has(id));
+    let coreAgentIds = selectedAgentIds.filter((id) => !additional.has(id));
+    if (coreAgentIds.length > 5) {
+      const dropOrder = [
+        "review-agent",
+        "project-status-agent",
+        "open-points-agent",
+        "decision-agent",
+        "documentation-agent",
+        "operations-agent",
+        "strategy-agent",
+        "api-agent",
+        "workflow-agent",
+      ];
+      const coreSet = new Set(coreAgentIds);
+      for (const id of dropOrder) {
+        if (coreSet.size <= 5) break;
+        if (coreSet.delete(id)) selected.delete(id);
+      }
+      coreAgentIds = [...coreSet];
+    }
+    const finalSelectedAgentIds = [...coreAgentIds, ...additionalAgentIds].filter((id) => AGENTS_BY_ID.has(id));
     return {
       ...route,
-      selectedAgentIds,
+      leadAgentId: PROJECT_MANAGER_AGENT_ID,
+      approvalAgentId: QA_AGENT_ID,
+      selectedAgentIds: finalSelectedAgentIds,
+      coreAgentIds,
+      additionalAgentIds,
       safety: commonSafety,
-      signals: { health, toolRelevant, designRelevant, technicalRelevant, sensitive, costRelevant },
+      signals: {
+        health,
+        toolRelevant,
+        designRelevant,
+        technicalRelevant,
+        sensitive,
+        costRelevant,
+        securityNeeded,
+        riskNeeded,
+        documentationNeeded,
+        independentReviewNeeded,
+        concreteExtraCount: additionalAgentIds.length,
+        presentationAgentId: finalSelectedAgentIds.includes("communication-agent")
+          ? "communication-agent"
+          : finalSelectedAgentIds.includes("ui-agent") ? "ui-agent" : null,
+      },
     };
   }
 
   const AGENT_ASSIGNMENT_TEMPLATES = Object.freeze({
-    "orchestrator-agent": ["Einsatzleitung und Zusammenführung", "Der Auftrag benötigt eine eindeutige Leitung ohne unnötige Agentenbreite.", "Arbeitsphasen, Abhängigkeiten und Übergaben koordinieren und die Fachbefunde verdichten.", "Ein kompakter Gesamtplan mit Konflikten, Reihenfolge und Entscheidungspunkt.", "Alle ausgewählten Beiträge sind vollständig, widerspruchsfrei und einem nächsten Schritt zugeordnet."],
+    "orchestrator-agent": ["Führung und Koordination", "Der Projektmanager-Agent führt jeden Tageslauf, begrenzt den Umfang und koordiniert alle Übergaben.", "Arbeitsphasen, Abhängigkeiten und Übergaben koordinieren und die Fachbefunde nach der QS-Abnahme verdichten.", "Ein kompakter Gesamtplan mit Konflikten, Reihenfolge und Entscheidungspunkt.", "Alle ausgewählten Beiträge sind vollständig, widerspruchsfrei und einem nächsten Schritt zugeordnet."],
     "project-status-agent": ["Projekt- und Demostand", "Die Auswahl muss vom bestätigten Ist-Stand statt von Annahmen ausgehen.", "Aktuellen Produkt-, Demo- und Projektstand sowie offene Punkte aus der kanonischen Akte verdichten.", "Bestätigtes Standbild mit offenen und ungeklärten Punkten.", "Technische Momentaufnahme und fachliche Freigabe werden klar getrennt."],
     "workflow-agent": ["Ablauf und Abhängigkeiten", "Mehrere Fachprüfungen benötigen eine belastbare Reihenfolge.", "Voraussetzungen, parallele Prüfungen, Wartepunkte und Zusammenführung strukturieren.", "Ausführbarer Ablaufplan ohne Agentenstart.", "Jeder Schritt besitzt Abhängigkeit und Übergabe."],
     "health-compass-agent": ["Health-Fachverantwortung", "Das Fokusprojekt braucht seine vorhandenen fachlichen Grenzen und den Health-Kontext.", "Kernnutzerfluss, offene Fachfragen, Waage/Labor gemäß Projektstand sowie Diagnose- und Heilversprechengrenzen prüfen.", "Health-Fachbefund mit klaren Freigabegrenzen.", "Keine Diagnose, Heilversprechen oder medizinische Freigabe; Ungeklärtes bleibt sichtbar."],
@@ -401,7 +519,7 @@
     "api-agent": ["Technische Machbarkeit", "Technische offene Punkte müssen von fachlichen Entscheidungen getrennt sichtbar sein.", "Datenfluss, UI-/API-Bezug, technische Risiken und spätere Umsetzbarkeit read-only einordnen.", "Technischer Machbarkeitsbefund ohne Codeänderung.", "Keine Repository-Änderung und Codex nur als späteres Werkzeug nach Freigabe."],
     "integration-agent": ["Plugin- und Werkzeugprüfung", "Werkzeuge sollen durch Anforderungen und Qualität statt Bequemlichkeit gewählt werden.", "Fähigkeit, Werkzeugkategorien, Kombinationen, Bearbeitbarkeit, Datenschutz, Kostenart, Skalierung und Ersatzlösung vergleichen.", "Werkzeug-Entscheidungsmatrix mit Kombination und Alternative.", "Kein Tool wird ausgeführt; Canva ist nie automatisch die einzige Wahl."],
     "documentation-agent": ["Wissens- und Projektkontext", "Befunde müssen nachvollziehbar auf bestätigtem Projektwissen beruhen.", "Kanonische Akte, bekannte Entscheidungen und offene Annahmen zu einer Übergabegrundlage strukturieren.", "Quellen- und Kontextübersicht für alle Fachprüfungen.", "Keine lokale Momentaufnahme wird zur zweiten technischen Wahrheit."],
-    "quality-test-agent": ["Qualitätssicherung und Abnahme", "Der Einsatzplan braucht eine unabhängige, messbare Abschlussprüfung.", "Alle Fachbefunde, Grenzen, Übergaben und Akzeptanzkriterien gegen den Ergebniswunsch prüfen.", "QA-Abnahmebericht mit bestanden/offen/blockiert.", "Vollständigkeit 100 Prozent; Design bei Relevanz mindestens 8/10 für Verständnis und Vertrauen."],
+    "quality-test-agent": ["Qualitätsprüfung und Abnahme", "Der QS-/Test-Agent verantwortet Abnahmekriterien und Abschlussprüfung unabhängig von der Projektleitung.", "Alle Fachbefunde, Grenzen, Übergaben und Akzeptanzkriterien gegen den Ergebniswunsch prüfen.", "QS-Abnahmebericht mit bestanden/offen/blockiert.", "Vollständigkeit 100 Prozent; Design bei Relevanz mindestens 8/10 für Verständnis und Vertrauen."],
     "review-agent": ["Unabhängiges Review", "Ein zweiter Blick reduziert Scheinsicherheit und Lücken.", "Ergebnis gegen Ziel, Quellen und Sicherheitsgrenzen spiegeln.", "Reviewbefund mit Widersprüchen und Restlücken.", "Jede Abweichung ist belegt und einer Entscheidung zugeordnet."],
     "strategy-agent": ["Strategische Verantwortung", "Zielrichtung und Wirkung müssen vor einer Entscheidung geklärt sein.", "Optionen, Wirkung, Aufwand und langfristige Folgen strukturieren.", "Strategische Empfehlung mit Alternativen.", "Empfehlung trennt Fakten, Annahmen und Jamals Entscheidung."],
     "decision-agent": ["Entscheidungsvorbereitung", "Jamal benötigt eine klare, nicht technische Entscheidung.", "Maximal drei verständliche Optionen samt Konsequenzen formulieren.", "Entscheidungsvorlage mit Empfehlung.", "Genau eine verständliche Entscheidungsfrage bleibt offen."],
@@ -418,24 +536,28 @@
 
   function buildAgentPlan(blueprint) {
     const leadId = blueprint.leadAgentId;
-    const qaId = blueprint.selectedAgentIds.includes("quality-test-agent") ? "quality-test-agent" : null;
+    const approvalId = blueprint.approvalAgentId || (
+      blueprint.selectedAgentIds.includes(QA_AGENT_ID) ? QA_AGENT_ID : null
+    );
     const prerequisiteIds = blueprint.selectedAgentIds.filter((id) => ["project-status-agent", "health-compass-agent", "product-agent", "documentation-agent"].includes(id));
-    const domainIds = blueprint.selectedAgentIds.filter((id) => id !== leadId && id !== qaId && !prerequisiteIds.includes(id));
+    const domainIds = blueprint.selectedAgentIds.filter((id) => id !== leadId && id !== approvalId && !prerequisiteIds.includes(id));
     return blueprint.selectedAgentIds.map((agentId) => {
       const agent = AGENTS_BY_ID.get(agentId);
       const template = AGENT_ASSIGNMENT_TEMPLATES[agentId] || [agent.role, "Diese Fachperspektive ist für den erkannten Auftrag erforderlich.", `„${agent.role}“ auf den Ergebniswunsch anwenden.`, "Nachvollziehbarer Fachbefund.", "Ergebnis ist prüfbar und hält alle Sicherheitsgrenzen ein."];
       const isLead = agentId === leadId;
-      const isQa = agentId === qaId;
+      const isApproval = agentId === approvalId;
       const isPrerequisite = prerequisiteIds.includes(agentId);
-      const executionMode = isLead ? "final-consolidation" : isQa ? "dependent-review" : isPrerequisite ? "prerequisite" : "parallel";
+      const executionMode = isLead ? "final-consolidation" : isApproval ? "dependent-review" : isPrerequisite ? "prerequisite" : "parallel";
       const dependsOn = isLead
-        ? (qaId ? [qaId] : domainIds)
-        : isQa
+        ? (approvalId ? [approvalId] : domainIds)
+        : isApproval
           ? [...prerequisiteIds, ...domainIds]
           : isPrerequisite ? [] : prerequisiteIds;
       return {
         agentId,
-        agentName: agent.name,
+        agentName: agentId === PROJECT_MANAGER_AGENT_ID
+          ? PROJECT_MANAGER_AGENT_NAME
+          : agentId === "integration-agent" ? TOOL_RADAR_AGENT_NAME : agent.name,
         canonicalRole: agent.role,
         selectionReason: template[1],
         roleInRun: template[0],
@@ -444,9 +566,10 @@
         acceptanceCheck: template[4],
         safetyBoundary: agentId === "integration-agent" ? "Nur interne Auswahl- und Bewertungslogik; keine Plugin-Ausführung oder externe Recherche." : "Nur Planung und Prüfung; keine automatische oder externe Ausführung.",
         dependsOn,
-        handoffTo: isLead ? "jamal" : isQa ? leadId : (qaId || leadId),
+        handoffTo: isLead ? "jamal" : isApproval ? leadId : (approvalId || leadId),
         executionMode,
         toolReviewRequired: agentId === "integration-agent",
+        isApproval,
       };
     });
   }
@@ -461,8 +584,10 @@
     return {
       required,
       responsibleAgentId: required ? "integration-agent" : null,
-      neededCapability: "Ein bearbeitbares, integrierbares Ergebnis mit hoher Qualität und kontrolliertem Datenfluss vorbereiten.",
-      toolCategories: categories,
+      status: required ? "ZUGEWIESEN" : "NICHT_BENOETIGT",
+      statusLabel: required ? "Plugin-/Tool-Radar-Agent zuständig" : "nicht benötigt",
+      neededCapability: required ? "Ein bearbeitbares, integrierbares Ergebnis mit hoher Qualität und kontrolliertem Datenfluss vorbereiten." : "Für diesen Tagesauftrag werden keine Plugins oder Werkzeuge benötigt.",
+      toolCategories: required ? categories : [],
       possibleCombination: required ? categories.slice(0, 3) : [],
       qualityAdvantage: "Spezialisierte Werkzeuge werden kombiniert, wenn dadurch Qualität, Bearbeitbarkeit oder Prüfbarkeit steigt.",
       selectionCriteria: ["Ergebnisqualität", "Integrationsfähigkeit", "Bearbeitbarkeit", "Datenschutz und Datenabfluss", "Kostenart", "Skalierbarkeit"],
@@ -479,11 +604,10 @@
     const taskType = detectTaskType(desiredOutcome);
     const blueprint = proposalBlueprint(taskType, run, desiredOutcome);
     const agentPlan = buildAgentPlan(blueprint);
-    const leadAgent = AGENTS_BY_ID.get(blueprint.leadAgentId);
     const projectName = run.canonicalSnapshot?.displayName || run.focusProjectId;
     const realisticScope = `Heute einen prüfbaren ${taskType === TASK_TYPES[0] ? "Einsatzplan" : "Arbeitsstand"} für „${desiredOutcome}“ vorbereiten; keine automatische Ausführung.`;
     const acceptanceCriterion = taskType === TASK_TYPES[0]
-      ? "Der Einsatzplan deckt Projektstand, Fachgrenzen, Produkt, Risiko, Datenschutz, Qualität, Technik und Werkzeuge mit begründeten Rollen, prüfbaren Ergebnissen und eindeutigen Übergaben ab."
+      ? "Der Einsatzplan deckt Führung, benötigte Fachrollen, Qualität und Abnahme mit begründeten Teilaufträgen, prüfbaren Ergebnissen und eindeutigen Übergaben ab."
       : `Ein nachvollziehbarer Arbeitsstand für „${desiredOutcome}“ liegt mit Prüfnachweis und offenem Entscheidungspunkt vor.`;
     const jamalDecisionQuestion = taskType === TASK_TYPES[0]
       ? (blueprint.signals.health
@@ -501,9 +625,16 @@
       repositoryWorkRequired: blueprint.repositoryWorkRequired,
       canonicalAgentRegistryCount: CANONICAL_AGENTS.length,
       selectedAgentIds: blueprint.selectedAgentIds,
+      coreAgentIds: blueprint.coreAgentIds,
+      additionalAgentIds: blueprint.additionalAgentIds,
+      coreAgentCount: blueprint.coreAgentIds.length,
+      additionalAgentCount: blueprint.additionalAgentIds.length,
       leadAgentId: blueprint.leadAgentId,
-      leadAgent: leadAgent.name,
-      leadAgentRole: leadAgent.role,
+      leadAgent: PROJECT_MANAGER_AGENT_NAME,
+      leadAgentRole: "Führt und koordiniert den Tageslauf; keine automatische Ausführung.",
+      approvalAgentId: blueprint.approvalAgentId || QA_AGENT_ID,
+      approvalAgent: AGENTS_BY_ID.get(blueprint.approvalAgentId || QA_AGENT_ID).name,
+      approvalAgentRole: "Verantwortet Qualitätsprüfung, Abnahmekriterien und Abschlussprüfung.",
       leadSelectionReason: agentPlan.find((item) => item.agentId === blueprint.leadAgentId)?.selectionReason,
       agentPlan,
       excludedAgentCount: CANONICAL_AGENTS.length - blueprint.selectedAgentIds.length,
@@ -621,6 +752,124 @@
     return errors;
   }
 
+  function resolveApprovalAgentId(proposal, options = {}) {
+    const selectedIds = Array.isArray(proposal?.selectedAgentIds) ? proposal.selectedAgentIds : [];
+    const storedId = proposal?.approvalAgentId || null;
+    const allowLegacyFallback = options.allowLegacyFallback === true;
+
+    if (storedId) {
+      if (!AGENTS_BY_ID.has(storedId)) {
+        return { ok: false, approvalAgentId: null, error: "approvalAgentId ist nicht kanonisch." };
+      }
+      if (selectedIds.length > 0 && !selectedIds.includes(storedId)) {
+        return { ok: false, approvalAgentId: null, error: "approvalAgentId fehlt in der Agentenauswahl." };
+      }
+      if (proposal?.leadAgentId && storedId === proposal.leadAgentId) {
+        return { ok: false, approvalAgentId: null, error: "Abnahmeverantwortlicher darf nicht zugleich Gesamtleiter sein." };
+      }
+      // V6.45.0: Abnahme ist ausschließlich der QS-/Test-Agent.
+      if (storedId !== QA_AGENT_ID) {
+        return { ok: false, approvalAgentId: null, error: "approvalAgentId muss quality-test-agent sein." };
+      }
+      return { ok: true, approvalAgentId: storedId, error: null };
+    }
+
+    if (allowLegacyFallback && selectedIds.includes(QA_AGENT_ID) && proposal?.leadAgentId !== QA_AGENT_ID) {
+      return { ok: true, approvalAgentId: QA_AGENT_ID, error: null, legacyFallback: true };
+    }
+
+    if (selectedIds.length > 0) {
+      return { ok: false, approvalAgentId: null, error: "approvalAgentId fehlt." };
+    }
+    return { ok: true, approvalAgentId: null, error: null };
+  }
+
+  function getApprovalAgentDisplay(proposal, options = {}) {
+    const resolved = resolveApprovalAgentId(proposal, { allowLegacyFallback: options.allowLegacyFallback !== false });
+    if (!resolved.ok || !resolved.approvalAgentId) {
+      return {
+        ok: false,
+        approvalAgentId: null,
+        approvalAgent: "UNGEKLÄRT",
+        approvalAgentRole: "Abnahmeverantwortung ungeklärt.",
+        error: resolved.error || "Abnahmeverantwortlicher fehlt.",
+        legacyFallback: Boolean(resolved.legacyFallback),
+      };
+    }
+    const agent = AGENTS_BY_ID.get(resolved.approvalAgentId);
+    return {
+      ok: true,
+      approvalAgentId: resolved.approvalAgentId,
+      approvalAgent: agent?.name || "QS-/Test-Agent",
+      approvalAgentRole: "Verantwortet Qualitätsprüfung, Abnahmekriterien und Abschlussprüfung.",
+      error: null,
+      legacyFallback: Boolean(resolved.legacyFallback),
+    };
+  }
+
+  function normalizeRolePartitions(proposal) {
+    const selectedIds = Array.isArray(proposal?.selectedAgentIds) ? proposal.selectedAgentIds : [];
+    const hasCore = Array.isArray(proposal?.coreAgentIds);
+    const hasAdditional = Array.isArray(proposal?.additionalAgentIds);
+    if (hasCore && hasAdditional) {
+      return {
+        coreAgentIds: proposal.coreAgentIds.slice(),
+        additionalAgentIds: proposal.additionalAgentIds.slice(),
+        legacyFallback: false,
+      };
+    }
+    // Legacy ohne Rollenlisten: deterministisch erste fünf als Kern, Rest als Zusatz.
+    return {
+      coreAgentIds: selectedIds.slice(0, 5),
+      additionalAgentIds: selectedIds.slice(5),
+      legacyFallback: true,
+    };
+  }
+
+  function validateRolePartitions(proposal, selectedIds) {
+    const hasCore = Array.isArray(proposal?.coreAgentIds);
+    const hasAdditional = Array.isArray(proposal?.additionalAgentIds);
+    if (!hasCore && !hasAdditional) return [];
+    if (hasCore !== hasAdditional) {
+      return ["Kern- und Zusatzrollen müssen gemeinsam vorliegen."];
+    }
+
+    const core = proposal.coreAgentIds;
+    const additional = proposal.additionalAgentIds;
+    const errors = [];
+
+    if (new Set(core).size !== core.length) errors.push("coreAgentIds enthält Duplikate.");
+    if (new Set(additional).size !== additional.length) errors.push("additionalAgentIds enthält Duplikate.");
+
+    const coreSet = new Set(core);
+    const additionalSet = new Set(additional);
+    for (const id of coreSet) {
+      if (additionalSet.has(id)) {
+        errors.push("Kern- und Zusatzrollen überschneiden sich.");
+        break;
+      }
+    }
+
+    const reunited = [...core, ...additional];
+    if (reunited.some((id) => !AGENTS_BY_ID.has(id))) {
+      errors.push("Kern- oder Zusatzrolle ist nicht kanonisch.");
+    }
+    if (reunited.some((id) => !selectedIds.includes(id))) {
+      errors.push("Kern- oder Zusatzrolle fehlt in der Agentenauswahl.");
+    }
+
+    const selectedSet = new Set(selectedIds);
+    const unionSet = new Set(reunited);
+    if (selectedIds.some((id) => !unionSet.has(id))) {
+      errors.push("Ausgewählter Agent fehlt in Kern- und Zusatzrollen.");
+    }
+    if (unionSet.size !== selectedSet.size || reunited.length !== selectedIds.length) {
+      errors.push("Kern- und Zusatzrollen passen nicht zur Agentenauswahl.");
+    }
+    if (core.length > 5) errors.push("Mehr als fünf Kernagenten sind unzulässig.");
+    return errors;
+  }
+
   function validateAgentPlan(proposal) {
     if (!proposal?.selectedAgentIds) return [];
     const errors = [];
@@ -628,8 +877,33 @@
     if (!Array.isArray(selectedIds) || selectedIds.length === 0) return ["Agentenauswahl fehlt."];
     if (new Set(selectedIds).size !== selectedIds.length) errors.push("Agentenauswahl enthält Duplikate.");
     if (selectedIds.some((id) => !AGENTS_BY_ID.has(id))) errors.push("Agentenauswahl enthält einen nicht-kanonischen Agenten.");
-    if (!selectedIds.includes(proposal.leadAgentId)) errors.push("Hauptverantwortlicher fehlt in der Agentenauswahl.");
-    if (!Array.isArray(proposal.agentPlan) || proposal.agentPlan.length !== selectedIds.length) errors.push("Strukturierter Agentenplan ist unvollständig.");
+    if (!proposal.leadAgentId || !selectedIds.includes(proposal.leadAgentId)) {
+      errors.push("Hauptverantwortlicher fehlt in der Agentenauswahl.");
+    }
+    if (proposal.leadAgentId && proposal.leadAgentId !== PROJECT_MANAGER_AGENT_ID) {
+      errors.push("leadAgentId muss orchestrator-agent sein.");
+    }
+
+    const approval = resolveApprovalAgentId(proposal, { allowLegacyFallback: true });
+    if (!approval.ok) errors.push(approval.error);
+    else if (approval.approvalAgentId) {
+      if (!selectedIds.includes(approval.approvalAgentId)) {
+        errors.push("approvalAgentId fehlt in der Agentenauswahl.");
+      }
+      if (approval.approvalAgentId === proposal.leadAgentId) {
+        errors.push("Abnahmeverantwortlicher darf nicht zugleich Gesamtleiter sein.");
+      }
+      const expectedName = AGENTS_BY_ID.get(approval.approvalAgentId)?.name;
+      if (proposal.approvalAgent && expectedName && proposal.approvalAgent !== expectedName) {
+        errors.push("approvalAgent widerspricht approvalAgentId.");
+      }
+    }
+
+    errors.push(...validateRolePartitions(proposal, selectedIds));
+
+    if (!Array.isArray(proposal.agentPlan) || proposal.agentPlan.length !== selectedIds.length) {
+      errors.push("Strukturierter Agentenplan ist unvollständig.");
+    }
     (proposal.agentPlan || []).forEach((item) => {
       ["agentId", "selectionReason", "roleInRun", "subtask", "expectedResult", "acceptanceCheck", "safetyBoundary", "executionMode"].forEach((field) => {
         if (!item?.[field]) errors.push(`${item?.agentId || "Agent"}: ${field} fehlt.`);
@@ -647,16 +921,17 @@
   function refreshAgentReviewPhase(phaseValue, proposal) {
     const phase = createAgentReviewPhase(phaseValue);
     const leadId = proposal?.leadAgentId;
-    const qaId = proposal?.selectedAgentIds?.includes("quality-test-agent") ? "quality-test-agent" : null;
+    const approval = resolveApprovalAgentId(proposal, { allowLegacyFallback: true });
+    const approvalId = approval.ok ? approval.approvalAgentId : null;
     const acceptedIds = new Set(phase.workItems.filter((item) => item.status === "ACCEPTED").map((item) => item.agentId));
 
     phase.workItems = phase.workItems.map((item) => {
       if (["ACCEPTED", "BLOCKED", "RESULT_RECORDED", "REVIEW_REQUIRED"].includes(item.status)) return item;
       if (item.agentId === leadId) {
-        return { ...item, status: qaId && acceptedIds.has(qaId) ? "READY" : "WAITING" };
+        return { ...item, status: approvalId && acceptedIds.has(approvalId) ? "READY" : "WAITING" };
       }
-      if (item.agentId === qaId) {
-        const required = phase.workItems.filter((entry) => entry.agentId !== leadId && entry.agentId !== qaId);
+      if (approvalId && item.agentId === approvalId) {
+        const required = phase.workItems.filter((entry) => entry.agentId !== leadId && entry.agentId !== approvalId);
         const blockers = required.filter((entry) => entry.status === "BLOCKED");
         return { ...item, status: blockers.length === 0 && required.every((entry) => acceptedIds.has(entry.agentId)) ? "READY" : "WAITING" };
       }
@@ -664,8 +939,8 @@
       return { ...item, status: dependenciesMet ? "READY" : "WAITING" };
     });
 
-    const domainItems = phase.workItems.filter((item) => item.agentId !== leadId && item.agentId !== qaId);
-    const qaItem = phase.workItems.find((item) => item.agentId === qaId);
+    const domainItems = phase.workItems.filter((item) => item.agentId !== leadId && item.agentId !== approvalId);
+    const qaItem = phase.workItems.find((item) => item.agentId === approvalId);
     const leadItem = phase.workItems.find((item) => item.agentId === leadId);
     phase.qa.availableAgentIds = domainItems.filter((item) => item.status === "ACCEPTED").map((item) => item.agentId);
     phase.qa.missingAgentIds = domainItems.filter((item) => item.status !== "ACCEPTED" && item.status !== "BLOCKED").map((item) => item.agentId);
@@ -687,6 +962,14 @@
     if (errors.length > 0) throw new Error(errors.join(" "));
     if (values.approved !== true) throw new Error("Jamals ausdrückliche Freigabe ist erforderlich.");
     if (next.agentReviewPhase?.preparedAt) throw new Error("Die Agenten-Prüfphase ist bereits vorbereitet.");
+    const approval = resolveApprovalAgentId(next.workProposal, { allowLegacyFallback: true });
+    if (!approval.ok || !approval.approvalAgentId) {
+      throw new Error(approval.error || "Abnahmeverantwortlicher fehlt.");
+    }
+    const approvalDisplay = getApprovalAgentDisplay(next.workProposal, { allowLegacyFallback: true });
+    next.workProposal.approvalAgentId = approvalDisplay.approvalAgentId;
+    next.workProposal.approvalAgent = approvalDisplay.approvalAgent;
+    next.workProposal.approvalAgentRole = approvalDisplay.approvalAgentRole;
     const now = isoDateTime(values.now || new Date());
     const phase = createAgentReviewPhase({
       status: "PREPARED",
@@ -705,6 +988,7 @@
         handoffTo: item.handoffTo,
         executionMode: item.executionMode,
         isLead: item.agentId === next.workProposal.leadAgentId,
+        isApproval: item.agentId === approval.approvalAgentId,
         status: item.executionMode === "prerequisite" ? "READY" : "WAITING",
         resultSource: "Manuelle Rückführung in der KI-Unternehmenszentrale",
         resultText: "",
@@ -741,7 +1025,7 @@
       if (values.pilotAgentId !== agentId) throw new Error("Runtime-Übernahme gehört nicht zum Pilot-Agenten.");
       if (item.agentId !== values.pilotAgentId) throw new Error("Runtime-Übernahme passt nicht zur Arbeitskarte.");
     }
-    if ((item.isLead || item.agentId === "quality-test-agent") && !runtimePilotAcceptance) {
+    if ((item.isLead || item.isApproval || item.agentId === resolveApprovalAgentId(next.workProposal, { allowLegacyFallback: true }).approvalAgentId) && !runtimePilotAcceptance) {
       throw new Error("QA und Zusammenführung besitzen eigene kontrollierte Rückführungen.");
     }
     if (item.resultConfirmedAt) throw new Error("Dieses Ergebnis wurde bereits bestätigt und wird nicht überschrieben.");
@@ -766,7 +1050,11 @@
   function recordQaResult(run, values = {}) {
     const next = clone(run);
     const phase = getAgentReviewPhase(next);
-    const item = phase.workItems.find((entry) => entry.agentId === "quality-test-agent");
+    const approval = resolveApprovalAgentId(next.workProposal, { allowLegacyFallback: true });
+    if (!approval.ok || !approval.approvalAgentId) {
+      throw new Error(approval.error || "Abnahmeverantwortlicher fehlt.");
+    }
+    const item = phase.workItems.find((entry) => entry.agentId === approval.approvalAgentId);
     if (!item || item.status !== "READY") throw new Error("QA ist erst nach allen notwendigen Agentenbefunden bereit.");
     if (item.resultConfirmedAt) throw new Error("Der QA-Befund wurde bereits bestätigt.");
     const qaStatus = singleText(values.status, "qaStatus", true).toUpperCase();
@@ -914,7 +1202,11 @@
         `Auftragstyp: ${proposal.taskType || "UNGEKLÄRT"}`,
         `Verstandenes Ziel: ${proposal.understoodGoal || outcome.desiredOutcome || "UNGEKLÄRT"}`,
         `Realistischer Tagesumfang: ${proposal.realisticDayScope || "UNGEKLÄRT"}`,
-        `Hauptverantwortung: ${proposal.leadAgent || "UNGEKLÄRT"} (${proposal.leadAgentId || "UNGEKLÄRT"})`,
+        `Hauptverantwortung: ${proposal.leadAgent || PROJECT_MANAGER_AGENT_NAME} (${proposal.leadAgentId || PROJECT_MANAGER_AGENT_ID})`,
+        (() => {
+          const approvalDisplay = getApprovalAgentDisplay(proposal);
+          return `Abnahmeverantwortung: ${approvalDisplay.approvalAgent} (${approvalDisplay.approvalAgentId || QA_AGENT_ID})`;
+        })(),
         "",
         "Ausgewählte Agenten, Begründungen, Teilaufträge und Übergaben:",
         ...(proposal.agentPlan || []).map((item) => [
@@ -927,7 +1219,9 @@
         ].join("\n")),
         "",
         "Plugin- und Werkzeugprüfung:",
+        `- Status: ${proposal.toolReview?.statusLabel || (proposal.toolReview?.required ? "Plugin-/Tool-Radar-Agent zuständig" : "nicht benötigt")}`,
         `- Erforderlich: ${proposal.toolReview?.required ? "ja" : "nein"}`,
+        `- Zuständig: ${proposal.toolReview?.responsibleAgentId ? TOOL_RADAR_AGENT_NAME : "keine Agentenzuweisung"}`,
         ...textList(proposal.toolReview?.toolCategories).map((item) => `- Kategorie: ${item}`),
         `- Auswahlgrenze: ${proposal.toolReview?.approvalBoundary || "Keine Werkzeugausführung."}`,
         "",
@@ -1093,6 +1387,9 @@
     recordAgentWorkResult,
     recordOrchestrationSummary,
     recordQaResult,
+    resolveApprovalAgentId,
+    getApprovalAgentDisplay,
+    normalizeRolePartitions,
     setAgentReviewApproval,
     setAgentReviewFinalDecision,
     setClosure,

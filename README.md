@@ -3,7 +3,7 @@
 ## Status
 
 - **V1 lokal fertig und betriebsbereit**
-- Version: **V6.44.1**
+- Version: **V6.45.0**
 - Betrieb nur lokal auf diesem Mac – kein Cloud- oder Deploymentbetrieb
 
 ## Projektordner

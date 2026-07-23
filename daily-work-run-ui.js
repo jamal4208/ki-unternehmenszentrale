@@ -275,11 +275,11 @@ function renderDailyWorkRunPreparation(run) {
         </details>
       </section>
     </form>
-    ${proposal ? renderDailyWorkProposal(proposal) : ""}
+    ${proposal ? renderDailyWorkProposal(proposal, run) : ""}
   `;
 }
 
-function renderDailyWorkProposal(proposal) {
+function renderDailyWorkProposal(proposal, run) {
   const plan = proposal.agentPlan || [];
   const nameById = new Map(plan.map((item) => [item.agentId, item.agentName || item.agent || item.agentId]));
   const modeLabel = (mode) => ({
@@ -311,32 +311,81 @@ function renderDailyWorkProposal(proposal) {
   `).join("");
   const workStructure = proposal.workStructure || {};
   const toolReview = proposal.toolReview || {};
+  const reviewPrepared = Boolean(run?.agentReviewPhase?.preparedAt);
+  const showPrimaryPrepare = run?.status === "READY_FOR_CODEX" && !reviewPrepared;
+  const rolePartitions = dailyWorkRunApi()?.normalizeRolePartitions?.(proposal) || {
+    coreAgentIds: Array.isArray(proposal.coreAgentIds) ? proposal.coreAgentIds : (proposal.selectedAgentIds || []).slice(0, 5),
+    additionalAgentIds: Array.isArray(proposal.additionalAgentIds)
+      ? proposal.additionalAgentIds
+      : (proposal.selectedAgentIds || []).slice(5),
+  };
+  const coreCount = rolePartitions.coreAgentIds.length;
+  const additionalCount = rolePartitions.additionalAgentIds.length;
+  const coreLabel = additionalCount > 0
+    ? `${coreCount} Kernagenten · + ${additionalCount} Zusatzrollen`
+    : `${coreCount} Kernagenten`;
+  const approvalDisplay = dailyWorkRunApi()?.getApprovalAgentDisplay?.(proposal) || {
+    approvalAgentId: proposal.approvalAgentId || "quality-test-agent",
+    approvalAgent: "QS-/Test-Agent",
+    approvalAgentRole: "Verantwortet Qualitätsprüfung, Abnahmekriterien und Abschlussprüfung.",
+  };
+  const nextStepLabel = showPrimaryPrepare
+    ? "Prüfphase vorbereiten"
+    : reviewPrepared
+      ? "Manuelle Prüfkarten bearbeiten und Befunde zurückführen"
+      : "Arbeitsvorschlag prüfen";
   return `
     <section class="daily-work-run-proposal" aria-labelledby="daily-work-proposal-title">
       <header><div><p class="eyebrow">Automatisch abgeleitet · nur Vorschlag</p><h4 id="daily-work-proposal-title">Arbeitsvorschlag</h4></div><span class="daily-work-run-mode">${deps.escapeHtml(proposal.taskType)}</span></header>
       ${proposal.repositoryWorkRequired === false ? `<p class="daily-work-run-no-repo"><strong>Kein Codex-/Repository-Auftrag.</strong> Dieser Vorschlag plant Rollen und Arbeit, ohne technische Ausführung.</p>` : ""}
+      <article class="daily-work-run-notice daily-work-run-primary-next-action">
+        <p class="eyebrow">Oben arbeiten. Unten nachschauen.</p>
+        <strong>${deps.escapeHtml(nextStepLabel)}</strong>
+        <dl class="daily-work-run-facts daily-work-run-guide-facts">
+          <div><dt>Fokusprojekt</dt><dd>${deps.escapeHtml(run?.canonicalSnapshot?.displayName || run?.focusProjectId || "UNGEKLÄRT")}</dd></div>
+          <div><dt>Gewünschtes Ergebnis</dt><dd>${deps.escapeHtml(proposal.understoodGoal || run?.dailyOutcome?.desiredOutcome || "UNGEKLÄRT")}</dd></div>
+          <div><dt>Hauptverantwortlicher</dt><dd><strong>${deps.escapeHtml(proposal.leadAgent || "Projektmanager-Agent")}</strong></dd></div>
+          <div><dt>Kernagenten</dt><dd>${deps.escapeHtml(coreLabel)} · ${deps.escapeHtml(String(proposal.excludedAgentCount || Math.max(0, (proposal.canonicalAgentRegistryCount || 25) - (proposal.selectedAgentIds?.length || 0))))} nicht benötigt</dd></div>
+          <div><dt>Nächster Schritt</dt><dd>${deps.escapeHtml(nextStepLabel)}</dd></div>
+          <div><dt>Sicherheitsgrenze</dt><dd>Keine Agentenausführung · keine externe Aktion · nur interne Vorbereitung</dd></div>
+        </dl>
+        ${showPrimaryPrepare ? `
+          <p>Noch kein Agent gestartet. Keine externe Aktion. Es werden nur interne Prüfkarten vorbereitet.</p>
+          <div class="daily-work-run-actions">
+            <button class="primary-button" type="button" data-prepare-agent-review>Prüfphase vorbereiten</button>
+          </div>
+        ` : `
+          <p>${reviewPrepared
+            ? "Die Prüfkarten sind vorbereitet. Unten folgen die Detailkarten zur manuellen Bearbeitung."
+            : "Der Arbeitsvorschlag ist vorbereitet. Details und Sicherheitsgrenzen stehen darunter."}</p>
+        `}
+      </article>
       <dl class="daily-work-run-facts">
         <div><dt>Verstandenes Ziel</dt><dd>${deps.escapeHtml(proposal.understoodGoal)}</dd></div>
         <div><dt>Realistischer Tagesumfang</dt><dd>${deps.escapeHtml(proposal.realisticDayScope)}</dd></div>
         <div><dt>Hauptverantwortlicher Agent</dt><dd><strong>${deps.escapeHtml(proposal.leadAgent)}</strong><br>${deps.escapeHtml(proposal.leadSelectionReason || proposal.leadAgentRole || "Einsatzleitung")}</dd></div>
+        <div><dt>Abnahmeverantwortlicher Agent</dt><dd><strong>${deps.escapeHtml(approvalDisplay.approvalAgent)}</strong><br>${deps.escapeHtml(approvalDisplay.approvalAgentRole)}</dd></div>
         <div><dt>Abnahmekriterium</dt><dd>${deps.escapeHtml(proposal.acceptanceCriterion)}</dd></div>
         ${proposal.selectedAgentIds ? `<div><dt>Bewusst ausgewählt</dt><dd>${proposal.selectedAgentIds.length} von ${proposal.canonicalAgentRegistryCount} kanonischen Agenten</dd></div><div><dt>Bewusst nicht benötigt</dt><dd>${proposal.excludedAgentCount} · ${deps.escapeHtml(proposal.exclusionReason)}</dd></div>` : ""}
       </dl>
       <div><h5>Benötigte Agenten, Rollen und Teilaufgaben</h5><div class="daily-work-run-agent-grid">${agents}</div></div>
       <div class="daily-work-run-proposal-grid">
         <div><h5>Arbeitsstruktur</h5>
-          <p><b>Muss vorher erfolgen:</b> ${(workStructure.prerequisites || []).map(displayAgent).map(escapeHtml).join(", ") || "keine"}</p>
-          <p><b>Parallel möglich:</b> ${(workStructure.parallelTasks || []).map(displayAgent).map(escapeHtml).join(", ") || "keine"}</p>
-          <p><b>Wartet auf Ergebnisse:</b> ${(workStructure.dependentReviews || []).map(displayAgent).map(escapeHtml).join(", ") || "keine"}</p>
+          <p><b>Muss vorher erfolgen:</b> ${(workStructure.prerequisites || []).map(displayAgent).map((name) => deps.escapeHtml(name)).join(", ") || "keine"}</p>
+          <p><b>Parallel möglich:</b> ${(workStructure.parallelTasks || []).map(displayAgent).map((name) => deps.escapeHtml(name)).join(", ") || "keine"}</p>
+          <p><b>Wartet auf Ergebnisse:</b> ${(workStructure.dependentReviews || []).map(displayAgent).map((name) => deps.escapeHtml(name)).join(", ") || "keine"}</p>
           <p><b>Zusammenführung:</b> ${deps.escapeHtml(displayAgent(workStructure.finalConsolidation))}</p>
         </div>
         <div><h5>Plugin- und Werkzeugprüfung</h5>
-          <p><b>Zuständig:</b> ${deps.escapeHtml(displayAgent(toolReview.responsibleAgentId))}</p>
+          <p><b>Status:</b> ${deps.escapeHtml(toolReview.statusLabel || (toolReview.required ? "Plugin-/Tool-Radar-Agent zuständig" : "nicht benötigt"))}</p>
+          ${toolReview.required ? `<p><b>Zuständig:</b> ${deps.escapeHtml(displayAgent(toolReview.responsibleAgentId))}</p>` : `<p><b>Zuständig:</b> keine Agentenzuweisung</p>`}
           <p>${deps.escapeHtml(toolReview.neededCapability || "Für diesen Umfang ist keine eigene Werkzeugprüfung nötig.")}</p>
-          ${dailyWorkRunList(toolReview.toolCategories || proposal.toolCategories)}
-          <p><b>Auswahl:</b> ${deps.escapeHtml((toolReview.selectionCriteria || []).join(" · "))}</p>
-          <p><b>Grenze:</b> ${deps.escapeHtml(toolReview.approvalBoundary || "Keine Werkzeugausführung.")}</p>
-          <p><b>Ersatz:</b> ${deps.escapeHtml(toolReview.fallback || "Manuelle lokale Vorlage.")}</p>
+          ${toolReview.required ? `
+            ${dailyWorkRunList(toolReview.toolCategories || proposal.toolCategories, "Keine Werkzeugkategorien angegeben.")}
+            <p><b>Auswahl:</b> ${deps.escapeHtml((toolReview.selectionCriteria || []).join(" · ") || "Keine Auswahlkriterien.")}</p>
+            <p><b>Grenze:</b> ${deps.escapeHtml(toolReview.approvalBoundary || "Keine Werkzeugausführung.")}</p>
+            <p><b>Ersatz:</b> ${deps.escapeHtml(toolReview.fallback || "Manuelle lokale Vorlage.")}</p>
+          ` : ""}
         </div>
         <div><h5>Dateien und Datenbereiche</h5>${dailyWorkRunList(proposal.fileOrDataAreas)}</div>
         <div><h5>Tests und Qualität</h5>${dailyWorkRunList(proposal.testsAndQuality)}</div>
@@ -397,7 +446,7 @@ function renderAgentRuntimePilot(run) {
     <section class="daily-work-runtime-pilot" aria-labelledby="daily-agent-runtime-title">
       <header>
         <div>
-          <p class="eyebrow">V6.44.1 · kontrollierte Laufzeit</p>
+          <p class="eyebrow">V6.45.0 · kontrollierte Laufzeit</p>
           <h4 id="daily-agent-runtime-title">Agenten-Laufzeit-Pilot</h4>
         </div>
         <span class="daily-work-run-mode">${deps.escapeHtml(pilot ? statusLabels[pilot.status] || pilot.status : "Noch nicht vorbereitet")}</span>
@@ -511,7 +560,10 @@ function renderDailyWorkAgentReviewPhase(run) {
   const displayAgent = (id) => id === "jamal" ? "Jamal" : (nameById.get(id) || id || "UNGEKLÄRT");
   const renderWorkItem = (item) => {
     const ready = item.status === "READY";
-    const isSpecial = item.isLead || item.agentId === "quality-test-agent";
+    const approvalDisplay = dailyWorkRunApi()?.getApprovalAgentDisplay?.(run.workProposal) || {
+      approvalAgentId: run.workProposal?.approvalAgentId || "quality-test-agent",
+    };
+    const isSpecial = item.isLead || item.isApproval || item.agentId === approvalDisplay.approvalAgentId;
     return `
       <article class="daily-work-review-card${item.isLead ? " is-lead" : ""}" data-agent-work-card="${deps.escapeHtml(item.agentId)}">
         <header>
@@ -550,6 +602,7 @@ function renderDailyWorkAgentReviewPhase(run) {
     `;
   };
   if (!phase.preparedAt) {
+    const primaryPrepareShownAbove = Boolean(run.workProposal);
     return `
       <section class="daily-work-review-phase" aria-labelledby="daily-agent-review-title">
         <header><div><p class="eyebrow">V6.40.3 · kontrolliert und lokal</p><h4 id="daily-agent-review-title">Kontrollierte Agenten-Prüfphase</h4></div><span class="daily-work-run-mode">${deps.escapeHtml(statusLabels[phase.status])}</span></header>
@@ -557,7 +610,9 @@ function renderDailyWorkAgentReviewPhase(run) {
         <p>Der Button bereitet ausschließlich interne Arbeitskarten vor. Er startet keinen Agenten.</p>
         <div class="daily-work-run-boundaries"><span>Noch keine Agentenausführung</span><span>Keine Plugin-Ausführung</span><span>Keine externe Aktion</span></div>
         <div class="daily-work-run-actions">
-          <button class="primary-button" type="button" data-prepare-agent-review>Prüfphase vorbereiten</button>
+          ${primaryPrepareShownAbove
+            ? `<button class="secondary-button" type="button" data-prepare-agent-review>Prüfphase vorbereiten</button>`
+            : `<button class="primary-button" type="button" data-prepare-agent-review>Prüfphase vorbereiten</button>`}
           <button class="secondary-button" type="button" data-adjust-agent-review>Einsatzplan noch anpassen</button>
           <button class="secondary-button" type="button" data-decline-agent-review>nicht starten</button>
         </div>
@@ -568,7 +623,12 @@ function renderDailyWorkAgentReviewPhase(run) {
 
   const prerequisites = phase.workItems.filter((item) => item.executionMode === "prerequisite");
   const parallel = phase.workItems.filter((item) => item.executionMode === "parallel");
-  const qaItem = phase.workItems.find((item) => item.agentId === "quality-test-agent");
+  const approvalDisplay = dailyWorkRunApi()?.getApprovalAgentDisplay?.(run.workProposal) || {
+    approvalAgentId: run.workProposal?.approvalAgentId || "quality-test-agent",
+    approvalAgent: "QS-/Test-Agent",
+  };
+  const approvalAgentId = approvalDisplay.approvalAgentId;
+  const qaItem = phase.workItems.find((item) => item.agentId === approvalAgentId || item.isApproval);
   const leadItem = phase.workItems.find((item) => item.agentId === run.workProposal.leadAgentId);
   const qaReady = qaItem?.status === "READY";
   const leadReady = leadItem?.status === "READY";
@@ -577,7 +637,7 @@ function renderDailyWorkAgentReviewPhase(run) {
     <section class="daily-work-review-phase" aria-labelledby="daily-agent-review-title">
       <header><div><p class="eyebrow">V6.40.3 · kontrolliert und lokal</p><h4 id="daily-agent-review-title">Kontrollierte Agenten-Prüfphase</h4></div><span class="daily-work-run-mode">${deps.escapeHtml(statusLabels[phase.status])}</span></header>
       <article class="daily-work-run-notice"><strong>Die Agentenaufträge sind vorbereitet. Es wurde noch kein Agent ausgeführt.</strong><p>Freigabe: von Jamal freigegeben · interne Prüfaufträge: vorbereitet · alle Befunde werden ausschließlich manuell zurückgeführt.</p></article>
-      <div class="daily-work-run-boundaries"><span>Noch keine Agentenausführung</span><span>13 interne Karten beim Health-Pilot</span><span>Reloadfest lokal gespeichert</span></div>
+      <div class="daily-work-run-boundaries"><span>Noch keine Agentenausführung</span><span>${phase.workItems.length} bedarfsgeleitete interne Karten</span><span>Reloadfest lokal gespeichert</span></div>
       <div class="daily-work-review-group"><h5>Grundlagen · kann sofort vorbereitet werden</h5><div class="daily-work-review-grid">${prerequisites.map(renderWorkItem).join("")}</div></div>
       <div class="daily-work-review-group"><h5>Parallele Fachprüfungen · nach bestätigten Grundlagen</h5><div class="daily-work-review-grid">${parallel.map(renderWorkItem).join("")}</div></div>
       ${qaItem ? `
@@ -601,7 +661,7 @@ function renderDailyWorkAgentReviewPhase(run) {
         </div>
       ` : ""}
       ${leadItem ? `
-        <div class="daily-work-review-group"><h5>Orchestrator-Zusammenführung</h5>${renderWorkItem(leadItem)}
+        <div class="daily-work-review-group"><h5>Projektmanager-Zusammenführung</h5>${renderWorkItem(leadItem)}
           ${leadReady ? `<form class="daily-work-review-special-form" id="daily-work-review-orchestration-form">
             <label>Bestätigte Befunde<textarea name="confirmedFindings" rows="4" required></textarea></label>
             <label>Offene Punkte<textarea name="openPoints" rows="2"></textarea></label>
@@ -841,7 +901,7 @@ function renderDailyWorkRun() {
       <article class="daily-work-run-start-card">
         <strong>Dieser gespeicherte Lauf ist nach der Vorschlagserstellung nicht mehr editierbar.</strong>
         <p>Beginne einen neuen Tageslauf, um einen neuen Ergebniswunsch einzugeben. Der vorhandene Lauf bleibt vollständig erhalten.</p>
-        <button class="primary-button" type="button" data-start-daily-work-run>Neuen Tageslauf beginnen</button>
+        <button class="secondary-button" type="button" data-start-daily-work-run>Neuen Tageslauf beginnen</button>
       </article>
     ` : ""}
     ${dailyWorkRunUiState.error ? `<p class="daily-work-run-error">${deps.escapeHtml(dailyWorkRunUiState.error)}</p>` : ""}

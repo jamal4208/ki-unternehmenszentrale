@@ -1,5 +1,13 @@
 # MIGRATION PLAN
 
+## V6.45.0 – V1-Finish-Sprint für den geführten Tageslauf
+
+V6.45.0 ändert weder Speicherformat noch API. Vorhandene Tagesläufe bleiben lesbar. Neue Arbeitsvorschläge führen `orchestrator-agent` sichtbar und fachlich als Projektmanager-Agent; `approvalAgentId` ist die einzige verbindliche Abnahmequelle und muss `quality-test-agent` sein. Anzeigename und Rolle werden aus der ID und dem kanonischen Register abgeleitet; widersprüchliche `approvalAgent`-Textfelder werden abgewiesen. Die Auswahl trennt `coreAgentIds` (höchstens fünf, eindeutige IDs) und `additionalAgentIds` (keine Überschneidung, exakte Mengenabdeckung von `selectedAgentIds`). UI- und Kommunikations-Agent werden XOR gewählt. Explizite Risiko-Signale wählen den Risiko-Agenten; Datenschutz allein nicht. Zusätzliche Rollen entstehen ausschließlich aus konkreten Ziel-, Risiko-, Daten-, Dokumentations-, Technik-, Kosten- oder Werkzeugsignalen.
+
+`toolReview` ergänzt kompatibel `status` und `statusLabel`. Ohne Werkzeugbedarf gilt `NICHT_BENOETIGT` / „nicht benötigt“ ohne Agentenzuweisung; bei Bedarf bleibt `integration-agent` als Plugin-/Tool-Radar-Agent zuständig. Die Oberfläche zeigt nach Vorschlagserstellung oben die Hauptaktion „Prüfphase vorbereiten“ mit kompakter Führung. Es gibt keine automatische Migration bestehender localStorage-Daten und keine Plugin-, Agenten-, Codex-, Repository- oder externe Ausführung. Autonomie- und Sicherheitsgrenzen bleiben unverändert.
+
+Rückfall: uncommittete Änderungen kontrolliert einzeln zurücknehmen; Browserdaten nicht löschen und kein `git reset` verwenden.
+
 ## V6.44.1 – Health-Verifizierungsstand synchronisieren
 
 V6.44.1 führt kein neues Speicherformat, keine neue Route und keine neue Runtime ein. Ausgangscommit der Zentrale: `b2f618e`. Health-Momentaufnahme: vorher `bc98b5c`, jetzt `28cdcf7` (PR #1 / `8eadc46`).

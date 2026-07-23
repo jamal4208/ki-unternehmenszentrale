@@ -1,6 +1,12 @@
 # PROJECT MASTER
 
-## Verbindlicher Versionsstand V6.44.1
+## Verbindlicher Versionsstand V6.45.0
+
+V6.45.0 bündelt den V1-Finish-Sprint für den geführten Tageslauf. Der Projektmanager-Agent führt und koordiniert jetzt durchgehend; der QS-/Test-Agent verantwortet Qualitätsprüfung, Abnahmekriterien und Abschlussprüfung über die verbindliche Quelle `approvalAgentId` und übernimmt keine Führungsrolle. Normale Tagesläufe verwenden höchstens fünf Kernagenten plus optional begründete Zusatzrollen. UI- und Kommunikations-Agent werden XOR gewählt. Explizite Risikoaufträge wählen den Risiko-Agenten; Datenschutz allein tut das nicht. Plugin- und Werkzeugprüfung ist entweder dem Plugin-/Tool-Radar-Agenten zugewiesen oder ausdrücklich als „nicht benötigt“ ohne Agentenzuweisung markiert. Direkt nach der Planerstellung steht die primäre Aktion „Prüfphase vorbereiten“ mit kompakter Führung und den unveränderten Ausführungsgrenzen oben bereit. V6.45.0 ist bis zum Commit ein lokaler Finish-Kandidat auf Basis von `5602cfa`.
+
+Keine API, kein Speicherformat und keine Runtime-Autonomie wurden erweitert. Agenten-, Codex-, Repository-, Plugin- und externe Ausführung, Deployment, automatische Freigaben sowie automatische Git-Aktionen bleiben blockiert.
+
+## Vorheriger Versionsstand V6.44.1
 
 V6.44.1 synchronisiert ausschließlich die kanonische technische Health-Momentaufnahme mit dem bestätigten Health-Stand `28cdcf7` (PR #1, Arbeitscommit `8eadc46`). Ausgangscommit der Zentrale: `b2f618e` (V6.44.0). **V1 lokal fertig und betriebsbereit** bleibt erhalten.
 
@@ -53,7 +59,7 @@ V6.41.0 ergänzt eine echte lokale Datensicherung als eigenständiges Modul `loc
 
 V6.40.3 ergänzt den abgenommenen Agenten-Einsatzplan um eine kontrollierte, ausschließlich lokale Agenten-Prüfphase. Nach Jamals ausdrücklicher Freigabe entstehen interne Arbeitskarten für genau die ausgewählten Agenten. Diese Karten bilden Auftrag, erwartetes Ergebnis, Prüfkriterium, Sicherheitsgrenze, gespeicherte Abhängigkeiten, Übergabe und manuelle Ergebnisrückführung ab. Sie starten keine Agenten und erzeugen keine simulierten Erfolgs- oder Ausführungsmeldungen.
 
-Grundlagen, parallele Fachbefunde, QS-/Test-Prüfung und Orchestrator-Zusammenführung werden in der gespeicherten Reihenfolge freigeschaltet. QA und Gesamtbefund bleiben manuelle Rückführungen. Jamals Abschlussentscheidung speichert genau einen nächsten sicheren Schritt und kann nur einmal in den bestehenden lokalen Projektverlauf übernommen werden. Alte V6.40.1- und V6.40.2-Läufe bleiben ohne pauschale Migration lesbar.
+Grundlagen, parallele Fachbefunde, QS-/Test-Prüfung und Projektmanager-Zusammenführung werden in der gespeicherten Reihenfolge freigeschaltet. QA und Gesamtbefund bleiben manuelle Rückführungen. Jamals Abschlussentscheidung speichert genau einen nächsten sicheren Schritt und kann nur einmal in den bestehenden lokalen Projektverlauf übernommen werden. Alte V6.40.1- und V6.40.2-Läufe bleiben ohne pauschale Migration lesbar.
 
 Die Grenzen bleiben unverändert: 17 kanonische Projekte, 25 kanonische Agenten, 41 GET-Routen, keine Schreib-API, keine Agenten-, Codex-, Plugin-, Git- oder externe Ausführung und kein Deployment.
 
