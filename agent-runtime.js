@@ -253,7 +253,7 @@
       if (!workItem.subtask || !workItem.expectedResult || !workItem.acceptanceCheck) {
         reasons.push("Der Projektmanager-Auftrag ist noch nicht vollständig vorbereitet.");
       }
-      if (workItem.resultConfirmedAt) {
+      if (workItem.resultConfirmedAt || workItem.runtimePilotEvidence?.acceptedAt) {
         reasons.push("Für diese Arbeitskarte liegt bereits ein bestätigter Befund vor.");
       }
     }
@@ -729,7 +729,7 @@
     const pilotAgentId = resolveProjektmanagerAgentId();
     const workItem = getWorkItem(run, pilotAgentId);
     if (!workItem) throw new Error("Arbeitskarte fehlt.");
-    if (workItem.resultConfirmedAt) {
+    if (workItem.runtimePilotEvidence?.acceptedAt || workItem.resultConfirmedAt) {
       throw new Error("Bestehender bestätigter Befund darf nicht überschrieben werden.");
     }
 
@@ -749,6 +749,7 @@
       now: options.now,
       runtimePilotAcceptance: true,
       pilotAgentId,
+      resultSource: "Lokaler Runtime-Pilot · bewusst übernommen",
     });
 
     let nextPilot = clone(pilot);

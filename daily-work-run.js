@@ -87,6 +87,33 @@
     return text.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean);
   }
 
+  const NULL_BLOCKER_KEYS = new Set([
+    "",
+    "keine",
+    "kein",
+    "kein blocker",
+    "keine blocker",
+    "nicht vorhanden",
+    "-",
+  ]);
+
+  function normalizeBlockerEntryKey(value) {
+    return String(value ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .replace(/[.!?]+$/g, "")
+      .trim();
+  }
+
+  function isNullBlockerEntry(value) {
+    return NULL_BLOCKER_KEYS.has(normalizeBlockerEntryKey(value));
+  }
+
+  function normalizeBlockerList(value) {
+    return textList(value).filter((entry) => !isNullBlockerEntry(entry));
+  }
+
   function plainObject(value) {
     return value && typeof value === "object" && !Array.isArray(value) ? clone(value) : {};
   }
@@ -915,14 +942,90 @@
   }
 
   function getAgentReviewPhase(run) {
-    return createAgentReviewPhase(run?.agentReviewPhase || {});
+    const phase = createAgentReviewPhase(run?.agentReviewPhase || {});
+    if (!phase.preparedAt) return phase;
+    return refreshAgentReviewPhase(phase, run?.workProposal);
+  }
+
+  function isOrchestrationConfirmed(phase) {
+    return phase?.orchestration?.status === "CONFIRMED" || Boolean(phase?.orchestration?.confirmedAt);
+  }
+
+  function isQaResultConfirmed(phase, qaItem) {
+    return Boolean(phase?.qa?.confirmedAt) || Boolean(qaItem?.resultConfirmedAt) || ["BESTANDEN", "TEILWEISE_BESTANDEN", "OFFEN", "BLOCKIERT"].includes(String(phase?.qa?.status || "").toUpperCase());
+  }
+
+  function buildRuntimePilotEvidence(values = {}, fallback = {}) {
+    const acceptedAt = values.acceptedAt || fallback.acceptedAt || isoDateTime(values.now || new Date());
+    return {
+      resultText: singleText(values.resultText ?? fallback.resultText, "runtimePilotEvidence.resultText", true),
+      openPoints: textList(values.openPoints ?? fallback.openPoints),
+      blockers: normalizeBlockerList(values.blockers ?? fallback.blockers),
+      acceptedAt,
+      resultSource: singleText(
+        values.resultSource || fallback.resultSource || "Lokaler Runtime-Pilot · bewusst übernommen",
+        "runtimePilotEvidence.resultSource",
+        true,
+      ),
+    };
+  }
+
+  function healLeadRuntimePilotDeadlock(phase, proposal) {
+    const leadId = proposal?.leadAgentId;
+    if (!leadId || isOrchestrationConfirmed(phase)) return phase;
+    phase.workItems = phase.workItems.map((item) => {
+      if (item.agentId !== leadId && !item.isLead) return item;
+      if (!item.resultConfirmed || item.status !== "ACCEPTED") return item;
+      const evidence = item.runtimePilotEvidence?.acceptedAt
+        ? item.runtimePilotEvidence
+        : buildRuntimePilotEvidence({
+          resultText: item.resultText,
+          openPoints: item.openPoints,
+          blockers: item.blockers,
+          acceptedAt: item.resultConfirmedAt || item.resultRecordedAt,
+          resultSource: item.resultSource || "Lokaler Runtime-Pilot · bewusst übernommen",
+          now: item.resultConfirmedAt || item.resultRecordedAt,
+        });
+      return {
+        ...item,
+        runtimePilotEvidence: evidence,
+        resultText: "",
+        openPoints: [],
+        blockers: [],
+        resultConfirmed: false,
+        resultConfirmedAt: null,
+        resultRecordedAt: null,
+        status: "WAITING",
+        resultSource: "Manuelle Rückführung in der KI-Unternehmenszentrale",
+      };
+    });
+    return phase;
   }
 
   function refreshAgentReviewPhase(phaseValue, proposal) {
-    const phase = createAgentReviewPhase(phaseValue);
+    let phase = createAgentReviewPhase(phaseValue);
     const leadId = proposal?.leadAgentId;
     const approval = resolveApprovalAgentId(proposal, { allowLegacyFallback: true });
     const approvalId = approval.ok ? approval.approvalAgentId : null;
+
+    phase = healLeadRuntimePilotDeadlock(phase, proposal);
+
+    phase.workItems = phase.workItems.map((item) => {
+      const nextItem = { ...item, blockers: normalizeBlockerList(item.blockers) };
+      if (
+        nextItem.status === "BLOCKED"
+        && nextItem.resultConfirmed
+        && nextItem.blockers.length === 0
+      ) {
+        if (phase.qa?.status === "BLOCKIERT" && (nextItem.isApproval || nextItem.agentId === approvalId)) {
+          nextItem.blockers = ["QA blockiert"];
+        } else {
+          nextItem.status = "ACCEPTED";
+        }
+      }
+      return nextItem;
+    });
+
     const acceptedIds = new Set(phase.workItems.filter((item) => item.status === "ACCEPTED").map((item) => item.agentId));
 
     phase.workItems = phase.workItems.map((item) => {
@@ -947,10 +1050,10 @@
     phase.qa.blockedAgentIds = domainItems.filter((item) => item.status === "BLOCKED").map((item) => item.agentId);
 
     if (phase.finalDecision.decidedAt) phase.status = "JAMAL_COMPLETED";
-    else if (leadItem?.status === "ACCEPTED") phase.status = "OVERALL_FINDING_PREPARED";
-    else if (qaItem?.status === "ACCEPTED") phase.status = "QA_COMPLETED";
+    else if (isOrchestrationConfirmed(phase) || leadItem?.status === "ACCEPTED") phase.status = "OVERALL_FINDING_PREPARED";
+    else if (qaItem?.status === "ACCEPTED" || isQaResultConfirmed(phase, qaItem)) phase.status = "QA_COMPLETED";
     else if (qaItem?.status === "READY") phase.status = "READY_FOR_QA";
-    else if (phase.workItems.some((item) => item.resultConfirmed)) phase.status = "RESULTS_PARTIAL";
+    else if (phase.workItems.some((item) => item.resultConfirmed || item.runtimePilotEvidence?.acceptedAt)) phase.status = "RESULTS_PARTIAL";
     else phase.status = phase.preparedAt ? "PREPARED" : "NOT_APPROVED";
     return phase;
   }
@@ -1028,6 +1131,27 @@
     if ((item.isLead || item.isApproval || item.agentId === resolveApprovalAgentId(next.workProposal, { allowLegacyFallback: true }).approvalAgentId) && !runtimePilotAcceptance) {
       throw new Error("QA und Zusammenführung besitzen eigene kontrollierte Rückführungen.");
     }
+    if (runtimePilotAcceptance && item.isLead) {
+      if (isOrchestrationConfirmed(phase)) {
+        throw new Error("Der Gesamtbefund wurde bereits bestätigt und wird nicht überschrieben.");
+      }
+      if (item.runtimePilotEvidence?.acceptedAt) {
+        throw new Error("Dieses Ergebnis wurde bereits bestätigt und wird nicht überschrieben.");
+      }
+      if (!["READY", "WAITING"].includes(item.status)) {
+        throw new Error("Die Runtime-Übernahme ist für diesen Arbeitskartenstatus nicht erlaubt.");
+      }
+      if (values.confirmed !== true) throw new Error("Das Ergebnis muss bewusst bestätigt werden.");
+      item.runtimePilotEvidence = buildRuntimePilotEvidence({
+        resultText: values.resultText,
+        openPoints: values.openPoints,
+        blockers: values.blockers,
+        now: values.now,
+        resultSource: values.resultSource || "Lokaler Runtime-Pilot · bewusst übernommen",
+      });
+      next.agentReviewPhase = refreshAgentReviewPhase(phase, next.workProposal);
+      return next;
+    }
     if (item.resultConfirmedAt) throw new Error("Dieses Ergebnis wurde bereits bestätigt und wird nicht überschrieben.");
     if (!runtimePilotAcceptance && item.status !== "READY") {
       throw new Error("Die Voraussetzungen für diesen Agentenbefund fehlen noch.");
@@ -1038,7 +1162,7 @@
     if (values.confirmed !== true) throw new Error("Das Ergebnis muss bewusst bestätigt werden.");
     item.resultText = singleText(values.resultText, "resultText", true);
     item.openPoints = textList(values.openPoints);
-    item.blockers = textList(values.blockers);
+    item.blockers = normalizeBlockerList(values.blockers);
     item.resultRecordedAt = isoDateTime(values.now || new Date());
     item.resultConfirmedAt = item.resultRecordedAt;
     item.resultConfirmed = true;
@@ -1071,7 +1195,10 @@
     };
     item.resultText = resultText;
     item.openPoints = textList(values.openPoints);
-    item.blockers = qaStatus === "BLOCKIERT" ? textList(values.blockers || ["QA blockiert"]) : textList(values.blockers);
+    const normalizedBlockers = normalizeBlockerList(values.blockers);
+    item.blockers = qaStatus === "BLOCKIERT"
+      ? (normalizedBlockers.length > 0 ? normalizedBlockers : ["QA blockiert"])
+      : normalizedBlockers;
     item.resultRecordedAt = now;
     item.resultConfirmedAt = now;
     item.resultConfirmed = true;
@@ -1084,8 +1211,10 @@
     const next = clone(run);
     const phase = getAgentReviewPhase(next);
     const item = phase.workItems.find((entry) => entry.agentId === next.workProposal?.leadAgentId);
+    if (isOrchestrationConfirmed(phase) || item?.resultConfirmedAt) {
+      throw new Error("Der Gesamtbefund wurde bereits bestätigt.");
+    }
     if (!item || item.status !== "READY") throw new Error("Die Zusammenführung ist erst nach bestätigtem QA-Befund bereit.");
-    if (item.resultConfirmedAt) throw new Error("Der Gesamtbefund wurde bereits bestätigt.");
     const confirmedFindings = textList(values.confirmedFindings);
     if (confirmedFindings.length === 0) throw new Error("Mindestens ein bestätigter Befund ist erforderlich.");
     const now = isoDateTime(values.now || new Date());
@@ -1389,7 +1518,9 @@
     recordQaResult,
     resolveApprovalAgentId,
     getApprovalAgentDisplay,
+    normalizeBlockerList,
     normalizeRolePartitions,
+    isOrchestrationConfirmed,
     setAgentReviewApproval,
     setAgentReviewFinalDecision,
     setClosure,

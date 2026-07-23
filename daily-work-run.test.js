@@ -525,6 +525,80 @@ function runTests() {
     assert.strictEqual(item.status, "BLOCKED");
     assert.deepStrictEqual(item.blockers, ["Medizinische Freigabe fehlt."]);
   });
+  check("eindeutig negative Blocker-Angaben werden als kein Blocker normalisiert", () => {
+    [
+      "",
+      "Keine.",
+      "keine",
+      "Kein Blocker",
+      "nicht vorhanden",
+      "kein",
+      "keine blocker",
+      "-",
+    ].forEach((blockers) => {
+      assert.deepStrictEqual(DailyWorkRun.normalizeBlockerList(blockers), []);
+      const accepted = DailyWorkRun.recordAgentWorkResult(preparedAgentReview, "health-compass-agent", {
+        resultText: "Health-Fachbefund ohne echten Blocker.",
+        blockers,
+        confirmed: true,
+      });
+      const item = DailyWorkRun.getAgentReviewPhase(accepted).workItems.find((entry) => entry.agentId === "health-compass-agent");
+      assert.strictEqual(item.status, "ACCEPTED");
+      assert.deepStrictEqual(item.blockers, []);
+      assert.strictEqual(item.resultConfirmed, true);
+      assert.strictEqual(item.resultText, "Health-Fachbefund ohne echten Blocker.");
+    });
+  });
+  check("echte Blocker-Aussagen bleiben erhalten und blockieren", () => {
+    [
+      "Keine Freigabe vorhanden",
+      "Kein Zugriff auf Testdaten",
+      "Externe Freigabe fehlt",
+      "Kein Zugriff auf die Testdaten",
+      "Risiko nicht geklärt",
+      "Blocker: externe Freigabe fehlt",
+    ].forEach((blockers) => {
+      assert.deepStrictEqual(DailyWorkRun.normalizeBlockerList(blockers), [blockers]);
+      const blocked = DailyWorkRun.recordAgentWorkResult(preparedAgentReview, "health-compass-agent", {
+        resultText: "Echter Blocker liegt vor.",
+        blockers,
+        confirmed: true,
+      });
+      const item = DailyWorkRun.getAgentReviewPhase(blocked).workItems.find((entry) => entry.agentId === "health-compass-agent");
+      assert.strictEqual(item.status, "BLOCKED");
+      assert.deepStrictEqual(item.blockers, [blockers]);
+    });
+  });
+  check("gespeicherter Fehlblocker „Keine.“ wird sicher geheilt ohne Befundverlust", () => {
+    let poisoned = DailyWorkRun.recordAgentWorkResult(preparedAgentReview, "product-agent", {
+      resultText: "Produktfluss und Demo-Grenzen manuell geprüft.",
+      confirmed: true,
+      now: "2026-07-23T11:55:00Z",
+    });
+    poisoned = DailyWorkRun.recordAgentWorkResult(poisoned, "health-compass-agent", {
+      resultText: "Health-Kernfluss und offene Fachfragen manuell geprüft.",
+      blockers: "Temporärer Platzhalter.",
+      confirmed: true,
+      now: "2026-07-23T12:00:00Z",
+    });
+    const healthItem = poisoned.agentReviewPhase.workItems.find((entry) => entry.agentId === "health-compass-agent");
+    healthItem.blockers = ["Keine."];
+    healthItem.status = "BLOCKED";
+    const parallelBefore = poisoned.agentReviewPhase.workItems.filter((entry) => entry.executionMode === "parallel");
+    parallelBefore.forEach((entry) => {
+      entry.status = "WAITING";
+    });
+    const healed = DailyWorkRun.getAgentReviewPhase(poisoned);
+    const healedHealth = healed.workItems.find((entry) => entry.agentId === "health-compass-agent");
+    assert.strictEqual(healedHealth.resultConfirmed, true);
+    assert.strictEqual(healedHealth.resultText, "Health-Kernfluss und offene Fachfragen manuell geprüft.");
+    assert.deepStrictEqual(healedHealth.blockers, []);
+    assert.strictEqual(healedHealth.status, "ACCEPTED");
+    assert.ok(!healed.qa.blockedAgentIds.includes("health-compass-agent"));
+    const parallelAfter = healed.workItems.filter((entry) => entry.executionMode === "parallel");
+    assert.ok(parallelAfter.length > 0);
+    assert.ok(parallelAfter.every((entry) => entry.status === "READY"));
+  });
   check("teilweise Ergebnisse bleiben nach Reload erhalten", () => {
     const storageV6403 = mockStorage();
     DailyWorkRun.saveDailyStore(storageV6403, DailyWorkRun.upsertRun(DailyWorkRun.createStore(), reviewProgress));
@@ -598,6 +672,125 @@ function runTests() {
     assert.strictEqual(phase.orchestration.status, "CONFIRMED");
     assert.strictEqual(phase.status, "OVERALL_FINDING_PREPARED");
     assert.strictEqual(phase.orchestration.confirmedFindings.length, 1);
+  });
+  check("Runtime-Pilot bestätigt Lead nicht vorzeitig als Zusammenführung", () => {
+    let withPilot = DailyWorkRun.recordAgentWorkResult(preparedAgentReview, "orchestrator-agent", {
+      resultText: "Lokaler deterministischer Pilot: Auftrag strukturell vollständig.",
+      confirmed: true,
+      runtimePilotAcceptance: true,
+      pilotAgentId: "orchestrator-agent",
+      now: "2026-07-23T13:00:00Z",
+    });
+    let phase = DailyWorkRun.getAgentReviewPhase(withPilot);
+    const lead = phase.workItems.find((item) => item.agentId === "orchestrator-agent");
+    assert.strictEqual(lead.resultConfirmed, false);
+    assert.ok(lead.runtimePilotEvidence?.acceptedAt);
+    assert.match(lead.runtimePilotEvidence.resultText, /Lokaler deterministischer Pilot/);
+    assert.notStrictEqual(lead.status, "ACCEPTED");
+    assert.strictEqual(phase.orchestration.status, "NOT_READY");
+
+    for (const agentId of ["product-agent", "health-compass-agent"]) {
+      withPilot = DailyWorkRun.recordAgentWorkResult(withPilot, agentId, {
+        resultText: `${agentId}: Fachbefund bestätigt.`,
+        confirmed: true,
+      });
+    }
+    const parallelIds = DailyWorkRun.getAgentReviewPhase(withPilot).workItems
+      .filter((item) => item.executionMode === "parallel")
+      .map((item) => item.agentId);
+    for (const agentId of parallelIds) {
+      withPilot = DailyWorkRun.recordAgentWorkResult(withPilot, agentId, {
+        resultText: `${agentId}: Fachbefund bestätigt.`,
+        confirmed: true,
+      });
+    }
+    withPilot = DailyWorkRun.recordQaResult(withPilot, {
+      status: "BESTANDEN",
+      resultText: "QA manuell bestanden.",
+      criteriaAnswered: true,
+      now: "2026-07-23T13:30:00Z",
+    });
+    phase = DailyWorkRun.getAgentReviewPhase(withPilot);
+    assert.strictEqual(phase.status, "QA_COMPLETED");
+    assert.strictEqual(phase.workItems.find((item) => item.agentId === "orchestrator-agent").status, "READY");
+    assert.ok(phase.workItems.find((item) => item.agentId === "orchestrator-agent").runtimePilotEvidence?.acceptedAt);
+    withPilot = DailyWorkRun.recordOrchestrationSummary(withPilot, {
+      confirmedFindings: "Gesamtbefund nach Pilot-Evidenz und QA.",
+      recommendedNextStep: "Jamal prüft den Gesamtbefund.",
+      jamalDecisionQuestion: "Soll der nächste Schritt vorbereitet werden?",
+      now: "2026-07-23T13:40:00Z",
+    });
+    phase = DailyWorkRun.getAgentReviewPhase(withPilot);
+    assert.strictEqual(phase.orchestration.status, "CONFIRMED");
+    assert.strictEqual(phase.workItems.find((item) => item.agentId === "orchestrator-agent").status, "ACCEPTED");
+    assert.ok(phase.workItems.find((item) => item.agentId === "orchestrator-agent").runtimePilotEvidence?.acceptedAt);
+  });
+  check("bestehender Pilot-Deadlock wird sicher geheilt ohne echten Gesamtbefund zu öffnen", () => {
+    let deadlock = DailyWorkRun.recordAgentWorkResult(preparedAgentReview, "product-agent", {
+      resultText: "Produkt bestätigt.",
+      confirmed: true,
+    });
+    deadlock = DailyWorkRun.recordAgentWorkResult(deadlock, "health-compass-agent", {
+      resultText: "Health bestätigt.",
+      confirmed: true,
+    });
+    const parallelIds = DailyWorkRun.getAgentReviewPhase(deadlock).workItems
+      .filter((item) => item.executionMode === "parallel")
+      .map((item) => item.agentId);
+    for (const agentId of parallelIds) {
+      deadlock = DailyWorkRun.recordAgentWorkResult(deadlock, agentId, {
+        resultText: `${agentId}: bestätigt.`,
+        confirmed: true,
+      });
+    }
+    deadlock = DailyWorkRun.recordQaResult(deadlock, {
+      status: "BESTANDEN",
+      resultText: "QA bestanden.",
+      criteriaAnswered: true,
+      now: "2026-07-23T14:00:00Z",
+    });
+    const lead = deadlock.agentReviewPhase.workItems.find((item) => item.agentId === "orchestrator-agent");
+    lead.status = "ACCEPTED";
+    lead.resultConfirmed = true;
+    lead.resultConfirmedAt = "2026-07-23T12:00:00Z";
+    lead.resultRecordedAt = "2026-07-23T12:00:00Z";
+    lead.resultText = "Lokaler deterministischer Pilot: Deadlock-Evidenz.";
+    delete lead.runtimePilotEvidence;
+    deadlock.agentReviewPhase.orchestration = {
+      status: "NOT_READY",
+      confirmedFindings: [],
+      openPoints: [],
+      conflicts: [],
+      risks: [],
+      recommendedNextStep: "",
+      notApproved: [],
+      jamalDecisionQuestion: "",
+      confirmedAt: null,
+    };
+    const healed = DailyWorkRun.getAgentReviewPhase(deadlock);
+    const healedLead = healed.workItems.find((item) => item.agentId === "orchestrator-agent");
+    assert.strictEqual(healedLead.resultConfirmed, false);
+    assert.strictEqual(healedLead.status, "READY");
+    assert.match(healedLead.runtimePilotEvidence.resultText, /Deadlock-Evidenz/);
+    assert.strictEqual(healed.orchestration.status, "NOT_READY");
+    assert.strictEqual(healed.qa.status, "BESTANDEN");
+    assert.strictEqual(healed.status, "QA_COMPLETED");
+
+    const completed = DailyWorkRun.recordOrchestrationSummary(deadlock, {
+      confirmedFindings: "Echter Gesamtbefund nach Heilung.",
+      recommendedNextStep: "Jamal entscheidet den nächsten Schritt.",
+      jamalDecisionQuestion: "Soll fortgesetzt werden?",
+      now: "2026-07-23T14:10:00Z",
+    });
+    assert.strictEqual(DailyWorkRun.getAgentReviewPhase(completed).orchestration.status, "CONFIRMED");
+    assert.throws(
+      () => DailyWorkRun.recordOrchestrationSummary(completed, {
+        confirmedFindings: "Zweiter Versuch",
+        recommendedNextStep: "Nein",
+        jamalDecisionQuestion: "Nein?",
+      }),
+      /bereits bestätigt/,
+    );
   });
   check("Abschluss benötigt genau einen sicheren Textschritt", () => {
     assert.throws(() => DailyWorkRun.setAgentReviewFinalDecision(reviewProgress, { decision: "FREIGEBEN", nextSafeStep: ["a", "b"] }), /Textwert/);
@@ -759,10 +952,10 @@ function runTests() {
   check("writeOperationsBlocked bleibt true", () => assert.strictEqual(API_SECURITY_FLAGS.writeOperationsBlocked, true));
   check("madeExternalRequest bleibt false", () => assert.strictEqual(API_SECURITY_FLAGS.madeExternalRequest, false));
 
-  assert.strictEqual(passed, 125);
+  assert.strictEqual(passed, 130);
   assert.strictEqual(DailyWorkRun.getActiveRun(stored).id, preparedDraft.id);
   assert.strictEqual(PROJECT_REGISTRY.length, 17);
-  console.log("daily-work-run.test.js: 125 Prüfpunkte erfolgreich");
+  console.log("daily-work-run.test.js: 130 Prüfpunkte erfolgreich");
 }
 
 runTests();

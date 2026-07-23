@@ -320,8 +320,10 @@ async function runTests() {
   const accepted = AgentRuntime.acceptResult(beforeAccept, finishedPilot, { confirmed: true, now: "2026-07-13T09:10:00Z" });
   check("Akzeptanz verwendet bestehende Ergebnisrückführung", () => {
     const item = DailyWorkRun.getAgentReviewPhase(accepted.run).workItems.find((entry) => entry.agentId === pilotAgentId);
-    assert.strictEqual(item.resultConfirmed, true);
-    assert.match(item.resultText, /Lokaler deterministischer Pilot/);
+    assert.strictEqual(item.resultConfirmed, false);
+    assert.ok(item.runtimePilotEvidence?.acceptedAt);
+    assert.match(item.runtimePilotEvidence.resultText, /Lokaler deterministischer Pilot/);
+    assert.ok(["WAITING", "READY"].includes(item.status));
   });
 
   check("bestehender bestätigter Befund wird nicht überschrieben", () => {

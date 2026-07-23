@@ -217,6 +217,23 @@ function runTests() {
     assert.match(uiSource, /Projektmanager-Zusammenführung/);
   });
 
+  check("Blocker-Feld weist auf leere Angabe ohne Blocker hin", () => {
+    assert.match(uiSource, /Leer lassen, wenn keine Blocker vorliegen\./);
+    assert.match(uiSource, /daily-work-run-field-hint/);
+  });
+
+  check("Prüfphase zeigt Fortschritt und korrigiert QA-/Zusammenführungsführung", () => {
+    const reviewSource = uiSource.slice(uiSource.indexOf("function renderDailyWorkAgentReviewPhase"), uiSource.indexOf("function renderDailyWorkRunPrompt"));
+    assert.match(reviewSource, /Prüfschritten abgeschlossen/);
+    assert.match(reviewSource, /Projektmanager-Zusammenführung ausfüllen/);
+    assert.match(reviewSource, /#daily-work-review-orchestration/);
+    assert.match(reviewSource, /QA abgeschlossen/);
+    assert.match(reviewSource, /qaConfirmed/);
+    assert.match(reviewSource, /orchestrationConfirmed/);
+    assert.match(reviewSource, /Laufzeit-Pilot-Evidenz/);
+    assert.match(reviewSource, /ersetzt nicht die manuelle Projektmanager-Zusammenführung/);
+  });
+
   check("unten kein zweiter gleichwertiger Hauptbutton für die Prüfphase", () => {
     const reviewSource = uiSource.slice(uiSource.indexOf("function renderDailyWorkAgentReviewPhase"), uiSource.indexOf("function renderDailyWorkRunPrompt"));
     assert.match(reviewSource, /primaryPrepareShownAbove/);

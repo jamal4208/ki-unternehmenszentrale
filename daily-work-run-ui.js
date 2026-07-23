@@ -564,8 +564,9 @@ function renderDailyWorkAgentReviewPhase(run) {
       approvalAgentId: run.workProposal?.approvalAgentId || "quality-test-agent",
     };
     const isSpecial = item.isLead || item.isApproval || item.agentId === approvalDisplay.approvalAgentId;
+    const pilotEvidence = item.runtimePilotEvidence;
     return `
-      <article class="daily-work-review-card${item.isLead ? " is-lead" : ""}" data-agent-work-card="${deps.escapeHtml(item.agentId)}">
+      <article class="daily-work-review-card${item.isLead ? " is-lead" : ""}" data-agent-work-card="${deps.escapeHtml(item.agentId)}" ${item.isLead ? 'id="daily-work-review-orchestration-card"' : ""}>
         <header>
           <div><strong>${deps.escapeHtml(item.agentName)}</strong><span>${deps.escapeHtml(item.roleInRun)}</span></div>
           <span class="daily-work-run-mode-tag">${deps.escapeHtml(itemStatusLabels[item.status] || item.status)}</span>
@@ -582,6 +583,15 @@ function renderDailyWorkAgentReviewPhase(run) {
             <div><dt>Ergebnisquelle</dt><dd>${deps.escapeHtml(item.resultSource)}</dd></div>
           </dl>
         </details>
+        ${pilotEvidence?.acceptedAt ? `
+          <div class="daily-work-review-result daily-work-review-pilot-evidence">
+            <strong>Laufzeit-Pilot-Evidenz · bewusst übernommen</strong>
+            <p>${deps.escapeHtml(pilotEvidence.resultText)}</p>
+            ${dailyWorkRunList(pilotEvidence.openPoints, "Keine offenen Punkte in der Pilot-Evidenz.")}
+            ${dailyWorkRunList(pilotEvidence.blockers, "Keine Blocker in der Pilot-Evidenz.")}
+            <p class="daily-work-run-field-hint">Diese Evidenz ersetzt nicht die manuelle Projektmanager-Zusammenführung nach QA.</p>
+          </div>
+        ` : ""}
         ${item.resultConfirmed ? `
           <div class="daily-work-review-result">
             <strong>Manuell bestätigter Befund</strong>
@@ -593,7 +603,7 @@ function renderDailyWorkAgentReviewPhase(run) {
           <form class="daily-work-review-result-form" data-agent-result-form data-agent-id="${deps.escapeHtml(item.agentId)}">
             <label>Ergebnis oder Befund<textarea name="resultText" rows="3" required></textarea></label>
             <label>Wichtigste offene Punkte<textarea name="openPoints" rows="2"></textarea></label>
-            <label>Blocker<textarea name="blockers" rows="2"></textarea></label>
+            <label>Blocker<textarea name="blockers" rows="2"></textarea><span class="daily-work-run-field-hint">Leer lassen, wenn keine Blocker vorliegen.</span></label>
             <label class="daily-work-review-confirm"><input type="checkbox" name="confirmed" required> Ergebnis bewusst bestätigen</label>
             <button class="secondary-button" type="submit">Befund lokal speichern</button>
           </form>
@@ -630,18 +640,49 @@ function renderDailyWorkAgentReviewPhase(run) {
   const approvalAgentId = approvalDisplay.approvalAgentId;
   const qaItem = phase.workItems.find((item) => item.agentId === approvalAgentId || item.isApproval);
   const leadItem = phase.workItems.find((item) => item.agentId === run.workProposal.leadAgentId);
-  const qaReady = qaItem?.status === "READY";
-  const leadReady = leadItem?.status === "READY";
-  const finalReady = phase.orchestration.status === "CONFIRMED";
+  const qaConfirmed = Boolean(phase.qa.confirmedAt) || Boolean(qaItem?.resultConfirmed);
+  const qaReady = !qaConfirmed && qaItem?.status === "READY";
+  const orchestrationConfirmed = phase.orchestration.status === "CONFIRMED" || Boolean(phase.orchestration.confirmedAt);
+  const leadReady = !orchestrationConfirmed && leadItem?.status === "READY";
+  const finalReady = orchestrationConfirmed;
+  const completedSteps = phase.workItems.filter((item) => item.status === "ACCEPTED" || item.status === "BLOCKED").length;
+  const totalSteps = phase.workItems.length;
+  const qaStatusLabels = {
+    BESTANDEN: "bestanden",
+    TEILWEISE_BESTANDEN: "teilweise bestanden",
+    OFFEN: "offen",
+    BLOCKIERT: "blockiert",
+  };
+  let nextStepLabel = "Fachbefunde manuell bestätigen";
+  let nextStepHref = "";
+  if (orchestrationConfirmed && !phase.finalDecision.decidedAt) {
+    nextStepLabel = "Jamals Abschlussentscheidung speichern";
+    nextStepHref = "#daily-work-review-final";
+  } else if (leadReady) {
+    nextStepLabel = "Projektmanager-Zusammenführung ausfüllen";
+    nextStepHref = "#daily-work-review-orchestration";
+  } else if (qaReady) {
+    nextStepLabel = "QA-Befund bestätigen";
+    nextStepHref = "#daily-work-review-qa";
+  } else if (qaConfirmed && !leadReady) {
+    nextStepLabel = "Projektmanager-Zusammenführung vorbereiten";
+    nextStepHref = "#daily-work-review-orchestration";
+  }
   return `
     <section class="daily-work-review-phase" aria-labelledby="daily-agent-review-title">
       <header><div><p class="eyebrow">V6.40.3 · kontrolliert und lokal</p><h4 id="daily-agent-review-title">Kontrollierte Agenten-Prüfphase</h4></div><span class="daily-work-run-mode">${deps.escapeHtml(statusLabels[phase.status])}</span></header>
+      <article class="daily-work-run-notice daily-work-review-progress">
+        <strong>${deps.escapeHtml(String(completedSteps))} von ${deps.escapeHtml(String(totalSteps))} Prüfschritten abgeschlossen</strong>
+        <p>Nächster Schritt: ${nextStepHref
+          ? `<a href="${nextStepHref}">${deps.escapeHtml(nextStepLabel)}</a>`
+          : deps.escapeHtml(nextStepLabel)}</p>
+      </article>
       <article class="daily-work-run-notice"><strong>Die Agentenaufträge sind vorbereitet. Es wurde noch kein Agent ausgeführt.</strong><p>Freigabe: von Jamal freigegeben · interne Prüfaufträge: vorbereitet · alle Befunde werden ausschließlich manuell zurückgeführt.</p></article>
       <div class="daily-work-run-boundaries"><span>Noch keine Agentenausführung</span><span>${phase.workItems.length} bedarfsgeleitete interne Karten</span><span>Reloadfest lokal gespeichert</span></div>
       <div class="daily-work-review-group"><h5>Grundlagen · kann sofort vorbereitet werden</h5><div class="daily-work-review-grid">${prerequisites.map(renderWorkItem).join("")}</div></div>
       <div class="daily-work-review-group"><h5>Parallele Fachprüfungen · nach bestätigten Grundlagen</h5><div class="daily-work-review-grid">${parallel.map(renderWorkItem).join("")}</div></div>
       ${qaItem ? `
-        <div class="daily-work-review-group"><h5>QA-Prüfung</h5>${renderWorkItem(qaItem)}
+        <div class="daily-work-review-group" id="daily-work-review-qa"><h5>QA-Prüfung</h5>${renderWorkItem(qaItem)}
           <dl class="daily-work-run-facts">
             <div><dt>Vorliegende Fachbefunde</dt><dd>${deps.escapeHtml(phase.qa.availableAgentIds.map(displayAgent).join(", ") || "keine")}</dd></div>
             <div><dt>Fehlende Fachbefunde</dt><dd>${deps.escapeHtml(phase.qa.missingAgentIds.map(displayAgent).join(", ") || "keine")}</dd></div>
@@ -649,11 +690,12 @@ function renderDailyWorkAgentReviewPhase(run) {
             <div><dt>Prüfkriterien beantwortet</dt><dd>${phase.qa.criteriaAnswered ? "ja" : "noch nicht manuell bestätigt"}</dd></div>
             <div><dt>Sicherheitsgrenzen verletzt</dt><dd>${deps.escapeHtml(phase.qa.safetyBoundariesViolated.join(", ") || "keine Verletzung manuell erfasst")}</dd></div>
           </dl>
-          ${qaReady ? `<form class="daily-work-review-special-form" id="daily-work-review-qa-form">
+          ${qaConfirmed ? `<p class="daily-work-run-notice"><strong>QA abgeschlossen</strong>${phase.qa.status && qaStatusLabels[phase.qa.status] ? ` · Status: ${deps.escapeHtml(qaStatusLabels[phase.qa.status])}` : ""}</p>`
+            : qaReady ? `<form class="daily-work-review-special-form" id="daily-work-review-qa-form">
             <label>QA-Status<select name="status" required><option value="">Bitte wählen</option><option value="BESTANDEN">bestanden</option><option value="TEILWEISE_BESTANDEN">teilweise bestanden</option><option value="OFFEN">offen</option><option value="BLOCKIERT">blockiert</option></select></label>
             <label>Manueller QA-Befund<textarea name="resultText" rows="4" required></textarea></label>
             <label>Offene Punkte<textarea name="openPoints" rows="2"></textarea></label>
-            <label>Blocker<textarea name="blockers" rows="2"></textarea></label>
+            <label>Blocker<textarea name="blockers" rows="2"></textarea><span class="daily-work-run-field-hint">Leer lassen, wenn keine Blocker vorliegen.</span></label>
             <label>Verletzte Sicherheitsgrenzen<textarea name="safetyBoundariesViolated" rows="2"></textarea></label>
             <label class="daily-work-review-confirm"><input type="checkbox" name="criteriaAnswered" required> Alle Prüfkriterien wurden bewusst beantwortet</label>
             <button class="primary-button" type="submit">QA-Befund lokal bestätigen</button>
@@ -661,8 +703,9 @@ function renderDailyWorkAgentReviewPhase(run) {
         </div>
       ` : ""}
       ${leadItem ? `
-        <div class="daily-work-review-group"><h5>Projektmanager-Zusammenführung</h5>${renderWorkItem(leadItem)}
-          ${leadReady ? `<form class="daily-work-review-special-form" id="daily-work-review-orchestration-form">
+        <div class="daily-work-review-group" id="daily-work-review-orchestration"><h5>Projektmanager-Zusammenführung</h5>${renderWorkItem(leadItem)}
+          ${orchestrationConfirmed ? `<p class="daily-work-run-notice"><strong>Projektmanager-Zusammenführung abgeschlossen.</strong></p>`
+            : leadReady ? `<form class="daily-work-review-special-form" id="daily-work-review-orchestration-form">
             <label>Bestätigte Befunde<textarea name="confirmedFindings" rows="4" required></textarea></label>
             <label>Offene Punkte<textarea name="openPoints" rows="2"></textarea></label>
             <label>Konflikte<textarea name="conflicts" rows="2"></textarea></label>
@@ -675,7 +718,7 @@ function renderDailyWorkAgentReviewPhase(run) {
         </div>
       ` : ""}
       ${finalReady ? `
-        <div class="daily-work-review-group"><h5>Jamals Abschlussentscheidung</h5>
+        <div class="daily-work-review-group" id="daily-work-review-final"><h5>Jamals Abschlussentscheidung</h5>
           ${phase.finalDecision.decidedAt ? `<dl class="daily-work-run-facts"><div><dt>Entscheidung</dt><dd>${deps.escapeHtml(phase.finalDecision.decision)}</dd></div><div><dt>Nächster sicherer Schritt</dt><dd>${deps.escapeHtml(phase.finalDecision.nextSafeStep)}</dd></div></dl><div class="daily-work-run-actions"><button class="secondary-button" type="button" data-transfer-agent-review-history ${phase.historyTransferredAt ? "disabled" : ""}>${phase.historyTransferredAt ? "Verlaufseintrag bereits übernommen" : "Abschluss einmalig in Verlauf übernehmen"}</button></div>` : `
             <p>${deps.escapeHtml(phase.orchestration.jamalDecisionQuestion)}</p>
             <form class="daily-work-review-special-form" id="daily-work-review-final-form">
