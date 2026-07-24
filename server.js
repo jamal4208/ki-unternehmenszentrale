@@ -20,6 +20,8 @@ const staticAssets = new Map([
   ["/", "index.html"],
   ["/index.html", "index.html"],
   ["/agent-registry.js", "agent-registry.js"],
+  ["/guided-work.js", "guided-work.js"],
+  ["/guided-work-ui.js", "guided-work-ui.js"],
   ["/daily-work-run.js", "daily-work-run.js"],
   ["/health-hybrid-work.js", "health-hybrid-work.js"],
   ["/agent-runtime.js", "agent-runtime.js"],

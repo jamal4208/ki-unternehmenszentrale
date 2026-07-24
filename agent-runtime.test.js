@@ -409,11 +409,17 @@ async function runTests() {
   });
 
   check("schemaVersion bleibt kompatibel", () => {
-    assert.strictEqual(persisted.schemaVersion, 1);
-    const oldRun = DailyWorkRun.createDraftRun({ id: "old-no-runtime" });
+    assert.ok([1, 2].includes(persisted.schemaVersion));
+    assert.strictEqual(DailyWorkRun.SCHEMA_VERSION, 2);
+    const oldRun = {
+      ...DailyWorkRun.createDraftRun({ id: "old-no-runtime" }),
+      schemaVersion: 1,
+      agentRuntimePilot: null,
+    };
     assert.strictEqual(oldRun.agentRuntimePilot, null);
     const store = DailyWorkRun.createStore({ activeRunId: oldRun.id, runs: [oldRun] });
     assert.strictEqual(DailyWorkRun.getActiveRun(store).agentRuntimePilot, null);
+    assert.strictEqual(DailyWorkRun.getActiveRun(store).schemaVersion, 1);
   });
 
   check("17 Projekte bleiben erhalten", () => assert.strictEqual(PROJECT_REGISTRY.length, 17));
@@ -486,7 +492,7 @@ async function runTests() {
   check("script-Reihenfolge enthält agent-runtime.js", () => {
     assert.match(
       htmlSource,
-      /<script src="health-hybrid-work\.js"><\/script>\s*<script src="daily-work-run\.js"><\/script>\s*<script src="agent-runtime\.js"><\/script>\s*<script src="local-data-backup\.js"><\/script>/,
+      /<script src="health-hybrid-work\.js"><\/script>\s*<script src="guided-work\.js"><\/script>\s*<script src="daily-work-run\.js"><\/script>\s*<script src="agent-runtime\.js"><\/script>\s*<script src="local-data-backup\.js"><\/script>/,
     );
   });
 

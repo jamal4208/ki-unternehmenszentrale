@@ -2,13 +2,28 @@
 
 ## Git- und Versionsstand
 
-- Version: **V6.46.0 – Health Hybrid End-to-End-Pilot**
-- Gesicherter vorheriger Ausgangsstand: **V6.45.2** / Commit **`fb9aa0d`** (Runtime-Pilot und Zusammenführung entkoppeln)
-- Branch: `main`
-- Verbindliche Aussage: **V1 lokal fertig und betriebsbereit**; V6.46.0 ist umgesetzt und vollständig browserseitig abgenommen
+- Vorheriger gesicherter Ausgangsstand: **V6.46.0** / Commit **`e611c9c`** (Health Hybrid End-to-End-Pilot)
+- Aktueller Arbeitsstand: **V7.0 Phase A – Guided Work Foundation: umgesetzt, getestet und browserseitig abgenommen**
+- Branch: `main`, committed und auf `origin/main` gepusht
+- Verbindliche Aussage: V6.46.0 bleibt als vorheriger gesicherter Stand erhalten; Phase A ist abgeschlossen, **V7.0 insgesamt ist damit nicht abgeschlossen** – Phase B bis Phase E sind weiterhin offen und nicht umgesetzt
 - Einstiegspunkte: `README.md`, `V1_BETRIEBSHANDBUCH.md`
 
-## V6.46.0 – umgesetzt und abgenommen
+## V7.0 Phase A – Guided Work Foundation (umgesetzt und abgenommen)
+
+- Neuer Tageslauf: `schemaVersion: 2`; v1-Läufe bleiben unverändert lesbar im selben Store
+- Module: `guided-work.js` (Domäne), `guided-work-ui.js` (Hauptarbeitsraum); `daily-work-run.js` / `health-hybrid-work.js` bleiben kanonisch
+- Geführter Hauptarbeitsraum: „Oben arbeiten. Unten nachschauen.“
+- Deterministische, quellenbasierte Arbeitsvorschläge (kein Auto-Start)
+- Editierbares Agententeam und `responsibleAgentId` vor Paketfreigabe; Invalidierung + Re-Fingerprint
+- Known-dirty-Baseline für Health (read-only Live inkl. relative Pfade/Hashes, keine Dateiinhalte)
+- Evidenz-Prefill für Fachbefund/QA/PM als Entwurf, nie als Bestätigung
+- V6.46.0-Hybrid-Fallback vollständig erhalten; Roh-JSON standardmäßig geschlossen
+- Backup-Schutz bleibt aktiv: Secret-Heuristik unverändert scharf; einzig der bestätigte False Positive bei bloßer `.env`/`.env.local`-Pfadnennung (z. B. in `forbiddenPaths`) wurde gezielt korrigiert, ohne die Erkennung realer Zugangsdaten zu schwächen
+- Bekannter, bewusst offener Bedienpunkt: Für `acknowledgeV2Overwrite` (Schutz gegen stilles Überschreiben lokaler v2-Läufe durch einen reinen v1-Import) gibt es noch keine UI-Freigabesteuerung; der sichere Standard („nicht überschreiben“) bleibt dadurch aktiv, ein bewusster Override ist aktuell nur außerhalb der UI möglich
+- 322 automatisierte Prüfpunkte grün; vollständige Browser-Abnahme inkl. Mobile 390×844 ohne horizontalen Überlauf bestanden
+- **Nicht enthalten – weiterhin offen für Phase B bis Phase E:** Execution Bridge, POST-Routen, Codex-/Agentenstart, Testausführung aus der Zentrale, Health-Schreiben, Commit/Push/Deployment, Autonomieerhöhung
+
+## V6.46.0 – vorheriger gesicherter Ausgangsstand
 
 - Hybrid-Pilot nur für **Health Upgrade Kompass**
 - Die Unternehmenszentrale liest den lokalen Health-Repository-Status ausschließlich read-only (Branch, HEAD, Working-Tree)
@@ -20,7 +35,7 @@
 - Commit-, Push-, Deployment- und Außenwirkungs-Gates sind ausschließlich Entscheidungen und führen nichts aus
 - Der V6.46.0-Evidenz-Deadlock ist behoben; bestehende betroffene WIP-Läufe werden defensiv geheilt
 - Andere Projekte erhalten noch keinen Health-Live- oder Ausführungspaketpfad
-- Vollständige Browser-End-to-End-Abnahme bestanden; `npm run check` / `npm test` / `git diff --check` grün vor Commit
+- Vollständige Browser-End-to-End-Abnahme bestanden; gesichert mit Commit `e611c9c`
 
 ## V6.45.2 – vorheriger gesicherter Ausgangsstand
 

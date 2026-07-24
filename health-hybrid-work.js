@@ -256,7 +256,7 @@ function buildPreparedPrompt(pkg) {
 }
 
 function fingerprintPayloadFromPackage(pkg) {
-  return {
+  const payload = {
     schemaVersion: pkg.schemaVersion,
     sourceRunId: pkg.sourceRunId,
     sourceWorkProposalId: pkg.sourceWorkProposalId,
@@ -272,27 +272,80 @@ function fingerprintPayloadFromPackage(pkg) {
     testCommand: pkg.testCommand,
     gitRules: pkg.gitRules,
   };
+  // Additive Phase-A-Felder nur, wenn am Paket gesetzt – sonst bleibt V6.46-Fingerprint stabil.
+  if (Object.prototype.hasOwnProperty.call(pkg, "knownWorkingTreeBaselineFingerprint")) {
+    payload.knownWorkingTreeBaselineFingerprint = pkg.knownWorkingTreeBaselineFingerprint || null;
+  }
+  if (Object.prototype.hasOwnProperty.call(pkg, "workingTreeCleanAtCreate")) {
+    payload.workingTreeCleanAtCreate = pkg.workingTreeCleanAtCreate !== false;
+  }
+  if (Object.prototype.hasOwnProperty.call(pkg, "teamRevisionAtCreate")) {
+    payload.teamRevisionAtCreate = pkg.teamRevisionAtCreate || 0;
+  }
+  if (Object.prototype.hasOwnProperty.call(pkg, "responsibleAgentRevisionAtCreate")) {
+    payload.responsibleAgentRevisionAtCreate = pkg.responsibleAgentRevisionAtCreate || 0;
+  }
+  return payload;
 }
 
-function assertLiveBaselineReady(liveStatus, expected = {}) {
-  if (!liveStatus || liveStatus.available !== true || liveStatus.ok !== true) {
+function normalizeLiveStatusShape(liveStatus) {
+  if (!liveStatus) return null;
+  if (liveStatus.live && typeof liveStatus.live === "object") {
+    return {
+      ok: liveStatus.ok,
+      available: liveStatus.available,
+      branch: liveStatus.live.branch,
+      head: liveStatus.live.head,
+      workingTreeClean: liveStatus.live.workingTreeClean,
+      workingTreeDetail: liveStatus.live.workingTreeDetail || null,
+      readAt: liveStatus.live.readAt || null,
+    };
+  }
+  return liveStatus;
+}
+
+function assertLiveBaselineReady(liveStatus, expected = {}, options = {}) {
+  const live = normalizeLiveStatusShape(liveStatus);
+  if (!live || live.available !== true || live.ok !== true) {
     throw new Error("Health-Repository ist nicht verfügbar.");
   }
-  if (!liveStatus.branch || liveStatus.branch === "HEAD") {
+  if (!live.branch || live.branch === "HEAD") {
     throw new Error("Aktueller Branch ist nicht eindeutig bestimmt.");
   }
-  if (liveStatus.workingTreeClean !== true) {
-    throw new Error("Working Tree ist nicht sauber. Keine automatische Bereinigung.");
-  }
-  if (!liveStatus.head) {
+  if (!live.head) {
     throw new Error("HEAD konnte nicht gelesen werden.");
   }
-  if (expected.allowedBranch && liveStatus.branch !== expected.allowedBranch) {
+
+  const knownBaseline = options.knownWorkingTreeBaseline || expected.knownWorkingTreeBaseline || null;
+  if (live.workingTreeClean !== true) {
+    if (!knownBaseline || !knownBaseline.jamalConfirmedAt) {
+      throw new Error("Working Tree ist nicht sauber. Known-dirty-Baseline erfordert Jamals ausdrückliche Bestätigung. Keine automatische Bereinigung.");
+    }
+    if (knownBaseline.preserveExistingChanges !== true && knownBaseline.jamalConfirmedClean !== true) {
+      throw new Error("Known-dirty-Baseline muss den Erhalt vorhandener Änderungen bestätigen.");
+    }
+    if (knownBaseline.branch !== live.branch) {
+      throw new Error("Bekannte Baseline-Branch weicht vom Live-Stand ab.");
+    }
+    if (knownBaseline.headCommit !== live.head) {
+      throw new Error("Bekannte Baseline-HEAD weicht vom Live-Stand ab.");
+    }
+    const liveFingerprint = live.workingTreeDetail?.baselineFingerprint || null;
+    if (liveFingerprint && knownBaseline.baselineFingerprint !== liveFingerprint) {
+      throw new Error("Working-Tree-Baseline ist veraltet (Drift). Paket wird STALE.");
+    }
+    if (knownBaseline.limitStatus && knownBaseline.limitStatus !== "OK") {
+      throw new Error("Known-dirty-Baseline ist wegen Grenzverletzung nicht paketfähig.");
+    }
+  }
+
+  if (expected.allowedBranch && live.branch !== expected.allowedBranch) {
     throw new Error("Branch weicht von allowedBranch ab.");
   }
-  if (expected.baseCommit && liveStatus.head !== expected.baseCommit) {
+  if (expected.baseCommit && live.head !== expected.baseCommit) {
     throw new Error("HEAD weicht vom gespeicherten baseCommit ab.");
   }
+  return live;
 }
 
 function createHealthExecutionPackage(run, liveStatus, values = {}) {
@@ -306,11 +359,17 @@ function createHealthExecutionPackage(run, liveStatus, values = {}) {
     throw new Error("Arbeitsvorschlag fehlt.");
   }
 
-  assertLiveBaselineReady(liveStatus);
+  const live = assertLiveBaselineReady(liveStatus, {}, {
+    knownWorkingTreeBaseline: values.knownWorkingTreeBaseline || run.knownWorkingTreeBaseline || null,
+  });
 
   const now = values.now || new Date();
   const createdAt = isoDateTime(now);
-  const responsibleAgentId = resolveResponsibleAgentId(run, values.responsibleAgentId || null);
+  const preferredResponsible =
+    values.responsibleAgentId ||
+    run.workProposal?.preferredResponsibleAgentId ||
+    null;
+  const responsibleAgentId = resolveResponsibleAgentId(run, preferredResponsible);
   const allowedFiles = defaultAllowedFiles(values, run);
   const forbiddenPaths = defaultForbiddenPaths(values);
   const overlap = allowedFiles.filter((entry) => forbiddenPaths.includes(entry));
@@ -318,6 +377,7 @@ function createHealthExecutionPackage(run, liveStatus, values = {}) {
     throw new Error("allowedFiles und forbiddenPaths dürfen sich nicht überschneiden.");
   }
 
+  const knownBaseline = values.knownWorkingTreeBaseline || run.knownWorkingTreeBaseline || null;
   const draft = {
     schemaVersion: EXECUTION_PACKAGE_SCHEMA_VERSION,
     executionPackageId: singleText(values.executionPackageId || `ep-${run.id}-${Date.now()}`, "executionPackageId", true),
@@ -329,8 +389,14 @@ function createHealthExecutionPackage(run, liveStatus, values = {}) {
     ),
     responsibleAgentId,
     projectId: HEALTH_PROJECT_ID,
-    baseCommit: liveStatus.head,
-    allowedBranch: liveStatus.branch,
+    baseCommit: live.head,
+    allowedBranch: live.branch,
+    knownWorkingTreeBaselineFingerprint: knownBaseline?.jamalConfirmedAt
+      ? knownBaseline.baselineFingerprint || null
+      : null,
+    workingTreeCleanAtCreate: live.workingTreeClean === true,
+    teamRevisionAtCreate: typeof run.teamRevision === "number" ? run.teamRevision : 0,
+    responsibleAgentRevisionAtCreate: typeof run.responsibleAgentRevision === "number" ? run.responsibleAgentRevision : 0,
     allowedFiles,
     forbiddenPaths,
     nonGoals: textList(values.nonGoals).length
@@ -414,10 +480,22 @@ function approveHealthExecutionPackageForCopy(run, liveStatus, values = {}) {
   if (!["DRAFT", "BLOCKED", "STALE"].includes(pkg.status)) {
     throw new Error("Paket ist für die Kopierfreigabe nicht im zulässigen Status.");
   }
-  assertLiveBaselineReady(liveStatus, {
-    allowedBranch: pkg.allowedBranch,
-    baseCommit: pkg.baseCommit,
-  });
+  try {
+    assertLiveBaselineReady(liveStatus, {
+      allowedBranch: pkg.allowedBranch,
+      baseCommit: pkg.baseCommit,
+      knownWorkingTreeBaseline: next.knownWorkingTreeBaseline || null,
+    }, {
+      knownWorkingTreeBaseline: next.knownWorkingTreeBaseline || null,
+    });
+  } catch (error) {
+    if (/veraltet|Drift|weicht/.test(String(error.message || ""))) {
+      pkg.status = "STALE";
+      next.executionPackage = pkg;
+      throw new Error(`${error.message} Paketstatus: STALE.`);
+    }
+    throw error;
+  }
   if (values.approved !== true) {
     throw new Error("Jamals ausdrückliche Freigabe ist erforderlich.");
   }

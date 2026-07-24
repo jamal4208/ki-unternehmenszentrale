@@ -13,14 +13,34 @@
     typeof module === "object" && module.exports
       ? require("./agent-runtime")
       : root?.AgentRuntime;
-  const api = factory(dailyWorkRunModule, localDataBackupModule, agentRuntimeModule);
+  const guidedWorkModule =
+    typeof module === "object" && module.exports
+      ? require("./guided-work")
+      : root?.GuidedWork;
+  const guidedWorkUiModule =
+    typeof module === "object" && module.exports
+      ? require("./guided-work-ui")
+      : root?.GuidedWorkUi;
+  const api = factory(
+    dailyWorkRunModule,
+    localDataBackupModule,
+    agentRuntimeModule,
+    guidedWorkModule,
+    guidedWorkUiModule,
+  );
   if (typeof module === "object" && module.exports) {
     module.exports = api;
   }
   if (root) {
     root.DailyWorkRunUi = api;
   }
-})(typeof globalThis !== "undefined" ? globalThis : this, function createDailyWorkRunUi(DailyWorkRun, LocalDataBackup, AgentRuntime) {
+})(typeof globalThis !== "undefined" ? globalThis : this, function createDailyWorkRunUi(
+  DailyWorkRun,
+  LocalDataBackup,
+  AgentRuntime,
+  GuidedWork,
+  GuidedWorkUi,
+) {
   const REQUIRED_DEPS = [
     "byId",
     "escapeHtml",
@@ -858,15 +878,23 @@ function renderHealthHybridWorkSection(run) {
             <div><dt>testCommand</dt><dd>${deps.escapeHtml(pkg.testCommand)} <em>(außerhalb ausführen)</em></dd></div>
           </dl>
           <textarea rows="12" readonly>${deps.escapeHtml(pkg.preparedPrompt || "")}</textarea>
+          <details class="daily-work-run-technical-details">
+            <summary>Roh-JSON des Pakets ${pkg.status === "RESULT_READY" || pkg.status === "ABORTED" ? "(historisch gebunden)" : "(standardmäßig geschlossen)"}</summary>
+            <pre class="guided-work-historical-json">${deps.escapeHtml(pkg.packageJson || "")}</pre>
+            <p class="guided-work-note">Paket und Evidenz sind an Lauf <code>${deps.escapeHtml(run.id)}</code> gebunden. Alte JSONs nicht wiederverwenden.</p>
+          </details>
         ` : `<p class="daily-work-run-empty">Noch kein Auftragspaket erzeugt.</p>`}
       </article>
 
       <article class="daily-work-hybrid-block daily-work-run-field--wide">
         <h5>3. Ergebnisrückführung</h5>
         <p>JSON einfügen → Vorschau → Jamal bestätigt. Paste allein ändert keinen Status. Evidenz landet auf der Agentenkarte und setzt sie nicht auf ACCEPTED.</p>
-        <label class="daily-work-run-field daily-work-run-field--wide">Ergebnis-JSON
-          <textarea id="daily-health-result-json" rows="10">${deps.escapeHtml(healthHybridUiState.rawResultDraft)}</textarea>
-        </label>
+        <details class="daily-work-run-technical-details" ${healthHybridUiState.rawResultDraft ? "" : ""}>
+          <summary>Ergebnis-JSON ${evidence?.recordedAt ? "· historisch gespeicherte Evidenz vorhanden" : "· technischer Hybrid-Fallback"}</summary>
+          <label class="daily-work-run-field daily-work-run-field--wide">Ergebnis-JSON
+            <textarea id="daily-health-result-json" rows="10">${deps.escapeHtml(healthHybridUiState.rawResultDraft)}</textarea>
+          </label>
+        </details>
         <div class="daily-work-run-actions">
           <button class="secondary-button" type="button" data-health-result-preview>Vorschau prüfen</button>
           <button class="primary-button" type="button" data-health-result-confirm ${preview?.ok || preview?.blocked ? "" : "disabled"}>Rückführung speichern</button>
@@ -1055,12 +1083,14 @@ function renderDailyWorkRun() {
   const run = getActiveDailyWorkRun();
   if (!run) {
     output.innerHTML = `
-      <article class="daily-work-run-start-card">
-        <p class="eyebrow">Bereit für einen bewussten Start</p>
-        <h4>Noch kein Tageslauf begonnen</h4>
-        <p>Es wird kein Fokusprojekt automatisch gewählt. Health Upgrade Kompass ist der empfohlene erste technische Pilot.</p>
-        <button class="primary-button" type="button" data-start-daily-work-run>Tageslauf manuell beginnen</button>
-      </article>
+      ${GuidedWorkUi?.renderMainSurface?.(null, { deps }) || `
+        <article class="daily-work-run-start-card">
+          <p class="eyebrow">Bereit für einen bewussten Start</p>
+          <h4>Noch kein Tageslauf begonnen</h4>
+          <p>Es wird kein Fokusprojekt automatisch gewählt. Health Upgrade Kompass ist der empfohlene erste technische Pilot.</p>
+          <button class="primary-button" type="button" data-start-daily-work-run>Tageslauf manuell beginnen</button>
+        </article>
+      `}
       <p class="daily-work-run-storage-note">Arbeitsdaten werden lokal in diesem Browser gespeichert. Kanonische Projekt-, Git- und Testdaten werden dadurch nicht verändert.</p>
       ${renderLocalDataBackupSection()}
     `;
@@ -1081,6 +1111,13 @@ function renderDailyWorkRun() {
   ].join("");
 
   output.innerHTML = `
+    ${GuidedWorkUi?.renderMainSurface?.(run, {
+      deps,
+      liveStatus: healthHybridUiState.liveStatus,
+      liveDrift: Boolean(
+        GuidedWork?.detectBaselineDrift?.(run, healthHybridUiState.liveStatus)?.drifted,
+      ),
+    }) || ""}
     <div class="daily-work-run-toolbar">
       <div>
         <span class="daily-work-run-status">${deps.escapeHtml(dailyWorkRunStatusLabel(run.status))}</span>
@@ -1101,15 +1138,20 @@ function renderDailyWorkRun() {
       </article>
     ` : ""}
     ${dailyWorkRunUiState.error ? `<p class="daily-work-run-error">${deps.escapeHtml(dailyWorkRunUiState.error)}</p>` : ""}
-    <section class="daily-work-run-stage" aria-labelledby="daily-start-title">
-      <div class="daily-work-run-stage-number">A</div>
-      <div><h4 id="daily-start-title">Tagesstart</h4><p>Genau ein Fokusprojekt wird bewusst ausgewählt.</p></div>
-      <label class="daily-work-run-field daily-work-run-field--wide">
-        Fokusprojekt
-        <select data-daily-work-focus ${run.status === "DRAFT" && projects.length > 0 ? "" : "disabled"}>${focusOptions}</select>
-      </label>
-      <div class="daily-work-run-field--wide">${renderDailyWorkRunCurrentProject(run)}</div>
-    </section>
+    <details class="daily-work-run-stage daily-work-run-lookback" ${run.status === "DRAFT" && !run.focusProjectId ? "open" : ""}>
+      <summary>
+        <span class="daily-work-run-stage-number">A</span>
+        Tagesstart und Fokusprojekt · unten nachschauen
+      </summary>
+      <div class="daily-work-run-lookback-body">
+        <p>Genau ein Fokusprojekt wird bewusst ausgewählt.</p>
+        <label class="daily-work-run-field daily-work-run-field--wide">
+          Fokusprojekt
+          <select data-daily-work-focus ${run.status === "DRAFT" && projects.length > 0 ? "" : "disabled"}>${focusOptions}</select>
+        </label>
+        <div class="daily-work-run-field--wide">${renderDailyWorkRunCurrentProject(run)}</div>
+      </div>
+    </details>
     ${renderDailyWorkRunPreparation(run)}
     ${renderDailyWorkAgentReviewPhase(run)}
     ${renderHealthHybridWorkSection(run)}
@@ -1228,6 +1270,8 @@ function liveStatusForPackage() {
     head: payload.live?.head || null,
     workingTreeClean: payload.live?.workingTreeClean,
     shortStatus: payload.live?.shortStatus || null,
+    workingTreeDetail: payload.live?.workingTreeDetail || null,
+    readAt: payload.live?.readAt || null,
   };
 }
 
@@ -1246,6 +1290,14 @@ async function refreshHealthLiveStatus() {
       throw new Error(payload?.message || "Live-Status konnte nicht gelesen werden.");
     }
     healthHybridUiState.liveStatus = payload;
+    const active = getActiveDailyWorkRun();
+    if (active && GuidedWork?.markPackageStaleOnBaselineDrift) {
+      const maybeStale = GuidedWork.markPackageStaleOnBaselineDrift(active, payload);
+      if (maybeStale?.executionPackage?.status === "STALE" && active.executionPackage?.status !== "STALE") {
+        saveDailyWorkRun(maybeStale);
+        deps.showToast("Baseline-Drift erkannt. Paket auf STALE gesetzt.");
+      }
+    }
     deps.showToast("Health-Live-Status gelesen. Kein Testprozess gestartet.");
   } catch (error) {
     healthHybridUiState.liveStatusError = error.message;
@@ -1264,6 +1316,145 @@ function setupDailyWorkRun() {
       const run = api.createDraftRun();
       saveDailyWorkRun(run);
       deps.showToast("Neuer Tageslauf lokal begonnen. Noch kein Fokusprojekt gewählt.");
+      return;
+    }
+
+    const guidedPrimary = event.target.closest("[data-guided-primary-action]");
+    if (guidedPrimary) {
+      const actionId = guidedPrimary.getAttribute("data-guided-primary-action");
+      if (actionId === "start-run" || actionId === "start-new-run") {
+        const run = dailyWorkRunApi().createDraftRun();
+        saveDailyWorkRun(run);
+        deps.showToast("Neuer Tageslauf lokal begonnen.");
+        return;
+      }
+      if (actionId === "select-focus") {
+        deps.byId("daily-work-run-output")?.querySelector("[data-daily-work-focus]")?.focus();
+        deps.showToast("Bitte Fokusprojekt oben im Arbeitsraum bzw. unter Tagesstart wählen.");
+        return;
+      }
+      if (actionId === "create-proposal") {
+        deps.byId("daily-work-run-preparation-form")?.requestSubmit?.();
+        return;
+      }
+      if (actionId === "confirm-baseline") {
+        event.target.closest(".guided-work-surface")?.querySelector("[data-guided-confirm-baseline]")?.click();
+        return;
+      }
+      if (actionId === "create-or-approve-package" || actionId === "copy-package") {
+        const approve = document.querySelector("[data-health-package-approve]");
+        const copy = document.querySelector("[data-health-package-copy]");
+        const form = document.getElementById("daily-health-package-form");
+        const run = getActiveDailyWorkRun();
+        if (!run?.executionPackage && form) {
+          form.requestSubmit?.();
+          return;
+        }
+        if (run?.executionPackage?.status === "READY_TO_COPY" && copy) {
+          copy.click();
+          return;
+        }
+        if (approve) approve.click();
+        return;
+      }
+      if (actionId === "paste-result" || actionId === "prepare-or-adopt-evidence") {
+        const prepare = document.querySelector("[data-prepare-agent-review]");
+        const adopt = document.querySelector("[data-health-evidence-adopt]");
+        if (prepare && !getActiveDailyWorkRun()?.agentReviewPhase?.preparedAt) {
+          prepare.click();
+          return;
+        }
+        if (adopt) adopt.click();
+        else document.getElementById("daily-health-result-json")?.focus();
+        return;
+      }
+      deps.showToast("Weiter im geführten Arbeitsraum prüfen.");
+      return;
+    }
+
+    const guidedConfirmBaseline = event.target.closest("[data-guided-confirm-baseline]");
+    if (guidedConfirmBaseline) {
+      try {
+        const live = healthHybridUiState.liveStatus;
+        if (!live) throw new Error("Zuerst den Live-Status lesen.");
+        const draft = GuidedWork.buildBaselineDraftFromLiveDetail(live, getActiveDailyWorkRun());
+        const run = GuidedWork.confirmKnownWorkingTreeBaseline(getActiveDailyWorkRun(), live, {
+          confirmed: true,
+          branch: draft.branch,
+          headCommit: draft.headCommit,
+          baselineFingerprint: draft.baselineFingerprint,
+          dirtyPaths: draft.dirtyPaths,
+          untrackedPaths: draft.untrackedPaths,
+          preserveExistingChanges: true,
+          confirmationNote: "Vorhandene Änderungen dürfen weder verworfen noch überschrieben werden.",
+        });
+        saveDailyWorkRun(run);
+        deps.showToast("Known-dirty-Baseline bestätigt. Keine Datei verändert.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        deps.showToast(error.message);
+      }
+      return;
+    }
+
+    const guidedResetPackage = event.target.closest("[data-guided-reset-package]");
+    if (guidedResetPackage) {
+      try {
+        const run = GuidedWork.resetExecutionPackageToDraft(getActiveDailyWorkRun(), {
+          confirmVisibleReset: true,
+          reason: "Sichtbares Zurücksetzen auf Paketentwurf",
+        });
+        saveDailyWorkRun(run);
+        deps.showToast("Paket auf Entwurf zurückgesetzt. Evidenz bleibt historisch erhalten.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        deps.showToast(error.message);
+      }
+      return;
+    }
+
+    const guidedTeamPreview = event.target.closest("[data-guided-team-preview]");
+    if (guidedTeamPreview) {
+      try {
+        const selected = [...document.querySelectorAll("[data-guided-team-agent]:checked")].map((node) => node.value);
+        const responsible = document.querySelector("[data-guided-responsible-agent]")?.value || "";
+        const impact = GuidedWork.previewTeamChangeImpact(getActiveDailyWorkRun(), selected, responsible);
+        const box = document.querySelector("[data-guided-team-impact]");
+        if (box) {
+          box.hidden = false;
+          box.textContent = impact.message;
+        }
+      } catch (error) {
+        deps.showToast(error.message);
+      }
+      return;
+    }
+
+    const guidedTeamSave = event.target.closest("[data-guided-team-save]");
+    if (guidedTeamSave) {
+      try {
+        const selected = [...document.querySelectorAll("[data-guided-team-agent]:checked")].map((node) => node.value);
+        const responsible = document.querySelector("[data-guided-responsible-agent]")?.value || "";
+        const reason = document.querySelector("[data-guided-team-reason]")?.value || "Manuelle Teamanpassung";
+        const impact = GuidedWork.previewTeamChangeImpact(getActiveDailyWorkRun(), selected, responsible);
+        if (impact.requiresVisiblePackageReset) {
+          throw new Error(impact.message);
+        }
+        let run = GuidedWork.updateGuidedTeam(getActiveDailyWorkRun(), {
+          selectedAgentIds: selected,
+          responsibleAgentId: responsible || undefined,
+          reason,
+          confirmImpact: true,
+        });
+        saveDailyWorkRun(run);
+        deps.showToast("Team aktualisiert. Kein neuer Tageslauf. Paket ggf. invalidiert.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        deps.showToast(error.message);
+      }
       return;
     }
 
@@ -1356,15 +1547,18 @@ function setupDailyWorkRun() {
       try {
         const raw = document.getElementById("daily-health-result-json")?.value || healthHybridUiState.rawResultDraft;
         healthHybridUiState.rawResultDraft = raw;
-        const run = dailyWorkRunApi().confirmExternalExecutionEvidence(
+        let run = dailyWorkRunApi().confirmExternalExecutionEvidence(
           getActiveDailyWorkRun(),
           raw,
           liveStatusForPackage(),
           { confirmed: true },
         );
+        if (GuidedWork?.attachDraftFindingsFromEvidence) {
+          run = GuidedWork.attachDraftFindingsFromEvidence(run);
+        }
         healthHybridUiState.resultPreview = null;
         saveDailyWorkRun(run);
-        deps.showToast("Externe Evidenz gespeichert. Arbeitskarte nicht auf ACCEPTED gesetzt.");
+        deps.showToast("Externe Evidenz gespeichert. Prefill ist Entwurf, nicht Bestätigung.");
       } catch (error) {
         dailyWorkRunUiState.error = error.message;
         renderDailyWorkRun();
@@ -1376,11 +1570,14 @@ function setupDailyWorkRun() {
     const healthEvidenceAdopt = event.target.closest("[data-health-evidence-adopt]");
     if (healthEvidenceAdopt) {
       try {
-        const run = dailyWorkRunApi().adoptExternalExecutionEvidenceIntoReview(getActiveDailyWorkRun(), {
+        let run = dailyWorkRunApi().adoptExternalExecutionEvidenceIntoReview(getActiveDailyWorkRun(), {
           adopt: true,
         });
+        if (GuidedWork?.attachDraftFindingsFromEvidence) {
+          run = GuidedWork.attachDraftFindingsFromEvidence(run);
+        }
         saveDailyWorkRun(run);
-        deps.showToast("Evidenz in Prüfphase übernommen. QA und PM bleiben getrennte Schritte.");
+        deps.showToast("Evidenz in Prüfphase übernommen. Prefill bleibt unbestätigt.");
       } catch (error) {
         dailyWorkRunUiState.error = error.message;
         renderDailyWorkRun();
@@ -1606,16 +1803,40 @@ function setupDailyWorkRun() {
   });
 
   document.addEventListener("change", (event) => {
+    if (event.target.matches("input[name='guided-outcome-suggestion']")) {
+      try {
+        if (!GuidedWork) throw new Error("Guided Work Modul fehlt.");
+        const run = GuidedWork.selectOutcomeSuggestion(getActiveDailyWorkRun(), event.target.value);
+        saveDailyWorkRun(run);
+        deps.showToast("Deterministischer Vorschlag übernommen. Noch nicht gestartet.");
+      } catch (error) {
+        dailyWorkRunUiState.error = error.message;
+        renderDailyWorkRun();
+        deps.showToast(error.message);
+      }
+      return;
+    }
+
     if (!event.target.matches("[data-daily-work-focus]")) return;
     try {
       const projectId = event.target.value;
       const current = currentCanonicalDailyProject(projectId);
       if (!current.available) throw new Error("Kanonisches Projekt ist aktuell UNGEKLÄRT.");
-      const run = dailyWorkRunApi().setFocusProject(
+      let run = dailyWorkRunApi().setFocusProject(
         getActiveDailyWorkRun(),
         current.project,
         getCanonicalProjectRegistryState().payload.snapshotNotice,
       );
+      if (GuidedWork?.attachOutcomeSuggestions) {
+        const history = typeof deps.getProjectHistory === "function"
+          ? deps.getProjectHistory(current.project.id) || []
+          : [];
+        run = GuidedWork.attachOutcomeSuggestions(run, {
+          canonicalProject: current.project,
+          projectHistory: history,
+          liveStatus: healthHybridUiState.liveStatus,
+        });
+      }
       saveDailyWorkRun(run);
       deps.showToast(`${current.project.displayName} wurde bewusst als Fokus gewählt.`);
     } catch (error) {
@@ -1652,9 +1873,12 @@ function setupDailyWorkRun() {
         const live = liveStatusForPackage();
         if (!live) throw new Error("Zuerst den Live-Status erneut lesen.");
         const data = new FormData(event.target);
-        const run = dailyWorkRunApi().createHealthExecutionPackage(getActiveDailyWorkRun(), live, {
+        const active = getActiveDailyWorkRun();
+        const run = dailyWorkRunApi().createHealthExecutionPackage(active, live, {
           allowedFiles: data.get("allowedFiles"),
           forbiddenPaths: data.get("forbiddenPaths"),
+          knownWorkingTreeBaseline: active.knownWorkingTreeBaseline || null,
+          responsibleAgentId: active.workProposal?.preferredResponsibleAgentId || undefined,
         });
         saveDailyWorkRun(run);
         deps.showToast("Auftragspaket erzeugt (DRAFT). Noch nicht kopierfertig.");

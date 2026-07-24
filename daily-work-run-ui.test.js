@@ -156,7 +156,7 @@ function runTests() {
   check("script-Reihenfolge ist korrekt", () => {
     assert.match(
       htmlSource,
-      /<script src="health-hybrid-work\.js"><\/script>\s*<script src="daily-work-run\.js"><\/script>\s*<script src="agent-runtime\.js"><\/script>\s*<script src="local-data-backup\.js"><\/script>\s*<script src="daily-work-run-ui\.js"><\/script>\s*<script src="app\.js"><\/script>/,
+      /<script src="health-hybrid-work\.js"><\/script>\s*<script src="guided-work\.js"><\/script>\s*<script src="daily-work-run\.js"><\/script>\s*<script src="agent-runtime\.js"><\/script>\s*<script src="local-data-backup\.js"><\/script>\s*<script src="guided-work-ui\.js"><\/script>\s*<script src="daily-work-run-ui\.js"><\/script>\s*<script src="app\.js"><\/script>/,
     );
   });
 
@@ -194,8 +194,9 @@ function runTests() {
     assert.strictEqual(validation.ok, true);
   });
 
-  check("V6.46.0 ist in der Oberfläche sichtbar", () => {
-    assert.match(htmlSource, /V6\.46\.0 · Health Hybrid E2E/);
+  check("V7.0 Phase A WIP und V6.46.0-Hybrid-Fallback sind sichtbar", () => {
+    assert.match(htmlSource, /V7\.0 Phase A · Guided Work Foundation · WIP/);
+    assert.match(htmlSource, /Hybrid-Fallback V6\.46\.0/);
   });
 
   check("primäre Prüfphasen-Aktion steht direkt im Arbeitsvorschlag", () => {

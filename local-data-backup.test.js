@@ -242,6 +242,77 @@ function runTests() {
     assert.throws(() => LocalDataBackup.importLocalData(storage, payload), /ausdrückliche Bestätigung/);
   });
 
+  check("Export mit forbiddenPaths-Sicherheitsgrenze .env/.env.local ist kein False Positive", () => {
+    const health = getProjectById("health-upgrade-kompass");
+    let run = DailyWorkRun.createDraftRun({ id: "run-envcheck", workDate: "2026-07-24" });
+    run = DailyWorkRun.setFocusProject(run, health, "Momentaufnahme", "2026-07-24T08:00:00Z");
+    run.executionPackage = {
+      id: "ep-envcheck",
+      status: "DRAFT",
+      allowedFiles: ["README.md"],
+      forbiddenPaths: [".env", ".env.local", "Archive", "Backups", "Outputs"],
+      preparedPrompt: "Verbotene Pfade:\n- .env\n- .env.local\n\nNicht-Ziele:\n- keine Ausführung",
+    };
+    run.executionPackage.packageJson = JSON.stringify(run.executionPackage, null, 2);
+    const store = DailyWorkRun.upsertRun(DailyWorkRun.createStore(), run);
+    const storage = mockStorage({
+      [LocalDataBackup.MANAGEMENT_STORAGE_KEY]: JSON.stringify(sampleManagementState()),
+      [LocalDataBackup.DAILY_STORAGE_KEY]: JSON.stringify(store),
+    });
+    assert.doesNotThrow(() => LocalDataBackup.exportLocalData(storage, { now: "2026-07-24T10:00:00.000Z" }));
+  });
+
+  check("Export mit echtem .env-Dateiinhalt (KEY=VALUE) wird weiterhin abgewiesen", () => {
+    let run = DailyWorkRun.createDraftRun({ id: "run-realleak", workDate: "2026-07-24" });
+    run.jamalNotes =
+      "Versehentlich Inhalt aus .env.local eingefügt:\nDATABASE_URL=postgres://user:pass@host/db\nCUSTOM_FLAG=true";
+    const store = DailyWorkRun.upsertRun(DailyWorkRun.createStore(), run);
+    const storage = mockStorage({
+      [LocalDataBackup.DAILY_STORAGE_KEY]: JSON.stringify(store),
+    });
+    assert.throws(() => LocalDataBackup.exportLocalData(storage), /Zugangsdaten oder Geheimnisse/);
+  });
+
+  check("weiterhin abgewiesen: echtes apiKey/secret/token/password JSON-Feld", () => {
+    ["apiKey", "secret", "token", "password"].forEach((field) => {
+      const raw = JSON.stringify({
+        schemaVersion: 1,
+        activeRunId: null,
+        runs: [
+          {
+            id: "run-secretfield",
+            [field]: field === "token" ? "verylongtokenvalue123" : "supersecretvalue",
+          },
+        ],
+      });
+      const storage = mockStorage({ [LocalDataBackup.DAILY_STORAGE_KEY]: raw });
+      assert.throws(
+        () => LocalDataBackup.exportLocalData(storage),
+        /Zugangsdaten oder Geheimnisse/,
+        `Feld ${field} sollte weiterhin abgewiesen werden`,
+      );
+    });
+  });
+
+  check("weiterhin abgewiesen: AIRTABLE_API_KEY und Bearer-Token", () => {
+    const bearerStorage = mockStorage({
+      [LocalDataBackup.DAILY_STORAGE_KEY]: JSON.stringify({
+        schemaVersion: 1,
+        activeRunId: null,
+        runs: [{ id: "run-bearer", jamalNotes: "Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456" }],
+      }),
+    });
+    assert.throws(() => LocalDataBackup.exportLocalData(bearerStorage), /Zugangsdaten oder Geheimnisse/);
+    const airtableStorage = mockStorage({
+      [LocalDataBackup.DAILY_STORAGE_KEY]: JSON.stringify({
+        schemaVersion: 1,
+        activeRunId: null,
+        runs: [{ id: "run-airtable", jamalNotes: "AIRTABLE_API_KEY" }],
+      }),
+    });
+    assert.throws(() => LocalDataBackup.exportLocalData(airtableStorage), /Zugangsdaten oder Geheimnisse/);
+  });
+
   const appSource = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
   const uiSource = fs.readFileSync(path.join(__dirname, "daily-work-run-ui.js"), "utf8");
   check("app.js bindet Datensicherung minimal an", () => {

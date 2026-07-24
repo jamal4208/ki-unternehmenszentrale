@@ -48,12 +48,35 @@
   const SECRET_PATTERNS = Object.freeze([
     /AIRTABLE_API_KEY/i,
     /Bearer\s+[A-Za-z0-9._-]{20,}/,
-    /\.env\.local/i,
     /"apiKey"\s*:\s*"[^"]{8,}"/i,
     /"secret"\s*:\s*"[^"]{8,}"/i,
     /"token"\s*:\s*"[^"]{12,}"/i,
     /"password"\s*:\s*"[^"]+"/i,
   ]);
+  // Bare mentions of ".env" / ".env.local" as a filename are not secrets by themselves -
+  // this app's own canonical safety boundaries (forbiddenPaths, UI defaults, safety notices)
+  // legitimately reference these filenames everywhere. Only flag it when an actual
+  // dotenv-style KEY=VALUE assignment appears nearby, which indicates real file content
+  // (a genuine leak) rather than a structural path label. Our own generated JSON/text
+  // never contains "=" near these mentions, so this keeps detection precise without
+  // weakening it for real leaked file content.
+  const ENV_FILE_MENTION_PATTERN = /\.env(?:\.local)?\b/gi;
+  const ENV_ASSIGNMENT_SHAPE_PATTERN = /[A-Za-z_][A-Za-z0-9_]{2,}\s*=\s*[^\s"'=]{4,}/;
+  const ENV_MENTION_CONTEXT_WINDOW = 120;
+
+  function hasSuspiciousEnvFileDump(text) {
+    ENV_FILE_MENTION_PATTERN.lastIndex = 0;
+    let match;
+    while ((match = ENV_FILE_MENTION_PATTERN.exec(text))) {
+      const start = Math.max(0, match.index - ENV_MENTION_CONTEXT_WINDOW);
+      const end = Math.min(text.length, match.index + match[0].length + ENV_MENTION_CONTEXT_WINDOW);
+      if (ENV_ASSIGNMENT_SHAPE_PATTERN.test(text.slice(start, end))) {
+        ENV_FILE_MENTION_PATTERN.lastIndex = 0;
+        return true;
+      }
+    }
+    return false;
+  }
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
@@ -71,8 +94,11 @@
 
   function scanForSecrets(text) {
     if (typeof text !== "string" || !text) return null;
-    const match = SECRET_PATTERNS.find((pattern) => pattern.test(text));
-    return match ? "Der Export enthält mögliche Zugangsdaten oder Geheimnisse und wird aus Sicherheitsgründen abgewiesen." : null;
+    const patternHit = SECRET_PATTERNS.some((pattern) => pattern.test(text));
+    const envDumpHit = !patternHit && hasSuspiciousEnvFileDump(text);
+    return patternHit || envDumpHit
+      ? "Der Export enthält mögliche Zugangsdaten oder Geheimnisse und wird aus Sicherheitsgründen abgewiesen."
+      : null;
   }
 
   function validateManagementStore(parsed) {
@@ -105,7 +131,7 @@
         throw new Error("Import enthält unzulässige kanonische Registerdaten.");
       }
     });
-    if (parsed.schemaVersion !== undefined && parsed.schemaVersion !== 1) {
+    if (parsed.schemaVersion !== undefined && parsed.schemaVersion !== 1 && parsed.schemaVersion !== 2) {
       throw new Error("Nicht unterstützte Tageslauf-schemaVersion.");
     }
     if (!Array.isArray(parsed.runs)) {
@@ -118,7 +144,11 @@
       if (typeof run.id !== "string" || !run.id.trim()) {
         throw new Error(`Beschädigte Tageslaufstruktur in Lauf ${index + 1}: id fehlt.`);
       }
-      if (run.schemaVersion !== undefined && run.schemaVersion !== 1) {
+      if (
+        run.schemaVersion !== undefined &&
+        run.schemaVersion !== 1 &&
+        run.schemaVersion !== 2
+      ) {
         throw new Error("Nicht unterstützte Tageslauf-schemaVersion.");
       }
     });
@@ -344,6 +374,23 @@
     return { ok: true, preview };
   }
 
+  function collectRunSchemaStats(parsed) {
+    const runs = Array.isArray(parsed?.runs) ? parsed.runs : [];
+    let v1 = 0;
+    let v2 = 0;
+    const v2Ids = [];
+    runs.forEach((run) => {
+      const version = Number(run?.schemaVersion || 1);
+      if (version === 2) {
+        v2 += 1;
+        if (typeof run.id === "string") v2Ids.push(run.id);
+      } else {
+        v1 += 1;
+      }
+    });
+    return { v1, v2, v2Ids, total: runs.length };
+  }
+
   function buildImportPreview(exportData, storage) {
     const current = {
       managementPresent: Boolean(storage?.getItem?.(MANAGEMENT_STORAGE_KEY)),
@@ -351,18 +398,27 @@
     };
     let dailyRunCount = 0;
     let managementProjectCount = 0;
+    let importSchemaStats = { v1: 0, v2: 0, v2Ids: [], total: 0 };
+    let localSchemaStats = { v1: 0, v2: 0, v2Ids: [], total: 0 };
     if (isPlainObject(exportData?.summary)) {
       dailyRunCount = Number(exportData.summary.dailyRunCount) || 0;
       managementProjectCount = Number(exportData.summary.managementProjectCount) || 0;
     }
     if (isPlainObject(exportData?.storage?.[DAILY_STORAGE_KEY]) && !exportData.storage[DAILY_STORAGE_KEY].empty) {
       try {
-        dailyRunCount = summarizeStorage(
-          JSON.parse(exportData.storage[DAILY_STORAGE_KEY].raw),
-          DAILY_STORAGE_KEY,
-        ).dailyRunCount;
+        const parsedImport = JSON.parse(exportData.storage[DAILY_STORAGE_KEY].raw);
+        dailyRunCount = summarizeStorage(parsedImport, DAILY_STORAGE_KEY).dailyRunCount;
+        importSchemaStats = collectRunSchemaStats(parsedImport);
       } catch (_error) {
         /* validation catches this before import */
+      }
+    }
+    if (current.dailyPresent) {
+      try {
+        const localRaw = storage.getItem(DAILY_STORAGE_KEY);
+        if (localRaw) localSchemaStats = collectRunSchemaStats(JSON.parse(localRaw));
+      } catch (_error) {
+        /* preview stays conservative */
       }
     }
     if (isPlainObject(exportData?.storage?.[MANAGEMENT_STORAGE_KEY]) && !exportData.storage[MANAGEMENT_STORAGE_KEY].empty) {
@@ -375,6 +431,8 @@
         /* validation catches this before import */
       }
     }
+    const localV2AtRisk = localSchemaStats.v2Ids.filter((id) => !importSchemaStats.v2Ids.includes(id));
+    const v2OverwriteRisk = localV2AtRisk.length > 0 && importSchemaStats.v2 < localSchemaStats.v2;
     return {
       exportedAt: exportData?.exportedAt || "UNGEKLÄRT",
       storageAreas: ALLOWED_STORAGE_KEYS.map((key) => {
@@ -389,12 +447,21 @@
       }),
       dailyRunCount,
       managementProjectCount,
+      schemaVersions: {
+        import: importSchemaStats,
+        local: localSchemaStats,
+        localV2RunIdsAtRisk: localV2AtRisk,
+        v2OverwriteRisk,
+      },
       overwrite: {
         management: current.managementPresent,
         daily: current.dailyPresent,
       },
       safetyNotice:
-        "Der Import überschreibt ausschließlich lokale Browser-Arbeitsdaten. Kanonische Projekt- und Agentenregister bleiben unverändert. Es startet keine Agenten-, Plugin- oder externe Aktion.",
+        "Der Import überschreibt ausschließlich lokale Browser-Arbeitsdaten. Kanonische Projekt- und Agentenregister bleiben unverändert. Es startet keine Agenten-, Plugin- oder externe Aktion." +
+        (v2OverwriteRisk
+          ? " Achtung: Lokale schemaVersion-2-Läufe wären durch diesen Import gefährdet und erfordern acknowledgeV2Overwrite."
+          : ""),
     };
   }
 
@@ -448,6 +515,15 @@
     }
     if (options.importToken && options.lastCompletedImportToken === options.importToken) {
       throw new Error("Dieser Import wurde bereits bestätigt und ausgeführt.");
+    }
+
+    if (
+      validation.preview?.schemaVersions?.v2OverwriteRisk === true &&
+      options.acknowledgeV2Overwrite !== true
+    ) {
+      throw new Error(
+        "Import würde lokale schemaVersion-2-Läufe stillschweigend gefährden. acknowledgeV2Overwrite=true ist erforderlich.",
+      );
     }
 
     const rollbackSnapshot = captureRollbackSnapshot(storage);

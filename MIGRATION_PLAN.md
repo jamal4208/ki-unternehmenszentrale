@@ -1,6 +1,22 @@
 # MIGRATION PLAN
 
-## V6.46.0 – Health Hybrid End-to-End-Pilot (umgesetzt und abgenommen)
+## V7.0 Phase A – Guided Work Foundation (umgesetzt, getestet und browserseitig abgenommen)
+
+Vorheriger gesicherter Ausgang: **V6.46.0 / `e611c9c`**. V7.0 insgesamt ist damit **nicht** abgeschlossen; Phase B bis Phase E bleiben offen und nicht umgesetzt. Phase A ist speicherkompatibel über denselben Key `ki-unternehmenszentrale-daily-work-runs-v1`. Neue Läufe erhalten `schemaVersion: 2`; v1-Läufe bleiben unverändert lesbar. Keine automatische persistente Migration. Backup/Restore erkennt v1 und v2; ein v1-Import darf lokale v2-Läufe nicht stillschweigend überschreiben (`acknowledgeV2Overwrite` erforderlich; für diesen Override existiert bewusst noch keine UI-Freigabesteuerung – der sichere Standard bleibt aktiv).
+
+| Bereich | Regel |
+|---|---|
+| guided-work.js | Phasen, Vorschläge, Team, Baseline, Prefill, Invalidierung |
+| guided-work-ui.js | Hauptarbeitsraum; sticky Führung; keine zweite State-Quelle |
+| daily-work-run.js | bleibt kanonische Tageslaufdomäne |
+| health-hybrid-work.js | bleibt Paket-/Fingerprint-/Evidenz-/Gate-Domäne; known-dirty mit Bestätigung |
+| health-repo-status.js | additive Live-Details: relative dirty/untracked paths, Inhaltshashes, Fingerprint |
+| local-data-backup.js | Secret-Heuristik unverändert scharf; False Positive bei bloßer `.env`/`.env.local`-Pfadnennung gezielt korrigiert |
+| Verboten in Phase A, offen für Phase B–E | Execution Bridge, POST, Codex-/Agentenstart, Tests aus Zentrale, Health-Schreiben, Commit/Push/Deploy |
+
+Health Upgrade Kompass bleibt ausschließlich read-only Pilotquelle. Hybrid-Fallback V6.46.0 bleibt vollständig nutzbar. 322 automatisierte Prüfpunkte grün; vollständige Browser-Abnahme inkl. Mobile 390×844 bestanden.
+
+## V6.46.0 – Health Hybrid End-to-End-Pilot (letzter gesicherter Stand `e611c9c`)
 
 V6.46.0 bleibt speicherkompatibel (`schemaVersion: 1`). Neue Felder `executionPackage`, `releaseGates` und `externalExecutionEvidence` sind additiv; alte Tagesläufe ohne diese Felder bleiben lesbar. Neue GET-Route: `/api/projects/health-upgrade-kompass/live-status` (nur Health, nur Git-Read). Kein Testprozess und kein Git-Schreiben aus der Zentrale. Vorheriger gesicherter Ausgang: V6.45.2 / `fb9aa0d`. Externe Evidenz ist kein automatisch bestätigter Fachbefund; der frühere V6.46.0-WIP-Evidenz-Deadlock ist behoben, betroffene WIP-Läufe werden defensiv geheilt. Andere Projekte erhalten noch keinen Hybrid-Pfad.
 

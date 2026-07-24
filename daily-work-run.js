@@ -15,7 +15,10 @@
     root.DailyWorkRun = api;
   }
 })(typeof globalThis !== "undefined" ? globalThis : this, function createDailyWorkRunApi(agentRegistryApi, healthHybridWorkApi) {
-  const SCHEMA_VERSION = 1;
+  const SCHEMA_VERSION = 2;
+  const LEGACY_SCHEMA_VERSION = 1;
+  const STORE_SCHEMA_VERSION = 1;
+  const SUPPORTED_RUN_SCHEMA_VERSIONS = Object.freeze([1, 2]);
   const DAILY_STORAGE_KEY = "ki-unternehmenszentrale-daily-work-runs-v1";
   const LEGACY_MANAGEMENT_STORAGE_KEY = "ki-unternehmenszentrale-v1";
   const STATUS_VALUES = Object.freeze([
@@ -137,6 +140,32 @@
 
   function createDraftRun(options = {}) {
     const now = options.now || new Date();
+    const guidedWorkModule = typeof module === "object" && module.exports
+      ? (() => {
+        try {
+          return require("./guided-work");
+        } catch (_error) {
+          return null;
+        }
+      })()
+      : (typeof globalThis !== "undefined" ? globalThis.GuidedWork : null);
+    const guidedDefaults = guidedWorkModule?.createEmptyGuidedFields
+      ? guidedWorkModule.createEmptyGuidedFields()
+      : {
+          guidedWorkPhase: "FOCUS",
+          outcomeSuggestions: [],
+          selectedOutcomeSuggestionId: null,
+          knownWorkingTreeBaseline: null,
+          draftFindings: null,
+          teamRevision: 0,
+          responsibleAgentRevision: 0,
+          guidedInvalidation: {
+            packageInvalidatedAt: null,
+            packageInvalidationReason: null,
+            previousPackageId: null,
+            previousFingerprint: null,
+          },
+        };
     return {
       schemaVersion: SCHEMA_VERSION,
       id: singleText(options.id || `daily-run-${Date.now()}`, "id", true),
@@ -226,6 +255,7 @@
         historyTransferredAt: null,
         closedAt: null,
       },
+      ...guidedDefaults,
     };
   }
 
@@ -1429,7 +1459,7 @@
     const runs = Array.isArray(value.runs) ? value.runs.map((run) => ({ ...clone(run), workProposal: run.workProposal ? clone(run.workProposal) : null })) : [];
     const activeRunId = runs.some((run) => run.id === value.activeRunId) ? value.activeRunId : null;
     return {
-      schemaVersion: SCHEMA_VERSION,
+      schemaVersion: STORE_SCHEMA_VERSION,
       activeRunId,
       runs,
     };
@@ -1470,6 +1500,21 @@
     if (!run) return null;
     if (run.executionPackage === undefined) run.executionPackage = null;
     if (run.pendingExternalExecutionEvidence === undefined) run.pendingExternalExecutionEvidence = null;
+    if (run.guidedWorkPhase === undefined) run.guidedWorkPhase = null;
+    if (run.outcomeSuggestions === undefined) run.outcomeSuggestions = [];
+    if (run.selectedOutcomeSuggestionId === undefined) run.selectedOutcomeSuggestionId = null;
+    if (run.knownWorkingTreeBaseline === undefined) run.knownWorkingTreeBaseline = null;
+    if (run.draftFindings === undefined) run.draftFindings = null;
+    if (run.teamRevision === undefined) run.teamRevision = 0;
+    if (run.responsibleAgentRevision === undefined) run.responsibleAgentRevision = 0;
+    if (run.guidedInvalidation === undefined) {
+      run.guidedInvalidation = {
+        packageInvalidatedAt: null,
+        packageInvalidationReason: null,
+        previousPackageId: null,
+        previousFingerprint: null,
+      };
+    }
     if (healthHybridWorkApi?.ensureReleaseGates) {
       run.releaseGates = healthHybridWorkApi.ensureReleaseGates(run);
     } else if (!run.releaseGates) {
@@ -1601,7 +1646,10 @@
     DAILY_STORAGE_KEY,
     FINAL_STATUS_VALUES,
     LEGACY_MANAGEMENT_STORAGE_KEY,
+    LEGACY_SCHEMA_VERSION,
     SCHEMA_VERSION,
+    STORE_SCHEMA_VERSION,
+    SUPPORTED_RUN_SCHEMA_VERSIONS,
     STATUS_VALUES,
     TASK_TYPES,
     applyHistoryEntryOnce,

@@ -3,7 +3,7 @@
 ## 1. Verbindlicher V1-Stand
 
 - **Aussage:** V1 lokal fertig und betriebsbereit
-- **Aktuelle Arbeitsversion:** **V6.46.0** (Health Hybrid End-to-End-Pilot; umgesetzt und browserseitig abgenommen)
+- **Aktuelle Arbeitsversion:** **V7.0 Phase A – Guided Work Foundation** (umgesetzt, getestet und browserseitig abgenommen; V7.0 insgesamt noch nicht abgeschlossen, Phase B bis Phase E offen); vorheriger gesicherter Stand **V6.46.0** / `e611c9c`
 - **Gesicherter vorheriger Ausgangsstand:** **V6.45.2** / Commit **`fb9aa0d`**
 - **Historischer Freeze-Ausgang:** `16bbf45` (V6.43.1) – nur Historie
 - **Branch:** `main`
@@ -58,7 +58,7 @@ Im Server-Terminal **Ctrl + C**. Keinen parallelen Server auf Port 4173 belassen
 
 - Arbeitsdaten liegen lokal im Browser
 - Schlüssel u. a.: `ki-unternehmenszentrale-v1`, `ki-unternehmenszentrale-daily-work-runs-v1`
-- `schemaVersion: 1` bleibt ohne Migration
+- `schemaVersion: 1` und `schemaVersion: 2` koexistieren; neue Läufe starten mit 2, ohne automatische Migration
 - Kanonische Projekt- und Agentenregister werden **nicht** in localStorage kopiert
 
 ## 9. Backup-Export

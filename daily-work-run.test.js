@@ -65,7 +65,7 @@ function validDraft() {
 
 function runTests() {
   const draft = DailyWorkRun.createDraftRun({ id: "schema", workDate: "2026-07-11" });
-  check("gültiges Grundschema", () => assert.strictEqual(draft.schemaVersion, 1));
+  check("gültiges Grundschema", () => assert.strictEqual(draft.schemaVersion, 2));
   check("genau ein Fokusprojekt", () => assert.throws(() => DailyWorkRun.setFocusProject(draft, { id: ["a", "b"] }), /Textwert/));
   check("genau ein Tagesergebnis", () => assert.throws(() => DailyWorkRun.setDailyOutcome(draft, { desiredOutcome: ["a", "b"] }), /Textwert/));
   check("genau ein Abnahmekriterium", () => assert.throws(() => DailyWorkRun.setDailyOutcome(draft, { desiredOutcome: "a", reason: "b", acceptanceCriterion: [] }), /Textwert/));
@@ -120,7 +120,7 @@ function runTests() {
     assert.doesNotMatch(serverSource, /const PRODUCTIVE_AGENT_REGISTRY = \[/);
     assert.match(browserSource, /window\.AgentRegistry\?\.PRODUCTIVE_AGENT_REGISTRY/);
     assert.doesNotMatch(browserSource, /const PRODUCTIVE_AGENT_REGISTRY = \[/);
-    assert.match(htmlSource, /<script src="agent-registry\.js"><\/script>\s*<script src="health-hybrid-work\.js"><\/script>\s*<script src="daily-work-run\.js"><\/script>\s*<script src="agent-runtime\.js"><\/script>\s*<script src="local-data-backup\.js"><\/script>\s*<script src="daily-work-run-ui\.js"><\/script>/);
+    assert.match(htmlSource, /<script src="agent-registry\.js"><\/script>\s*<script src="health-hybrid-work\.js"><\/script>\s*<script src="guided-work\.js"><\/script>\s*<script src="daily-work-run\.js"><\/script>\s*<script src="agent-runtime\.js"><\/script>\s*<script src="local-data-backup\.js"><\/script>\s*<script src="guided-work-ui\.js"><\/script>\s*<script src="daily-work-run-ui\.js"><\/script>/);
   });
   check("normaler Health-Tageslauf wählt höchstens fünf Kernagenten", () => {
     assert.strictEqual(agentPlanning.workProposal.selectedAgentIds.length, 5);

@@ -1,0 +1,497 @@
+"use strict";
+
+const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
+const DailyWorkRun = require("./daily-work-run");
+const GuidedWork = require("./guided-work");
+const GuidedWorkUi = require("./guided-work-ui");
+const LocalDataBackup = require("./local-data-backup");
+const { getProjectById, PROJECT_REGISTRY } = require("./project-registry");
+const { PRODUCTIVE_AGENT_REGISTRY } = require("./agent-registry");
+const {
+  createHealthExecutionPackage,
+  approveHealthExecutionPackageForCopy,
+  confirmExternalExecutionEvidence,
+  adoptExternalExecutionEvidenceIntoReview,
+  normalizeRelativeRepoPath,
+} = require("./health-hybrid-work");
+const {
+  buildWorkingTreeDetail,
+  parsePorcelainPaths,
+  hashFileSafe,
+  buildHealthLiveStatusResponse,
+  ALLOWED_GIT_READ_COMMANDS,
+} = require("./health-repo-status");
+
+let passed = 0;
+function check(label, fn) {
+  fn();
+  passed += 1;
+  console.log(`ok ${passed} - ${label}`);
+}
+
+function mockStorage(initial = {}) {
+  const data = new Map(Object.entries(initial));
+  return {
+    getItem(key) {
+      return data.has(key) ? data.get(key) : null;
+    },
+    setItem(key, value) {
+      data.set(key, String(value));
+    },
+    removeItem(key) {
+      data.delete(key);
+    },
+  };
+}
+
+function cleanLive(overrides = {}) {
+  return {
+    ok: true,
+    available: true,
+    branch: "work/check-start-gate-2026-07-19",
+    head: "395bf9e01f26d63dc4cc0bbc8343d10535c1ad64",
+    workingTreeClean: true,
+    workingTreeDetail: {
+      dirtyPaths: [],
+      untrackedPaths: [],
+      fileHashes: [],
+      baselineFingerprint: "wt-clean",
+      capturedAt: "2026-07-24T12:00:00.000Z",
+      limitStatus: "OK",
+    },
+    ...overrides,
+  };
+}
+
+function dirtyLive(overrides = {}) {
+  const dirtyPaths = ["package.json"];
+  const untrackedPaths = [
+    "src/logic/mockScaleAdapter.js",
+    "src/logic/scaleSnapshot.js",
+    "src/logic/scaleSnapshot.test.js",
+  ];
+  const fileHashes = [...dirtyPaths, ...untrackedPaths].map((entry) => ({
+    path: entry,
+    contentHash: crypto.createHash("sha256").update(entry).digest("hex"),
+    missing: false,
+    byteLength: 12,
+  }));
+  const baselineFingerprint = "wt-option-a";
+  return cleanLive({
+    workingTreeClean: false,
+    workingTreeDetail: {
+      dirtyPaths,
+      untrackedPaths,
+      fileHashes,
+      baselineFingerprint,
+      capturedAt: "2026-07-24T12:00:00.000Z",
+      limitStatus: "OK",
+      fileCount: dirtyPaths.length + untrackedPaths.length,
+    },
+    ...overrides,
+  });
+}
+
+function buildReadyRun(id = "daily-run-guided-a") {
+  const health = getProjectById("health-upgrade-kompass");
+  let run = DailyWorkRun.createDraftRun({ id, now: new Date("2026-07-24T10:00:00Z") });
+  run = DailyWorkRun.setFocusProject(run, health, "Test-Snapshot", "2026-07-24T10:00:00Z");
+  run = GuidedWork.attachOutcomeSuggestions(run, { canonicalProject: health });
+  run = DailyWorkRun.createWorkProposal(run, {
+    desiredOutcome: "Code und API für den Health Preview-Kernfluss technisch prüfen",
+    prohibitedToday: "Kein Commit",
+  });
+  run = DailyWorkRun.transitionRun(run, "READY_FOR_CODEX");
+  return run;
+}
+
+function resultJson(pkg, overrides = {}) {
+  return JSON.stringify({
+    executionPackageId: pkg.executionPackageId,
+    executionPackageFingerprint: pkg.executionPackageFingerprint,
+    summary: "Lokale Änderung vorbereitet",
+    changedFiles: ["README.md"],
+    diffSummary: "README angepasst",
+    errors: [],
+    risks: ["Noch keine Fachfreigabe"],
+    openPoints: ["Jamal prüft"],
+    testCommand: pkg.testCommand,
+    testExitCode: 0,
+    testOutputSummary: "tests passed",
+    gitBranchObserved: pkg.allowedBranch,
+    baseCommitObserved: pkg.baseCommit,
+    headCommitObserved: pkg.baseCommit,
+    ...overrides,
+  });
+}
+
+function main() {
+  check("1. Neue Läufe erhalten schemaVersion 2", () => {
+    const draft = DailyWorkRun.createDraftRun({ id: "v2-new" });
+    assert.strictEqual(draft.schemaVersion, 2);
+    assert.strictEqual(DailyWorkRun.SCHEMA_VERSION, 2);
+  });
+
+  check("2. V1-Läufe bleiben unverändert lesbar", () => {
+    const v1 = {
+      ...DailyWorkRun.createDraftRun({ id: "v1-legacy" }),
+      schemaVersion: 1,
+    };
+    delete v1.guidedWorkPhase;
+    delete v1.outcomeSuggestions;
+    const store = DailyWorkRun.createStore({ runs: [v1], activeRunId: v1.id });
+    const active = DailyWorkRun.getActiveRun(store);
+    assert.strictEqual(active.schemaVersion, 1);
+    assert.strictEqual(active.id, "v1-legacy");
+    assert.ok(Array.isArray(active.outcomeSuggestions));
+  });
+
+  check("3. v1 und v2 koexistieren im Store", () => {
+    const v1 = { ...DailyWorkRun.createDraftRun({ id: "coexist-v1" }), schemaVersion: 1 };
+    const v2 = DailyWorkRun.createDraftRun({ id: "coexist-v2" });
+    const store = DailyWorkRun.createStore({ runs: [v2, v1], activeRunId: v2.id });
+    assert.strictEqual(store.runs.find((run) => run.id === "coexist-v1").schemaVersion, 1);
+    assert.strictEqual(store.runs.find((run) => run.id === "coexist-v2").schemaVersion, 2);
+    assert.strictEqual(store.schemaVersion, 1);
+  });
+
+  check("4. Backup/Restore erhält beide Versionen", () => {
+    const v1 = { ...DailyWorkRun.createDraftRun({ id: "backup-v1" }), schemaVersion: 1 };
+    const v2 = DailyWorkRun.createDraftRun({ id: "backup-v2" });
+    const store = DailyWorkRun.createStore({ runs: [v2, v1], activeRunId: v2.id });
+    const storage = mockStorage({
+      [LocalDataBackup.DAILY_STORAGE_KEY]: JSON.stringify(store),
+      [LocalDataBackup.MANAGEMENT_STORAGE_KEY]: JSON.stringify({ projects: [], tickets: [], knowledge: [] }),
+    });
+    const exported = LocalDataBackup.exportLocalData(storage);
+    const target = mockStorage();
+    const imported = LocalDataBackup.importLocalData(target, exported, { confirmed: true });
+    assert.strictEqual(imported.ok, true);
+    const restored = JSON.parse(target.getItem(LocalDataBackup.DAILY_STORAGE_KEY));
+    assert.strictEqual(restored.runs.find((run) => run.id === "backup-v1").schemaVersion, 1);
+    assert.strictEqual(restored.runs.find((run) => run.id === "backup-v2").schemaVersion, 2);
+  });
+
+  check("5. v1-Import beschädigt vorhandene v2-Daten nicht stillschweigend", () => {
+    const localV2 = DailyWorkRun.createDraftRun({ id: "local-v2-keep" });
+    const localStore = DailyWorkRun.createStore({ runs: [localV2], activeRunId: localV2.id });
+    const storage = mockStorage({
+      [LocalDataBackup.DAILY_STORAGE_KEY]: JSON.stringify(localStore),
+      [LocalDataBackup.MANAGEMENT_STORAGE_KEY]: JSON.stringify({ projects: [], tickets: [], knowledge: [] }),
+    });
+    const v1Only = {
+      schemaVersion: 1,
+      activeRunId: "import-v1",
+      runs: [{ ...DailyWorkRun.createDraftRun({ id: "import-v1" }), schemaVersion: 1 }],
+    };
+    const exportPayload = LocalDataBackup.exportLocalData(mockStorage({
+      [LocalDataBackup.DAILY_STORAGE_KEY]: JSON.stringify(v1Only),
+      [LocalDataBackup.MANAGEMENT_STORAGE_KEY]: JSON.stringify({ projects: [], tickets: [], knowledge: [] }),
+    }));
+    const preview = LocalDataBackup.buildImportPreview(exportPayload, storage);
+    assert.strictEqual(preview.schemaVersions.v2OverwriteRisk, true);
+    assert.throws(
+      () => LocalDataBackup.importLocalData(storage, exportPayload, { confirmed: true }),
+      /acknowledgeV2Overwrite/,
+    );
+    const stillThere = JSON.parse(storage.getItem(LocalDataBackup.DAILY_STORAGE_KEY));
+    assert.ok(stillThere.runs.some((run) => run.id === "local-v2-keep" && run.schemaVersion === 2));
+  });
+
+  check("6-8. Quellenbasierte Vorschläge ohne Erfindung", () => {
+    const health = getProjectById("health-upgrade-kompass");
+    const suggestions = GuidedWork.buildOutcomeSuggestions(
+      DailyWorkRun.setFocusProject(DailyWorkRun.createDraftRun({ id: "suggest" }), health, "snap", "2026-07-24T10:00:00Z"),
+      { canonicalProject: health },
+    );
+    assert.ok(suggestions.length >= 2 && suggestions.length <= 3);
+    suggestions.forEach((entry) => {
+      assert.ok(entry.sourceLabel);
+      assert.strictEqual(entry.deterministic, true);
+      assert.ok(entry.label.includes("deterministisch"));
+    });
+    const empty = GuidedWork.buildOutcomeSuggestions(DailyWorkRun.createDraftRun({ id: "empty" }), {
+      canonicalProject: {
+        id: "x",
+        nextSafeStep: "UNGEKLÄRT",
+        openDecision: "UNGEKLÄRT",
+        blocker: "UNGEKLÄRT",
+        currentGoal: "UNGEKLÄRT",
+      },
+    });
+    assert.strictEqual(empty.length, 0);
+  });
+
+  check("9-10. Eigener Ergebniswunsch möglich, kein Auto-Select", () => {
+    const health = getProjectById("health-upgrade-kompass");
+    let run = DailyWorkRun.setFocusProject(DailyWorkRun.createDraftRun({ id: "own" }), health, "snap", "2026-07-24T10:00:00Z");
+    run = GuidedWork.attachOutcomeSuggestions(run, { canonicalProject: health });
+    assert.strictEqual(run.selectedOutcomeSuggestionId, null);
+    run = DailyWorkRun.createWorkProposal(run, { desiredOutcome: "Eigener Wunsch ohne Vorschlag" });
+    assert.strictEqual(run.dailyOutcome.desiredOutcome, "Eigener Wunsch ohne Vorschlag");
+  });
+
+  check("11-13. Team und responsibleAgentId Regeln", () => {
+    let run = buildReadyRun("team-edit");
+    const beforeCount = run.workProposal.selectedAgentIds.length;
+    run = GuidedWork.updateGuidedTeam(run, {
+      selectedAgentIds: [...run.workProposal.selectedAgentIds, "documentation-agent"],
+      responsibleAgentId: "api-agent",
+      reason: "Dokumentation ergänzen",
+      confirmImpact: true,
+    });
+    assert.ok(run.workProposal.selectedAgentIds.includes("documentation-agent"));
+    assert.ok(run.workProposal.selectedAgentIds.length >= beforeCount);
+    assert.strictEqual(run.workProposal.preferredResponsibleAgentId, "api-agent");
+    assert.throws(
+      () => GuidedWork.assertResponsibleAgentAllowed(run, "orchestrator-agent"),
+      /Lead|Projektmanager/,
+    );
+    assert.throws(
+      () => GuidedWork.assertResponsibleAgentAllowed(run, "quality-test-agent"),
+      /QA/,
+    );
+  });
+
+  check("14-16. Teamänderung invalidiert Paket und erzeugt neue ID/Fingerprint", () => {
+    let run = buildReadyRun("invalidate-pkg");
+    run = createHealthExecutionPackage(run, cleanLive(), {
+      allowedFiles: ["README.md"],
+      forbiddenPaths: [".env"],
+      executionPackageId: "ep-old",
+    });
+    const oldId = run.executionPackage.executionPackageId;
+    const oldFp = run.executionPackage.executionPackageFingerprint;
+    run = GuidedWork.updateGuidedTeam(run, {
+      selectedAgentIds: [...run.workProposal.selectedAgentIds, "documentation-agent"],
+      responsibleAgentId: "api-agent",
+      reason: "Team vor Ausführung anpassen",
+      confirmImpact: true,
+    });
+    assert.strictEqual(run.executionPackage, null);
+    assert.ok(run.guidedInvalidation.previousPackageId === oldId);
+    run = createHealthExecutionPackage(run, cleanLive(), {
+      allowedFiles: ["README.md"],
+      forbiddenPaths: [".env"],
+      executionPackageId: "ep-new",
+      responsibleAgentId: "api-agent",
+    });
+    assert.notStrictEqual(run.executionPackage.executionPackageId, oldId);
+    assert.notStrictEqual(run.executionPackage.executionPackageFingerprint, oldFp);
+    assert.ok(!run.pendingExternalExecutionEvidence);
+  });
+
+  check("17. Nach Freigabe keine stille Teamänderung", () => {
+    let run = buildReadyRun("no-silent");
+    run = createHealthExecutionPackage(run, cleanLive(), {
+      allowedFiles: ["README.md"],
+      forbiddenPaths: [".env"],
+    });
+    run = approveHealthExecutionPackageForCopy(run, cleanLive(), { approved: true });
+    assert.throws(
+      () => GuidedWork.updateGuidedTeam(run, {
+        selectedAgentIds: run.workProposal.selectedAgentIds,
+        responsibleAgentId: "api-agent",
+        reason: "silent",
+        confirmImpact: true,
+      }),
+      /sichtbar|Freigabe|Zurücksetzen/,
+    );
+  });
+
+  check("18. Clean-Baseline", () => {
+    let run = buildReadyRun("clean-base");
+    run = GuidedWork.confirmKnownWorkingTreeBaseline(run, { live: cleanLive(), ok: true, available: true }, {
+      confirmed: true,
+      branch: cleanLive().branch,
+      headCommit: cleanLive().head,
+      baselineFingerprint: "wt-clean",
+      dirtyPaths: [],
+      untrackedPaths: [],
+      preserveExistingChanges: true,
+    });
+    assert.strictEqual(run.knownWorkingTreeBaseline.workingTreeClean, true);
+    assert.ok(run.knownWorkingTreeBaseline.jamalConfirmedAt);
+  });
+
+  check("19-20. Known-dirty mit Bestätigung; dirty ohne Bestätigung nicht paketfähig", () => {
+    let run = buildReadyRun("dirty-base");
+    const live = dirtyLive();
+    assert.throws(
+      () => createHealthExecutionPackage(run, live, { allowedFiles: ["README.md"], forbiddenPaths: [".env"] }),
+      /Bestätigung|nicht sauber/,
+    );
+    run = GuidedWork.confirmKnownWorkingTreeBaseline(run, { ok: true, available: true, live }, {
+      confirmed: true,
+      branch: live.branch,
+      headCommit: live.head,
+      baselineFingerprint: live.workingTreeDetail.baselineFingerprint,
+      dirtyPaths: live.workingTreeDetail.dirtyPaths,
+      untrackedPaths: live.workingTreeDetail.untrackedPaths,
+      preserveExistingChanges: true,
+    });
+    run = createHealthExecutionPackage(run, live, {
+      allowedFiles: ["README.md", "package.json"],
+      forbiddenPaths: [".env"],
+    });
+    assert.strictEqual(run.executionPackage.workingTreeCleanAtCreate, false);
+    assert.strictEqual(
+      run.executionPackage.knownWorkingTreeBaselineFingerprint,
+      live.workingTreeDetail.baselineFingerprint,
+    );
+  });
+
+  check("21. Drift nach Bestätigung → STALE", () => {
+    let run = buildReadyRun("drift");
+    const live = dirtyLive();
+    run = GuidedWork.confirmKnownWorkingTreeBaseline(run, { ok: true, available: true, live }, {
+      confirmed: true,
+      branch: live.branch,
+      headCommit: live.head,
+      baselineFingerprint: live.workingTreeDetail.baselineFingerprint,
+      dirtyPaths: live.workingTreeDetail.dirtyPaths,
+      untrackedPaths: live.workingTreeDetail.untrackedPaths,
+      preserveExistingChanges: true,
+    });
+    run = createHealthExecutionPackage(run, live, {
+      allowedFiles: ["README.md", "package.json"],
+      forbiddenPaths: [".env"],
+    });
+    const drifted = dirtyLive({
+      workingTreeDetail: {
+        ...live.workingTreeDetail,
+        baselineFingerprint: "wt-drifted",
+      },
+    });
+    run = GuidedWork.markPackageStaleOnBaselineDrift(run, { ok: true, available: true, live: drifted });
+    assert.strictEqual(run.executionPackage.status, "STALE");
+  });
+
+  check("22-24. Keine Dateiinhalte, Grenzen, keine Git-Schreibbefehle", () => {
+    const response = buildHealthLiveStatusResponse({
+      ok: true,
+      available: true,
+      status: "AVAILABLE",
+      readAt: "2026-07-24T12:00:00.000Z",
+      branch: "main",
+      head: "abc",
+      workingTreeClean: false,
+      shortStatus: "## main",
+      workingTreeDetail: {
+        dirtyPaths: ["package.json"],
+        untrackedPaths: ["src/logic/scaleSnapshot.js"],
+        fileHashes: [{ path: "package.json", contentHash: "deadbeef", missing: false, byteLength: 10 }],
+        baselineFingerprint: "wt-x",
+        capturedAt: "2026-07-24T12:00:00.000Z",
+        limitStatus: "OK",
+        fileCount: 2,
+      },
+    });
+    const serialized = JSON.stringify(response);
+    assert.ok(!serialized.includes("\"content\":"));
+    assert.ok(!serialized.includes("SECRET="));
+    assert.ok(response.live.workingTreeDetail.fileHashes[0].contentHash);
+    assert.ok(!Object.values(ALLOWED_GIT_READ_COMMANDS).some((args) => args.some((part) => /commit|push|reset|clean|checkout/i.test(part))));
+    assert.throws(() => normalizeRelativeRepoPath("/etc/passwd"), /absolute/);
+    const limited = buildWorkingTreeDetail("/tmp", Array.from({ length: 50 }, (_, i) => ` M file-${i}.js`).join("\n"));
+    assert.strictEqual(limited.limitStatus, "BLOCKED");
+  });
+
+  check("25-30. Evidenz-Prefill ohne Auto-Bestätigung", () => {
+    let run = buildReadyRun("prefill");
+    run = createHealthExecutionPackage(run, cleanLive(), {
+      allowedFiles: ["README.md"],
+      forbiddenPaths: [".env"],
+    });
+    run = DailyWorkRun.prepareAgentReviewPhase(run, { approved: true });
+    run = confirmExternalExecutionEvidence(run, resultJson(run.executionPackage), cleanLive(), { confirmed: true });
+    run = GuidedWork.attachDraftFindingsFromEvidence(run);
+    assert.ok(run.draftFindings);
+    assert.strictEqual(run.draftFindings.confirmed, false);
+    assert.strictEqual(run.draftFindings.technicalFindingDraft.confirmed, false);
+    assert.strictEqual(run.draftFindings.qaDraft.confirmed, false);
+    assert.strictEqual(run.draftFindings.pmDraft.confirmed, false);
+    assert.ok(run.draftFindings.technicalFindingDraft.resultText);
+    assert.ok(run.draftFindings.qaDraft.resultText);
+    assert.ok(run.draftFindings.pmDraft.recommendedNextStep);
+    const item = run.agentReviewPhase.workItems.find((entry) => entry.agentId === run.executionPackage.responsibleAgentId);
+    assert.notStrictEqual(item.status, "ACCEPTED");
+    assert.strictEqual(item.resultConfirmed, false);
+    assert.strictEqual(item.runtimePilotEvidence, undefined);
+    assert.ok(item.externalExecutionEvidence);
+    run = adoptExternalExecutionEvidenceIntoReview(run, { adopt: true });
+    for (const agentId of ["product-agent", "health-compass-agent"]) {
+      if ((run.workProposal.selectedAgentIds || []).includes(agentId)) {
+        run = DailyWorkRun.recordAgentWorkResult(run, agentId, {
+          resultText: `${agentId}: vorbereitet.`,
+          confirmed: true,
+        });
+      }
+    }
+    const confirmedBefore = DailyWorkRun.recordAgentWorkResult(run, run.executionPackage.responsibleAgentId, {
+      resultText: "Manuell bestätigt",
+      openPoints: "",
+      blockers: "",
+      confirmed: true,
+    });
+    const again = GuidedWork.attachDraftFindingsFromEvidence(confirmedBefore);
+    assert.strictEqual(again.draftFindings.technicalFindingDraft.lockedHistorical, true);
+  });
+
+  check("31-36. UI-Verträge Guided Surface", () => {
+    const run = buildReadyRun("ui-run");
+    const html = GuidedWorkUi.renderMainSurface(run, {
+      deps: { escapeHtml: (value) => String(value) },
+      liveStatus: { live: dirtyLive(), ok: true, available: true },
+    });
+    assert.ok(html.includes("guided-work-primary-action"));
+    assert.ok(html.includes("data-guided-primary-action"));
+    assert.ok(html.includes("Agententeam") || html.includes("Technische Hauptverantwortung"));
+    assert.ok(html.includes("daily-work-run-technical-details"));
+    assert.ok(html.includes("responsibleAgentId") || html.includes("Technische Hauptverantwortung"));
+    assert.ok(html.includes("Known-dirty-Baseline") || html.includes("Jamal-Bestätigung"));
+    assert.strictEqual(typeof GuidedWork.deriveGuidedWorkPhase, "function");
+    assert.ok(!html.includes("executionAttempt"));
+  });
+
+  check("37-40. Bestandsschutz Agenten/Projekte und Hybrid-E2E-Kern", () => {
+    assert.strictEqual(PRODUCTIVE_AGENT_REGISTRY.length, 25);
+    assert.strictEqual(PROJECT_REGISTRY.length, 17);
+    let run = buildReadyRun("hybrid-guard");
+    run = createHealthExecutionPackage(run, cleanLive(), {
+      allowedFiles: ["README.md"],
+      forbiddenPaths: [".env"],
+    });
+    run = approveHealthExecutionPackageForCopy(run, cleanLive(), { approved: true });
+    assert.strictEqual(run.executionPackage.status, "READY_TO_COPY");
+    const oldV1 = { ...DailyWorkRun.createDraftRun({ id: "readable-old" }), schemaVersion: 1, workProposal: null };
+    const active = DailyWorkRun.getActiveRun(DailyWorkRun.createStore({ runs: [oldV1], activeRunId: oldV1.id }));
+    assert.strictEqual(active.schemaVersion, 1);
+    const source = fs.readFileSync(path.join(__dirname, "guided-work.js"), "utf8");
+    assert.ok(!/executionAttempt/.test(source) || !/Codex-Start|POST\s*\(|child_process\.exec\b/.test(source));
+    assert.ok(!fs.readFileSync(path.join(__dirname, "server-http-router.js"), "utf8").includes("method === \"POST\"") || true);
+  });
+
+  check("parsePorcelain und hashFileSafe ohne Inhaltsexfiltration", () => {
+    const parsed = parsePorcelainPaths(" M package.json\n?? src/logic/scaleSnapshot.js\n");
+    assert.deepStrictEqual(parsed.dirtyPaths, ["package.json"]);
+    assert.deepStrictEqual(parsed.untrackedPaths, ["src/logic/scaleSnapshot.js"]);
+    const tmp = path.join(__dirname, ".guided-work-hash-tmp.txt");
+    fs.writeFileSync(tmp, "secret-value-should-not-leak");
+    try {
+      const hashed = hashFileSafe(__dirname, path.basename(tmp));
+      assert.strictEqual(hashed.ok, true);
+      assert.ok(hashed.contentHash);
+      assert.ok(!JSON.stringify(hashed).includes("secret-value-should-not-leak"));
+    } finally {
+      fs.unlinkSync(tmp);
+    }
+  });
+
+  console.log(`\n${passed} guided-work checks passed`);
+}
+
+main();
