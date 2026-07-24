@@ -946,7 +946,7 @@ function runTests() {
 
   const serverSource = fs.readFileSync(path.join(__dirname, "server.js"), "utf8");
   const routeCount = (serverSource.match(/^\s+\["\/api\//gm) || []).length;
-  check("42 GET-Routen bleiben erhalten", () => assert.strictEqual(routeCount, 42));
+  check("43 GET-Routen bleiben erhalten (Phase B: +1 /api/server-status)", () => assert.strictEqual(routeCount, 43));
   check("unbekannte Projekt-ID bleibt 404", () => assert.strictEqual(invoke("GET", "/api/projects/unbekannt").statusCode, 404));
   check("POST bleibt 405", () => assert.strictEqual(invoke("POST", "/api/projects").statusCode, 405));
   check("writeOperationsBlocked bleibt true", () => assert.strictEqual(API_SECURITY_FLAGS.writeOperationsBlocked, true));

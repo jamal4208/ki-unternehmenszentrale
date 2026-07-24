@@ -3,9 +3,10 @@
 ## Git- und Versionsstand
 
 - Vorheriger gesicherter Ausgangsstand: **V6.46.0** / Commit **`e611c9c`** (Health Hybrid End-to-End-Pilot)
-- Aktueller Arbeitsstand: **V7.0 Phase A – Guided Work Foundation: umgesetzt, getestet und browserseitig abgenommen**
-- Branch: `main`, committed und auf `origin/main` gepusht
-- Verbindliche Aussage: V6.46.0 bleibt als vorheriger gesicherter Stand erhalten; Phase A ist abgeschlossen, **V7.0 insgesamt ist damit nicht abgeschlossen** – Phase B bis Phase E sind weiterhin offen und nicht umgesetzt
+- **V7.0 Phase A – Guided Work Foundation:** umgesetzt, getestet, browserseitig abgenommen und gesichert mit Commit **`4a74ebe`** auf `origin/main`
+- **V7.0 Phase B – Betriebsstabilität:** umgesetzt, getestet und browserseitig abgenommen; **mit diesem Commit gesichert und auf `origin/main` gepusht**
+- Branch: `main`
+- Verbindliche Aussage: V6.46.0 bleibt als vorheriger gesicherter Stand erhalten; Phase A (`4a74ebe`) und Phase B sind abgeschlossen und gesichert; **V7.0 insgesamt ist damit nicht abgeschlossen** – Phase C bis Phase E sind weiterhin offen und nicht umgesetzt
 - Einstiegspunkte: `README.md`, `V1_BETRIEBSHANDBUCH.md`
 
 ## V7.0 Phase A – Guided Work Foundation (umgesetzt und abgenommen)
@@ -21,7 +22,20 @@
 - Backup-Schutz bleibt aktiv: Secret-Heuristik unverändert scharf; einzig der bestätigte False Positive bei bloßer `.env`/`.env.local`-Pfadnennung (z. B. in `forbiddenPaths`) wurde gezielt korrigiert, ohne die Erkennung realer Zugangsdaten zu schwächen
 - Bekannter, bewusst offener Bedienpunkt: Für `acknowledgeV2Overwrite` (Schutz gegen stilles Überschreiben lokaler v2-Läufe durch einen reinen v1-Import) gibt es noch keine UI-Freigabesteuerung; der sichere Standard („nicht überschreiben“) bleibt dadurch aktiv, ein bewusster Override ist aktuell nur außerhalb der UI möglich
 - 322 automatisierte Prüfpunkte grün; vollständige Browser-Abnahme inkl. Mobile 390×844 ohne horizontalen Überlauf bestanden
-- **Nicht enthalten – weiterhin offen für Phase B bis Phase E:** Execution Bridge, POST-Routen, Codex-/Agentenstart, Testausführung aus der Zentrale, Health-Schreiben, Commit/Push/Deployment, Autonomieerhöhung
+- **Nicht enthalten – weiterhin offen für Phase C bis Phase E:** Execution Bridge, POST-Routen, Codex-/Agentenstart, Testausführung aus der Zentrale, Health-Schreiben, Commit/Push/Deployment, Autonomieerhöhung (Phase B siehe unten, ebenfalls abgeschlossen)
+
+## V7.0 Phase B – Betriebsstabilität (umgesetzt, getestet und browserseitig abgenommen, mit diesem Commit gesichert)
+
+- Separater lokaler Controller `scripts/zentral-ctl.js` (nicht Teil des laufenden App-Servers) mit `status`, `start`, `stop`, `restart`; npm-Skripte `central:start`, `central:status`, `central:stop`, `central:restart`; `npm start` bleibt einfacher manueller Fallback
+- Sicherheitsregeln: verwaltet ausschließlich selbst gestartete Prozesse; beendet nie einen fremden Prozess nur wegen Portbelegung; prüft PID-Existenz, erwartete Node-Anwendung, Projektpfad-Fingerprint und Startnachweis vor `stop`/`restart`; erkennt stale Statusdateien; SIGTERM mit Timeout, kein automatisches `kill -9`; feste argv-Arrays, kein `shell: true`
+- App-Support-Verzeichnis `~/Library/Application Support/KI-Unternehmenszentrale/server/` außerhalb beider Repositories; atomare Statusdatei (tmp + rename), Größenbegrenzung, keine Secrets/Env/Browserdaten/Prompts
+- Neues Domänenmodul `server-status.js`: unveränderliche Start-Momentaufnahme (App-Version, Git-Commit, Startzeit, Port), Statusmodell `RUNNING | STOPPED | STALE | PORT_CONFLICT | VERSION_MISMATCH | UNKNOWN`, `UNKNOWN` statt erfundener Versionsaussage bei nicht lesbarem Git-Stand
+- Neue read-only Route `GET /api/server-status` (Route 43 von 43); andere Methoden bleiben 405; keine vollständigen Pfade, keine Secrets, `writeOperationsBlocked: true`, `madeExternalRequest: false`
+- Kompakte Statusanzeige im Guided Work Surface (Port, Version, kurzer Commit, Startzeit, Status); technische Details (PID, vollständiger Commit, Controllerdetails) standardmäßig geschlossen; genau ein sicherer nächster Schritt bei Problemen; **kein** Start-/Stop-/Restart-Button im Browser
+- Portstrategie: Standard `4173`, kein automatischer Portwechsel, Konflikt wird klar gemeldet, alternativer Port nur explizit über `--port`
+- 32 neue automatisierte Prüfpunkte (`server-status.test.js`: 18, `zentral-ctl.test.js`: 14) plus erweiterte Prüfpunkte in `server-http-router.test.js`, `guided-work.test.js`, `daily-work-run.test.js`, `agent-runtime.test.js`; gesamt **384 automatisierte Prüfpunkte grün** (`npm test`, Exit-Code 0)
+- Vollständige Browser-Abnahme bestanden: realer Controller-Lifecycle (`start`/`status`/`restart`/`stop`) gegen einen tatsächlich laufenden Server, echter Portkonflikt auf 4173 gegen einen fremden, unveränderten Prozess ohne Kill, Statusanzeige inkl. Reload-Persistenz, Mobile 390×844 ohne horizontalen Überlauf, Phase-A-Hauptfluss weiterhin vollständig nutzbar
+- **Nicht enthalten – weiterhin offen für Phase C bis Phase E:** Execution Bridge, Executor-Schnittstelle, Codex-/Cursor-Agentenstart, Repository-Arbeitsausführung, POST-Routen, Health-Schreibaktion, Testausführung aus dem Browser, automatisches Commit/Push/Deployment, Autonomieerhöhung, Browserbutton für Prozesssteuerung
 
 ## V6.46.0 – vorheriger gesicherter Ausgangsstand
 

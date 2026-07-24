@@ -285,7 +285,48 @@ async function runTests() {
 
   const serverSource = fs.readFileSync(path.join(__dirname, "server.js"), "utf8");
   const routeCount = (serverSource.match(/^\s+\["\/api\//gm) || []).length;
-  check("bestehende 42 GET-Routen bleiben registriert", () => assert.strictEqual(routeCount, 42));
+  check("bestehende 43 GET-Routen bleiben registriert (Phase B: +1 /api/server-status)", () =>
+    assert.strictEqual(routeCount, 43),
+  );
+
+  const serverStatusGet = await invokeJson(requestHandler, "GET", "/api/server-status");
+  check("GET /api/server-status liefert 200", () => assert.strictEqual(serverStatusGet.statusCode, 200));
+  check("GET /api/server-status liefert sichere Grundfelder ohne Schreibaktionen", () => {
+    assert.strictEqual(serverStatusGet.json.writeOperationsBlocked, true);
+    assert.strictEqual(serverStatusGet.json.madeExternalRequest, false);
+    assert.ok(["RUNNING", "VERSION_MISMATCH", "UNKNOWN"].includes(serverStatusGet.json.status));
+    assert.ok(Number.isInteger(serverStatusGet.json.pid));
+    assert.ok(typeof serverStatusGet.json.appVersion === "string" && serverStatusGet.json.appVersion.length > 0);
+    assert.ok(!("projectRoot" in serverStatusGet.json));
+    assert.ok(!JSON.stringify(serverStatusGet.json).includes(__dirname));
+  });
+
+  const serverStatusPost = await invokeJson(requestHandler, "POST", "/api/server-status");
+  check("POST /api/server-status bleibt 405", () => assert.strictEqual(serverStatusPost.statusCode, 405));
+
+  const controllerScriptAsset = await invoke(requestHandler, "GET", "/scripts/zentral-ctl.js");
+  check("scripts/zentral-ctl.js wird nicht statisch ausgeliefert", () =>
+    assert.strictEqual(controllerScriptAsset.statusCode, 404),
+  );
+
+  const serverStatusModuleAsset = await invoke(requestHandler, "GET", "/server-status.js");
+  check("server-status.js wird nicht statisch ausgeliefert", () =>
+    assert.strictEqual(serverStatusModuleAsset.statusCode, 404),
+  );
+
+  const serverStatusTestAsset = await invoke(requestHandler, "GET", "/server-status.test.js");
+  check("server-status.test.js wird nicht statisch ausgeliefert", () =>
+    assert.strictEqual(serverStatusTestAsset.statusCode, 404),
+  );
+
+  const zentralCtlTestAsset = await invoke(requestHandler, "GET", "/zentral-ctl.test.js");
+  check("zentral-ctl.test.js wird nicht statisch ausgeliefert", () =>
+    assert.strictEqual(zentralCtlTestAsset.statusCode, 404),
+  );
+
+  check("server.js kann selbst keine Prozesse starten (kein child_process)", () => {
+    assert.doesNotMatch(serverSource, /require\(["']child_process["']\)/);
+  });
 
   const postOnKnown = await invokeJson(requestHandler, "POST", "/api/projects");
   check("POST auf bestehende Route bleibt 405", () => assert.strictEqual(postOnKnown.statusCode, 405));
@@ -394,6 +435,14 @@ async function runTests() {
 
     const postIntegration = await httpRequest(integrationPort, "POST", "/api/projects");
     check("Integration: POST liefert 405", () => assert.strictEqual(postIntegration.statusCode, 405));
+
+    const statusIntegration = await httpGet(integrationPort, "/api/server-status");
+    check("Integration: GET /api/server-status liefert 200 mit passendem Port", () => {
+      assert.strictEqual(statusIntegration.statusCode, 200);
+      const payload = JSON.parse(statusIntegration.body);
+      assert.strictEqual(payload.port, integrationPort);
+      assert.strictEqual(payload.managedByController, false);
+    });
   } finally {
     serverProcess.kill("SIGTERM");
   }
@@ -403,8 +452,8 @@ async function runTests() {
     assert.strictEqual(normalizeRequestPathname("/safe/path"), "/safe/path");
   });
 
-  assert.strictEqual(passed, 40);
-  console.log("server-http-router.test.js: 40 Prüfpunkte erfolgreich");
+  assert.strictEqual(passed, 49);
+  console.log("server-http-router.test.js: 49 Prüfpunkte erfolgreich");
 }
 
 runTests().catch((error) => {

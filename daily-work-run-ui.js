@@ -84,6 +84,12 @@
     rawResultDraft: "",
   };
 
+  const serverStatusUiState = {
+    serverStatus: null,
+    serverStatusError: null,
+    serverStatusLoading: false,
+  };
+
   let deps = null;
   let initialized = false;
   let eventsBound = false;
@@ -1083,7 +1089,7 @@ function renderDailyWorkRun() {
   const run = getActiveDailyWorkRun();
   if (!run) {
     output.innerHTML = `
-      ${GuidedWorkUi?.renderMainSurface?.(null, { deps }) || `
+      ${GuidedWorkUi?.renderMainSurface?.(null, { deps, serverStatus: serverStatusUiState.serverStatus }) || `
         <article class="daily-work-run-start-card">
           <p class="eyebrow">Bereit für einen bewussten Start</p>
           <h4>Noch kein Tageslauf begonnen</h4>
@@ -1117,6 +1123,7 @@ function renderDailyWorkRun() {
       liveDrift: Boolean(
         GuidedWork?.detectBaselineDrift?.(run, healthHybridUiState.liveStatus)?.drifted,
       ),
+      serverStatus: serverStatusUiState.serverStatus,
     }) || ""}
     <div class="daily-work-run-toolbar">
       <div>
@@ -1304,6 +1311,31 @@ async function refreshHealthLiveStatus() {
     deps.showToast(error.message);
   } finally {
     healthHybridUiState.liveStatusLoading = false;
+    renderDailyWorkRun();
+  }
+}
+
+// Read-only background status read of the server that is already serving this page.
+// Never starts, stops, or restarts anything; a failed read never fabricates a
+// "gestoppt" claim, since a reachable page implies a reachable server by definition.
+async function refreshServerStatus() {
+  serverStatusUiState.serverStatusLoading = true;
+  serverStatusUiState.serverStatusError = null;
+  try {
+    const response = await fetch("/api/server-status", {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload?.message || "Serverstatus konnte nicht gelesen werden.");
+    }
+    serverStatusUiState.serverStatus = payload;
+  } catch (error) {
+    serverStatusUiState.serverStatusError = error.message;
+  } finally {
+    serverStatusUiState.serverStatusLoading = false;
     renderDailyWorkRun();
   }
 }
@@ -2129,10 +2161,11 @@ function setupDailyWorkRun() {
   return {
     init,
     render,
+    refreshServerStatus,
     DAILY_STORAGE_KEY: DailyWorkRun?.DAILY_STORAGE_KEY || "ki-unternehmenszentrale-daily-work-runs-v1",
     LEGACY_MANAGEMENT_STORAGE_KEY: DailyWorkRun?.LEGACY_MANAGEMENT_STORAGE_KEY || "ki-unternehmenszentrale-v1",
     getInternalState() {
-      return { initialized, eventsBound, dailyWorkRunUiState, localDataBackupUiState };
+      return { initialized, eventsBound, dailyWorkRunUiState, localDataBackupUiState, serverStatusUiState };
     },
   };
 });

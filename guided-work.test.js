@@ -457,6 +457,86 @@ function main() {
     assert.ok(!html.includes("executionAttempt"));
   });
 
+  check("Phase B: Serverstatus-UI kompakt, Details geschlossen, genau ein sicherer nächster Schritt, kein Steuerbutton", () => {
+    const deps = { escapeHtml: (value) => String(value) };
+    const runningHtml = GuidedWorkUi.renderServerStatus(
+      {
+        status: "RUNNING",
+        port: 4173,
+        pid: 4242,
+        startedAt: "2026-07-24T10:00:00.000Z",
+        appVersion: "V7.0 Phase B",
+        gitCommit: "a".repeat(40),
+        currentProjectCommit: "a".repeat(40),
+        managedByController: true,
+        controllerSchemaVersion: 1,
+        message: "Server läuft und entspricht dem aktuellen Projektstand.",
+        nextAction: "Kein Schritt notwendig.",
+      },
+      deps,
+    );
+    assert.ok(runningHtml.includes("Aktuell und betriebsbereit"));
+    assert.ok(runningHtml.includes("Port 4173"));
+    assert.ok(!runningHtml.includes("Nächster sicherer Schritt"), "RUNNING zeigt keinen Problem-Schritt");
+    assert.ok(runningHtml.includes("<details"), "technische Details existieren");
+    assert.ok(!/<details[^>]*\bopen\b/.test(runningHtml), "technische Details sind standardmäßig geschlossen");
+    assert.ok(!runningHtml.includes("<button"), "kein Start/Stop/Restart-Button");
+
+    const mismatchHtml = GuidedWorkUi.renderServerStatus(
+      {
+        status: "VERSION_MISMATCH",
+        port: 4173,
+        pid: 4242,
+        startedAt: "2026-07-24T10:00:00.000Z",
+        appVersion: "V7.0 Phase B",
+        gitCommit: "a".repeat(40),
+        currentProjectCommit: "b".repeat(40),
+        managedByController: true,
+        controllerSchemaVersion: 1,
+        message: "Server läuft, liefert aber wahrscheinlich veralteten Code.",
+        nextAction: "npm run central:restart",
+      },
+      deps,
+    );
+    assert.ok(mismatchHtml.includes("Server wahrscheinlich veraltet"));
+    const nextStepMatches = mismatchHtml.match(/Nächster sicherer Schritt/g) || [];
+    assert.strictEqual(nextStepMatches.length, 1, "genau ein sicherer nächster Schritt");
+    assert.ok(mismatchHtml.includes("npm run central:restart"));
+    assert.ok(!mismatchHtml.includes("<button"));
+
+    const unknownHtml = GuidedWorkUi.renderServerStatus(null, deps);
+    assert.ok(unknownHtml.includes("Serverstatus ungeklärt"));
+    assert.strictEqual(GuidedWorkUi.serverStatusUiText("PORT_CONFLICT"), "Port durch anderen Prozess belegt");
+
+    const run = buildReadyRun("server-status-ui-run");
+    const surfaceHtml = GuidedWorkUi.renderMainSurface(run, {
+      deps,
+      liveStatus: { live: dirtyLive(), ok: true, available: true },
+      serverStatus: {
+        status: "RUNNING",
+        port: 4173,
+        pid: 1,
+        startedAt: "2026-07-24T10:00:00.000Z",
+        appVersion: "V7.0 Phase B",
+        gitCommit: "a".repeat(40),
+        currentProjectCommit: "a".repeat(40),
+        managedByController: true,
+        controllerSchemaVersion: 1,
+        nextAction: "Kein Schritt notwendig.",
+      },
+    });
+    assert.ok(surfaceHtml.includes("guided-work-server-status"), "Serverstatus ist Teil der Guided-Work-Oberfläche");
+    assert.ok(surfaceHtml.includes("guided-work-primary-action"), "Phase-A-Hauptfluss bleibt nutzbar");
+    assert.ok(
+      !surfaceHtml.includes("data-server-start") &&
+        !surfaceHtml.includes("data-server-stop") &&
+        !surfaceHtml.includes("data-server-restart"),
+    );
+
+    const noRunHtml = GuidedWorkUi.renderMainSurface(null, { deps, serverStatus: null });
+    assert.ok(noRunHtml.includes("guided-work-server-status"), "Serverstatus auch ohne aktiven Lauf sichtbar");
+  });
+
   check("37-40. Bestandsschutz Agenten/Projekte und Hybrid-E2E-Kern", () => {
     assert.strictEqual(PRODUCTIVE_AGENT_REGISTRY.length, 25);
     assert.strictEqual(PROJECT_REGISTRY.length, 17);

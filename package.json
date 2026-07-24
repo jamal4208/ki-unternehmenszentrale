@@ -1,7 +1,11 @@
 {
   "scripts": {
     "start": "node server.js",
-    "test": "node project-registry.test.js && node daily-work-run.test.js && node agent-runtime.test.js && node local-data-backup.test.js && node daily-work-run-ui.test.js && node server-http-router.test.js && node health-repo-status.test.js && node health-hybrid-work.test.js && node guided-work.test.js",
-    "check": "node --check agent-registry.js && node --check guided-work.js && node --check guided-work-ui.js && node --check daily-work-run.js && node --check health-hybrid-work.js && node --check agent-runtime.js && node --check agent-runtime.test.js && node --check daily-work-run.test.js && node --check local-data-backup.js && node --check local-data-backup.test.js && node --check daily-work-run-ui.js && node --check daily-work-run-ui.test.js && node --check server-http-router.js && node --check server-http-router.test.js && node --check app.js && node --check server.js && node --check project-registry.js && node --check project-registry.test.js && node --check health-repo-status.js && node --check health-repo-status.test.js && node --check health-hybrid-work.test.js && node --check guided-work.test.js"
+    "central:start": "node scripts/zentral-ctl.js start",
+    "central:status": "node scripts/zentral-ctl.js status",
+    "central:stop": "node scripts/zentral-ctl.js stop",
+    "central:restart": "node scripts/zentral-ctl.js restart",
+    "test": "node project-registry.test.js && node daily-work-run.test.js && node agent-runtime.test.js && node local-data-backup.test.js && node daily-work-run-ui.test.js && node server-http-router.test.js && node health-repo-status.test.js && node health-hybrid-work.test.js && node guided-work.test.js && node server-status.test.js && node zentral-ctl.test.js",
+    "check": "node --check agent-registry.js && node --check guided-work.js && node --check guided-work-ui.js && node --check daily-work-run.js && node --check health-hybrid-work.js && node --check agent-runtime.js && node --check agent-runtime.test.js && node --check daily-work-run.test.js && node --check local-data-backup.js && node --check local-data-backup.test.js && node --check daily-work-run-ui.js && node --check daily-work-run-ui.test.js && node --check server-http-router.js && node --check server-http-router.test.js && node --check app.js && node --check server.js && node --check project-registry.js && node --check project-registry.test.js && node --check health-repo-status.js && node --check health-repo-status.test.js && node --check health-hybrid-work.test.js && node --check guided-work.test.js && node --check server-status.js && node --check server-status.test.js && node --check scripts/zentral-ctl.js && node --check zentral-ctl.test.js"
   }
 }

@@ -14,6 +14,7 @@ const {
   readHealthRepoStatus,
   buildHealthLiveStatusResponse,
 } = require("./health-repo-status");
+const serverStatusModule = require("./server-status");
 
 const rootDir = __dirname;
 const staticAssets = new Map([
@@ -34,6 +35,14 @@ const staticAssets = new Map([
 loadLocalEnv();
 
 const port = Number(process.env.PORT) || 4173;
+
+// Captured exactly once at process start; frozen for the lifetime of this process.
+// Deliberately synchronous (fast, local, read-only git command) so the snapshot exists
+// before the first request can arrive.
+const serverStartupSnapshot = serverStatusModule.captureStartupSnapshot({
+  port,
+  gitCommit: serverStatusModule.readGitCommitReadOnlySync(rootDir),
+});
 
 function loadLocalEnv() {
   const envPath = path.join(rootDir, ".env.local");
@@ -83,6 +92,39 @@ function handleProjects(res) {
 
 function handleHealthUpgradeKompassProject(res) {
   sendJson(res, 200, buildProjectResponse("health-upgrade-kompass"));
+}
+
+async function handleServerStatus(res) {
+  try {
+    const currentGitCommit = await serverStatusModule.readGitCommitReadOnly(rootDir);
+    const statusPaths = serverStatusModule.resolveStatusPaths({ projectRoot: rootDir });
+    const fileResult = serverStatusModule.readStatusFileSafe(statusPaths);
+    const controllerRecord = fileResult.ok ? fileResult.record : null;
+    const payload = serverStatusModule.buildServerStatusApiResponse({
+      snapshot: serverStartupSnapshot,
+      currentGitCommit,
+      controllerRecord,
+      currentPid: process.pid,
+      currentPort: port,
+    });
+    sendJson(res, 200, payload);
+  } catch (_error) {
+    sendJson(res, 200, {
+      status: "UNKNOWN",
+      port,
+      pid: process.pid,
+      startedAt: serverStartupSnapshot.startedAt,
+      appVersion: serverStartupSnapshot.appVersion,
+      gitCommit: serverStartupSnapshot.gitCommit,
+      currentProjectCommit: serverStatusModule.UNKNOWN,
+      isCurrentVersion: null,
+      managedByController: false,
+      controllerSchemaVersion: null,
+      message: "Serverstatus konnte nicht sicher ermittelt werden.",
+      nextAction: "npm run central:status",
+      ...API_SECURITY_FLAGS,
+    });
+  }
 }
 
 async function handleHealthUpgradeKompassLiveStatus(res) {
@@ -21901,6 +21943,7 @@ const getRoutes = buildRouteMap([
   ["/api/agents/content-design-plugin-task/improvement-task", (res) => handleContentDesignImprovementTask(res)],
   ["/api/agents/content-design-plugin-task/usable-canva-task", (res) => handleContentDesignUsableCanvaTask(res)],
   ["/api/agents/projectmanager-plugin-task/autonomy-applied", (res) => handleProjectManagerAutonomyApplied(res)],
+  ["/api/server-status", (res) => handleServerStatus(res)],
 ]);
 
 const { requestHandler } = createHttpRouter({

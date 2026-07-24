@@ -3,8 +3,9 @@
 ## Status
 
 - **V1 lokal fertig und betriebsbereit**
-- Version: **V6.46.0** – Health Hybrid End-to-End-Pilot (umgesetzt und abgenommen)
-- Gesicherter vorheriger Ausgang: **V6.45.2** / `fb9aa0d`
+- Version: **V7.0 Phase A – Guided Work Foundation** (umgesetzt, abgenommen, gesichert mit Commit `4a74ebe`)
+- **V7.0 Phase B – Betriebsstabilität** ist umgesetzt, getestet, browserseitig abgenommen und mit diesem Commit gesichert
+- Gesicherter vorheriger Ausgang: **V6.46.0** / `e611c9c`
 - Betrieb nur lokal auf diesem Mac – kein Cloud- oder Deploymentbetrieb
 
 ## Projektordner
@@ -13,23 +14,36 @@
 
 ## Normaler Start
 
+**Empfohlen (zeigt vorher den Status, verhindert doppelte Server):**
+
 1. Terminal öffnen
 2. In den Projektordner wechseln:
    `cd "/Users/jamal/Documents/New project/ki-unternehmenszentrale"`
+3. Status prüfen: `npm run central:status`
+4. Server starten: `npm run central:start`
+5. Safari öffnen
+6. Adresse aufrufen: `http://127.0.0.1:4173/`
+
+**Einfacher Fallback (weiterhin gültig):**
+
+1. Terminal öffnen
+2. In den Projektordner wechseln
 3. Server starten: `npm start`
-4. Safari öffnen
-5. Adresse aufrufen: `http://127.0.0.1:4173/`
+4. Safari öffnen, Adresse aufrufen: `http://127.0.0.1:4173/`
 
 ## Server sauber beenden
 
-Im Terminal, in dem der Server läuft: **Ctrl + C**
+- Bei Start über den Controller: `npm run central:stop`
+- Bei Start über `npm start`: im Terminal, in dem der Server läuft, **Ctrl + C**
 
 ## Hinweis bei EADDRINUSE
 
 - Port **4173** wird bereits benutzt.
 - **Keinen zweiten Server starten.**
-- Zuerst prüfen, ob die Zentrale unter `http://127.0.0.1:4173/` schon erreichbar ist.
-- Nur wenn nötig: den bestehenden Server-Prozess beenden, danach einmal neu starten.
+- Zuerst `npm run central:status` ausführen: zeigt Port, PID, Version, Commit, Startzeit und genau einen sicheren nächsten Schritt.
+- Der Controller beendet **niemals automatisch** einen fremden Prozess, nur weil der Port belegt ist.
+- Nur wenn nötig: den bestehenden, tatsächlich eigenen Server-Prozess beenden (`npm run central:stop`), danach einmal neu starten (`npm run central:start`).
+- Kompakter Serverstatus (Port, Version, Commit, Startzeit) ist zusätzlich direkt in der Oberfläche sichtbar; technische Details sind standardmäßig eingeklappt.
 
 ## Datensicherung
 

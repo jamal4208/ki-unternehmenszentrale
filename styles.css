@@ -920,6 +920,39 @@
   letter-spacing: 0.02em;
 }
 
+.guided-work-server-status {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.6);
+  min-width: 0;
+}
+
+.guided-work-server-status-line {
+  margin: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.guided-work-server-status-next-step {
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.guided-work-server-status-next-step code {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.guided-work-server-status-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
 .guided-work-block,
 .guided-work-team-editor {
   display: grid;

@@ -3,7 +3,7 @@
 ## 1. Verbindlicher V1-Stand
 
 - **Aussage:** V1 lokal fertig und betriebsbereit
-- **Aktuelle Arbeitsversion:** **V7.0 Phase A – Guided Work Foundation** (umgesetzt, getestet und browserseitig abgenommen; V7.0 insgesamt noch nicht abgeschlossen, Phase B bis Phase E offen); vorheriger gesicherter Stand **V6.46.0** / `e611c9c`
+- **Aktuelle Arbeitsversion:** **V7.0 Phase A – Guided Work Foundation** (umgesetzt, getestet, browserseitig abgenommen, gesichert mit Commit `4a74ebe`); **V7.0 Phase B – Betriebsstabilität** ist umgesetzt, getestet, browserseitig abgenommen und mit diesem Commit auf `origin/main` gesichert; V7.0 insgesamt noch nicht abgeschlossen, Phase C bis Phase E offen; vorheriger gesicherter Stand **V6.46.0** / `e611c9c`
 - **Gesicherter vorheriger Ausgangsstand:** **V6.45.2** / Commit **`fb9aa0d`**
 - **Historischer Freeze-Ausgang:** `16bbf45` (V6.43.1) – nur Historie
 - **Branch:** `main`
@@ -20,6 +20,7 @@
 - Modularisierte Kernbereiche (Tageslauf, Backup, Runtime, Router) nutzen
 - Lokalen deterministischen Runtime-Piloten für Health Upgrade Kompass bedienen
 - Manuelle Freigabe, Ergebnisannahme, Audit, Reload-Persistenz
+- Serverstatus (Port, Version, Commit, Startzeit, Status) kompakt in der Oberfläche anzeigen und den lokalen Betrieb über den separaten Controller `scripts/zentral-ctl.js` verständlich starten/stoppen/neustarten (V7.0 Phase B)
 
 ## 3. Was die Zentrale bewusst noch nicht kann
 
@@ -38,21 +39,45 @@
 
 ## 5. Startanleitung
 
+**Empfohlen (Controller, seit Phase B):**
+
+1. Terminal öffnen
+2. `cd "/Users/jamal/Documents/New project/ki-unternehmenszentrale"`
+3. `npm run central:status` – zeigt, ob bereits ein von der Zentrale verwalteter Server läuft, bevor irgendetwas gestartet wird
+4. `npm run central:start`
+5. Safari: `http://127.0.0.1:4173/`
+
+**Einfacher Fallback (weiterhin gültig, unverändert):**
+
 1. Terminal öffnen
 2. `cd "/Users/jamal/Documents/New project/ki-unternehmenszentrale"`
 3. `npm start`
 4. Safari: `http://127.0.0.1:4173/`
 
+Der Controller (`scripts/zentral-ctl.js`) ist ein separates lokales Werkzeug und kein Bestandteil des App-Servers selbst; `npm start` bleibt vollständig unverändert nutzbar, ohne Controller-Metadaten zu erzeugen.
+
 ## 6. Beenden des Servers
 
-Im Server-Terminal **Ctrl + C**. Keinen parallelen Server auf Port 4173 belassen.
+- Bei Start über den Controller: `npm run central:stop` (sendet `SIGTERM`, beendet ausschließlich den zuvor selbst gestarteten Prozess, nie einen fremden Prozess)
+- Bei Start über `npm start`: im Server-Terminal **Ctrl + C**
+- Keinen parallelen Server auf demselben Port belassen
 
 ## 7. Umgang mit Port 4173 und EADDRINUSE
 
 - Standardport: **4173**
-- Bei `EADDRINUSE`: Port ist belegt – **keinen zweiten Server starten**
-- Zuerst prüfen, ob die Oberfläche bereits läuft
-- Nur bei Bedarf den bestehenden Prozess beenden und einmal neu starten
+- Zuerst `npm run central:status` ausführen – zeigt Status (`RUNNING`, `STOPPED`, `STALE`, `PORT_CONFLICT`, `VERSION_MISMATCH`, `UNKNOWN`), Port, PID, Version, Commit, Startzeit und genau einen sicheren nächsten Schritt
+- Bei `PORT_CONFLICT`: der Controller stellt nur fest, dass der Port belegt ist, und **beendet niemals automatisch einen fremden Prozess** – **keinen zweiten Server starten**
+- Bei `STALE`: die gespeicherte Statusdatei verweist auf einen nicht mehr laufenden Prozess; der Controller erkennt dies sicher und räumt sie kontrolliert auf, ohne einen echten Prozess zu beenden
+- Bei `VERSION_MISMATCH`: ein laufender Server entspricht nicht dem aktuellen Projektstand; empfohlener nächster Schritt ist `npm run central:restart`
+- Nur bei Bedarf und nach Prüfung: den bestehenden, tatsächlich eigenen Prozess beenden und einmal neu starten
+- Alternativer Port nur ausdrücklich über `npm run central:start -- --port <Portnummer>`; kein automatischer Portwechsel
+
+## 7a. Lokaler Controller `scripts/zentral-ctl.js` (V7.0 Phase B)
+
+- Befehle: `npm run central:status`, `npm run central:start`, `npm run central:stop`, `npm run central:restart`
+- Speichert ausschließlich technische Betriebsmetadaten (PID, Port, Startzeit, Projektpfad-Fingerprint, App-Version, Commit bei Start, Controller-Schema-Version) unter `~/Library/Application Support/KI-Unternehmenszentrale/server/` – außerhalb dieses und des Health-Repositories
+- Verwaltet ausschließlich selbst gestartete Prozesse; prüft vor `stop`/`restart` PID-Existenz, erwartete Node-Anwendung, Projektpfad und Startnachweis; beendet nie einen fremden Prozess
+- Enthält keine Execution Bridge, keinen Executor, keinen Codex-/Agentenstart und keine Browser-Steuerbuttons – rein lokale Terminal-Bedienung
 
 ## 8. Browserdaten und localStorage
 

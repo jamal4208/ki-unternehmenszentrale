@@ -42,6 +42,59 @@
     }[phase] || phase || "UNGEKLÄRT";
   }
 
+  function serverStatusUiText(status) {
+    return {
+      RUNNING: "Aktuell und betriebsbereit",
+      VERSION_MISMATCH: "Server wahrscheinlich veraltet",
+      PORT_CONFLICT: "Port durch anderen Prozess belegt",
+    }[status] || "Serverstatus ungeklärt";
+  }
+
+  function formatStartedAt(value) {
+    if (typeof value !== "string" || !value) return "UNGEKLÄRT";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "UNGEKLÄRT";
+    try {
+      return date.toLocaleString("de-DE");
+    } catch (_error) {
+      return date.toISOString();
+    }
+  }
+
+  // Read-only rendering of a status this same page's server already reported about
+  // itself. No start/stop/restart controls here — see AGENTS.md / MIGRATION_PLAN.md
+  // Phase B boundary: the external controller remains the source of truth for
+  // "gestoppt"; this view never claims that, since a reachable page implies a
+  // reachable server.
+  function renderServerStatus(serverStatusData, deps) {
+    const data = serverStatusData || null;
+    const status = data?.status || "UNKNOWN";
+    const label = serverStatusUiText(status);
+    const showNextStep = Boolean(data) && status !== "RUNNING";
+    return `
+      <div class="guided-work-server-status" data-server-status="${escape(deps, status)}">
+        <p class="guided-work-server-status-line">
+          <strong>${escape(deps, label)}</strong>
+          · Port ${escape(deps, String(data?.port ?? "UNGEKLÄRT"))}
+          · ${escape(deps, data?.appVersion || "UNGEKLÄRT")}
+          · Commit ${escape(deps, shortHash(data?.gitCommit))}
+          · Start ${escape(deps, formatStartedAt(data?.startedAt))}
+        </p>
+        ${showNextStep ? `<p class="guided-work-server-status-next-step">Nächster sicherer Schritt: <code>${escape(deps, data?.nextAction || "npm run central:status")}</code></p>` : ""}
+        <details class="guided-work-server-status-details">
+          <summary>Technische Details (PID, vollständiger Commit, Controller)</summary>
+          <dl class="daily-work-run-facts">
+            <div><dt>PID</dt><dd>${escape(deps, String(data?.pid ?? "UNGEKLÄRT"))}</dd></div>
+            <div><dt>Commit (voll)</dt><dd><code>${escape(deps, data?.gitCommit || "UNGEKLÄRT")}</code></dd></div>
+            <div><dt>Aktueller Projekt-Commit</dt><dd><code>${escape(deps, data?.currentProjectCommit || "UNGEKLÄRT")}</code></dd></div>
+            <div><dt>Verwaltet durch Controller</dt><dd>${data?.managedByController ? "ja" : "nein"}</dd></div>
+            <div><dt>Controller-Schema-Version</dt><dd>${escape(deps, String(data?.controllerSchemaVersion ?? "—"))}</dd></div>
+          </dl>
+        </details>
+      </div>
+    `;
+  }
+
   function renderPrimaryAction(action, deps) {
     if (!action) return "";
     return `
@@ -271,10 +324,11 @@
       return `
         <section class="guided-work-surface" aria-label="Geführter Hauptarbeitsraum">
           <div class="guided-work-sticky">
-            <p class="eyebrow">V7.0 Phase A · Guided Work Foundation · WIP</p>
-            <h4>Oben arbeiten. Unten nachschauen.</h4>
-            <p>Noch kein Tageslauf. Health Upgrade Kompass bleibt read-only Pilotquelle.</p>
-            ${renderPrimaryAction(action, deps)}
+          <p class="eyebrow">V7.0 Phase A · Guided Work Foundation · WIP</p>
+          <h4>Oben arbeiten. Unten nachschauen.</h4>
+          <p>Noch kein Tageslauf. Health Upgrade Kompass bleibt read-only Pilotquelle.</p>
+          ${renderServerStatus(context.serverStatus, deps)}
+          ${renderPrimaryAction(action, deps)}
           </div>
         </section>
       `;
@@ -310,6 +364,7 @@
           <p><b>Gewünschtes Ergebnis:</b> ${escape(deps, desired)}</p>
           <p><b>Nächster Schritt:</b> ${escape(deps, action?.label || "Prüfen")}</p>
           <p><b>Blocker / Entscheidung:</b> ${escape(deps, blocker)}</p>
+          ${renderServerStatus(context.serverStatus, deps)}
           ${renderPrimaryAction(action, deps)}
         </div>
         ${renderSuggestions(guided, deps)}
@@ -327,6 +382,8 @@
     renderTeamEditor,
     renderBaselinePanel,
     renderDraftFindings,
+    renderServerStatus,
+    serverStatusUiText,
     phaseLabel,
   });
 });

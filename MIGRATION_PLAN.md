@@ -1,8 +1,23 @@
 # MIGRATION PLAN
 
-## V7.0 Phase A – Guided Work Foundation (umgesetzt, getestet und browserseitig abgenommen)
+## V7.0 Phase B – Betriebsstabilität (umgesetzt, getestet, browserseitig abgenommen und mit diesem Commit gesichert)
 
-Vorheriger gesicherter Ausgang: **V6.46.0 / `e611c9c`**. V7.0 insgesamt ist damit **nicht** abgeschlossen; Phase B bis Phase E bleiben offen und nicht umgesetzt. Phase A ist speicherkompatibel über denselben Key `ki-unternehmenszentrale-daily-work-runs-v1`. Neue Läufe erhalten `schemaVersion: 2`; v1-Läufe bleiben unverändert lesbar. Keine automatische persistente Migration. Backup/Restore erkennt v1 und v2; ein v1-Import darf lokale v2-Läufe nicht stillschweigend überschreiben (`acknowledgeV2Overwrite` erforderlich; für diesen Override existiert bewusst noch keine UI-Freigabesteuerung – der sichere Standard bleibt aktiv).
+Vorheriger gesicherter Ausgang: **V7.0 Phase A / `4a74ebe`**. Phase B macht den lokalen Betrieb der Zentrale verständlich und zuverlässig (Serverstatus, Port, PID, Version, Commit, nächster sicherer Schritt) und behebt Unklarheit bei `EADDRINUSE` und veraltetem Code. Der Controller (`npm run central:start` u. a.) ist der empfohlene lokale Startweg; `npm start` bleibt manueller Fallback. Keine Execution Bridge, keine POST-Route, kein Browserbutton für Prozesssteuerung. Health bleibt ausschließlich read-only Pilotquelle.
+
+| Bereich | Regel |
+|---|---|
+| scripts/zentral-ctl.js | separater lokaler Controller; `status`/`start`/`stop`/`restart`; verwaltet nur selbst gestartete Prozesse; nie Fremd-Kill; SIGTERM statt `kill -9`; kein `shell: true` |
+| App-Support-Verzeichnis | `~/Library/Application Support/KI-Unternehmenszentrale/server/`; außerhalb aller Repositories; atomare Statusdatei; keine Secrets/Env/Browserdaten |
+| server-status.js | reines Domänenmodul; unveränderliche Start-Momentaufnahme; Statusmodell `RUNNING\|STOPPED\|STALE\|PORT_CONFLICT\|VERSION_MISMATCH\|UNKNOWN` |
+| GET /api/server-status | Route 43 von 43; read-only; kein Prozessstart/-stopp; andere Methoden 405 |
+| guided-work-ui.js | additive, kompakte Statusanzeige; Details standardmäßig geschlossen; kein Steuerbutton |
+| Verboten in Phase B, offen für Phase C–E | Execution Bridge, Executor-Schnittstelle, Codex-/Agentenstart, Repository-Arbeitsausführung, POST, Health-Schreiben, Testausführung aus dem Browser, Commit/Push/Deploy, Autonomieerhöhung |
+
+Server-Version/-Commit werden beim Start unveränderlich erfasst (`UNKNOWN` bei nicht lesbarem Git-Stand). Portkonflikte werden nur gemeldet, nie automatisch aufgelöst; ein fremder Prozess auf Port 4173 wurde real getestet und blieb während des gesamten Controller-Lebenszyklus (start/status/restart/stop auf Alternativport) unverändert am Leben. 32 neue automatisierte Prüfpunkte plus erweiterte Bestandstests; gesamt 384 von 384 Prüfpunkten grün; vollständige Browser-Abnahme inkl. Mobile 390×844 bestanden.
+
+## V7.0 Phase A – Guided Work Foundation (umgesetzt, getestet, browserseitig abgenommen und gesichert mit Commit `4a74ebe`)
+
+Vorheriger gesicherter Ausgang: **V6.46.0 / `e611c9c`**. V7.0 insgesamt ist damit **nicht** abgeschlossen; Phase B ist umgesetzt und gesichert (siehe oben), Phase C bis Phase E bleiben offen und nicht umgesetzt. Phase A ist speicherkompatibel über denselben Key `ki-unternehmenszentrale-daily-work-runs-v1`. Neue Läufe erhalten `schemaVersion: 2`; v1-Läufe bleiben unverändert lesbar. Keine automatische persistente Migration. Backup/Restore erkennt v1 und v2; ein v1-Import darf lokale v2-Läufe nicht stillschweigend überschreiben (`acknowledgeV2Overwrite` erforderlich; für diesen Override existiert bewusst noch keine UI-Freigabesteuerung – der sichere Standard bleibt aktiv).
 
 | Bereich | Regel |
 |---|---|
@@ -12,7 +27,7 @@ Vorheriger gesicherter Ausgang: **V6.46.0 / `e611c9c`**. V7.0 insgesamt ist dami
 | health-hybrid-work.js | bleibt Paket-/Fingerprint-/Evidenz-/Gate-Domäne; known-dirty mit Bestätigung |
 | health-repo-status.js | additive Live-Details: relative dirty/untracked paths, Inhaltshashes, Fingerprint |
 | local-data-backup.js | Secret-Heuristik unverändert scharf; False Positive bei bloßer `.env`/`.env.local`-Pfadnennung gezielt korrigiert |
-| Verboten in Phase A, offen für Phase B–E | Execution Bridge, POST, Codex-/Agentenstart, Tests aus Zentrale, Health-Schreiben, Commit/Push/Deploy |
+| Verboten in Phase A und B, offen für Phase C–E (Phase B siehe oben) | Execution Bridge, POST, Codex-/Agentenstart, Tests aus Zentrale, Health-Schreiben, Commit/Push/Deploy |
 
 Health Upgrade Kompass bleibt ausschließlich read-only Pilotquelle. Hybrid-Fallback V6.46.0 bleibt vollständig nutzbar. 322 automatisierte Prüfpunkte grün; vollständige Browser-Abnahme inkl. Mobile 390×844 bestanden.
 

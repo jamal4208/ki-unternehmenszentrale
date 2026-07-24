@@ -50083,6 +50083,7 @@ if (window.DailyWorkRunUi) {
     renderAll,
     localStorage: window.localStorage,
   });
+  window.DailyWorkRunUi.refreshServerStatus?.();
 }
 renderAll();
 refreshCanonicalProjectRegistry();

@@ -424,9 +424,9 @@ async function runTests() {
 
   check("17 Projekte bleiben erhalten", () => assert.strictEqual(PROJECT_REGISTRY.length, 17));
   check("25 Agenten bleiben erhalten", () => assert.strictEqual(AgentRegistry.CANONICAL_AGENT_COUNT, 25));
-  check("42 GET-Routen bleiben erhalten", () => {
+  check("43 GET-Routen bleiben erhalten (Phase B: +1 /api/server-status)", () => {
     const routeCount = (fs.readFileSync(path.join(__dirname, "server.js"), "utf8").match(/^\s+\["\/api\//gm) || []).length;
-    assert.strictEqual(routeCount, 42);
+    assert.strictEqual(routeCount, 43);
   });
   check("POST bleibt 405", () => assert.strictEqual(invoke("POST", "/api/projects").statusCode, 405));
 
