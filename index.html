@@ -49,6 +49,19 @@
             <span class="nav-icon" aria-hidden="true">07</span>
             Wissen
           </button>
+          <p class="nav-section-label">V7.1 Phase A · neu</p>
+          <button class="nav-item" type="button" data-view="v71-documents">
+            <span class="nav-icon" aria-hidden="true">08</span>
+            Projektunterlagen
+          </button>
+          <button class="nav-item" type="button" data-view="v71-tools">
+            <span class="nav-icon" aria-hidden="true">09</span>
+            Werkzeuge &amp; Lizenzen
+          </button>
+          <button class="nav-item" type="button" data-view="v71-plugin-gateway">
+            <span class="nav-icon" aria-hidden="true">10</span>
+            Plugin-Gateway
+          </button>
         </nav>
 
         <div class="principle-box">
@@ -1252,6 +1265,52 @@
             <div class="template-grid" id="template-grid"></div>
           </section>
         </section>
+
+        <section class="view" id="v71-documents-view" data-title="Projektunterlagen &amp; Wissenseingang">
+          <div class="section-toolbar">
+            <div>
+              <p class="eyebrow">V7.1 Phase A · neu · lokal · manuell</p>
+              <h3>Projektunterlagen &amp; Wissenseingang</h3>
+              <p class="v71-subtitle">
+                Dokumente, Notizen und Links werden ausschließlich lokal registriert und außerhalb der Repositories
+                abgelegt. Keine Cloud-Synchronisation, keine automatische externe Übertragung, keine automatische
+                Löschung.
+              </p>
+            </div>
+            <span class="system-pill system-pill-safe">lokal · manuell · keine externe Übertragung</span>
+          </div>
+          <div id="v71-documents-output" class="v71-output" aria-live="polite">Lade Projektunterlagen…</div>
+        </section>
+
+        <section class="view" id="v71-tools-view" data-title="Werkzeuge &amp; Lizenzen">
+          <div class="section-toolbar">
+            <div>
+              <p class="eyebrow">V7.1 Phase A · neu · Werkzeug-/Lizenzregister</p>
+              <h3>Werkzeuge &amp; Lizenzen</h3>
+              <p class="v71-subtitle">
+                Ein vorgemerktes Werkzeug bedeutet keine technische Verbindung. Eine Lizenz gilt niemals automatisch
+                als verbunden. Canva, HeyGen und Shopify sind ausschließlich vorgemerkt, nicht produktiv angebunden.
+              </p>
+            </div>
+            <span class="system-pill system-pill-safe">keine Zugangsdaten gespeichert</span>
+          </div>
+          <div id="v71-tools-output" class="v71-output" aria-live="polite">Lade Werkzeug- und Lizenzregister…</div>
+        </section>
+
+        <section class="view" id="v71-plugin-gateway-view" data-title="Plugin-Gateway &amp; Tool-Routing">
+          <div class="section-toolbar">
+            <div>
+              <p class="eyebrow">V7.1 Phase A · neu · kontrolliertes Gateway</p>
+              <h3>Plugin-Gateway &amp; Tool-Routing</h3>
+              <p class="v71-subtitle">
+                Kein offenes Universal-Plugin-System. Die Zentrale zeigt ehrlich, was direkt ausführbar ist, was eine
+                kontrollierte Übergabe braucht und was nur eine Empfehlung bleibt. Kein automatischer Start.
+              </p>
+            </div>
+            <span class="system-pill system-pill-safe">keine autonome Ausführung</span>
+          </div>
+          <div id="v71-plugin-gateway-output" class="v71-output" aria-live="polite">Lade Plugin-Gateway-Status…</div>
+        </section>
       </main>
     </div>
 
@@ -1265,5 +1324,6 @@
     <script src="guided-work-ui.js"></script>
     <script src="daily-work-run-ui.js"></script>
     <script src="app.js"></script>
+    <script src="v71-ui.js"></script>
   </body>
 </html>

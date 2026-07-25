@@ -1,5 +1,9 @@
 # PROJECT MASTER
 
+## V7.1 Phase A – lokal umgesetzt, ungesichert (Commit/Push stehen aus)
+
+V7.1 Phase A („Dokumenten- und Wissenseingang, Werkzeug-/Lizenzregister und sicheres Plugin-Gateway-Fundament") ist lokal vollständig umgesetzt, read-only auditiert gegen den ursprünglichen Auftrag und mit 661 automatisierten Prüfpunkten grün getestet (Browser-/Mobile-Abnahme zusätzlich manuell durchgeführt, siehe `CURRENT_STATUS.md`). Nach der ersten manuellen Safari-Abnahme wurden zwei gemeldete Abschlussfehler (Checkbox-Layout im Tool-Routing-Formular; nicht strukturierte Blockierungsantwort bei „kein Werkzeug erfunden") mit der kleinstmöglichen Korrektur behoben, siehe `MIGRATION_PLAN.md`. **Kein Commit, kein Push, kein Deployment.** V7.0 bleibt unverändert `FROZEN` auf `15ce8bb`. Details, Dateiliste und Testergebnisse siehe `CURRENT_STATUS.md` und `MIGRATION_PLAN.md`. Bereit zur manuellen Wiederholungsabnahme und Commit-Prüfung durch Jamal.
+
 ## V7.0 offiziell FROZEN – Jamal-Entscheidung vom 2026-07-25
 
 V7.0 ist mit Jamals ausdrücklicher Entscheidung vom 25.07.2026 offiziell auf `FROZEN` gesetzt, auf Basis des gesicherten Phase-E-Stands **`52ce012`**. Phase A bis E sind damit abgeschlossen; V7.0 erhält keine neuen Funktionen mehr, Änderungen bleiben auf belegte Fehler-, Sicherheits- und Betriebsfixes begrenzt. Der read-only Freeze-Status (`GET /api/v7-freeze-status`, `v7-freeze-status.js#MANUAL_FREEZE_DECISION`) zeigt `FROZEN` ausschließlich wegen dieser einen, von Hand hinterlegten Entscheidung – nie automatisch aus Git-Stand oder Testzahl. Neue Funktionen beginnen erst nach separater Freigabe unter V7.1 (Dokumenten-/Wissenseingang, Werkzeug-/Lizenzregister, Plugin-Gateway, Marketing-Agentur, Canva/HeyGen, Shopify, weitere Umsatzprojekte). Kein Deployment, keine Autonomieerhöhung.

@@ -302,16 +302,16 @@ async function runTests() {
   const serverSource = fs.readFileSync(path.join(__dirname, "server.js"), "utf8");
   const getRouteBlockMatch = serverSource.match(/const getRoutes = buildRouteMap\(\[([\s\S]*?)\n\]\);/);
   const routeCount = getRouteBlockMatch ? (getRouteBlockMatch[1].match(/^\s+\["\/api\//gm) || []).length : 0;
-  check("bestehende 47 GET-Routen bleiben registriert (Phase C: +2 GET Execution-Status/-Ergebnis, Phase D: +1 GET Executor-Registry, Phase E: +1 GET Freeze-Status)", () =>
-    assert.strictEqual(routeCount, 47),
+  check("bestehende 52 GET-Routen bleiben registriert (Phase C: +2 GET Execution-Status/-Ergebnis, Phase D: +1 GET Executor-Registry, Phase E: +1 GET Freeze-Status, V7.1 Phase A: +5 GET Dokumente/Tools/Plugin-Gateway/Tool-Routing/Backup-Export)", () =>
+    assert.strictEqual(routeCount, 52),
   );
 
   const postRouteBlockMatch = serverSource.match(/const postRoutes = buildRouteMap\(\[([\s\S]*?)\]\);/);
   const postRouteCount = postRouteBlockMatch
     ? (postRouteBlockMatch[1].match(/^\s+\["\/api\//gm) || []).length
     : 0;
-  check("genau 4 additive POST-Routen sind registriert (Execution Bridge)", () =>
-    assert.strictEqual(postRouteCount, 4),
+  check("genau 7 additive POST-Routen sind registriert (Execution Bridge + V7.1 Phase A Dokumente/Backup)", () =>
+    assert.strictEqual(postRouteCount, 7),
   );
 
   const serverStatusGet = await invokeJson(requestHandler, "GET", "/api/server-status");

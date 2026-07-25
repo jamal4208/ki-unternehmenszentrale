@@ -1,5 +1,21 @@
 # MIGRATION PLAN
 
+## V7.1 Phase A – Dokumenten-/Wissenseingang, Werkzeug-/Lizenzregister, Plugin-Gateway (lokal umgesetzt, ungesichert – Commit/Push stehen aus)
+
+Vorheriger gesicherter Ausgang: **V7.0 offiziell FROZEN / `15ce8bb`**. V7.1 Phase A ist additiv; kein bestehender V7.0-Codepfad wurde umgeschrieben oder ersetzt.
+
+| Bereich | Regel |
+|---|---|
+| document-registry.js (neu) | Metadaten-/Referenzmodell für Projektunterlagen; Originale ausschließlich unter App Support (`documents/{originals,metadata,previews,quarantine,test-inbox}`); Allowlist-Dateitypen; Traversal-/Symlink-/Secret-Dateischutz; Hashing vor/nach Ablage; Dublettenerkennung; kein produktiver Browser-Upload, stattdessen isolierter Test-Upload gegen serverseitige Fixture-Dateien; kein Lösch-Endpunkt |
+| tool-registry.js (neu) | alleinige kanonische Quelle für Werkzeugidentität/-fähigkeiten/-lizenz/-kosten; 21 vorgemerkte Werkzeuge in 14 Kategorien; keine Zugangsdaten; Lizenz niemals automatisch `CONNECTED` |
+| plugin-gateway.js (neu) | alleinige kanonische Quelle für Live-/Adapterzustand und deterministisches Tool-Routing; spiegelt Codex/GitHub(lokal, read-only)/Airtable(Zugangsdaten-Anwesenheit); Canva/HeyGen/Shopify/Vercel nur vorgemerkt; Health-Hardblock bleibt wirksam |
+| server.js (PRODUCTIVE_PLUGIN_REGISTRY) | unverändert, V7.0-eingefroren, ausschließlich UI-Textsammlung für den Cockpit-„Plugin-Leitstand"; wird von V7.1-Modulen nicht gelesen/verändert; zusätzlich als `module.exports.PRODUCTIVE_PLUGIN_REGISTRY` für Bestandsschutztests exportiert (keine Verhaltensänderung) |
+| v71-registry-backup.js (neu) | additives, eigenständig versioniertes Schema `v71-phase-a-metadata-1`; sichert nur Metadaten/Register-Schnappschüsse; keine Originaldateien, Credentials, Tokens; Restore liefert nur eine geprüfte Vorschau, schreibt nichts zurück; Schema v1/v2 von `local-data-backup.js` bleiben unverändert und getrennt |
+| server.js (additive Routen) | 5 neue GET (`/api/v71/documents`, `/api/v71/tools`, `/api/v71/plugin-gateway`, `/api/v71/tool-routing`, `/api/v71/backup/export`) + 3 neue POST (`/api/v71/documents/register`, `/api/v71/documents/test-upload`, `/api/v71/backup/import-preview`); insgesamt 52 GET / 7 POST; alle bestehenden Sicherheitsguards wiederverwendet (kein zweiter Token-Mechanismus) |
+| index.html / styles.css / v71-ui.js (neu) | drei additive Chef-Modus-Bereiche; bestehende CSS-Klassen wiederverwendet, kein Redesign; Agentenzugriff-Einschränkung und Wissensquellen-Markierung im Formular ergänzt |
+| Verboten in Phase A, offen für Phase V7.1 B | produktiver Canva-/HeyGen-/Shopify-Lauf, echter Browser-Datei-Upload, Sichtbarkeit von Dokumentreferenzen direkt in `guided-work-ui.js` (bewusst unverändert gelassen), Commit/Push/Deploy, Autonomieerhöhung |
+| Nachbesserung nach 1. manueller Safari-Abnahme (styles.css, v71-ui.js, plugin-gateway.js) | Checkbox-Layout „externe Übertragung erlaubt"/„Veröffentlichung erlaubt" korrigiert: globale Formularregel (`width:100%`, `min-height:42px`, `padding:8px 10px`) griff ungewollt auf `type="checkbox"`; jetzt eng begrenzte `.v71-checkbox`/`.v71-checkbox-label`-Regel (feste 18×18px-Box, umbrechende Beschriftung, `for`/`id`-Kopplung); Standardwert weiterhin `false`. `recommendToolForTask` liefert bei Blockierung zusätzlich `status: "BLOCKED"`, `blockedCandidate` (fachlich geeignet, aber nicht ausführbar, inkl. `connectionStatus`/`missingApprovals`/`costStatus`/`dataClassificationBoundary`/`fallback`), `blockedAlternatives`, `nextAllowedJamalStep`; weiterhin keine erfundene Empfehlung, kein automatischer Start, Canva/HeyGen/Shopify bleiben `NOT_CONNECTED`. Neue Tests: 10 zusätzliche Prüfpunkte in `plugin-gateway.test.js`, neue Datei `v71-ui.test.js` (12 Prüfpunkte) |
+
 ## V7.0 offiziell FROZEN – Jamal-Entscheidung (2026-07-25)
 
 Vorheriger gesicherter Ausgang: **V7.0 Phase E / `52ce012`**. Kein neuer Code-Pfad, keine Autonomieerhöhung, kein Deployment, keine Phase V7.1: nur der kanonische, auditierbare Nachweis von Jamals ausdrücklicher Entscheidung, V7.0 einzufrieren.

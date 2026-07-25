@@ -17,6 +17,10 @@ const {
 const serverStatusModule = require("./server-status");
 const executionBridgeModule = require("./execution-bridge");
 const v7FreezeStatusModule = require("./v7-freeze-status");
+const documentRegistryModule = require("./document-registry");
+const toolRegistryModule = require("./tool-registry");
+const pluginGatewayModule = require("./plugin-gateway");
+const v71RegistryBackupModule = require("./v71-registry-backup");
 
 const rootDir = __dirname;
 const staticAssets = new Map([
@@ -32,6 +36,7 @@ const staticAssets = new Map([
   ["/daily-work-run-ui.js", "daily-work-run-ui.js"],
   ["/app.js", "app.js"],
   ["/styles.css", "styles.css"],
+  ["/v71-ui.js", "v71-ui.js"],
 ]);
 
 loadLocalEnv();
@@ -6650,6 +6655,14 @@ function resolveProductiveProjectContext(projectIdInput) {
 
 const PLUGIN_COMMAND_CENTER_VERSION = "V6.34.2";
 
+// V7.0-eingefroren, ausschließlich für den Cockpit-"Plugin-Leitstand" und die
+// Content-Design-Plugin-Task-Flows (readOnlyAllowedActions/blockedActions/
+// safetyBoundary als Erzählkarten für die Chef-UI). Kein technischer
+// Verbindungs- oder Ausführungsstatus, keine Datenklassifizierung, keine
+// Lizenzdaten. Seit V7.1 Phase A gilt für Werkzeugidentität/-fähigkeiten
+// ausschließlich tool-registry.js und für Live-/Adapterzustand ausschließlich
+// plugin-gateway.js; diese Liste bleibt bewusst unverändert und wird von den
+// neuen V7.1-Modulen nicht gelesen (siehe plugin-gateway.js Dateikopf).
 const PRODUCTIVE_PLUGIN_REGISTRY = [
   {
     id: "github",
@@ -22174,6 +22187,190 @@ function handleFirstReadOnlyPreview(res) {
   request.end();
 }
 
+// ---------------------------------------------------------------------------
+// V7.1 Phase A – Dokumenten-/Wissenseingang, Werkzeug-/Lizenzregister und
+// Plugin-Gateway (additiv). Dieselben Rand-Sicherheitsmuster wie bei der
+// Execution Bridge: Origin-/Host-Prüfung, JSON-Content-Type, Größenlimit,
+// bekannte Feldmengen, keine Stacktraces. Kein neuer externer Netzwerkaufruf
+// wird durch diese Routen ausgelöst.
+// ---------------------------------------------------------------------------
+
+const V71_API_MAX_BODY_BYTES = 64 * 1024;
+
+function v71ErrorPayload(message) {
+  return {
+    ok: false,
+    message: String(message || "Anfrage konnte nicht sicher verarbeitet werden."),
+    ...API_SECURITY_FLAGS,
+    madeExternalRequest: false,
+  };
+}
+
+async function withV71ApiGuards(req, res, allowedFields, label, handler) {
+  if (!isExecutionRequestOriginAllowed(req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+    return;
+  }
+  let body;
+  try {
+    body = await readJsonRequestBody(req, V71_API_MAX_BODY_BYTES);
+    assertKnownFieldsOnly(body, allowedFields, label);
+  } catch (error) {
+    sendJson(res, error.statusCode || 400, v71ErrorPayload(error.message));
+    return;
+  }
+  try {
+    const result = await handler(body);
+    sendJson(res, 200, { ...result, ...API_SECURITY_FLAGS, madeExternalRequest: false });
+  } catch (error) {
+    sendJson(res, 400, v71ErrorPayload(error.message));
+  }
+}
+
+function handleV71DocumentsList(res, context) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+    return;
+  }
+  const projectId = safeQueryParam(context.requestUrl, "projectId");
+  const documents = documentRegistryModule.listDocuments(projectId ? { projectId } : {});
+  sendJson(res, 200, {
+    ok: true,
+    version: "V7.1-Phase-A",
+    documentCount: documents.length,
+    documents,
+    ...API_SECURITY_FLAGS,
+    madeExternalRequest: false,
+  });
+}
+
+function handleV71DocumentById(res, documentId) {
+  const safeId = typeof documentId === "string" ? documentId.replace(/[^a-zA-Z0-9-]/g, "") : "";
+  const document = safeId ? documentRegistryModule.getDocumentById(safeId) : null;
+  if (!document) {
+    sendJson(res, 404, { ok: false, message: "Dokument nicht gefunden.", ...API_SECURITY_FLAGS, madeExternalRequest: false });
+    return;
+  }
+  sendJson(res, 200, { ok: true, document, ...API_SECURITY_FLAGS, madeExternalRequest: false });
+}
+
+function handleV71DocumentRegister(res, context) {
+  return withV71ApiGuards(
+    context.req,
+    res,
+    [
+      "projectId",
+      "title",
+      "sourceType",
+      "classification",
+      "note",
+      "sourceReference",
+      "documentType",
+      "mediaType",
+      "allowedAgentIds",
+      "knowledgeStatus",
+      "provenanceNote",
+    ],
+    "documents/register",
+    (body) => documentRegistryModule.registerDocument(body),
+  );
+}
+
+function handleV71DocumentTestUpload(res, context) {
+  return withV71ApiGuards(
+    context.req,
+    res,
+    ["projectId", "sourceFilename", "classification", "title", "documentType", "allowedAgentIds"],
+    "documents/test-upload",
+    (body) => documentRegistryModule.registerTestUpload(body),
+  );
+}
+
+function handleV71ToolRegistry(res, context) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+    return;
+  }
+  sendJson(res, 200, { ok: true, ...toolRegistryModule.buildToolsResponse(), ...API_SECURITY_FLAGS, madeExternalRequest: false });
+}
+
+function handleV71PluginGateway(res, context) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+    return;
+  }
+  const projectId = safeQueryParam(context.requestUrl, "projectId") || null;
+  sendJson(res, 200, {
+    ok: true,
+    ...pluginGatewayModule.buildPluginGatewayResponse({ projectId }),
+    ...API_SECURITY_FLAGS,
+    madeExternalRequest: false,
+  });
+}
+
+function parseCsvQueryParam(requestUrl, key) {
+  const raw = requestUrl.searchParams.get(key);
+  if (typeof raw !== "string" || !raw.trim()) return [];
+  return raw
+    .split(",")
+    .map((entry) => entry.trim().slice(0, 80))
+    .filter(Boolean)
+    .slice(0, 20);
+}
+
+function handleV71ToolRouting(res, context) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+    return;
+  }
+  const requestUrl = context.requestUrl;
+  const projectId = safeQueryParam(requestUrl, "projectId");
+  const dataClassification = safeQueryParam(requestUrl, "dataClassification") || "NORMAL";
+  const costCeilingRaw = requestUrl.searchParams.get("costCeiling");
+  const result = pluginGatewayModule.recommendToolForTask({
+    projectId,
+    requiredCapabilities: parseCsvQueryParam(requestUrl, "requiredCapabilities"),
+    dataClassification,
+    externalTransferAllowed: requestUrl.searchParams.get("externalTransferAllowed") === "true",
+    publicationAllowed: requestUrl.searchParams.get("publicationAllowed") === "true",
+    costCeiling: costCeilingRaw !== null && Number.isFinite(Number(costCeilingRaw)) ? Number(costCeilingRaw) : null,
+  });
+  sendJson(res, 200, { ...result, ...API_SECURITY_FLAGS, madeExternalRequest: false });
+}
+
+function handleV71BackupExport(res, context) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+    return;
+  }
+  sendJson(res, 200, {
+    ok: true,
+    ...v71RegistryBackupModule.exportV71Metadata(),
+    ...API_SECURITY_FLAGS,
+    madeExternalRequest: false,
+  });
+}
+
+function handleV71BackupImportPreview(res, context) {
+  return withV71ApiGuards(
+    context.req,
+    res,
+    [
+      "exportFormatVersion",
+      "exportedAt",
+      "applicationName",
+      "scope",
+      "documents",
+      "toolRegistrySnapshot",
+      "pluginStatusSnapshot",
+      "summary",
+      "safetyNotice",
+    ],
+    "backup/import-preview",
+    (body) => v71RegistryBackupModule.importV71MetadataPreview(body),
+  );
+}
+
 const getRoutes = buildRouteMap([
   ["/api/projects", (res) => handleProjects(res)],
   ["/api/projects/health-upgrade-kompass", (res) => handleHealthUpgradeKompassProject(res)],
@@ -22224,6 +22421,11 @@ const getRoutes = buildRouteMap([
   ["/api/execution/attempts/status", (res, context) => handleExecutionAttemptStatus(res, context)],
   ["/api/execution/attempts/result", (res, context) => handleExecutionAttemptResult(res, context)],
   ["/api/execution/executors", (res, context) => handleExecutionExecutors(res, context)],
+  ["/api/v71/documents", (res, context) => handleV71DocumentsList(res, context)],
+  ["/api/v71/tools", (res, context) => handleV71ToolRegistry(res, context)],
+  ["/api/v71/plugin-gateway", (res, context) => handleV71PluginGateway(res, context)],
+  ["/api/v71/tool-routing", (res, context) => handleV71ToolRouting(res, context)],
+  ["/api/v71/backup/export", (res, context) => handleV71BackupExport(res, context)],
 ]);
 
 const postRoutes = buildRouteMap([
@@ -22231,6 +22433,9 @@ const postRoutes = buildRouteMap([
   ["/api/execution/attempts/start", (res, context) => handleExecutionStart(res, context)],
   ["/api/execution/attempts/cancel", (res, context) => handleExecutionCancel(res, context)],
   ["/api/execution/apply", (res, context) => handleExecutionApply(res, context)],
+  ["/api/v71/documents/register", (res, context) => handleV71DocumentRegister(res, context)],
+  ["/api/v71/documents/test-upload", (res, context) => handleV71DocumentTestUpload(res, context)],
+  ["/api/v71/backup/import-preview", (res, context) => handleV71BackupImportPreview(res, context)],
 ]);
 
 const { requestHandler } = createHttpRouter({
@@ -22242,6 +22447,17 @@ const { requestHandler } = createHttpRouter({
       handler: (res, context) => {
         const projectId = decodeURIComponent(context.pathname.slice("/api/projects/".length));
         handleUnknownProject(res, projectId);
+      },
+    },
+    {
+      prefix: "/api/v71/documents/",
+      handler: (res, context) => {
+        if (!isExecutionRequestOriginAllowed(context.req)) {
+          sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+          return;
+        }
+        const documentId = decodeURIComponent(context.pathname.slice("/api/v71/documents/".length));
+        handleV71DocumentById(res, documentId);
       },
     },
   ],
@@ -22265,4 +22481,8 @@ if (require.main === module) {
 
 module.exports = {
   requestHandler,
+  // Additiv für V7.1-Bestandsschutztests (v71-integration.test.js), damit die
+  // Widerspruchsfreiheit zur neuen Plugin-Wahrheitsquelle ohne Quelltext-
+  // Parsing geprüft werden kann. Keine Verhaltensänderung.
+  PRODUCTIVE_PLUGIN_REGISTRY,
 };

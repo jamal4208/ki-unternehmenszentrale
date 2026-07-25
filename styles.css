@@ -8816,3 +8816,220 @@ details.local-agent-assignment-details > summary {
   gap: 0.5rem;
   margin-top: 0.5rem;
 }
+
+/* -------------------------------------------------------------------- */
+/* V7.1 Phase A – Projektunterlagen, Werkzeuge & Lizenzen, Plugin-Gateway */
+/* Bewusst additiv und mit bestehenden Klassen (.panel, .primary-button, */
+/* .form-grid, .empty-state) kombiniert statt einer Design-Überarbeitung. */
+/* -------------------------------------------------------------------- */
+
+.v71-subtitle {
+  color: var(--muted);
+  max-width: 60ch;
+}
+
+.v71-output {
+  display: grid;
+  gap: 16px;
+}
+
+.v71-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+@media (min-width: 900px) {
+  .v71-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.v71-form {
+  display: grid;
+  gap: 10px;
+}
+
+.v71-tool-groups {
+  display: grid;
+  gap: 16px;
+}
+
+.v71-card-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.v71-card {
+  border: 1px solid var(--card-border, var(--line));
+  border-radius: var(--radius-card, 12px);
+  background: var(--surface, #fff);
+  padding: 14px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.v71-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.v71-card-meta {
+  color: var(--muted);
+  font-size: var(--text-xs, 12px);
+}
+
+.v71-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.v71-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.v71-pill-direct {
+  background: #eaf6ef;
+  border-color: #bfe3cc;
+  color: #206a3f;
+}
+
+.v71-pill-handoff {
+  background: #fdf3e2;
+  border-color: #eecd93;
+  color: #8a5a12;
+}
+
+.v71-pill-recommendation {
+  background: #eef1fb;
+  border-color: #c7d0f2;
+  color: #3a4a9c;
+}
+
+.v71-pill-blocked {
+  background: #fbeaea;
+  border-color: #eec3c3;
+  color: #9b3131;
+}
+
+.v71-pill-neutral {
+  background: #f4f2ef;
+  border-color: var(--line);
+  color: #5f574d;
+}
+
+.v71-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: var(--text-xs, 12px);
+}
+
+.v71-detail-list {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  font-size: var(--text-xs, 12px);
+}
+
+.v71-detail-list div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: space-between;
+}
+
+.v71-detail-list dt {
+  color: var(--muted);
+}
+
+.v71-note {
+  margin: 0;
+  font-size: var(--text-xs, 12px);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.v71-note-warning {
+  color: #9b3131;
+}
+
+.v71-note-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: var(--text-xs, 12px);
+  color: var(--muted);
+}
+
+/* V7.1 Phase A – Nachbesserung (manuelle Safari-Abnahme): die allgemeine
+   Formularregel "textarea, input, select { width: 100%; }" sowie
+   "input, select { min-height: 42px; padding: 8px 10px; }" (siehe oben,
+   Zeile ~4298/4314) galt ungewollt auch für type="checkbox" und blähte die
+   Checkbox zu einer raumfüllenden, umrandeten Fläche auf. Dadurch wirkte die
+   Box in Safari optisch wie "aktiv" und quetschte die Beschriftung in den
+   Restplatz. Diese Regel setzt ausschließlich innerhalb von .v71-checkbox
+   Breite/Höhe/Padding zurück und lässt die Beschriftung frei umbrechen.
+   Bewusst eng begrenzt (kein globaler Checkbox-Reset), da nur dieser
+   V7.1-Phase-A-Bereich betroffen und gemeldet ist. */
+.v71-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-weight: 500;
+  cursor: pointer;
+  min-height: 0;
+}
+
+.v71-checkbox input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  margin: 2px 0 0;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: #ffffff;
+  accent-color: var(--ink);
+}
+
+.v71-checkbox-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.v71-blocked-candidate {
+  border-left: 3px solid var(--line-strong);
+  padding-left: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.v71-routing-result {
+  margin-top: 8px;
+}
+
+@media (max-width: 480px) {
+  .v71-card-list {
+    grid-template-columns: 1fr;
+  }
+}

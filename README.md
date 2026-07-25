@@ -9,6 +9,7 @@
 - **V7.0 Phase D – Codex als kontrollierten Executor anbinden** ist umgesetzt, getestet, echter Codex-Fixture-Pilot bestanden und mit Commit `6553452` gesichert; Codex läuft ausschließlich isoliert gegen das Fixture-Repository, Codex-Start und Apply für Health bleiben hart blockiert
 - **V7.0 Phase E – Health-Ende-zu-Ende-Abnahme und Freeze-Kandidat** ist umgesetzt, getestet und mit Commit `52ce012` gesichert; read-only V7.0-Freeze-Status (`IN_REVIEW|FREEZE_CANDIDATE|FROZEN`)
 - **V7.0 ist mit Jamals ausdrücklicher Entscheidung vom 25.07.2026 offiziell `FROZEN`** (Basis `52ce012`); Phase A bis E abgeschlossen; keine neuen Funktionen mehr in V7.0; neue Funktionen erst ab V7.1 nach separater Freigabe
+- **V7.1 Phase A – Dokumenten-/Wissenseingang, Werkzeug-/Lizenzregister, Plugin-Gateway** ist lokal umgesetzt und mit 661 automatisierten Prüfpunkten grün getestet (inkl. Nachbesserung aus der ersten manuellen Safari-Abnahme: Checkbox-Layout und strukturierte Blockierungsantwort), **aber noch nicht committed, gepusht oder deployt**; bereit zur manuellen Wiederholungsabnahme durch Jamal (siehe `CURRENT_STATUS.md`)
 - Gesicherter vorheriger Ausgang: **V6.46.0** / `e611c9c`
 - Betrieb nur lokal auf diesem Mac – kein Cloud- oder Deploymentbetrieb
 

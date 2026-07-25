@@ -5,6 +5,7 @@
 - **Aussage:** V1 lokal fertig und betriebsbereit
 - **Aktuelle Arbeitsversion:** **V7.0 Phase A** gesichert (`4a74ebe`); **V7.0 Phase B** gesichert (`3487a84`); **V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor** gesichert (`0858b4e`); **V7.0 Phase D – Codex als kontrollierten Executor anbinden** gesichert (`6553452`); **V7.0 Phase E – Health-Ende-zu-Ende-Abnahme und Freeze-Kandidat** gesichert (`52ce012`); vorheriger gesicherter Stand **V6.46.0** / `e611c9c`
 - **V7.0 offiziell FROZEN:** Jamal-Entscheidung vom **25.07.2026** auf Basis von `52ce012`; Phase A bis E abgeschlossen; keine neuen Funktionen mehr in V7.0; Phase V7.1 offen und benötigt eine neue, separate Freigabe
+- **V7.1 Phase A** (Dokumenten-/Wissenseingang, Werkzeug-/Lizenzregister, Plugin-Gateway) ist lokal umgesetzt und getestet, **jedoch noch nicht committed, gepusht oder deployt** – wartet auf Jamals manuelle Abnahme
 - **Gesicherter vorheriger Ausgangsstand:** **V6.45.2** / Commit **`fb9aa0d`**
 - **Historischer Freeze-Ausgang:** `16bbf45` (V6.43.1) – nur Historie
 - **Branch:** `main`
@@ -27,6 +28,9 @@
 
 ## 3. Was die Zentrale bewusst noch nicht kann
 
+- V7.1 Phase A (Projektunterlagen, Werkzeug-/Lizenzregister, Plugin-Gateway) produktiv nutzen, bevor Jamal Commit/Push freigegeben hat – aktuell nur lokal umgesetzt und getestet
+- Echte Dateiuploads aus dem Browser entgegennehmen (Phase A bietet ausschließlich Metadaten-/Referenzeingang plus einen isolierten Test-Upload gegen serverseitige Fixture-Dateien)
+- Canva, HeyGen oder Shopify produktiv ausführen (nur vorgemerkt, keine technische Verbindung)
 - Codex oder Mock produktiv gegen Health oder ein anderes echtes Repository ausführen (nur Fixture-Repository)
 - Einen V7.0-Freeze auf `FROZEN` selbst setzen (ausschließlich Jamals Entscheidung)
 - Produktive Plugins oder Schreib-APIs betreiben
