@@ -24,6 +24,11 @@ function mockExecFactory(responses) {
 }
 
 async function main() {
+  check("CENTRAL_APP_VERSION zeigt den kanonischen V7.0-FROZEN-Stand, nicht mehr eine veraltete Phase", () => {
+    assert.strictEqual(serverStatus.CENTRAL_APP_VERSION, "V7.0 FROZEN");
+    assert.ok(!/Phase/.test(serverStatus.CENTRAL_APP_VERSION), "keine veraltete Phasenangabe im Versionslabel");
+  });
+
   check("captureStartupSnapshot ist unveränderlich (frozen)", () => {
     const snapshot = serverStatus.captureStartupSnapshot({ port: 4173, gitCommit: "a".repeat(40) });
     assert.ok(Object.isFrozen(snapshot));

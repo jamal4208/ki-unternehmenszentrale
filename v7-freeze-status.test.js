@@ -43,9 +43,43 @@ async function main() {
     assert.ok(Object.isFrozen(freezeStatus.PHASE_HISTORY));
   });
 
-  check("LAST_SECURED_COMMIT ist der volle Freeze-Basis-Commit-Hash (Phase E / 52ce012)", () => {
+  check("LAST_SECURED_COMMIT ist der volle Freeze-Basis-Commit-Hash (Phase E / 52ce012) und bleibt unverändert", () => {
     assert.strictEqual(freezeStatus.LAST_SECURED_COMMIT, "52ce0125f0d641295bcc1b83ee9442e95abb199d");
     assert.ok(/^[0-9a-f]{40}$/.test(freezeStatus.LAST_SECURED_COMMIT));
+  });
+
+  check("OFFICIAL_FROZEN_COMMIT ist der volle offizielle Freeze-Commit-Hash (80b827b) und unterscheidet sich bewusst von der Entscheidungsbasis", () => {
+    assert.strictEqual(freezeStatus.OFFICIAL_FROZEN_COMMIT, "80b827b8f7edbbefbb20bda4e94a0d22fb6b07b8");
+    assert.ok(/^[0-9a-f]{40}$/.test(freezeStatus.OFFICIAL_FROZEN_COMMIT));
+    assert.notStrictEqual(freezeStatus.OFFICIAL_FROZEN_COMMIT, freezeStatus.LAST_SECURED_COMMIT);
+  });
+
+  check("computeFreezeStatus: aktueller Git-Stand am offiziellen Freeze-Commit ergibt gitMatchesOfficialFrozenCommit=true", () => {
+    const result = freezeStatus.computeFreezeStatus({
+      currentGitCommit: freezeStatus.OFFICIAL_FROZEN_COMMIT,
+      workingTreeClean: true,
+      manualFreezeDecision: freezeStatus.MANUAL_FREEZE_DECISION,
+    });
+    assert.strictEqual(result.officialFrozenCommit, freezeStatus.OFFICIAL_FROZEN_COMMIT);
+    assert.strictEqual(result.gitMatchesOfficialFrozenCommit, true);
+    // Die Entscheidungsbasis bleibt getrennt sichtbar und wird nicht überschrieben:
+    assert.strictEqual(result.lastSecuredCommit, freezeStatus.LAST_SECURED_COMMIT);
+    assert.strictEqual(result.gitMatchesLastSecuredCommit, false, "Basis-Commit und offizieller Freeze-Commit sind bewusst unterschiedliche Commits");
+  });
+
+  check("computeFreezeStatus: abweichender Git-Stand ergibt gitMatchesOfficialFrozenCommit=false, keine Erfindung", () => {
+    const result = freezeStatus.computeFreezeStatus({
+      currentGitCommit: "f".repeat(40),
+      workingTreeClean: true,
+      manualFreezeDecision: freezeStatus.MANUAL_FREEZE_DECISION,
+    });
+    assert.strictEqual(result.gitMatchesOfficialFrozenCommit, false);
+  });
+
+  check("computeFreezeStatus: fehlender Git-Stand ergibt gitMatchesOfficialFrozenCommit=false statt Erfindung", () => {
+    const result = freezeStatus.computeFreezeStatus({ currentGitCommit: null, workingTreeClean: null });
+    assert.strictEqual(result.gitMatchesOfficialFrozenCommit, false);
+    assert.strictEqual(result.officialFrozenCommit, freezeStatus.OFFICIAL_FROZEN_COMMIT);
   });
 
   check("computeFreezeStatus: fehlender/unbekannter Git-Stand ist IN_REVIEW, niemals FREEZE_CANDIDATE", () => {

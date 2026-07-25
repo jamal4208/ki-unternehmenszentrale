@@ -125,8 +125,9 @@
           ` : ""}
           <dl class="daily-work-run-facts">
             <div><dt>Version</dt><dd>${escape(deps, data.version || "UNGEKLÄRT")} · Phase ${escape(deps, data.phase || "?")}</dd></div>
-            <div><dt>Zuletzt gesicherter Basisstand (Commit)</dt><dd><code>${escape(deps, shortHash(data.lastSecuredCommit))}</code></dd></div>
-            <div><dt>Aktueller Git-Stand entspricht gesichertem Commit</dt><dd>${data.gitMatchesLastSecuredCommit ? "ja" : "nein"}</dd></div>
+            <div><dt>Freeze-Entscheidungsbasis (Commit)</dt><dd><code>${escape(deps, shortHash(data.lastSecuredCommit))}</code></dd></div>
+            <div><dt>Aktueller offizieller Freeze-Commit</dt><dd><code>${escape(deps, shortHash(data.officialFrozenCommit))}</code></dd></div>
+            <div><dt>Aktueller Git-Stand entspricht offiziellem Freeze-Commit</dt><dd>${data.gitMatchesOfficialFrozenCommit ? "ja" : "nein"}</dd></div>
             <div><dt>Working Tree sauber</dt><dd>${data.workingTreeClean === true ? "ja" : data.workingTreeClean === false ? "nein" : "UNGEKLÄRT"}</dd></div>
             <div><dt>Letzter gemessener Teststand</dt><dd>${data.tests?.allGreen ? "grün" : "ungeklärt/nicht grün"} · ${escape(deps, String(data.tests?.checkCount ?? "—"))} Prüfpunkte (Phase ${escape(deps, data.tests?.recordedAtPhase || "?")})</dd></div>
           </dl>

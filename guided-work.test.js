@@ -932,6 +932,48 @@ function main() {
     assert.ok(!frozenHtml.includes(">In Prüfung<"), "keine widersprüchliche IN_REVIEW-Anzeige neben FROZEN");
   });
 
+  check("V7.0-Betriebsfix: Freeze-Karte trennt Entscheidungsbasis und aktuellen offiziellen Freeze-Commit und zeigt 'ja' bei Übereinstimmung", () => {
+    const deps = { escapeHtml: (value) => String(value) };
+    const run = buildReadyRun("freeze-status-official-commit-run");
+    const html = GuidedWorkUi.renderMainSurface(run, {
+      deps,
+      liveStatus: { live: dirtyLive(), ok: true, available: true },
+      freezeStatus: {
+        version: "V7.0",
+        phase: "E",
+        status: "FROZEN",
+        phases: [
+          { phase: "E", title: "Health-Ende-zu-Ende-Audit, Freeze-Status und Chef-Modus-Klarheit", status: "DONE", commit: "52ce012" },
+        ],
+        lastSecuredCommit: "52ce0125f0d641295bcc1b83ee9442e95abb199d",
+        officialFrozenCommit: "80b827b8f7edbbefbb20bda4e94a0d22fb6b07b8",
+        gitMatchesLastSecuredCommit: false,
+        gitMatchesOfficialFrozenCommit: true,
+        workingTreeClean: true,
+        tests: { allGreen: true, checkCount: 528, recordedAtPhase: "E" },
+        manualFreezeDecision: {
+          version: "V7.0",
+          status: "FROZEN",
+          decidedBy: "Jamal",
+          decisionDate: "2026-07-25",
+          baseCommit: "52ce0125f0d641295bcc1b83ee9442e95abb199d",
+          note: "Neue Funktionen beginnen ab V7.1.",
+        },
+        openJamalSteps: ["Jede spätere Autonomieerhöhung oder Phase V7.1 benötigt eine neue ausdrückliche Freigabe."],
+        knownNonGoals: ["Kein automatisches Setzen auf FROZEN ohne Jamal."],
+        nextProductPathAfterV70: ["Dokumenten- und Wissenseingang"],
+      },
+    });
+    assert.ok(html.includes("Freeze-Entscheidungsbasis"), "Entscheidungsbasis ist als solche beschriftet");
+    assert.ok(html.includes("Aktueller offizieller Freeze-Commit"), "offizieller Freeze-Commit ist als solcher beschriftet");
+    assert.ok(html.includes("52ce012"), "Entscheidungsbasis-Commit ist sichtbar");
+    assert.ok(html.includes("80b827b"), "offizieller Freeze-Commit ist sichtbar");
+    assert.ok(
+      html.includes("Aktueller Git-Stand entspricht offiziellem Freeze-Commit</dt><dd>ja</dd>"),
+      "Git-Abgleich erfolgt gegen den offiziellen Freeze-Commit und zeigt hier korrekt 'ja'",
+    );
+  });
+
   check("Phase E: Sticky-Kopf zeigt 'Wer arbeitet daran' und 'Ausführung/Evidenz' additiv ohne neues Datenmodell", () => {
     const deps = { escapeHtml: (value) => String(value) };
     let run = buildReadyRun("sticky-evidence-run");

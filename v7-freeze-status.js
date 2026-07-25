@@ -24,6 +24,14 @@
 // dann FROZEN, wenn ihr explizit dieses eine kanonische, geprüfte Objekt als
 // `manualFreezeDecision` übergeben wird. Es gibt bewusst keinen zweiten Weg,
 // FROZEN zu setzen: kein Schreib-Endpunkt, kein Button, kein Unfreeze.
+//
+// Zwei getrennte, absichtlich unterschiedliche Commit-Werte (V7.0-Betriebsfix
+// 25.07.2026): `LAST_SECURED_COMMIT` ist die historische Freeze-
+// Entscheidungsbasis (52ce012) und bleibt unverändert. `OFFICIAL_FROZEN_COMMIT`
+// ist der jeweils aktuelle, tatsächlich als FROZEN geltende Git-Stand
+// (zunächst der Freeze-Dokumentations-Commit 80b827b) und wird bei jedem
+// später akzeptierten Betriebsfix von Hand nachgeführt. Beide Werte werden nie
+// miteinander verwechselt oder ineinander überschrieben.
 
 const { execFile } = require("child_process");
 
@@ -64,10 +72,23 @@ const PHASE_HISTORY = Object.freeze([
   }),
 ]);
 
-// Letzter gesicherter Commit auf origin/main – zugleich die Basis, auf der
-// Jamal die V7.0-Freeze-Entscheidung getroffen hat (siehe
+// Freeze-Entscheidungsbasis: der gesicherte Phase-E-Stand, auf dessen
+// Grundlage Jamal die V7.0-Freeze-Entscheidung getroffen hat (siehe
 // MANUAL_FREEZE_DECISION.baseCommit, muss mit diesem Wert übereinstimmen).
+// Dies ist eine historische Tatsache und wird durch spätere, zulässige
+// Betriebsfixes NICHT überschrieben oder umgedeutet.
 const LAST_SECURED_COMMIT = "52ce0125f0d641295bcc1b83ee9442e95abb199d";
+
+// Aktueller offizieller Freeze-Commit: der Commit, der den zuletzt
+// gesicherten, tatsächlich als V7.0-FROZEN geltenden Git-Stand markiert.
+// Direkt nach der Freeze-Entscheidung ist das der Dokumentations-Commit
+// "V7.0 offiziell einfrieren", der die Entscheidung selbst festgehalten hat
+// (Basis weiterhin `LAST_SECURED_COMMIT`/52ce012). Bei jedem später
+// akzeptierten und tatsächlich committeten Betriebsfix wird dieser Wert von
+// Hand auf den neuen Commit nachgeführt – genau wie LAST_SECURED_COMMIT und
+// PHASE_HISTORY bereits gepflegt werden. Die Freeze-Entscheidungsbasis bleibt
+// davon unabhängig und unverändert.
+const OFFICIAL_FROZEN_COMMIT = "80b827b8f7edbbefbb20bda4e94a0d22fb6b07b8";
 
 // Zuletzt tatsächlich gemessener automatisierter Teststand (siehe
 // Abschlussbericht Phase E / V7.0-Freeze). Wird bei jedem neuen gesicherten
@@ -199,10 +220,22 @@ function readWorkingTreeCleanReadOnly(repoDir, options = {}) {
  * MANUAL_FREEZE_DECISION-Objekt übergeben wird, lautet der Status FROZEN –
  * unabhängig vom aktuellen Git-Stand, damit spätere zulässige Fehler-/
  * Sicherheits-/Betriebsfixes den Freeze nicht stillschweigend aufheben.
+ *
+ * Der Rückgabewert unterscheidet bewusst zwei verschiedene Vergleiche:
+ * `gitMatchesLastSecuredCommit` vergleicht mit der historischen
+ * Freeze-Entscheidungsbasis (52ce012) und bleibt unverändert für die
+ * automatische IN_REVIEW/FREEZE_CANDIDATE-Ableitung erhalten;
+ * `gitMatchesOfficialFrozenCommit` vergleicht mit dem aktuellen offiziellen
+ * Freeze-Commit (OFFICIAL_FROZEN_COMMIT) und ist der für die Anzeige "aktueller
+ * Git-Stand entspricht offiziellem Freeze-Commit" maßgebliche Wert.
  */
 function computeFreezeStatus({ currentGitCommit, workingTreeClean, manualFreezeDecision } = {}) {
   const gitMatchesLastSecuredCommit =
     typeof currentGitCommit === "string" && currentGitCommit.length > 0 && currentGitCommit === LAST_SECURED_COMMIT;
+  const gitMatchesOfficialFrozenCommit =
+    typeof currentGitCommit === "string" &&
+    currentGitCommit.length > 0 &&
+    currentGitCommit === OFFICIAL_FROZEN_COMMIT;
   const workingTreeCleanKnown = workingTreeClean === true;
   const readyForCandidate =
     gitMatchesLastSecuredCommit && workingTreeCleanKnown && LAST_KNOWN_TEST_SUMMARY.allGreen === true;
@@ -221,8 +254,10 @@ function computeFreezeStatus({ currentGitCommit, workingTreeClean, manualFreezeD
     status,
     phases: PHASE_HISTORY,
     lastSecuredCommit: LAST_SECURED_COMMIT,
+    officialFrozenCommit: OFFICIAL_FROZEN_COMMIT,
     currentGitCommit: typeof currentGitCommit === "string" && currentGitCommit ? currentGitCommit : null,
     gitMatchesLastSecuredCommit,
+    gitMatchesOfficialFrozenCommit,
     workingTreeClean: workingTreeClean === true ? true : workingTreeClean === false ? false : null,
     tests: LAST_KNOWN_TEST_SUMMARY,
     manualFreezeDecision: manualDecisionValid ? manualFreezeDecision : null,
@@ -237,6 +272,7 @@ module.exports = {
   FREEZE_STATUS_VALUES,
   PHASE_HISTORY,
   LAST_SECURED_COMMIT,
+  OFFICIAL_FROZEN_COMMIT,
   LAST_KNOWN_TEST_SUMMARY,
   MANUAL_FREEZE_DECISION,
   KNOWN_NON_GOALS,

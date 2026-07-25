@@ -14,7 +14,11 @@ const { execFile, execFileSync } = require("child_process");
 const { API_SECURITY_FLAGS } = require("./project-registry");
 
 const CONTROLLER_SCHEMA_VERSION = 1;
-const CENTRAL_APP_VERSION = "V7.0 Phase B";
+// Kanonisches Versionslabel für die Serverkarte. Wird von Hand nachgeführt,
+// sobald sich der offizielle V7.0-Status ändert (siehe
+// v7-freeze-status.js#MANUAL_FREEZE_DECISION) – V7.0 ist seit Jamals
+// Entscheidung vom 25.07.2026 offiziell FROZEN, daher nicht mehr "Phase B".
+const CENTRAL_APP_VERSION = "V7.0 FROZEN";
 const GIT_TIMEOUT_MS = 4000;
 const UNKNOWN = "UNKNOWN";
 const APP_SUPPORT_DIR_NAME = "KI-Unternehmenszentrale";
