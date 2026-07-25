@@ -15,6 +15,7 @@ const {
   buildHealthLiveStatusResponse,
 } = require("./health-repo-status");
 const serverStatusModule = require("./server-status");
+const executionBridgeModule = require("./execution-bridge");
 
 const rootDir = __dirname;
 const staticAssets = new Map([
@@ -125,6 +126,227 @@ async function handleServerStatus(res) {
       ...API_SECURITY_FLAGS,
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor.
+//
+// server.js bleibt bewusst dünn: alle eigentliche Geschäftslogik (Baseline,
+// Isolation, Locks, Attempt-Statusmaschine, Mock-Executor, Apply-Gate) lebt
+// ausschließlich in execution-bridge.js. Hier werden nur HTTP-Rand: Origin-/
+// Host-Prüfung, Content-Type, Größenbegrenzung, bekannte Feldmengen und die
+// sechs additiven Routen verdrahtet.
+// ---------------------------------------------------------------------------
+
+const EXECUTION_API_MAX_BODY_BYTES = 32 * 1024;
+
+function isLoopbackHostHeader(hostHeader) {
+  if (typeof hostHeader !== "string" || !hostHeader) return false;
+  const withoutPort = hostHeader.split(":")[0];
+  return withoutPort === "127.0.0.1" || withoutPort === "localhost";
+}
+
+function isExecutionRequestOriginAllowed(req) {
+  if (!isLoopbackHostHeader(req.headers.host)) return false;
+  const origin = req.headers.origin;
+  if (typeof origin !== "string" || !origin) return true;
+  try {
+    const originUrl = new URL(origin);
+    const hostAllowed = originUrl.hostname === "127.0.0.1" || originUrl.hostname === "localhost";
+    const originPort = originUrl.port ? Number(originUrl.port) : originUrl.protocol === "https:" ? 443 : 80;
+    return hostAllowed && originPort === port;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function assertKnownFieldsOnly(body, allowedFields, label) {
+  const unknown = Object.keys(body || {}).filter((key) => !allowedFields.includes(key));
+  if (unknown.length > 0) {
+    throw new Error(`${label}: unbekannte Felder werden abgewiesen (${unknown.join(", ")}).`);
+  }
+}
+
+function readJsonRequestBody(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const contentType = String(req.headers["content-type"] || "");
+    if (!/^application\/json(;|$)/i.test(contentType.trim())) {
+      reject(Object.assign(new Error("Content-Type muss application/json sein."), { statusCode: 415 }));
+      return;
+    }
+    let received = 0;
+    const chunks = [];
+    let rejected = false;
+    req.on("data", (chunk) => {
+      if (rejected) return;
+      received += chunk.length;
+      if (received > maxBytes) {
+        rejected = true;
+        reject(Object.assign(new Error("Anfragekörper überschreitet die Größenbegrenzung."), { statusCode: 413 }));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      if (rejected) return;
+      const raw = Buffer.concat(chunks).toString("utf8");
+      if (!raw.trim()) {
+        resolve({});
+        return;
+      }
+      try {
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          reject(Object.assign(new Error("Anfragekörper muss ein JSON-Objekt sein."), { statusCode: 400 }));
+          return;
+        }
+        resolve(parsed);
+      } catch (_error) {
+        reject(Object.assign(new Error("Anfragekörper ist kein gültiges JSON."), { statusCode: 400 }));
+      }
+    });
+    req.on("error", () => {
+      if (rejected) return;
+      reject(Object.assign(new Error("Anfrage konnte nicht gelesen werden."), { statusCode: 400 }));
+    });
+  });
+}
+
+function executionErrorPayload(message) {
+  return {
+    ok: false,
+    message: String(message || "Anfrage konnte nicht sicher verarbeitet werden."),
+    writeOperationsBlocked: false,
+    madeExternalRequest: false,
+  };
+}
+
+const EXECUTION_PACKAGE_FIELDS = [
+  "executionPackageId",
+  "executionPackageFingerprint",
+  "projectId",
+  "baseCommit",
+  "allowedBranch",
+  "allowedFiles",
+  "forbiddenPaths",
+  "responsibleAgentId",
+  "testCommand",
+];
+
+const KNOWN_WORKING_TREE_BASELINE_FIELDS = [
+  "schemaVersion",
+  "branch",
+  "headCommit",
+  "dirtyPaths",
+  "untrackedPaths",
+  "fileHashes",
+  "baselineFingerprint",
+  "capturedAt",
+  "sourceRunId",
+  "jamalConfirmedAt",
+  "jamalConfirmedClean",
+  "preserveExistingChanges",
+  "confirmationNote",
+  "limitStatus",
+  "confirmationRequired",
+  "workingTreeClean",
+];
+
+async function withExecutionApiGuards(req, res, allowedFields, label, handler) {
+  if (!isExecutionRequestOriginAllowed(req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+    return;
+  }
+  let body;
+  try {
+    body = await readJsonRequestBody(req, EXECUTION_API_MAX_BODY_BYTES);
+    assertKnownFieldsOnly(body, allowedFields, label);
+    if (body.executionPackage) {
+      assertKnownFieldsOnly(body.executionPackage, EXECUTION_PACKAGE_FIELDS, `${label}.executionPackage`);
+    }
+    if (body.knownWorkingTreeBaseline) {
+      assertKnownFieldsOnly(body.knownWorkingTreeBaseline, KNOWN_WORKING_TREE_BASELINE_FIELDS, `${label}.knownWorkingTreeBaseline`);
+    }
+  } catch (error) {
+    sendJson(res, error.statusCode || 400, executionErrorPayload(error.message));
+    return;
+  }
+  try {
+    const result = await handler(body);
+    sendJson(res, 200, { ...result, ...API_SECURITY_FLAGS, madeExternalRequest: false });
+  } catch (error) {
+    sendJson(res, 400, executionErrorPayload(error.message));
+  }
+}
+
+function handleExecutionPrepare(res, context) {
+  return withExecutionApiGuards(
+    context.req,
+    res,
+    ["runId", "executionPackage", "knownWorkingTreeBaseline"],
+    "prepare",
+    (body) => executionBridgeModule.prepareExecutionAttempt(body),
+  );
+}
+
+function handleExecutionStart(res, context) {
+  return withExecutionApiGuards(
+    context.req,
+    res,
+    ["token", "runId", "executionPackageId", "executionPackageFingerprint", "attemptId", "scenario", "approved"],
+    "start",
+    (body) => executionBridgeModule.startExecutionAttempt(body),
+  );
+}
+
+function handleExecutionCancel(res, context) {
+  return withExecutionApiGuards(
+    context.req,
+    res,
+    ["token", "runId", "executionPackageId", "executionPackageFingerprint", "attemptId"],
+    "cancel",
+    (body) => executionBridgeModule.cancelExecutionAttempt(body),
+  );
+}
+
+function handleExecutionApply(res, context) {
+  return withExecutionApiGuards(
+    context.req,
+    res,
+    ["token", "runId", "executionPackageId", "executionPackageFingerprint", "attemptId", "approved"],
+    "apply",
+    (body) => {
+      if (body.token) return executionBridgeModule.confirmApply(body);
+      return executionBridgeModule.requestApplyPreview(body);
+    },
+  );
+}
+
+function safeQueryParam(requestUrl, key) {
+  const value = requestUrl.searchParams.get(key);
+  if (typeof value !== "string") return "";
+  return value.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 80);
+}
+
+function handleExecutionAttemptStatus(res, context) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+    return;
+  }
+  const attemptId = safeQueryParam(context.requestUrl, "attemptId");
+  const result = executionBridgeModule.readOnlyAttemptStatus(attemptId);
+  sendJson(res, result.ok ? 200 : 404, { ...result, ...API_SECURITY_FLAGS });
+}
+
+function handleExecutionAttemptResult(res, context) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+    return;
+  }
+  const attemptId = safeQueryParam(context.requestUrl, "attemptId");
+  const result = executionBridgeModule.readOnlyAttemptResult(attemptId);
+  sendJson(res, result.ok ? 200 : 404, { ...result, ...API_SECURITY_FLAGS });
 }
 
 async function handleHealthUpgradeKompassLiveStatus(res) {
@@ -21944,10 +22166,20 @@ const getRoutes = buildRouteMap([
   ["/api/agents/content-design-plugin-task/usable-canva-task", (res) => handleContentDesignUsableCanvaTask(res)],
   ["/api/agents/projectmanager-plugin-task/autonomy-applied", (res) => handleProjectManagerAutonomyApplied(res)],
   ["/api/server-status", (res) => handleServerStatus(res)],
+  ["/api/execution/attempts/status", (res, context) => handleExecutionAttemptStatus(res, context)],
+  ["/api/execution/attempts/result", (res, context) => handleExecutionAttemptResult(res, context)],
+]);
+
+const postRoutes = buildRouteMap([
+  ["/api/execution/prepare", (res, context) => handleExecutionPrepare(res, context)],
+  ["/api/execution/attempts/start", (res, context) => handleExecutionStart(res, context)],
+  ["/api/execution/attempts/cancel", (res, context) => handleExecutionCancel(res, context)],
+  ["/api/execution/apply", (res, context) => handleExecutionApply(res, context)],
 ]);
 
 const { requestHandler } = createHttpRouter({
   getRoutes,
+  postRoutes,
   routePrefixHandlers: [
     {
       prefix: "/api/projects/",

@@ -317,6 +317,37 @@ function main() {
     assert.ok(run.knownWorkingTreeBaseline.jamalConfirmedAt);
   });
 
+  check("18b. Schema-v2 mit gespeicherter Baseline bleibt lesbar; Schema-v1 ohne Baseline lesbar", () => {
+    const v2 = buildReadyRun("v2-with-baseline");
+    const withBaseline = GuidedWork.confirmKnownWorkingTreeBaseline(
+      v2,
+      { live: cleanLive(), ok: true, available: true },
+      {
+        confirmed: true,
+        branch: cleanLive().branch,
+        headCommit: cleanLive().head,
+        baselineFingerprint: "wt-clean",
+        dirtyPaths: [],
+        untrackedPaths: [],
+        preserveExistingChanges: true,
+      },
+    );
+    const storeV2 = DailyWorkRun.createStore({ runs: [withBaseline], activeRunId: withBaseline.id });
+    const activeV2 = DailyWorkRun.getActiveRun(storeV2);
+    assert.strictEqual(activeV2.schemaVersion, 2);
+    assert.ok(activeV2.knownWorkingTreeBaseline);
+    assert.strictEqual(activeV2.knownWorkingTreeBaseline.baselineFingerprint, "wt-clean");
+    assert.strictEqual(activeV2.knownWorkingTreeBaseline.branch, cleanLive().branch);
+    assert.strictEqual(activeV2.knownWorkingTreeBaseline.headCommit, cleanLive().head);
+
+    const v1 = { ...DailyWorkRun.createDraftRun({ id: "v1-no-baseline" }), schemaVersion: 1 };
+    delete v1.knownWorkingTreeBaseline;
+    const storeV1 = DailyWorkRun.createStore({ runs: [v1], activeRunId: v1.id });
+    const activeV1 = DailyWorkRun.getActiveRun(storeV1);
+    assert.strictEqual(activeV1.schemaVersion, 1);
+    assert.ok(activeV1.knownWorkingTreeBaseline === null || activeV1.knownWorkingTreeBaseline === undefined);
+  });
+
   check("19-20. Known-dirty mit Bestätigung; dirty ohne Bestätigung nicht paketfähig", () => {
     let run = buildReadyRun("dirty-base");
     const live = dirtyLive();
@@ -368,6 +399,74 @@ function main() {
     });
     run = GuidedWork.markPackageStaleOnBaselineDrift(run, { ok: true, available: true, live: drifted });
     assert.strictEqual(run.executionPackage.status, "STALE");
+  });
+
+  check("Phase C Fix: bestätigter Fingerprint muss exakt zum Live-Stand passen (rungebunden, fingerprintgebunden)", () => {
+    let run = buildReadyRun("wrong-fingerprint");
+    const live = dirtyLive();
+    assert.throws(
+      () =>
+        GuidedWork.confirmKnownWorkingTreeBaseline(run, { ok: true, available: true, live }, {
+          confirmed: true,
+          branch: live.branch,
+          headCommit: live.head,
+          baselineFingerprint: "wt-falsch-behauptet",
+          dirtyPaths: live.workingTreeDetail.dirtyPaths,
+          untrackedPaths: live.workingTreeDetail.untrackedPaths,
+          preserveExistingChanges: true,
+        }),
+      /Fingerprint/,
+    );
+    assert.strictEqual(run.knownWorkingTreeBaseline, null);
+  });
+
+  check("Phase C Fix: nach Drift macht eine erneute Bestätigung mit aktuellem Fingerprint das Paket wieder erzeugbar", () => {
+    let run = buildReadyRun("reconfirm-after-drift");
+    const live = dirtyLive();
+    run = GuidedWork.confirmKnownWorkingTreeBaseline(run, { ok: true, available: true, live }, {
+      confirmed: true,
+      branch: live.branch,
+      headCommit: live.head,
+      baselineFingerprint: live.workingTreeDetail.baselineFingerprint,
+      dirtyPaths: live.workingTreeDetail.dirtyPaths,
+      untrackedPaths: live.workingTreeDetail.untrackedPaths,
+      preserveExistingChanges: true,
+    });
+    run = createHealthExecutionPackage(run, live, {
+      allowedFiles: ["README.md", "package.json"],
+      forbiddenPaths: [".env"],
+    });
+    const drifted = dirtyLive({
+      workingTreeDetail: { ...live.workingTreeDetail, baselineFingerprint: "wt-drifted-again" },
+    });
+    run = GuidedWork.markPackageStaleOnBaselineDrift(run, { ok: true, available: true, live: drifted });
+    assert.strictEqual(run.executionPackage.status, "STALE");
+    // Alte Bestätigung ist für den neuen Fingerprint ungültig – erneute Erzeugung muss weiterhin blockiert sein.
+    assert.throws(
+      () =>
+        createHealthExecutionPackage(run, drifted, {
+          allowedFiles: ["README.md", "package.json"],
+          forbiddenPaths: [".env"],
+        }),
+      /Drift|weicht/,
+    );
+    // Erneute ausdrückliche Bestätigung mit dem jetzt aktuellen Fingerprint macht das Paket wieder erzeugbar.
+    const draft = GuidedWork.buildBaselineDraftFromLiveDetail({ ok: true, available: true, live: drifted }, run);
+    run = GuidedWork.confirmKnownWorkingTreeBaseline(run, { ok: true, available: true, live: drifted }, {
+      confirmed: true,
+      branch: draft.branch,
+      headCommit: draft.headCommit,
+      baselineFingerprint: draft.baselineFingerprint,
+      dirtyPaths: draft.dirtyPaths,
+      untrackedPaths: draft.untrackedPaths,
+      preserveExistingChanges: true,
+    });
+    run = createHealthExecutionPackage(run, drifted, {
+      allowedFiles: ["README.md", "package.json"],
+      forbiddenPaths: [".env"],
+    });
+    assert.strictEqual(run.executionPackage.status, "DRAFT");
+    assert.strictEqual(run.executionPackage.knownWorkingTreeBaselineFingerprint, "wt-drifted-again");
   });
 
   check("22-24. Keine Dateiinhalte, Grenzen, keine Git-Schreibbefehle", () => {
@@ -535,6 +634,184 @@ function main() {
 
     const noRunHtml = GuidedWorkUi.renderMainSurface(null, { deps, serverStatus: null });
     assert.ok(noRunHtml.includes("guided-work-server-status"), "Serverstatus auch ohne aktiven Lauf sichtbar");
+  });
+
+  check("Phase C: executionAttempt-Felder sind additiv, Token-frei und ohne Auto-Fachbestätigung", () => {
+    let run = buildReadyRun("execution-attempt-fields-run");
+    assert.strictEqual(run.executionAttempt, null, "neuer Lauf startet ohne Attempt");
+    assert.strictEqual(GuidedWork.canStartNewExecutionAttempt(run), true);
+
+    run = GuidedWork.beginExecutionAttempt(run, {
+      attemptId: "att-test-1",
+      executionPackageId: "ep-test-1",
+      executionPackageFingerprint: "fp-test-1",
+      projectId: "execution-bridge-fixture",
+      mockExecutorLabel: "Deterministischer Mock-Executor – technische Sicherheitsprüfung, keine KI-Ausführung.",
+    });
+    assert.strictEqual(run.executionAttempt.status, "PREPARED");
+    assert.strictEqual(run.executionAttempt.applyStatus, "NOT_REQUESTED");
+    assert.ok(!("startToken" in run.executionAttempt), "Token wird niemals im Tageslauf gespeichert");
+    assert.ok(!JSON.stringify(run.executionAttempt).toLowerCase().includes("token"));
+    assert.strictEqual(GuidedWork.canStartNewExecutionAttempt(run), false, "kein zweiter Attempt parallel");
+    assert.throws(() => GuidedWork.beginExecutionAttempt(run, { attemptId: "att-test-2" }));
+
+    run = GuidedWork.applyExecutionAttemptStatus(run, {
+      attemptId: "att-test-1",
+      status: "RUNNING",
+      startedAt: "2026-07-24T10:05:00.000Z",
+    });
+    assert.strictEqual(run.executionAttempt.status, "RUNNING");
+
+    const foreignAttempt = GuidedWork.applyExecutionAttemptStatus(run, { attemptId: "att-does-not-match", status: "SUCCEEDED" });
+    assert.strictEqual(foreignAttempt.executionAttempt.status, "RUNNING", "fremde Attempt-ID verändert nichts");
+
+    run = GuidedWork.applyExecutionAttemptResult(run, {
+      attemptId: "att-test-1",
+      status: "SUCCEEDED",
+      finishedAt: "2026-07-24T10:05:03.000Z",
+      changedFiles: ["FIXTURE_NOTE.md"],
+      diff: [{ path: "FIXTURE_NOTE.md", linesAdded: 3, linesRemoved: 0 }],
+      testStatus: "PASSED",
+      testExitCode: 0,
+      testSummary: "Mock-Executor: deterministische Testsimulation grün.",
+      blockers: [],
+      errors: [],
+    });
+    assert.strictEqual(run.executionAttempt.status, "SUCCEEDED");
+    assert.deepStrictEqual(run.executionAttempt.changedFiles, ["FIXTURE_NOTE.md"]);
+    assert.strictEqual(run.executionAttempt.testStatus, "PASSED");
+    assert.ok(!("ACCEPTED" in run.executionAttempt), "kein Auto-ACCEPTED");
+    assert.strictEqual(GuidedWork.canStartNewExecutionAttempt(run), true, "terminaler Status erlaubt neuen Attempt");
+
+    run = GuidedWork.applyExecutionApplyResult(run, {
+      attemptId: "att-test-1",
+      applyStatus: "APPLIED",
+      appliedFiles: ["FIXTURE_NOTE.md"],
+    });
+    assert.strictEqual(run.executionAttempt.applyStatus, "APPLIED");
+    assert.ok(run.executionAttempt.appliedAt);
+    assert.notStrictEqual(run.status, "CLOSED", "APPLIED bedeutet keinen automatischen Laufabschluss");
+
+    run = GuidedWork.clearExecutionAttempt(run);
+    assert.strictEqual(run.executionAttempt, null);
+
+    const legacyRun = { schemaVersion: 1, id: "legacy-no-attempt" };
+    const withDefaults = GuidedWork.ensureGuidedDefaults(legacyRun);
+    assert.strictEqual(withDefaults.executionAttempt, null, "v1-Läufe erhalten additiv null statt Fehler");
+  });
+
+  check("Phase C UI: Isolierte Testausführung in Chef-Sprache, ein primärer Button je Zustand, Mock-Executor eindeutig gekennzeichnet", () => {
+    const deps = { escapeHtml: (value) => String(value) };
+    let run = buildReadyRun("execution-attempt-ui-run");
+
+    const idleHtml = GuidedWorkUi.renderExecutionAttempt(run, {}, deps);
+    assert.ok(idleHtml.includes(GuidedWorkUi.MOCK_EXECUTOR_LABEL));
+    assert.ok(idleHtml.includes("data-execution-target"));
+    assert.ok(idleHtml.includes("data-execution-scenario"));
+    assert.ok(idleHtml.includes('data-execution-action="prepare"'));
+    assert.strictEqual((idleHtml.match(/data-execution-action="/g) || []).length, 1, "genau ein primärer Button im Leerzustand");
+    assert.ok(!idleHtml.toLowerCase().includes("codex"));
+    assert.ok(!idleHtml.toLowerCase().includes("ki-ausführung erfolgt") && !/\bKI-Agent\b/.test(idleHtml));
+
+    run = GuidedWork.beginExecutionAttempt(run, {
+      attemptId: "att-ui-1",
+      executionPackageId: "ep-ui-1",
+      executionPackageFingerprint: "fp-ui-1",
+      projectId: "execution-bridge-fixture",
+      mockExecutorLabel: GuidedWorkUi.MOCK_EXECUTOR_LABEL,
+    });
+    const preparedHtml = GuidedWorkUi.renderExecutionAttempt(run, {}, deps);
+    assert.ok(preparedHtml.includes("vorbereitet"));
+    assert.ok(preparedHtml.includes('data-execution-action="start"'));
+    assert.strictEqual((preparedHtml.match(/data-execution-action="/g) || []).length, 1);
+
+    run = GuidedWork.applyExecutionAttemptStatus(run, { attemptId: "att-ui-1", status: "RUNNING", startedAt: "2026-07-24T10:05:00.000Z" });
+    const runningHtml = GuidedWorkUi.renderExecutionAttempt(run, {}, deps);
+    assert.ok(runningHtml.includes("läuft isoliert"));
+    assert.ok(runningHtml.includes('data-execution-action="cancel"'));
+    assert.strictEqual((runningHtml.match(/data-execution-action="/g) || []).length, 1);
+    assert.ok(!runningHtml.includes("<select"), "während RUNNING keine erneute Zielauswahl");
+
+    run = GuidedWork.applyExecutionAttemptResult(run, {
+      attemptId: "att-ui-1",
+      status: "SUCCEEDED",
+      finishedAt: "2026-07-24T10:05:03.000Z",
+      changedFiles: ["FIXTURE_NOTE.md"],
+      testStatus: "PASSED",
+      testSummary: "Mock-Executor: deterministische Testsimulation grün.",
+      blockers: [],
+      errors: [],
+    });
+    const succeededHtml = GuidedWorkUi.renderExecutionAttempt(run, {}, deps);
+    assert.ok(succeededHtml.includes("prüfpflichtig"));
+    assert.ok(succeededHtml.includes('data-execution-action="apply-review"'));
+    assert.ok(succeededHtml.includes("FIXTURE_NOTE.md"));
+
+    run = GuidedWork.applyExecutionApplyResult(run, {
+      attemptId: "att-ui-1",
+      applyStatus: "APPLY_REVIEW",
+      applyPreview: {
+        executionPackageId: "ep-ui-1",
+        executionPackageFingerprint: "fp-ui-1",
+        baseline: { branch: "main", head: "abcdef0123456789" },
+        attemptId: "att-ui-1",
+        changedFiles: ["FIXTURE_NOTE.md"],
+        diffSummary: [{ path: "FIXTURE_NOTE.md", linesAdded: 1, linesRemoved: 0 }],
+        testStatus: "PASSED",
+        testSummary: "Mock-Executor: deterministische Testsimulation grün.",
+        risks: [],
+        blockers: [],
+        note: "Kein Commit. Kein Push. Kein Deployment.",
+      },
+    });
+    const reviewHtml = GuidedWorkUi.renderExecutionAttempt(run, {}, deps);
+    assert.ok(reviewHtml.includes('data-execution-apply-review="true"'));
+    assert.ok(reviewHtml.includes("Prüfvorschau vor Übernahme"));
+    assert.ok(reviewHtml.includes("Paket-ID"));
+    assert.ok(reviewHtml.includes("Fingerprint"));
+    assert.ok(reviewHtml.includes("Baseline"));
+    assert.ok(reviewHtml.includes("Diff-Zusammenfassung"));
+    assert.ok(reviewHtml.includes('data-execution-action="apply-confirm"'));
+    assert.ok(reviewHtml.includes("Kein Commit. Kein Push. Kein Deployment."));
+    assert.strictEqual((reviewHtml.match(/data-execution-action="/g) || []).length, 1);
+    assert.ok(GuidedWorkUi.EXECUTION_ATTEMPT_SCENARIOS.some((entry) => entry.id === "TIMEOUT"));
+
+    run = GuidedWork.applyExecutionApplyResult(run, { attemptId: "att-ui-1", applyStatus: "APPLIED", appliedFiles: ["FIXTURE_NOTE.md"] });
+    const appliedHtml = GuidedWorkUi.renderExecutionAttempt(run, {}, deps);
+    assert.ok(appliedHtml.includes("Änderungen übernommen, noch nicht committed"));
+    assert.ok(appliedHtml.includes("Kein Commit. Kein Push. Kein Deployment."));
+    assert.ok(!appliedHtml.includes('data-execution-apply-review="true"'), "nach APPLIED keine offene Prüfvorschau");
+
+    let blockedRun = GuidedWork.beginExecutionAttempt(GuidedWork.clearExecutionAttempt(run), {
+      attemptId: "att-ui-2",
+      executionPackageId: "ep-ui-2",
+      executionPackageFingerprint: "fp-ui-2",
+      projectId: "execution-bridge-fixture",
+    });
+    blockedRun = GuidedWork.applyExecutionAttemptResult(blockedRun, {
+      attemptId: "att-ui-2",
+      status: "BLOCKED",
+      blockers: ["Datei außerhalb der Allowlist verändert: UNAUTHORIZED_MOCK_CHANGE.txt"],
+    });
+    const blockedHtml = GuidedWorkUi.renderExecutionAttempt(blockedRun, {}, deps);
+    assert.ok(blockedHtml.includes("blockiert"));
+    assert.ok(blockedHtml.includes("UNAUTHORIZED_MOCK_CHANGE.txt"));
+
+    let healthRun = GuidedWork.beginExecutionAttempt(GuidedWork.clearExecutionAttempt(run), {
+      attemptId: "att-ui-3",
+      executionPackageId: "ep-ui-3",
+      executionPackageFingerprint: "fp-ui-3",
+      projectId: "health-upgrade-kompass",
+    });
+    healthRun = GuidedWork.applyExecutionAttemptResult(healthRun, {
+      attemptId: "att-ui-3",
+      status: "SUCCEEDED",
+      changedFiles: ["README.md"],
+      testStatus: "PASSED",
+    });
+    healthRun = GuidedWork.applyExecutionApplyResult(healthRun, { attemptId: "att-ui-3", applyStatus: "APPLY_DECLINED" });
+    const healthDeclinedHtml = GuidedWorkUi.renderExecutionAttempt(healthRun, {}, deps);
+    assert.ok(healthDeclinedHtml.includes("Health-Apply erst nach Phase-C-Abnahme und späterer ausdrücklicher Pilotfreigabe."));
   });
 
   check("37-40. Bestandsschutz Agenten/Projekte und Hybrid-E2E-Kern", () => {

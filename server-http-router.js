@@ -104,11 +104,28 @@ function getMimeType(fileName) {
   return "application/javascript; charset=utf-8";
 }
 
+function validatePostRoutes(postRoutes) {
+  if (!postRoutes) return;
+  if (!(postRoutes instanceof Map)) {
+    throw new Error("createHttpRouter: postRoutes muss eine Map sein.");
+  }
+  postRoutes.forEach((handler, routePath) => {
+    if (typeof routePath !== "string" || !routePath.startsWith("/")) {
+      throw new Error(`createHttpRouter: ungültiger POST-Routenpfad "${routePath}".`);
+    }
+    if (typeof handler !== "function") {
+      throw new Error(`createHttpRouter: POST-Handler für "${routePath}" muss eine Funktion sein.`);
+    }
+  });
+}
+
 function createHttpRouter(options) {
   assertCreateOptions(options);
   validateUniqueRoutePaths(options.getRoutes);
   validateStaticAssets(options.staticAssets);
+  validatePostRoutes(options.postRoutes);
 
+  const postRoutes = options.postRoutes instanceof Map ? options.postRoutes : new Map();
   const routePrefixHandlers = Array.isArray(options.routePrefixHandlers)
     ? options.routePrefixHandlers
     : [];
@@ -161,6 +178,27 @@ function createHttpRouter(options) {
     const requestUrl = new URL(req.url, `http://${req.headers.host || "127.0.0.1"}`);
     const pathname = normalizeRequestPathname(requestUrl.pathname);
 
+    // POST bleibt für jeden Pfad außer den explizit registrierten POST-Routen
+    // exakt wie zuvor (405) gesperrt. Nur die kleine, additive Menge an
+    // POST-Routen (z. B. Execution Bridge, Phase C) wird hier bedient.
+    if (req.method === "POST") {
+      if (!pathname) {
+        options.sendText(res, 404, "Not found");
+        return;
+      }
+      const postHandler = postRoutes.get(pathname);
+      if (!postHandler) {
+        options.sendJson(res, 405, options.methodNotAllowedPayload);
+        return;
+      }
+      try {
+        postHandler(res, { requestUrl, pathname, req });
+      } catch (_error) {
+        onInternalError(res, options.sendJson);
+      }
+      return;
+    }
+
     if (req.method !== "GET") {
       options.sendJson(res, 405, options.methodNotAllowedPayload);
       return;
@@ -178,6 +216,14 @@ function createHttpRouter(options) {
       } catch (_error) {
         onInternalError(res, options.sendJson);
       }
+      return;
+    }
+
+    // Ein Pfad, der ausschließlich als POST-Route registriert ist, bleibt für
+    // GET bekannt, aber mit falscher Methode (405) – nicht 404 wie ein
+    // tatsächlich unbekannter Pfad.
+    if (postRoutes.has(pathname)) {
+      options.sendJson(res, 405, options.methodNotAllowedPayload);
       return;
     }
 
@@ -205,6 +251,9 @@ function createHttpRouter(options) {
     serveStatic,
     getRegisteredRouteCount() {
       return options.getRoutes.size;
+    },
+    getRegisteredPostRouteCount() {
+      return postRoutes.size;
     },
     getRegisteredStaticAssetCount() {
       return options.staticAssets.size;

@@ -945,8 +945,9 @@ function runTests() {
   check("bestehende Registertests bleiben eingebunden", () => assert.ok(fs.readFileSync(path.join(__dirname, "package.json"), "utf8").includes("project-registry.test.js")));
 
   const serverSource = fs.readFileSync(path.join(__dirname, "server.js"), "utf8");
-  const routeCount = (serverSource.match(/^\s+\["\/api\//gm) || []).length;
-  check("43 GET-Routen bleiben erhalten (Phase B: +1 /api/server-status)", () => assert.strictEqual(routeCount, 43));
+  const getRouteBlockMatch = serverSource.match(/const getRoutes = buildRouteMap\(\[([\s\S]*?)\n\]\);/);
+  const routeCount = getRouteBlockMatch ? (getRouteBlockMatch[1].match(/^\s+\["\/api\//gm) || []).length : 0;
+  check("45 GET-Routen bleiben erhalten (Phase C: +2 GET Execution-Status/-Ergebnis)", () => assert.strictEqual(routeCount, 45));
   check("unbekannte Projekt-ID bleibt 404", () => assert.strictEqual(invoke("GET", "/api/projects/unbekannt").statusCode, 404));
   check("POST bleibt 405", () => assert.strictEqual(invoke("POST", "/api/projects").statusCode, 405));
   check("writeOperationsBlocked bleibt true", () => assert.strictEqual(API_SECURITY_FLAGS.writeOperationsBlocked, true));

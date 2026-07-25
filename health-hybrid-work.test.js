@@ -552,6 +552,47 @@ function main() {
     assert.strictEqual(phase.orchestration.status, "CONFIRMED");
   });
 
+  check("dirty tree without a confirmed baseline never creates even a partial package (Phase C fix, precondition)", () => {
+    let run = buildReadyRun();
+    const dirty = cleanLive({ workingTreeClean: false });
+    assert.throws(
+      () => createHealthExecutionPackage(run, dirty, { allowedFiles: ["README.md"], forbiddenPaths: [".env"] }),
+      /Bestätigung|nicht sauber/,
+    );
+    assert.strictEqual(run.executionPackage, null, "kein Teilpaket bei abgelehnter Erzeugung");
+  });
+
+  check("re-approving an already READY_TO_COPY package is rejected instead of silently creating a duplicate (Phase C fix)", () => {
+    let run = buildReadyRun();
+    run = createHealthExecutionPackage(run, cleanLive(), {
+      allowedFiles: ["README.md"],
+      forbiddenPaths: [".env"],
+    });
+    run = approveHealthExecutionPackageForCopy(run, cleanLive(), { approved: true });
+    assert.strictEqual(run.executionPackage.status, "READY_TO_COPY");
+    const firstId = run.executionPackage.executionPackageId;
+    const firstFingerprint = run.executionPackage.executionPackageFingerprint;
+    assert.throws(
+      () => approveHealthExecutionPackageForCopy(run, cleanLive(), { approved: true }),
+      /nicht im zulässigen Status/,
+    );
+    assert.strictEqual(run.executionPackage.executionPackageId, firstId);
+    assert.strictEqual(run.executionPackage.executionPackageFingerprint, firstFingerprint);
+  });
+
+  check("approve never reaches READY_TO_COPY without values.approved === true (no silent auto-approval)", () => {
+    let run = buildReadyRun();
+    run = createHealthExecutionPackage(run, cleanLive(), {
+      allowedFiles: ["README.md"],
+      forbiddenPaths: [".env"],
+    });
+    assert.throws(
+      () => approveHealthExecutionPackageForCopy(run, cleanLive(), {}),
+      /ausdrückliche Freigabe/,
+    );
+    assert.strictEqual(run.executionPackage.status, "DRAFT");
+  });
+
   check("no git write or test process markers in hybrid module source", () => {
     const hybridSource = fs.readFileSync(path.join(__dirname, "health-hybrid-work.js"), "utf8");
     const statusSource = fs.readFileSync(path.join(__dirname, "health-repo-status.js"), "utf8");

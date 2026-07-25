@@ -4,7 +4,8 @@
 
 - **V1 lokal fertig und betriebsbereit**
 - Version: **V7.0 Phase A – Guided Work Foundation** (umgesetzt, abgenommen, gesichert mit Commit `4a74ebe`)
-- **V7.0 Phase B – Betriebsstabilität** ist umgesetzt, getestet, browserseitig abgenommen und mit diesem Commit gesichert
+- **V7.0 Phase B – Betriebsstabilität** ist umgesetzt, getestet, browserseitig abgenommen und mit Commit `3487a84` gesichert
+- **V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor** ist technisch umgesetzt (Umsetzungskandidat, noch nicht committed); Mock-Executor ist keine KI; Apply nur Fixture, Health-Apply blockiert
 - Gesicherter vorheriger Ausgang: **V6.46.0** / `e611c9c`
 - Betrieb nur lokal auf diesem Mac – kein Cloud- oder Deploymentbetrieb
 

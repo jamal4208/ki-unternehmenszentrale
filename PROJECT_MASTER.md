@@ -1,12 +1,14 @@
 # PROJECT MASTER
 
-## Aktueller Arbeitsstand V7.0 (Phase A und Phase B gesichert)
+## Aktueller Arbeitsstand V7.0 (Phase A und Phase B gesichert; Phase C Umsetzungskandidat)
 
 **V7.0 Phase A – Guided Work Foundation** ist umgesetzt, getestet, browserseitig abgenommen und mit Commit **`4a74ebe`** auf `origin/main` gesichert. Sie führt einen geführten Hauptarbeitsraum („Oben arbeiten. Unten nachschauen.“) mit deterministischen, quellenbasierten Arbeitsvorschlägen, editierbarem Agententeam, Re-Fingerprinting/Invalidierung, klarer Trennung von Live-/Snapshot-/Historienständen, bekannt-dirty-Baseline für Health und Evidenz-Prefill ein. Neue Tagesläufe erhalten `schemaVersion: 2`; `schemaVersion: 1` bleibt unverändert lesbar. Der V6.46.0-Hybrid-Fallback bleibt vollständig erhalten.
 
-**V7.0 Phase B – Betriebsstabilität** ist umgesetzt, getestet, browserseitig abgenommen und **mit diesem Commit auf `origin/main` gesichert**. Sie macht den lokalen Betrieb verständlich und zuverlässig über einen separaten lokalen Controller (`scripts/zentral-ctl.js`: `status`/`start`/`stop`/`restart`, empfohlener lokaler Startweg; `npm start` bleibt manueller Fallback), eine unveränderliche Server-Start-Momentaufnahme, ein Statusmodell (`RUNNING`/`STOPPED`/`STALE`/`PORT_CONFLICT`/`VERSION_MISMATCH`/`UNKNOWN`), eine neue read-only Route `GET /api/server-status` und eine kompakte Statusanzeige in der Oberfläche ohne Steuerbuttons. Der Controller verwaltet ausschließlich selbst gestartete Prozesse und beendet nie einen fremden Prozess, auch nicht bei Portkonflikt. Keine Execution Bridge und keine POST-Ausführung; Health bleibt ausschließlich read-only Pilotquelle.
+**V7.0 Phase B – Betriebsstabilität** ist umgesetzt, getestet, browserseitig abgenommen und mit Commit **`3487a84`** auf `origin/main` gesichert. Separater lokaler Controller, Serverstatus-API und kompakte Statusanzeige ohne Steuerbuttons. Health bleibt ausschließlich read-only Pilotquelle.
 
-**Vorheriger gesicherter Ausgangsstand:** V6.46.0 / `e611c9c`. **V7.0 insgesamt ist nicht abgeschlossen** – Phase C bis Phase E sind weiterhin offen und nicht umgesetzt. Keine Execution Bridge, kein Executor, kein Codex-/Agentenstart, keine Repository-Arbeitsausführung, keine POST-Route, kein Health-Schreiben, keine Testausführung aus dem Browser, kein automatisches Commit/Push/Deployment, keine Autonomieerhöhung.
+**V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor** ist technisch umgesetzt und getestet, aber **Umsetzungskandidat: noch nicht committed**. Isolierter Workspace unter App Support, deterministischer Mock-Executor (keine KI), Attempt-/Apply-State-Machine, One-Time-Token-API, Apply nur gegen Fixture-Repository nach Jamal-Freigabe. Health-Apply bleibt in Phase C hart blockiert. Apply ist kein Commit, kein Push, kein Deployment.
+
+**Vorheriger gesicherter Ausgangsstand:** V6.46.0 / `e611c9c`. **V7.0 insgesamt ist nicht abgeschlossen** – Phase D und Phase E sind weiterhin offen und nicht umgesetzt. Kein Codex-/Cursor-Agentenstart, keine produktive Health-Apply-Freigabe, kein automatisches Commit/Push/Deployment, keine Autonomieerhöhung.
 
 ## Verbindlicher Arbeitsstand V6.46.0
 

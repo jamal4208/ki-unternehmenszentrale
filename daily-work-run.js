@@ -165,6 +165,7 @@
             previousPackageId: null,
             previousFingerprint: null,
           },
+          executionAttempt: null,
         };
     return {
       schemaVersion: SCHEMA_VERSION,

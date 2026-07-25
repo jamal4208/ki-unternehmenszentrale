@@ -2,6 +2,7 @@
 
 const assert = require("assert");
 const fs = require("fs");
+const os = require("os");
 const http = require("http");
 const net = require("net");
 const path = require("path");
@@ -9,6 +10,13 @@ const { spawn } = require("child_process");
 const { createHttpRouter, buildRouteMap, getMimeType, normalizeRequestPathname } = require("./server-http-router");
 const { requestHandler } = require("./server");
 const { API_SECURITY_FLAGS } = require("./project-registry");
+
+// Alle HTTP-Aufrufe gegen den echten server.js in dieser Testdatei laufen mit
+// einem isolierten HOME-Verzeichnis. Phase C (Execution Bridge) schreibt bei
+// Erfolg unter ~/Library/Application Support/... – Tests dürfen dieses
+// Verzeichnis auf der echten Maschine niemals berühren.
+const FAKE_HOME_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "eb-router-test-home-"));
+process.env.HOME = FAKE_HOME_DIR;
 
 let passed = 0;
 function check(label, assertion) {
@@ -131,15 +139,21 @@ function httpGet(port, targetPath) {
   });
 }
 
-function httpRequest(port, method, targetPath) {
+function httpRequest(port, method, targetPath, jsonBody) {
   return new Promise((resolve, reject) => {
+    const data = jsonBody === undefined ? undefined : JSON.stringify(jsonBody);
     const request = http.request(
       {
         hostname: "127.0.0.1",
         port,
         path: targetPath,
         method,
-        headers: { host: `127.0.0.1:${port}` },
+        headers: {
+          host: `127.0.0.1:${port}`,
+          ...(data !== undefined
+            ? { "content-type": "application/json", "content-length": Buffer.byteLength(data) }
+            : {}),
+        },
       },
       (response) => {
         let body = "";
@@ -152,11 +166,13 @@ function httpRequest(port, method, targetPath) {
             statusCode: response.statusCode,
             headers: response.headers,
             body,
+            json: body ? JSON.parse(body) : null,
           });
         });
       },
     );
     request.on("error", reject);
+    if (data !== undefined) request.write(data);
     request.end();
   });
 }
@@ -284,9 +300,18 @@ async function runTests() {
   });
 
   const serverSource = fs.readFileSync(path.join(__dirname, "server.js"), "utf8");
-  const routeCount = (serverSource.match(/^\s+\["\/api\//gm) || []).length;
-  check("bestehende 43 GET-Routen bleiben registriert (Phase B: +1 /api/server-status)", () =>
-    assert.strictEqual(routeCount, 43),
+  const getRouteBlockMatch = serverSource.match(/const getRoutes = buildRouteMap\(\[([\s\S]*?)\n\]\);/);
+  const routeCount = getRouteBlockMatch ? (getRouteBlockMatch[1].match(/^\s+\["\/api\//gm) || []).length : 0;
+  check("bestehende 45 GET-Routen bleiben registriert (Phase C: +2 GET Execution-Status/-Ergebnis)", () =>
+    assert.strictEqual(routeCount, 45),
+  );
+
+  const postRouteBlockMatch = serverSource.match(/const postRoutes = buildRouteMap\(\[([\s\S]*?)\]\);/);
+  const postRouteCount = postRouteBlockMatch
+    ? (postRouteBlockMatch[1].match(/^\s+\["\/api\//gm) || []).length
+    : 0;
+  check("genau 4 additive POST-Routen sind registriert (Execution Bridge)", () =>
+    assert.strictEqual(postRouteCount, 4),
   );
 
   const serverStatusGet = await invokeJson(requestHandler, "GET", "/api/server-status");
@@ -367,10 +392,157 @@ async function runTests() {
     assert.doesNotMatch(serverSource, /requestUrl\.pathname === "\/api\//);
   });
 
+  // ---------------------------------------------------------------------
+  // V7.0 Phase C – Execution Bridge API (localhost-only, Origin/Host-Prüfung,
+  // application/json, kleine Größenbegrenzung, servergenerierte Tokens).
+  // ---------------------------------------------------------------------
+
+  function invokeJsonBody(handler, method, url, body, extraHeaders = {}) {
+    return new Promise((resolve) => {
+      const data = body === undefined ? undefined : JSON.stringify(body);
+      let statusCode = null;
+      let rawBody = "";
+      handler(
+        {
+          method,
+          url,
+          headers: {
+            host: "127.0.0.1",
+            "content-type": "application/json",
+            ...extraHeaders,
+          },
+          on(event, cb) {
+            if (event === "data" && data !== undefined) cb(Buffer.from(data, "utf8"));
+            if (event === "end") cb();
+          },
+        },
+        {
+          writeHead(code) {
+            statusCode = code;
+          },
+          end(responseBody = "") {
+            rawBody += responseBody;
+            resolve({ statusCode, json: rawBody ? JSON.parse(rawBody) : null });
+          },
+        },
+      );
+    });
+  }
+
+  const prepareBadOrigin = await invokeJsonBody(
+    requestHandler,
+    "POST",
+    "/api/execution/prepare",
+    {},
+    { origin: "http://evil.example.com" },
+  );
+  check("POST /api/execution/prepare mit fremdem Origin liefert 403", () =>
+    assert.strictEqual(prepareBadOrigin.statusCode, 403),
+  );
+
+  const prepareBadContentType = await invokeJsonBody(requestHandler, "POST", "/api/execution/prepare", {}, {
+    "content-type": "text/plain",
+  });
+  check("POST /api/execution/prepare mit falschem Content-Type liefert 415", () =>
+    assert.strictEqual(prepareBadContentType.statusCode, 415),
+  );
+
+  const prepareUnknownField = await invokeJsonBody(requestHandler, "POST", "/api/execution/prepare", {
+    runId: "r1",
+    freeShellCommand: "rm -rf /",
+  });
+  check("POST /api/execution/prepare weist unbekannte Felder defensiv ab (400)", () => {
+    assert.strictEqual(prepareUnknownField.statusCode, 400);
+    assert.strictEqual(prepareUnknownField.json.ok, false);
+    assert.strictEqual(prepareUnknownField.json.writeOperationsBlocked, false);
+  });
+
+  const prepareBadHost = await invokeJsonBody(
+    requestHandler,
+    "POST",
+    "/api/execution/prepare",
+    { runId: "r-host" },
+    { host: "evil.example.com" },
+  );
+  check("POST /api/execution/prepare mit fremdem Host liefert 403", () =>
+    assert.strictEqual(prepareBadHost.statusCode, 403),
+  );
+
+  const oversizedBody = "x".repeat(33 * 1024);
+  const prepareTooLarge = await new Promise((resolve) => {
+    let statusCode = null;
+    let rawBody = "";
+    requestHandler(
+      {
+        method: "POST",
+        url: "/api/execution/prepare",
+        headers: {
+          host: "127.0.0.1",
+          "content-type": "application/json",
+        },
+        on(event, cb) {
+          if (event === "data") cb(Buffer.from(`{"pad":"${oversizedBody}"}`, "utf8"));
+          if (event === "end") cb();
+        },
+        destroy() {},
+      },
+      {
+        writeHead(code) {
+          statusCode = code;
+        },
+        end(responseBody = "") {
+          rawBody += responseBody;
+          let json = null;
+          try {
+            json = rawBody ? JSON.parse(rawBody) : null;
+          } catch (_error) {
+            json = null;
+          }
+          resolve({ statusCode, json });
+        },
+      },
+    );
+  });
+  check("POST /api/execution/prepare mit zu großem Body liefert 413", () =>
+    assert.strictEqual(prepareTooLarge.statusCode, 413),
+  );
+
+  const prepareGetInstead = await invokeJson(requestHandler, "GET", "/api/execution/prepare");
+  check("GET auf reine POST-Route /api/execution/prepare liefert 405 statt 404", () =>
+    assert.strictEqual(prepareGetInstead.statusCode, 405),
+  );
+
+  const missingAttemptStatus = await invokeJson(
+    requestHandler,
+    "GET",
+    "/api/execution/attempts/status?attemptId=att-unknown-000000000000",
+  );
+  check("GET /api/execution/attempts/status für unbekannten Attempt liefert 404", () =>
+    assert.strictEqual(missingAttemptStatus.statusCode, 404),
+  );
+
+  const missingAttemptResult = await invokeJson(
+    requestHandler,
+    "GET",
+    "/api/execution/attempts/result?attemptId=att-unknown-000000000000",
+  );
+  check("GET /api/execution/attempts/result für unbekannten Attempt liefert 404", () =>
+    assert.strictEqual(missingAttemptResult.statusCode, 404),
+  );
+
+  const executionPostOnKnownGet = await invokeJson(requestHandler, "POST", "/api/execution/attempts/status");
+  check("POST auf reine GET-Execution-Route bleibt 405", () =>
+    assert.strictEqual(executionPostOnKnownGet.statusCode, 405),
+  );
+
+  check("server.js bindet den Execution-Server-Support nur über 127.0.0.1/localhost (keine CORS-Freigabe)", () => {
+    assert.doesNotMatch(serverSource, /Access-Control-Allow-Origin/);
+  });
+
   const integrationPort = await getFreePort();
   const serverProcess = spawn(process.execPath, ["server.js"], {
     cwd: __dirname,
-    env: { ...process.env, PORT: String(integrationPort) },
+    env: { ...process.env, PORT: String(integrationPort), HOME: FAKE_HOME_DIR },
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -443,6 +615,95 @@ async function runTests() {
       assert.strictEqual(payload.port, integrationPort);
       assert.strictEqual(payload.managedByController, false);
     });
+
+    // Vollständiger Execution-Bridge-Rundlauf gegen den echten, laufenden
+    // Serverprozess – ausschließlich gegen das Fixture-Projekt, isoliertes
+    // HOME (FAKE_HOME_DIR), niemals gegen Health.
+    const runId = "run-router-integration";
+    const prepared = await httpRequest(integrationPort, "POST", "/api/execution/prepare", {
+      runId,
+      executionPackage: {
+        executionPackageId: "ep-router-integration",
+        executionPackageFingerprint: "fp-router-integration",
+        projectId: "execution-bridge-fixture",
+        allowedFiles: ["FIXTURE_NOTE.md"],
+        forbiddenPaths: [],
+      },
+    });
+    check("Integration: POST /api/execution/prepare liefert PREPARED", () => {
+      assert.strictEqual(prepared.statusCode, 200);
+      assert.strictEqual(prepared.json.status, "PREPARED");
+      assert.ok(typeof prepared.json.startToken === "string" && prepared.json.startToken.length > 0);
+    });
+
+    const started = await httpRequest(integrationPort, "POST", "/api/execution/attempts/start", {
+      token: prepared.json.startToken,
+      runId,
+      executionPackageId: "ep-router-integration",
+      executionPackageFingerprint: "fp-router-integration",
+      attemptId: prepared.json.attemptId,
+      scenario: "SUCCESS",
+      approved: true,
+    });
+    check("Integration: POST /api/execution/attempts/start liefert RUNNING", () => {
+      assert.strictEqual(started.statusCode, 200);
+      assert.strictEqual(started.json.status, "RUNNING");
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    const attemptStatus = await httpGet(integrationPort, `/api/execution/attempts/status?attemptId=${prepared.json.attemptId}`);
+    check("Integration: GET /api/execution/attempts/status zeigt SUCCEEDED", () => {
+      const payload = JSON.parse(attemptStatus.body);
+      assert.strictEqual(attemptStatus.statusCode, 200);
+      assert.strictEqual(payload.status, "SUCCEEDED");
+    });
+
+    const attemptResult = await httpGet(integrationPort, `/api/execution/attempts/result?attemptId=${prepared.json.attemptId}`);
+    check("Integration: GET /api/execution/attempts/result liefert strukturierte Evidenz ohne Fachbestätigung", () => {
+      const payload = JSON.parse(attemptResult.body);
+      assert.strictEqual(attemptResult.statusCode, 200);
+      assert.deepStrictEqual(payload.changedFiles, ["FIXTURE_NOTE.md"]);
+      assert.strictEqual(payload.testStatus, "PASSED");
+      assert.ok(!("ACCEPTED" in payload));
+    });
+
+    const applyPreview = await httpRequest(integrationPort, "POST", "/api/execution/apply", {
+      runId,
+      executionPackageId: "ep-router-integration",
+      executionPackageFingerprint: "fp-router-integration",
+      attemptId: prepared.json.attemptId,
+    });
+    check("Integration: POST /api/execution/apply ohne Token liefert Review-Vorschau", () => {
+      assert.strictEqual(applyPreview.statusCode, 200);
+      assert.deepStrictEqual(applyPreview.json.preview.changedFiles, ["FIXTURE_NOTE.md"]);
+      assert.ok(typeof applyPreview.json.applyToken === "string" && applyPreview.json.applyToken.length > 0);
+    });
+
+    const applyConfirmed = await httpRequest(integrationPort, "POST", "/api/execution/apply", {
+      token: applyPreview.json.applyToken,
+      runId,
+      executionPackageId: "ep-router-integration",
+      executionPackageFingerprint: "fp-router-integration",
+      attemptId: prepared.json.attemptId,
+      approved: true,
+    });
+    check("Integration: POST /api/execution/apply mit Token übernimmt in Fixture-Repo (APPLIED)", () => {
+      assert.strictEqual(applyConfirmed.statusCode, 200);
+      assert.strictEqual(applyConfirmed.json.applyStatus, "APPLIED");
+    });
+
+    const applyTokenReuse = await httpRequest(integrationPort, "POST", "/api/execution/apply", {
+      token: applyPreview.json.applyToken,
+      runId,
+      executionPackageId: "ep-router-integration",
+      executionPackageFingerprint: "fp-router-integration",
+      attemptId: prepared.json.attemptId,
+      approved: true,
+    });
+    check("Integration: Apply-Token ist einmalig (Zweitnutzung liefert 400)", () =>
+      assert.strictEqual(applyTokenReuse.statusCode, 400),
+    );
   } finally {
     serverProcess.kill("SIGTERM");
   }
@@ -452,8 +713,14 @@ async function runTests() {
     assert.strictEqual(normalizeRequestPathname("/safe/path"), "/safe/path");
   });
 
-  assert.strictEqual(passed, 49);
-  console.log("server-http-router.test.js: 49 Prüfpunkte erfolgreich");
+  try {
+    fs.rmSync(FAKE_HOME_DIR, { recursive: true, force: true });
+  } catch (_error) {
+    /* best effort cleanup */
+  }
+
+  assert.strictEqual(passed, 67);
+  console.log("server-http-router.test.js: 67 Prüfpunkte erfolgreich");
 }
 
 runTests().catch((error) => {

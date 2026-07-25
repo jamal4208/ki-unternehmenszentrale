@@ -290,6 +290,187 @@
     `;
   }
 
+  // ---------------------------------------------------------------------
+  // V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor (additiv).
+  //
+  // Rein präsentational: kein fetch, kein Netzwerkzugriff hier. Klicks setzen
+  // ausschließlich data-execution-*-Attribute, die daily-work-run-ui.js
+  // auswertet und dort gegen die lokalen Execution-API-Routen ausführt.
+  // ---------------------------------------------------------------------
+
+  const EXECUTION_ATTEMPT_TARGETS = Object.freeze([
+    { id: "execution-bridge-fixture", label: "Fixture-Testprojekt (technische Selbstprüfung)" },
+    { id: "health-upgrade-kompass", label: "Health Upgrade Kompass (nur Baseline · Apply blockiert)" },
+  ]);
+
+  const EXECUTION_ATTEMPT_SCENARIOS = Object.freeze([
+    { id: "SUCCESS", label: "Erfolg (erlaubte Datei geändert)" },
+    { id: "ALLOWLIST_VIOLATION", label: "Allowlist-Verstoß (wird blockiert)" },
+    { id: "FAILURE", label: "Fehler (kontrollierter Fehlschlag)" },
+    { id: "TIMEOUT", label: "Zeitlimit (kontrollierter Timeout)" },
+  ]);
+
+  const MOCK_EXECUTOR_LABEL = "Deterministischer Mock-Executor – technische Sicherheitsprüfung, keine KI-Ausführung.";
+
+  function isTerminalAttemptStatus(status) {
+    return ["SUCCEEDED", "FAILED", "BLOCKED", "CANCELLED", "TIMED_OUT"].includes(status);
+  }
+
+  function describeExecutionAttemptState(attempt) {
+    if (!attempt) {
+      return { headline: "Noch keine isolierte Testausführung", note: "Nichts wurde gestartet." };
+    }
+    const status = attempt.status;
+    const applyStatus = attempt.applyStatus;
+    if (status === "PREPARED") {
+      return {
+        headline: "vorbereitet",
+        note: "Baseline gelesen. Noch nicht gestartet. Jamal muss ausdrücklich freigeben.",
+        primary: { action: "start", label: "Freigeben und isoliert starten" },
+      };
+    }
+    if (["APPROVED", "QUEUED", "RUNNING"].includes(status)) {
+      return {
+        headline: "läuft isoliert",
+        note: "Läuft ausschließlich in einem isolierten Arbeitsbereich außerhalb aller Repositories.",
+        primary: { action: "cancel", label: "Abbrechen" },
+      };
+    }
+    if (status === "SUCCEEDED" && applyStatus === "NOT_REQUESTED") {
+      return {
+        headline: "prüfpflichtig",
+        note: "Isolierter Lauf erfolgreich. Das ist kein Fachbefund und keine Übernahme. Jamal muss prüfen.",
+        primary: { action: "apply-review", label: "Geprüfte Änderungen prüfen" },
+      };
+    }
+    if (status === "SUCCEEDED" && applyStatus === "APPLY_REVIEW") {
+      return {
+        headline: "prüfpflichtig",
+        note: "Änderungen noch nicht übernommen. Kein Commit. Kein Push. Kein Deployment.",
+        primary: { action: "apply-confirm", label: "Geprüfte Änderungen übernehmen" },
+      };
+    }
+    if (applyStatus === "APPLIED") {
+      return {
+        headline: "Änderungen übernommen, noch nicht committed",
+        note: "Übernahme in das Fixture-Repository. Kein Commit. Kein Push. Kein Deployment.",
+        primary: { action: "reset", label: "Neuen Versuch vorbereiten" },
+      };
+    }
+    if (applyStatus === "APPLY_DECLINED") {
+      return {
+        headline: "Health-Apply blockiert",
+        note: "Health-Apply erst nach Phase-C-Abnahme und späterer ausdrücklicher Pilotfreigabe.",
+        primary: { action: "reset", label: "Neuen Versuch vorbereiten" },
+      };
+    }
+    if (applyStatus === "STALE") {
+      return {
+        headline: "Änderungen noch nicht übernommen",
+        note: "Zielprojekt hat sich seit der Baseline verändert. Kein Schreiben. Neuer Entscheidungspunkt.",
+        primary: { action: "reset", label: "Neuen Versuch vorbereiten" },
+      };
+    }
+    if (status === "BLOCKED") {
+      return {
+        headline: "blockiert",
+        note: "Allowlist-Verstoß erkannt. Keine Datei hat das Zielprojekt erreicht.",
+        primary: { action: "reset", label: "Neuen Versuch vorbereiten" },
+      };
+    }
+    if (isTerminalAttemptStatus(status)) {
+      return {
+        headline: status === "CANCELLED" ? "abgebrochen" : status === "TIMED_OUT" ? "Zeitlimit überschritten" : "fehlgeschlagen",
+        note: "Kein Ergebnis wurde übernommen.",
+        primary: { action: "reset", label: "Neuen Versuch vorbereiten" },
+      };
+    }
+    return { headline: "freigegeben", note: "Warte auf Start.", primary: { action: "start", label: "Isoliert starten" } };
+  }
+
+  function renderExecutionAttempt(run, context, deps) {
+    if (!run) return "";
+    const attempt = run.executionAttempt || null;
+    const state = describeExecutionAttemptState(attempt);
+    const recovery = attempt?.recovery?.recovery === true ? attempt.recovery : null;
+    const uiState = context.executionUiState || {};
+
+    const idleSelectors = !attempt ? `
+      <div class="guided-work-execution-setup">
+        <label class="guided-work-field">Zielprojekt
+          <select data-execution-target>
+            ${EXECUTION_ATTEMPT_TARGETS.map((entry) => `<option value="${escape(deps, entry.id)}" ${uiState.selectedTargetId === entry.id ? "selected" : ""}>${escape(deps, entry.label)}</option>`).join("")}
+          </select>
+        </label>
+        <label class="guided-work-field">Mock-Szenario
+          <select data-execution-scenario>
+            ${EXECUTION_ATTEMPT_SCENARIOS.map((entry) => `<option value="${escape(deps, entry.id)}" ${uiState.selectedScenario === entry.id ? "selected" : ""}>${escape(deps, entry.label)}</option>`).join("")}
+          </select>
+        </label>
+        <button class="primary-button" type="button" data-execution-action="prepare">Isolierte Testausführung vorbereiten</button>
+      </div>
+    ` : "";
+
+    const primaryButton = state.primary
+      ? `<button class="primary-button" type="button" data-execution-action="${escape(deps, state.primary.action)}" ${uiState.loading ? "disabled" : ""}>${escape(deps, state.primary.label)}</button>`
+      : "";
+
+    const evidenceBlock = attempt && isTerminalAttemptStatus(attempt.status) ? `
+      <details class="daily-work-run-technical-details">
+        <summary>Evidenz anzeigen (Diff, Tests, Blocker)</summary>
+        <p><strong>Testergebnis</strong>: ${escape(deps, attempt.testStatus || "UNGEKLÄRT")} · ${escape(deps, attempt.testSummary || "")}</p>
+        <p><strong>Geänderte Dateien</strong></p>
+        <ul>${(attempt.changedFiles || []).map((entry) => `<li><code>${escape(deps, entry)}</code></li>`).join("") || "<li>keine</li>"}</ul>
+        ${(attempt.blockers || []).length ? `<p><strong>Blocker</strong></p><ul>${attempt.blockers.map((entry) => `<li>${escape(deps, entry)}</li>`).join("")}</ul>` : ""}
+        ${(attempt.errors || []).length ? `<p><strong>Fehler</strong></p><ul>${attempt.errors.map((entry) => `<li>${escape(deps, entry)}</li>`).join("")}</ul>` : ""}
+        <p class="guided-work-note">Evidenz ist ein technischer Befund des isolierten Laufs, kein bestätigter Fachbefund.</p>
+      </details>
+    ` : "";
+
+    const preview = attempt?.applyStatus === "APPLY_REVIEW" ? (uiState.applyPreview || attempt.applyPreview || null) : null;
+    const applyReviewBlock = preview ? `
+      <article class="guided-work-apply-review" data-execution-apply-review="true">
+        <h5>Prüfvorschau vor Übernahme</h5>
+        <dl class="daily-work-run-facts">
+          <div><dt>Paket-ID</dt><dd><code>${escape(deps, preview.executionPackageId || attempt.executionPackageId || "—")}</code></dd></div>
+          <div><dt>Fingerprint</dt><dd><code>${escape(deps, preview.executionPackageFingerprint || attempt.executionPackageFingerprint || "—")}</code></dd></div>
+          <div><dt>Baseline</dt><dd>${escape(deps, preview.baseline ? `${preview.baseline.branch || "?"} · ${shortHash(preview.baseline.head || "")}` : "—")}</dd></div>
+          <div><dt>Attempt</dt><dd><code>${escape(deps, shortHash(preview.attemptId || attempt.attemptId || ""))}</code></dd></div>
+          <div><dt>Teststatus</dt><dd>${escape(deps, preview.testStatus || attempt.testStatus || "UNGEKLÄRT")} · ${escape(deps, preview.testSummary || attempt.testSummary || "")}</dd></div>
+        </dl>
+        <p><strong>Geänderte Dateien</strong></p>
+        <ul>${(preview.changedFiles || attempt.changedFiles || []).map((entry) => `<li><code>${escape(deps, entry)}</code></li>`).join("") || "<li>keine</li>"}</ul>
+        <p><strong>Diff-Zusammenfassung</strong></p>
+        <ul>${(preview.diffSummary || []).map((entry) => `<li><code>${escape(deps, entry.path)}</code> +${escape(deps, String(entry.linesAdded || 0))} −${escape(deps, String(entry.linesRemoved || 0))}</li>`).join("") || "<li>keine Diff-Zeilen</li>"}</ul>
+        ${(preview.risks || []).length ? `<p><strong>Risiken</strong></p><ul>${preview.risks.map((entry) => `<li>${escape(deps, entry)}</li>`).join("")}</ul>` : ""}
+        ${(preview.blockers || []).length ? `<p><strong>Blocker</strong></p><ul>${preview.blockers.map((entry) => `<li>${escape(deps, entry)}</li>`).join("")}</ul>` : ""}
+        <p class="guided-work-note"><strong>${escape(deps, preview.note || "Kein Commit. Kein Push. Kein Deployment.")}</strong></p>
+      </article>
+    ` : "";
+
+    return `
+      <details class="guided-work-block guided-work-execution-attempt" open data-execution-attempt-status="${escape(deps, attempt?.status || "NONE")}">
+        <summary>Isolierte Testausführung (Mock) · ${escape(deps, state.headline)}</summary>
+        <p class="guided-work-note"><strong>${escape(deps, MOCK_EXECUTOR_LABEL)}</strong></p>
+        ${recovery ? `<article class="daily-work-run-notice daily-work-run-notice--warning"><strong>Recovery-Fall</strong><p>${escape(deps, recovery.reason)} ${escape(deps, recovery.recommendedAction)}</p></article>` : ""}
+        ${attempt ? `
+          <dl class="daily-work-run-facts">
+            <div><dt>Zielprojekt</dt><dd>${escape(deps, attempt.projectId || "UNGEKLÄRT")}</dd></div>
+            <div><dt>Attempt</dt><dd><code>${escape(deps, shortHash(attempt.attemptId))}</code></dd></div>
+            <div><dt>Status</dt><dd>${escape(deps, attempt.status || "UNGEKLÄRT")}</dd></div>
+            <div><dt>Übernahmestatus</dt><dd>${escape(deps, attempt.applyStatus || "NOT_REQUESTED")}</dd></div>
+          </dl>
+        ` : ""}
+        <p>${escape(deps, state.note)}</p>
+        ${uiState.errorMessage ? `<article class="daily-work-run-notice daily-work-run-notice--warning"><strong>Hinweis</strong><p>${escape(deps, uiState.errorMessage)}</p></article>` : ""}
+        ${applyReviewBlock}
+        ${idleSelectors}
+        ${primaryButton}
+        ${evidenceBlock}
+      </details>
+    `;
+  }
+
   function renderCompactMeta(run, deps) {
     const pkg = run?.executionPackage;
     return `
@@ -370,6 +551,7 @@
         ${renderSuggestions(guided, deps)}
         ${renderTeamEditor(guided, deps)}
         ${renderBaselinePanel(guided, context.liveStatus, deps)}
+        ${renderExecutionAttempt(guided, context, deps)}
         ${renderDraftFindings(guided, deps)}
         ${renderCompactMeta(guided, deps)}
       </section>
@@ -382,8 +564,13 @@
     renderTeamEditor,
     renderBaselinePanel,
     renderDraftFindings,
+    renderExecutionAttempt,
+    describeExecutionAttemptState,
     renderServerStatus,
     serverStatusUiText,
     phaseLabel,
+    MOCK_EXECUTOR_LABEL,
+    EXECUTION_ATTEMPT_TARGETS,
+    EXECUTION_ATTEMPT_SCENARIOS,
   });
 });

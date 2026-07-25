@@ -90,6 +90,21 @@
     serverStatusLoading: false,
   };
 
+  // V7.0 Phase C – rein clientseitiger UI-Zustand für die Execution Bridge.
+  // Tokens leben ausschließlich hier im Arbeitsspeicher des Tabs – niemals im
+  // Tageslauf, niemals in localStorage, niemals im Backup, niemals in der URL.
+  const executionAttemptUiState = {
+    selectedTargetId: "execution-bridge-fixture",
+    selectedScenario: "SUCCESS",
+    loading: false,
+    errorMessage: null,
+    pendingStartToken: null,
+    pendingCancelToken: null,
+    pendingApplyToken: null,
+    applyPreview: null,
+    pollHandle: null,
+  };
+
   let deps = null;
   let initialized = false;
   let eventsBound = false;
@@ -868,7 +883,7 @@ function renderHealthHybridWorkSection(run) {
           <label class="daily-work-run-field daily-work-run-field--wide">Verbotene Pfade<textarea name="forbiddenPaths" rows="3" required>${deps.escapeHtml((pkg?.forbiddenPaths || [".env", ".env.local"]).join("\n"))}</textarea></label>
           <div class="daily-work-run-actions daily-work-run-field--wide">
             <button class="secondary-button" type="submit">Paket aus Live-Stand erzeugen</button>
-            <button class="primary-button" type="button" data-health-package-approve ${pkg ? "" : "disabled"}>Freigeben und kopierfertig machen</button>
+            <button class="primary-button" type="button" data-health-package-approve ${pkg || live ? "" : "disabled"}>Freigeben und kopierfertig machen</button>
             <button class="secondary-button" type="button" data-health-package-copy ${pkg?.status === "READY_TO_COPY" || pkg?.status === "IN_EXTERNAL_WORK" ? "" : "disabled"}>Paketprompt kopieren</button>
             <button class="secondary-button" type="button" data-health-package-abort ${pkg && pkg.status !== "ABORTED" ? "" : "disabled"}>Paket abbrechen</button>
           </div>
@@ -1124,6 +1139,7 @@ function renderDailyWorkRun() {
         GuidedWork?.detectBaselineDrift?.(run, healthHybridUiState.liveStatus)?.drifted,
       ),
       serverStatus: serverStatusUiState.serverStatus,
+      executionUiState: executionAttemptUiState,
     }) || ""}
     <div class="daily-work-run-toolbar">
       <div>
@@ -1340,6 +1356,275 @@ async function refreshServerStatus() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor (Browser-Seite).
+//
+// Ausschließlich localhost-Aufrufe gegen die eigene, bereits geladene Seite.
+// Tokens werden nie in run/localStorage geschrieben, nur transient hier im
+// Tab-Speicher gehalten. Kein Codex-, KI- oder Netzwerkaufruf.
+// ---------------------------------------------------------------------------
+
+function generateExecutionDemoId(prefix) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function executionAttemptTargetDefaults(projectId) {
+  if (projectId === "health-upgrade-kompass") {
+    return { allowedFiles: ["README.md"], forbiddenPaths: [".env", ".env.local"] };
+  }
+  return { allowedFiles: ["FIXTURE_NOTE.md"], forbiddenPaths: [] };
+}
+
+async function callExecutionApi(path, method, body) {
+  const response = await fetch(path, {
+    method,
+    headers: method === "POST" ? { "Content-Type": "application/json", Accept: "application/json" } : { Accept: "application/json" },
+    cache: "no-store",
+    body: method === "POST" ? JSON.stringify(body || {}) : undefined,
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(payload?.message || `Execution-API antwortete mit Status ${response.status}.`);
+  }
+  return payload;
+}
+
+function stopExecutionAttemptPolling() {
+  if (executionAttemptUiState.pollHandle) {
+    clearInterval(executionAttemptUiState.pollHandle);
+    executionAttemptUiState.pollHandle = null;
+  }
+}
+
+function pollExecutionAttempt(attemptId) {
+  stopExecutionAttemptPolling();
+  executionAttemptUiState.pollHandle = setInterval(async () => {
+    try {
+      const statusPayload = await callExecutionApi(`/api/execution/attempts/status?attemptId=${encodeURIComponent(attemptId)}`, "GET");
+      const run = getActiveDailyWorkRun();
+      if (!run || !run.executionAttempt || run.executionAttempt.attemptId !== attemptId) {
+        stopExecutionAttemptPolling();
+        return;
+      }
+      const updated = GuidedWork.applyExecutionAttemptStatus(run, statusPayload);
+      const terminal = ["SUCCEEDED", "FAILED", "BLOCKED", "CANCELLED", "TIMED_OUT"].includes(statusPayload.status);
+      if (terminal) {
+        stopExecutionAttemptPolling();
+        const resultPayload = await callExecutionApi(`/api/execution/attempts/result?attemptId=${encodeURIComponent(attemptId)}`, "GET");
+        const withResult = GuidedWork.applyExecutionAttemptResult(updated, resultPayload);
+        saveDailyWorkRun(withResult);
+        deps.showToast(`Isolierter Lauf beendet: ${statusPayload.status}. Kein Fachbefund, keine Übernahme.`);
+      } else {
+        saveDailyWorkRun(updated);
+      }
+    } catch (error) {
+      stopExecutionAttemptPolling();
+      executionAttemptUiState.errorMessage = error.message;
+      renderDailyWorkRun();
+    }
+  }, 700);
+}
+
+async function prepareExecutionAttemptFlow() {
+  const run = getActiveDailyWorkRun();
+  if (!run) return;
+  const projectId = document.querySelector("[data-execution-target]")?.value || executionAttemptUiState.selectedTargetId;
+  const scenario = document.querySelector("[data-execution-scenario]")?.value || executionAttemptUiState.selectedScenario;
+  executionAttemptUiState.selectedTargetId = projectId;
+  executionAttemptUiState.selectedScenario = scenario;
+  executionAttemptUiState.loading = true;
+  executionAttemptUiState.errorMessage = null;
+  renderDailyWorkRun();
+  try {
+    const { allowedFiles, forbiddenPaths } = executionAttemptTargetDefaults(projectId);
+    const executionPackageId = generateExecutionDemoId("ep-demo");
+    const executionPackageFingerprint = generateExecutionDemoId("fp-demo");
+    // Für Health wird eine bereits von Jamal bestätigte known-dirty-Baseline aus
+    // dem bestehenden Hybrid-Mechanismus wiederverwendet (keine zweite
+    // Bestätigungsquelle). Ohne bestehende Bestätigung bleibt Health hier
+    // bewusst blockiert statt automatisch zu bereinigen.
+    const knownWorkingTreeBaseline =
+      projectId === "health-upgrade-kompass" && run.knownWorkingTreeBaseline?.jamalConfirmedAt
+        ? run.knownWorkingTreeBaseline
+        : undefined;
+    const payload = await callExecutionApi("/api/execution/prepare", "POST", {
+      runId: run.id,
+      executionPackage: {
+        executionPackageId,
+        executionPackageFingerprint,
+        projectId,
+        allowedFiles,
+        forbiddenPaths,
+      },
+      ...(knownWorkingTreeBaseline ? { knownWorkingTreeBaseline } : {}),
+    });
+    executionAttemptUiState.pendingStartToken = payload.startToken;
+    const updated = GuidedWork.beginExecutionAttempt(run, {
+      attemptId: payload.attemptId,
+      executionPackageId,
+      executionPackageFingerprint,
+      projectId,
+      mockExecutorLabel: GuidedWorkUi?.MOCK_EXECUTOR_LABEL,
+    });
+    saveDailyWorkRun(updated);
+    deps.showToast("Isolierte Testausführung vorbereitet. Baseline gelesen. Noch nicht gestartet.");
+  } catch (error) {
+    executionAttemptUiState.errorMessage = error.message;
+    deps.showToast(error.message);
+  } finally {
+    executionAttemptUiState.loading = false;
+    renderDailyWorkRun();
+  }
+}
+
+async function startExecutionAttemptFlow() {
+  const run = getActiveDailyWorkRun();
+  const attempt = run?.executionAttempt;
+  if (!run || !attempt || !executionAttemptUiState.pendingStartToken) {
+    executionAttemptUiState.errorMessage = "Kein gültiger Start-Token vorhanden. Bitte erneut vorbereiten.";
+    renderDailyWorkRun();
+    return;
+  }
+  executionAttemptUiState.loading = true;
+  executionAttemptUiState.errorMessage = null;
+  renderDailyWorkRun();
+  try {
+    const payload = await callExecutionApi("/api/execution/attempts/start", "POST", {
+      token: executionAttemptUiState.pendingStartToken,
+      runId: attempt.runId || run.id,
+      executionPackageId: attempt.executionPackageId,
+      executionPackageFingerprint: attempt.executionPackageFingerprint,
+      attemptId: attempt.attemptId,
+      scenario: executionAttemptUiState.selectedScenario,
+      approved: true,
+    });
+    executionAttemptUiState.pendingStartToken = null;
+    executionAttemptUiState.pendingCancelToken = payload.cancelToken || null;
+    const updated = GuidedWork.applyExecutionAttemptStatus(run, { attemptId: attempt.attemptId, status: payload.status });
+    saveDailyWorkRun(updated);
+    deps.showToast("Isoliert gestartet. Läuft ausschließlich außerhalb aller Repositories.");
+    pollExecutionAttempt(attempt.attemptId);
+  } catch (error) {
+    executionAttemptUiState.errorMessage = error.message;
+    deps.showToast(error.message);
+  } finally {
+    executionAttemptUiState.loading = false;
+    renderDailyWorkRun();
+  }
+}
+
+async function cancelExecutionAttemptFlow() {
+  const run = getActiveDailyWorkRun();
+  const attempt = run?.executionAttempt;
+  if (!run || !attempt || !executionAttemptUiState.pendingCancelToken) {
+    executionAttemptUiState.errorMessage = "Kein gültiger Cancel-Token vorhanden.";
+    renderDailyWorkRun();
+    return;
+  }
+  try {
+    await callExecutionApi("/api/execution/attempts/cancel", "POST", {
+      token: executionAttemptUiState.pendingCancelToken,
+      runId: attempt.runId || run.id,
+      executionPackageId: attempt.executionPackageId,
+      executionPackageFingerprint: attempt.executionPackageFingerprint,
+      attemptId: attempt.attemptId,
+    });
+    executionAttemptUiState.pendingCancelToken = null;
+    deps.showToast("Abbruch angefordert.");
+  } catch (error) {
+    executionAttemptUiState.errorMessage = error.message;
+    deps.showToast(error.message);
+    renderDailyWorkRun();
+  }
+}
+
+async function requestExecutionApplyReviewFlow() {
+  const run = getActiveDailyWorkRun();
+  const attempt = run?.executionAttempt;
+  if (!run || !attempt) return;
+  executionAttemptUiState.loading = true;
+  executionAttemptUiState.errorMessage = null;
+  renderDailyWorkRun();
+  try {
+    const payload = await callExecutionApi("/api/execution/apply", "POST", {
+      runId: attempt.runId || run.id,
+      executionPackageId: attempt.executionPackageId,
+      executionPackageFingerprint: attempt.executionPackageFingerprint,
+      attemptId: attempt.attemptId,
+    });
+    executionAttemptUiState.pendingApplyToken = payload.applyToken || null;
+    executionAttemptUiState.applyPreview = payload.preview || null;
+    const updated = GuidedWork.applyExecutionApplyResult(run, {
+      attemptId: attempt.attemptId,
+      applyStatus: payload.preview?.applyBlocked ? "APPLY_DECLINED" : "APPLY_REVIEW",
+      applyPreview: payload.preview || null,
+    });
+    saveDailyWorkRun(updated);
+    if (payload.preview?.applyBlocked) {
+      deps.showToast(payload.preview?.applyBlockedReason || "Übernahme ist für dieses Ziel blockiert.");
+    } else {
+      deps.showToast("Prüfvorschau bereit. Noch keine Übernahme. Kein Commit. Kein Push.");
+    }
+  } catch (error) {
+    executionAttemptUiState.errorMessage = error.message;
+    deps.showToast(error.message);
+  } finally {
+    executionAttemptUiState.loading = false;
+    renderDailyWorkRun();
+  }
+}
+
+async function confirmExecutionApplyFlow() {
+  const run = getActiveDailyWorkRun();
+  const attempt = run?.executionAttempt;
+  if (!run || !attempt || !executionAttemptUiState.pendingApplyToken) {
+    executionAttemptUiState.errorMessage = "Kein gültiger Übernahme-Token vorhanden. Bitte Prüfvorschau erneut öffnen.";
+    renderDailyWorkRun();
+    return;
+  }
+  executionAttemptUiState.loading = true;
+  executionAttemptUiState.errorMessage = null;
+  renderDailyWorkRun();
+  try {
+    const payload = await callExecutionApi("/api/execution/apply", "POST", {
+      token: executionAttemptUiState.pendingApplyToken,
+      runId: attempt.runId || run.id,
+      executionPackageId: attempt.executionPackageId,
+      executionPackageFingerprint: attempt.executionPackageFingerprint,
+      attemptId: attempt.attemptId,
+      approved: true,
+    });
+    executionAttemptUiState.pendingApplyToken = null;
+    executionAttemptUiState.applyPreview = null;
+    const updated = GuidedWork.applyExecutionApplyResult(run, {
+      attemptId: attempt.attemptId,
+      applyStatus: payload.applyStatus,
+      appliedFiles: payload.appliedFiles,
+    });
+    saveDailyWorkRun(updated);
+    deps.showToast(payload.message || "Übernahme verarbeitet. Kein Commit. Kein Push. Kein Deployment.");
+  } catch (error) {
+    executionAttemptUiState.errorMessage = error.message;
+    deps.showToast(error.message);
+  } finally {
+    executionAttemptUiState.loading = false;
+    renderDailyWorkRun();
+  }
+}
+
+function resetExecutionAttemptFlow() {
+  stopExecutionAttemptPolling();
+  executionAttemptUiState.pendingStartToken = null;
+  executionAttemptUiState.pendingCancelToken = null;
+  executionAttemptUiState.pendingApplyToken = null;
+  executionAttemptUiState.applyPreview = null;
+  executionAttemptUiState.errorMessage = null;
+  const run = getActiveDailyWorkRun();
+  if (run) {
+    saveDailyWorkRun(GuidedWork.clearExecutionAttempt(run));
+  }
+}
+
 function setupDailyWorkRun() {
   document.addEventListener("click", async (event) => {
     const startButton = event.target.closest("[data-start-daily-work-run]");
@@ -1374,15 +1659,12 @@ function setupDailyWorkRun() {
         return;
       }
       if (actionId === "create-or-approve-package" || actionId === "copy-package") {
+        // Delegiert vollständig an den Freigabe-Button, der Bestätigung, Paketerzeugung
+        // und Freigabe in einem Schritt abdeckt (kein separater Formular-Submit-Umweg mehr).
         const approve = document.querySelector("[data-health-package-approve]");
         const copy = document.querySelector("[data-health-package-copy]");
-        const form = document.getElementById("daily-health-package-form");
         const run = getActiveDailyWorkRun();
-        if (!run?.executionPackage && form) {
-          form.requestSubmit?.();
-          return;
-        }
-        if (run?.executionPackage?.status === "READY_TO_COPY" && copy) {
+        if (["READY_TO_COPY", "IN_EXTERNAL_WORK"].includes(run?.executionPackage?.status) && copy) {
           copy.click();
           return;
         }
@@ -1447,6 +1729,26 @@ function setupDailyWorkRun() {
       return;
     }
 
+    const executionActionButton = event.target.closest("[data-execution-action]");
+    if (executionActionButton) {
+      const action = executionActionButton.getAttribute("data-execution-action");
+      if (action === "prepare") {
+        await prepareExecutionAttemptFlow();
+      } else if (action === "start") {
+        await startExecutionAttemptFlow();
+      } else if (action === "cancel") {
+        await cancelExecutionAttemptFlow();
+      } else if (action === "apply-review") {
+        await requestExecutionApplyReviewFlow();
+      } else if (action === "apply-confirm") {
+        await confirmExecutionApplyFlow();
+      } else if (action === "reset") {
+        resetExecutionAttemptFlow();
+        deps.showToast("Zurückgesetzt. Bereit für einen neuen isolierten Versuch.");
+      }
+      return;
+    }
+
     const guidedTeamPreview = event.target.closest("[data-guided-team-preview]");
     if (guidedTeamPreview) {
       try {
@@ -1501,11 +1803,53 @@ function setupDailyWorkRun() {
       try {
         const live = liveStatusForPackage();
         if (!live) throw new Error("Zuerst den Live-Status erneut lesen.");
-        const run = dailyWorkRunApi().approveHealthExecutionPackageForCopy(getActiveDailyWorkRun(), live, {
-          approved: true,
-        });
+        let run = getActiveDailyWorkRun();
+        if (!run) throw new Error("Kein aktiver Tageslauf.");
+
+        // Mehrfachklick auf ein bereits freigegebenes Paket ist ein No-Op mit Rückmeldung,
+        // kein zweiter Request und kein zweites Paket.
+        if (["READY_TO_COPY", "IN_EXTERNAL_WORK"].includes(run.executionPackage?.status)) {
+          deps.showToast("Auftragspaket ist bereits freigegeben und kopierfertig.");
+          return;
+        }
+
+        if (!run.executionPackage) {
+          // Ein Klick deckt den kompletten Ablauf ab: bei erkannter known-dirty-Baseline wird
+          // Jamals Klick selbst als seine ausdrückliche Bestätigung gewertet, an den aktuellen
+          // Branch/HEAD/Fingerprint gebunden gespeichert, und danach wird das Paket sofort mit
+          // dieser Baseline erzeugt. Bei Drift seit einer älteren Bestätigung wird erneut bestätigt.
+          if (live.workingTreeClean !== true) {
+            const drift = GuidedWork?.detectBaselineDrift?.(run, healthHybridUiState.liveStatus);
+            const hasValidConfirmedBaseline = Boolean(run.knownWorkingTreeBaseline?.jamalConfirmedAt) && drift?.drifted !== true;
+            if (!hasValidConfirmedBaseline) {
+              if (!GuidedWork) throw new Error("Baseline-Bestätigung ist nicht verfügbar.");
+              const draft = GuidedWork.buildBaselineDraftFromLiveDetail(healthHybridUiState.liveStatus, run);
+              run = GuidedWork.confirmKnownWorkingTreeBaseline(run, healthHybridUiState.liveStatus, {
+                confirmed: true,
+                branch: draft.branch,
+                headCommit: draft.headCommit,
+                baselineFingerprint: draft.baselineFingerprint,
+                dirtyPaths: draft.dirtyPaths,
+                untrackedPaths: draft.untrackedPaths,
+                preserveExistingChanges: true,
+                confirmationNote: "Vorhandene Änderungen dürfen weder verworfen noch überschrieben werden.",
+              });
+            }
+          }
+
+          const form = document.getElementById("daily-health-package-form");
+          const formData = form ? new FormData(form) : null;
+          run = dailyWorkRunApi().createHealthExecutionPackage(run, live, {
+            allowedFiles: formData ? formData.get("allowedFiles") : undefined,
+            forbiddenPaths: formData ? formData.get("forbiddenPaths") : undefined,
+            knownWorkingTreeBaseline: run.knownWorkingTreeBaseline || null,
+            responsibleAgentId: run.workProposal?.preferredResponsibleAgentId || undefined,
+          });
+        }
+
+        run = dailyWorkRunApi().approveHealthExecutionPackageForCopy(run, live, { approved: true });
         saveDailyWorkRun(run);
-        deps.showToast("Auftragspaket freigegeben – kopierfertig. Kein Agent gestartet.");
+        deps.showToast("Baseline bestätigt, Auftragspaket erzeugt und freigegeben – kopierfertig. Kein Agent gestartet. Health-Apply bleibt blockiert.");
       } catch (error) {
         dailyWorkRunUiState.error = error.message;
         renderDailyWorkRun();
@@ -2165,7 +2509,15 @@ function setupDailyWorkRun() {
     DAILY_STORAGE_KEY: DailyWorkRun?.DAILY_STORAGE_KEY || "ki-unternehmenszentrale-daily-work-runs-v1",
     LEGACY_MANAGEMENT_STORAGE_KEY: DailyWorkRun?.LEGACY_MANAGEMENT_STORAGE_KEY || "ki-unternehmenszentrale-v1",
     getInternalState() {
-      return { initialized, eventsBound, dailyWorkRunUiState, localDataBackupUiState, serverStatusUiState };
+      return {
+        initialized,
+        eventsBound,
+        dailyWorkRunUiState,
+        localDataBackupUiState,
+        serverStatusUiState,
+        executionAttemptUiState,
+        healthHybridUiState,
+      };
     },
   };
 });

@@ -2,9 +2,19 @@
 
 ## Überblick
 
-`server.js` registriert über `server-http-router.js` **43 tatsächlich vorhandene API-Routen**, alle mit Methode `GET`. Jede andere HTTP-Methode wird vor dem Routing abgewiesen (HTTP 405). Es gibt keine API-Schreibroute.
+`server.js` registriert über `server-http-router.js` **45 GET-Routen** und **4 additive POST-Routen** (nur Execution Bridge, Phase C). Andere HTTP-Methoden bleiben 405. GET-Routen bleiben read-only. Die POST-Routen der Execution Bridge schreiben ausschließlich in App-Support und – nach Jamal-Freigabe – in ein Fixture-Testrepository; niemals in Health und niemals mit Commit/Push/Deployment.
 
-V7.0 Phase B (umgesetzt, getestet und browserseitig abgenommen) ergänzt **genau eine neue Route**: `GET /api/server-status`. Sie liest ausschließlich den Status des bereits laufenden App-Servers und sichere, read-only gelesene Controller-Metadaten aus dem lokalen App-Support-Statuspfad. Keine Prozess-Start-/Stop-Aktion, keine vollständigen internen Pfade, keine Secrets. Andere Methoden bleiben 405.
+V7.0 Phase C (Umsetzungskandidat, noch nicht committed) ergänzt:
+- GET `/api/execution/attempts/status`
+- GET `/api/execution/attempts/result`
+- POST `/api/execution/prepare`
+- POST `/api/execution/attempts/start`
+- POST `/api/execution/attempts/cancel`
+- POST `/api/execution/apply` (ohne Token = Preview; mit Token + `approved:true` = Confirm)
+
+Sicherheit: nur `127.0.0.1`, Host-/Origin-Prüfung, `application/json`, max. 32 KiB Body, unbekannte Felder abgewiesen, One-Time-Token nur im Server-RAM (kurzlebig, aktionsgebunden, nicht in localStorage/Backup/URL). Mock-Executor ist keine KI. Health-Apply bleibt hart blockiert.
+
+V7.0 Phase B (gesichert `3487a84`) ergänzte **genau eine neue GET-Route**: `GET /api/server-status`. Sie liest ausschließlich den Status des bereits laufenden App-Servers und sichere, read-only gelesene Controller-Metadaten aus dem lokalen App-Support-Statuspfad. Keine Prozess-Start-/Stop-Aktion, keine vollständigen internen Pfade, keine Secrets. Andere Methoden bleiben 405.
 
 V6.44.1 ändert **keine Route und kein API-Verhalten**. Es synchronisiert nur die kanonische Health-/Expansion-Momentaufnahme im Projektregister; keine neue API, keine Schreibroute, keine Autonomieerhöhung.
 
@@ -67,16 +77,27 @@ Nur `/api/agents/plugin-readiness` liest HTTP-Query-Parameter. Lokale Serverkonf
 | 41 | `/api/projects/health-upgrade-kompass` | technische Health-Pilotakte | keine HTTP-Eingaben → bestätigte Health-Momentaufnahme | Read-only; `writeOperationsBlocked: true`; `madeExternalRequest: false`; unbekannte Projekt-ID kontrolliert 404 | NEIN | NEIN | V6.39.0; keine medizinische, fachliche oder rechtliche Freigabe |
 | 42 | `/api/projects/health-upgrade-kompass/live-status` | lokaler Health-Live-Status | keine HTTP-Eingaben → Branch, HEAD, Working-Tree, relative dirty/untracked paths, Inhaltshashes, Baseline-Fingerprint (read-only) | Read-only Git-Lesezugriff nur auf kanonischen Health-Pfad; kein Testlauf; kein Schreibbefehl; keine Dateiinhalte/Secrets; `writeOperationsBlocked: true`; `madeExternalRequest: false` | NEIN | NEIN | V6.46.0 + V7.0 Phase A additive Live-Details; keine Secrets/vollständigen Pfade in Fehlern |
 | 43 | `/api/server-status` | Serverstatus des laufenden App-Servers | keine HTTP-Eingaben → `status`, `port`, `pid`, `startedAt`, `appVersion`, `gitCommit`, `currentProjectCommit`, `isCurrentVersion`, `managedByController`, `controllerSchemaVersion`, `message`, `nextAction` | Read-only; liest nur den bereits laufenden Prozess und die sichere Controller-Statusdatei; kein Prozessstart/-stopp; keine vollständigen Pfade/Secrets; `writeOperationsBlocked: true`; `madeExternalRequest: false` | NEIN | NEIN | V7.0 Phase B; Controller unter `scripts/zentral-ctl.js` ist separat und nicht Teil dieser Route |
+| 44 | `/api/execution/attempts/status` | Attempt-Status der Execution Bridge | Query `attemptId` → Status, Apply-Status, Recovery | Read-only Attempt-Metadaten aus App Support; keine Secrets/Dateiinhalte; `madeExternalRequest: false` | NEIN | NEIN | V7.0 Phase C (Umsetzungskandidat); Mock ≠ KI |
+| 45 | `/api/execution/attempts/result` | Attempt-Ergebnis / Evidenz | Query `attemptId` → Diff-Summary, Tests, Blocker, changedFiles | Read-only strukturierte Evidenz; kein Auto-ACCEPTED; keine Dateiinhalte | NEIN | NEIN | V7.0 Phase C (Umsetzungskandidat) |
 
-Die V6.39.0-Routen 40–41 lesen ausschließlich die beim Serverstart geladene In-Memory-Quelle `project-registry.js` ohne Dateisystemzugriff. Route 42 liest zusätzlich lokal nur den kanonischen Health-Pfad über feste Git-Lesebefehle (`health-repo-status.js`), ohne `fetch`/`pull`/`checkout`/`reset`/`clean` und ohne Testprozess. Route 43 liest zusätzlich einmalig beim Serverstart (unveränderliche Momentaufnahme) sowie je Anfrage frisch den lokalen Git-Commit des Zentralen-Projekts und read-only die Controller-Statusdatei aus dem App-Support-Pfad; sie startet, stoppt oder verändert keinen Prozess. Andere Methoden bleiben mit HTTP 405 blockiert. Erfolgreiche Antworten enthalten immer `writeOperationsBlocked: true` und `madeExternalRequest: false`.
+### Additive POST-Routen (nur Execution Bridge, Phase C)
+
+| Nr. | POST-Pfad | Zweck | Sicherheit |
+|---:|---|---|---|
+| P1 | `/api/execution/prepare` | Attempt vorbereiten, Start-Token ausgeben | Host/Origin/JSON/Bodylimit; Token nur RAM; kein freier Command/Pfad |
+| P2 | `/api/execution/attempts/start` | Attempt starten (Mock-Szenario) | Start-Token einmalig; Lock; isolierter Workspace |
+| P3 | `/api/execution/attempts/cancel` | Attempt abbrechen | Cancel-Token einmalig; SIGTERM-äquivalente Cancel-Flagge |
+| P4 | `/api/execution/apply` | Preview ohne Token / Confirm mit Token + `approved:true` | Apply nur Fixture; Health hart blockiert; kein Commit/Push/Deploy |
+
+Die V6.39.0-Routen 40–41 lesen ausschließlich die beim Serverstart geladene In-Memory-Quelle `project-registry.js` ohne Dateisystemzugriff. Route 42 liest zusätzlich lokal nur den kanonischen Health-Pfad über feste Git-Lesebefehle (`health-repo-status.js`), ohne `fetch`/`pull`/`checkout`/`reset`/`clean` und ohne Testprozess. Route 43 liest zusätzlich einmalig beim Serverstart (unveränderliche Momentaufnahme) sowie je Anfrage frisch den lokalen Git-Commit des Zentralen-Projekts und read-only die Controller-Statusdatei aus dem App-Support-Pfad; sie startet, stoppt oder verändert keinen Prozess. Routen 44–45 und P1–P4 gehören zur Execution Bridge: sie materialisieren und prüfen ausschließlich isolierte Workspaces unter App Support und dürfen Health niemals als Apply-Ziel verwenden. Andere Methoden bleiben mit HTTP 405 blockiert. Erfolgreiche GET-Antworten enthalten immer `writeOperationsBlocked: true` und `madeExternalRequest: false`.
 
 ## Statische Auslieferung
 
-`server-http-router.js` liefert ausschließlich explizit freigegebene lokale Assets aus. GET `/` und `/index.html` liefern `index.html`; GET `/agent-registry.js` liefert das kanonische 25-Agenten-Register; GET `/health-hybrid-work.js` liefert das Health-Hybrid-Arbeitsmodul; GET `/guided-work.js` und `/guided-work-ui.js` liefern die Guided-Work-Foundation (V7.0 Phase A, umgesetzt und browserseitig abgenommen; die Serverstatus-Anzeige aus Phase B ist additiv Teil von `guided-work-ui.js`, keine neue statische Datei); GET `/daily-work-run.js` liefert das lokale Tageslaufmodell; GET `/agent-runtime.js` liefert das Runtime-Modul; GET `/daily-work-run-ui.js` liefert das Tageslauf-UI-Modul; GET `/local-data-backup.js` liefert das Datensicherungsmodul; GET `/app.js` liefert `app.js`; GET `/styles.css` liefert `styles.css`. Die statische Modulauslieferung ist keine zusätzliche API-Route. Andere statische Pfade, `.env`, `.git`, Testdateien und Dokumentationen sind nicht freigegeben. `server-status.js` (Domänenmodul für Route 43) und `scripts/zentral-ctl.js` (separater lokaler Controller, V7.0 Phase B) sind serverseitige Node-Module und werden **nicht** statisch an den Browser ausgeliefert.
+`server-http-router.js` liefert ausschließlich explizit freigegebene lokale Assets aus. GET `/` und `/index.html` liefern `index.html`; GET `/agent-registry.js` liefert das kanonische 25-Agenten-Register; GET `/health-hybrid-work.js` liefert das Health-Hybrid-Arbeitsmodul; GET `/guided-work.js` und `/guided-work-ui.js` liefern die Guided-Work-Foundation (V7.0 Phase A; Phase-B-Serverstatus und Phase-C-Execution-UI sind additiv in denselben Dateien); GET `/daily-work-run.js` liefert das lokale Tageslaufmodell; GET `/agent-runtime.js` liefert das Runtime-Modul; GET `/daily-work-run-ui.js` liefert das Tageslauf-UI-Modul; GET `/local-data-backup.js` liefert das Datensicherungsmodul; GET `/app.js` liefert `app.js`; GET `/styles.css` liefert `styles.css`. Die statische Modulauslieferung ist keine zusätzliche API-Route. Andere statische Pfade, `.env`, `.git`, Testdateien und Dokumentationen sind nicht freigegeben. `server-status.js`, `scripts/zentral-ctl.js`, `execution-bridge.js` und `execution-mock-adapter.js` sind serverseitige Node-Module und werden **nicht** statisch an den Browser ausgeliefert.
 
 ## Sicherheitsstatus
 
-Alle Routen sind read-only ausgerichtet. Nur die beiden Airtable-Test-/Vorschaurouten können bei vollständigen lokalen Zugangsdaten und ausdrücklicher Serverfreigabe eine externe HTTPS-GET-Anfrage auslösen. Keine Route darf extern schreiben.
+Alle GET-Routen sind read-only ausgerichtet. Nur die beiden Airtable-Test-/Vorschaurouten können bei vollständigen lokalen Zugangsdaten und ausdrücklicher Serverfreigabe eine externe HTTPS-GET-Anfrage auslösen. Die additiven POST-Routen der Execution Bridge (Phase C) schreiben ausschließlich lokal in App Support und – nach Jamal-Freigabe – in ein Fixture-Testrepository; Health bleibt Apply-gesperrt; kein Commit, Push oder Deployment. Keine Route darf extern schreiben.
 
 ## Bekannte Widersprüche
 

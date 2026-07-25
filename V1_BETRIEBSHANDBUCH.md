@@ -3,7 +3,7 @@
 ## 1. Verbindlicher V1-Stand
 
 - **Aussage:** V1 lokal fertig und betriebsbereit
-- **Aktuelle Arbeitsversion:** **V7.0 Phase A – Guided Work Foundation** (umgesetzt, getestet, browserseitig abgenommen, gesichert mit Commit `4a74ebe`); **V7.0 Phase B – Betriebsstabilität** ist umgesetzt, getestet, browserseitig abgenommen und mit diesem Commit auf `origin/main` gesichert; V7.0 insgesamt noch nicht abgeschlossen, Phase C bis Phase E offen; vorheriger gesicherter Stand **V6.46.0** / `e611c9c`
+- **Aktuelle Arbeitsversion:** **V7.0 Phase A** gesichert (`4a74ebe`); **V7.0 Phase B** gesichert (`3487a84`); **V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor** technisch umgesetzt (Umsetzungskandidat, noch nicht committed); V7.0 insgesamt noch nicht abgeschlossen, Phase D und Phase E offen; vorheriger gesicherter Stand **V6.46.0** / `e611c9c`
 - **Gesicherter vorheriger Ausgangsstand:** **V6.45.2** / Commit **`fb9aa0d`**
 - **Historischer Freeze-Ausgang:** `16bbf45` (V6.43.1) – nur Historie
 - **Branch:** `main`
@@ -21,6 +21,7 @@
 - Lokalen deterministischen Runtime-Piloten für Health Upgrade Kompass bedienen
 - Manuelle Freigabe, Ergebnisannahme, Audit, Reload-Persistenz
 - Serverstatus (Port, Version, Commit, Startzeit, Status) kompakt in der Oberfläche anzeigen und den lokalen Betrieb über den separaten Controller `scripts/zentral-ctl.js` verständlich starten/stoppen/neustarten (V7.0 Phase B)
+- Isolierte Mock-Testausführung vorbereiten, starten, abbrechen und nach Jamal-Freigabe nur in ein Fixture-Repository übernehmen (V7.0 Phase C); Mock-Executor ist keine KI; Health-Apply bleibt blockiert; Apply ist kein Commit/Push/Deployment
 
 ## 3. Was die Zentrale bewusst noch nicht kann
 

@@ -88,6 +88,11 @@
         previousPackageId: null,
         previousFingerprint: null,
       },
+      // V7.0 Phase C – additiv. executionAttempt speichert ausschließlich die
+      // sicheren, bereits von execution-bridge.js gefilterten Statusfelder
+      // (niemals Tokens, niemals Dateiinhalte). Ein Attempt ist kein
+      // executionPackage und SUCCEEDED/APPLIED bedeuten weder Commit noch Push.
+      executionAttempt: null,
     };
   }
 
@@ -104,6 +109,9 @@
     if (!Array.isArray(next.outcomeSuggestions)) next.outcomeSuggestions = [];
     if (typeof next.teamRevision !== "number") next.teamRevision = 0;
     if (typeof next.responsibleAgentRevision !== "number") next.responsibleAgentRevision = 0;
+    if (next.executionAttempt !== null && (typeof next.executionAttempt !== "object" || Array.isArray(next.executionAttempt))) {
+      next.executionAttempt = null;
+    }
     return next;
   }
 
@@ -702,6 +710,139 @@
     return next;
   }
 
+  // ---------------------------------------------------------------------
+  // V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor (additiv).
+  //
+  // guided-work.js bleibt bewusst frei von Netzwerk-/I-O-Code. Die
+  // eigentliche Isolation, Statusmaschine und der Mock-Executor leben
+  // ausschließlich in execution-bridge.js. Diese Funktionen reduzieren nur
+  // die bereits von der Bridge sicher gefilterten Antworten (nie Tokens,
+  // nie Dateiinhalte, nie Secrets) in den Tageslauf – dieselbe Trennung wie
+  // bei executionPackage/health-hybrid-work.js.
+  // ---------------------------------------------------------------------
+
+  const SAFE_EXECUTION_ATTEMPT_STATUS_FIELDS = Object.freeze([
+    "status",
+    "applyStatus",
+    "scenario",
+    "startedAt",
+    "finishedAt",
+    "mockExecutorLabel",
+    "recovery",
+  ]);
+
+  const SAFE_EXECUTION_ATTEMPT_RESULT_FIELDS = Object.freeze([
+    "changedFiles",
+    "diff",
+    "testStatus",
+    "testExitCode",
+    "testSummary",
+    "errors",
+    "blockers",
+    "resultSource",
+  ]);
+
+  function canStartNewExecutionAttempt(run) {
+    const current = ensureGuidedDefaults(run);
+    const attempt = current.executionAttempt;
+    if (!attempt) return true;
+    return ["SUCCEEDED", "FAILED", "BLOCKED", "CANCELLED", "TIMED_OUT"].includes(attempt.status);
+  }
+
+  function beginExecutionAttempt(run, attemptInfo = {}) {
+    const current = ensureGuidedDefaults(run);
+    if (!canStartNewExecutionAttempt(current)) {
+      throw new Error("Es läuft bereits ein aktiver Ausführungsversuch für diesen Tageslauf.");
+    }
+    const attemptId = singleText(attemptInfo.attemptId, "attemptId", true);
+    const next = clone(current);
+    next.executionAttempt = {
+      attemptId,
+      runId: singleText(attemptInfo.runId || run?.id || "", "runId") || null,
+      executionPackageId: singleText(attemptInfo.executionPackageId, "executionPackageId") || null,
+      executionPackageFingerprint: singleText(attemptInfo.executionPackageFingerprint, "executionPackageFingerprint") || null,
+      projectId: singleText(attemptInfo.projectId, "projectId") || null,
+      status: "PREPARED",
+      applyStatus: "NOT_REQUESTED",
+      scenario: null,
+      createdAt: isoDateTime(attemptInfo.now || new Date()),
+      startedAt: null,
+      finishedAt: null,
+      mockExecutorLabel: singleText(attemptInfo.mockExecutorLabel, "mockExecutorLabel") || null,
+      changedFiles: [],
+      diff: [],
+      testStatus: null,
+      testExitCode: null,
+      testSummary: null,
+      errors: [],
+      blockers: [],
+      recovery: { recovery: false },
+      appliedAt: null,
+      appliedFiles: [],
+      resultSource: null,
+    };
+    return next;
+  }
+
+  function applyExecutionAttemptStatus(run, statusPayload = {}) {
+    const current = ensureGuidedDefaults(run);
+    const attemptId = singleText(statusPayload.attemptId, "attemptId");
+    if (!current.executionAttempt || !attemptId || current.executionAttempt.attemptId !== attemptId) {
+      return current;
+    }
+    const next = clone(current);
+    SAFE_EXECUTION_ATTEMPT_STATUS_FIELDS.forEach((field) => {
+      if (statusPayload[field] !== undefined) next.executionAttempt[field] = statusPayload[field];
+    });
+    return next;
+  }
+
+  function applyExecutionAttemptResult(run, resultPayload = {}) {
+    const current = ensureGuidedDefaults(run);
+    const attemptId = singleText(resultPayload.attemptId, "attemptId");
+    if (!current.executionAttempt || !attemptId || current.executionAttempt.attemptId !== attemptId) {
+      return current;
+    }
+    const next = clone(current);
+    SAFE_EXECUTION_ATTEMPT_STATUS_FIELDS.concat(SAFE_EXECUTION_ATTEMPT_RESULT_FIELDS).forEach((field) => {
+      if (resultPayload[field] !== undefined) next.executionAttempt[field] = resultPayload[field];
+    });
+    // Bewusst KEIN Auto-ACCEPTED und keine Fachbestätigung: Evidence ist nur
+    // ein technischer Befund des isolierten Laufs, keine bestätigte Aussage.
+    return next;
+  }
+
+  function applyExecutionApplyResult(run, applyPayload = {}) {
+    const current = ensureGuidedDefaults(run);
+    const attemptId = singleText(applyPayload.attemptId, "attemptId");
+    if (!current.executionAttempt || (attemptId && current.executionAttempt.attemptId !== attemptId)) {
+      return current;
+    }
+    const next = clone(current);
+    if (applyPayload.applyStatus) next.executionAttempt.applyStatus = applyPayload.applyStatus;
+    if (Array.isArray(applyPayload.appliedFiles)) next.executionAttempt.appliedFiles = applyPayload.appliedFiles;
+    if (applyPayload.applyPreview && typeof applyPayload.applyPreview === "object" && !Array.isArray(applyPayload.applyPreview)) {
+      // Nur strukturierte Preview-Metadaten – keine Dateiinhalte, keine Tokens.
+      next.executionAttempt.applyPreview = applyPayload.applyPreview;
+    }
+    if (applyPayload.applyStatus === "APPLIED") {
+      next.executionAttempt.appliedAt = isoDateTime(applyPayload.now || new Date());
+      next.executionAttempt.applyPreview = null;
+    }
+    if (applyPayload.applyStatus === "APPLY_DECLINED" || applyPayload.applyStatus === "STALE" || applyPayload.applyStatus === "APPLY_FAILED") {
+      next.executionAttempt.applyPreview = applyPayload.applyPreview || next.executionAttempt.applyPreview || null;
+    }
+    return next;
+  }
+
+  function clearExecutionAttempt(run) {
+    const current = ensureGuidedDefaults(run);
+    if (!current.executionAttempt) return current;
+    const next = clone(current);
+    next.executionAttempt = null;
+    return next;
+  }
+
   function findExternalEvidence(run) {
     const pending = run?.pendingExternalExecutionEvidence || null;
     if (pending) return { evidence: pending, location: "pending" };
@@ -919,6 +1060,12 @@
     confirmKnownWorkingTreeBaseline,
     detectBaselineDrift,
     markPackageStaleOnBaselineDrift,
+    canStartNewExecutionAttempt,
+    beginExecutionAttempt,
+    applyExecutionAttemptStatus,
+    applyExecutionAttemptResult,
+    applyExecutionApplyResult,
+    clearExecutionAttempt,
     buildDraftFindingsFromEvidence,
     attachDraftFindingsFromEvidence,
     getPrimaryGuidedAction,

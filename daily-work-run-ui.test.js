@@ -446,6 +446,264 @@ function runTests() {
     assert.strictEqual(output, "");
   });
 
+  check("Phase C Fix: Freigeben-Button ist nicht dauerhaft an ein vorhandenes Paket gebunden", () => {
+    const hybridSource = uiSource.slice(
+      uiSource.indexOf("function renderHealthHybridWorkSection"),
+      uiSource.indexOf("function renderDailyWorkAgentReviewPhase") > uiSource.indexOf("function renderHealthHybridWorkSection")
+        ? uiSource.indexOf("function renderDailyWorkAgentReviewPhase")
+        : uiSource.length,
+    );
+    assert.match(hybridSource, /data-health-package-approve \$\{pkg \|\| live \? "" : "disabled"\}/);
+    assert.doesNotMatch(hybridSource, /data-health-package-approve \$\{pkg \? "" : "disabled"\}/);
+  });
+
+  check("Phase C Fix: ein Klick auf Freigeben deckt Bestätigung, Paketerzeugung und Freigabe ab; Mehrfachklick ist ein No-Op mit Rückmeldung", () => {
+    const handlerSource = uiSource.slice(
+      uiSource.indexOf('const healthPackageApprove = event.target.closest("[data-health-package-approve]");'),
+      uiSource.indexOf('const healthPackageCopy = event.target.closest("[data-health-package-copy]");'),
+    );
+    assert.match(handlerSource, /READY_TO_COPY.*IN_EXTERNAL_WORK.*includes\(run\.executionPackage\?\.status\)/s);
+    assert.match(handlerSource, /GuidedWork\?\.detectBaselineDrift/);
+    assert.match(handlerSource, /GuidedWork\.confirmKnownWorkingTreeBaseline/);
+    assert.match(handlerSource, /dailyWorkRunApi\(\)\.createHealthExecutionPackage/);
+    assert.match(handlerSource, /dailyWorkRunApi\(\)\.approveHealthExecutionPackageForCopy/);
+    assert.match(handlerSource, /deps\.showToast\(/);
+    // Reihenfolge: erst known-dirty per Klick bestätigen, dann Paket erzeugen, dann freigeben.
+    const confirmIndex = handlerSource.indexOf("GuidedWork.confirmKnownWorkingTreeBaseline");
+    const createIndex = handlerSource.indexOf("createHealthExecutionPackage");
+    const approveIndex = handlerSource.indexOf("approveHealthExecutionPackageForCopy");
+    assert.ok(confirmIndex < createIndex, "Bestätigung muss vor Paketerzeugung erfolgen");
+    assert.ok(createIndex < approveIndex, "Paketerzeugung muss vor Freigabe erfolgen");
+  });
+
+  check("Phase C Fix: kompletter Freigabe-Ablauf für known-dirty-Baseline in genau einem Klick, keine Duplikate, kein Netzwerkaufruf, kein stiller Abbruch", () => {
+    const output = require("child_process").execFileSync(
+      process.execPath,
+      [
+        "-e",
+        `
+          const assert = require("assert");
+          const DailyWorkRun = require(${JSON.stringify(path.join(__dirname, "daily-work-run.js"))});
+          const { getProjectById } = require(${JSON.stringify(path.join(__dirname, "project-registry.js"))});
+          const { buildHealthLiveStatusResponse } = require(${JSON.stringify(path.join(__dirname, "health-repo-status.js"))});
+
+          global.fetch = () => { throw new Error("Unerwarteter Netzwerkaufruf im Paket-Freigabe-Ablauf."); };
+
+          const clickHandlers = [];
+          global.document = {
+            addEventListener(type, handler) {
+              if (type === "click") clickHandlers.push(handler);
+            },
+            getElementById() { return null; },
+            querySelector() { return null; },
+            querySelectorAll() { return []; },
+          };
+
+          const DailyWorkRunUi = require(${JSON.stringify(path.join(__dirname, "daily-work-run-ui.js"))});
+
+          const container = { innerHTML: "" };
+          const data = new Map();
+          const localStorage = {
+            getItem(key) { return data.has(key) ? data.get(key) : null; },
+            setItem(key, value) { data.set(key, String(value)); },
+          };
+          const toasts = [];
+          const deps = {
+            byId: (id) => (id === "daily-work-run-output" ? container : null),
+            escapeHtml: (value) => String(value ?? ""),
+            comparableText: (value) => String(value ?? "").trim().toLowerCase(),
+            showToast: (message) => toasts.push(message),
+            getCanonicalProjectRegistryState: () => ({
+              status: "ready",
+              payload: { writeOperationsBlocked: true, madeExternalRequest: false, projects: [getProjectById("health-upgrade-kompass")], snapshotNotice: "Test" },
+              error: null,
+            }),
+            getAppState: () => ({ projects: [] }),
+            loadState: () => ({ projects: [] }),
+            saveState: () => {},
+            getProjectHistory: () => [],
+            renderAll: () => {},
+            localStorage,
+          };
+          DailyWorkRunUi.init(deps);
+
+          let run = DailyWorkRun.createDraftRun({ id: "ui-health-approve-run", workDate: "2026-07-25" });
+          run = DailyWorkRun.setFocusProject(run, getProjectById("health-upgrade-kompass"), "Snap", "2026-07-25T05:00:00Z");
+          run = DailyWorkRun.createWorkProposal(run, {
+            desiredOutcome: "Code und API für den Health Preview-Kernfluss technisch prüfen und den nächsten sicheren Schritt festlegen.",
+          });
+          run = DailyWorkRun.transitionRun(run, "READY_FOR_CODEX");
+          const internal = DailyWorkRunUi.getInternalState();
+          internal.dailyWorkRunUiState.store = DailyWorkRun.upsertRun(DailyWorkRun.createStore(), run);
+
+          const liveResponse = buildHealthLiveStatusResponse({
+            ok: true,
+            available: true,
+            status: "AVAILABLE",
+            readAt: "2026-07-25T05:00:00.000Z",
+            branch: "work/check-start-gate-2026-07-19",
+            head: "395bf9e01f26d63dc4cc0bbc8343d10535c1ad64",
+            workingTreeClean: false,
+            shortStatus: "## work/check-start-gate-2026-07-19",
+            workingTreeDetail: {
+              dirtyPaths: ["package.json"],
+              untrackedPaths: ["src/logic/mockScaleAdapter.js", "src/logic/scaleSnapshot.js", "src/logic/scaleSnapshot.test.js"],
+              fileHashes: [],
+              baselineFingerprint: "wt-ui-approve-test",
+              capturedAt: "2026-07-25T05:00:00.000Z",
+              limitStatus: "OK",
+            },
+          });
+          internal.healthHybridUiState.liveStatus = liveResponse;
+
+          DailyWorkRunUi.render();
+          assert.match(container.innerHTML, /Noch kein Auftragspaket erzeugt/);
+          assert.doesNotMatch(container.innerHTML, /data-health-package-approve[^>]*disabled/);
+
+          function fakeClick(attr) {
+            const target = { closest(selector) { return selector === "[" + attr + "]" ? target : null; } };
+            return { target };
+          }
+
+          (async () => {
+            for (const handler of clickHandlers) {
+              await handler(fakeClick("data-health-package-approve"));
+            }
+
+            let active = DailyWorkRun.getActiveRun(internal.dailyWorkRunUiState.store);
+            assert.ok(active.executionPackage, "Paket sollte nach genau einem Klick existieren.");
+            assert.strictEqual(active.executionPackage.status, "READY_TO_COPY");
+            assert.ok(active.knownWorkingTreeBaseline && active.knownWorkingTreeBaseline.jamalConfirmedAt, "Baseline muss durch den Klick bestätigt sein.");
+            assert.strictEqual(active.knownWorkingTreeBaseline.preserveExistingChanges, true);
+            assert.ok(toasts.length > 0, "Kein stiller Abbruch: es muss eine sichtbare Rückmeldung geben.");
+            assert.ok(!toasts.some((message) => /nicht sauber|ausdrückliche Bestätigung erforderlich/.test(message)), "kein Blocker-Toast nach erfolgreichem Klick");
+
+            DailyWorkRunUi.render();
+            assert.doesNotMatch(container.innerHTML, /Noch kein Auftragspaket erzeugt/);
+            assert.match(container.innerHTML, /READY_TO_COPY/);
+
+            const firstPackageId = active.executionPackage.executionPackageId;
+            const firstFingerprint = active.executionPackage.executionPackageFingerprint;
+            const toastCountBeforeSecondClick = toasts.length;
+
+            for (const handler of clickHandlers) {
+              await handler(fakeClick("data-health-package-approve"));
+            }
+
+            active = DailyWorkRun.getActiveRun(internal.dailyWorkRunUiState.store);
+            assert.strictEqual(active.executionPackage.executionPackageId, firstPackageId, "Mehrfachklick darf kein zweites Paket erzeugen.");
+            assert.strictEqual(active.executionPackage.executionPackageFingerprint, firstFingerprint, "Mehrfachklick darf keinen neuen Fingerprint erzeugen.");
+            assert.strictEqual(active.executionPackage.status, "READY_TO_COPY");
+            assert.ok(toasts.length > toastCountBeforeSecondClick, "Auch der zweite Klick muss sichtbar zurückmelden (kein stiller Abbruch).");
+          })().catch((error) => {
+            console.error(error && error.stack ? error.stack : String(error));
+            process.exitCode = 1;
+          });
+        `,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.strictEqual(output, "");
+  });
+
+  check("Phase C Fix: Clean-Baseline erzeugt und gibt das Paket weiterhin in einem Klick frei (kein Regressions-Bruch)", () => {
+    const output = require("child_process").execFileSync(
+      process.execPath,
+      [
+        "-e",
+        `
+          const assert = require("assert");
+          const DailyWorkRun = require(${JSON.stringify(path.join(__dirname, "daily-work-run.js"))});
+          const { getProjectById } = require(${JSON.stringify(path.join(__dirname, "project-registry.js"))});
+          const { buildHealthLiveStatusResponse } = require(${JSON.stringify(path.join(__dirname, "health-repo-status.js"))});
+
+          global.fetch = () => { throw new Error("Unerwarteter Netzwerkaufruf im Paket-Freigabe-Ablauf."); };
+
+          const clickHandlers = [];
+          global.document = {
+            addEventListener(type, handler) {
+              if (type === "click") clickHandlers.push(handler);
+            },
+            getElementById() { return null; },
+            querySelector() { return null; },
+            querySelectorAll() { return []; },
+          };
+
+          const DailyWorkRunUi = require(${JSON.stringify(path.join(__dirname, "daily-work-run-ui.js"))});
+
+          const container = { innerHTML: "" };
+          const data = new Map();
+          const localStorage = {
+            getItem(key) { return data.has(key) ? data.get(key) : null; },
+            setItem(key, value) { data.set(key, String(value)); },
+          };
+          const toasts = [];
+          const deps = {
+            byId: (id) => (id === "daily-work-run-output" ? container : null),
+            escapeHtml: (value) => String(value ?? ""),
+            comparableText: (value) => String(value ?? "").trim().toLowerCase(),
+            showToast: (message) => toasts.push(message),
+            getCanonicalProjectRegistryState: () => ({
+              status: "ready",
+              payload: { writeOperationsBlocked: true, madeExternalRequest: false, projects: [getProjectById("health-upgrade-kompass")], snapshotNotice: "Test" },
+              error: null,
+            }),
+            getAppState: () => ({ projects: [] }),
+            loadState: () => ({ projects: [] }),
+            saveState: () => {},
+            getProjectHistory: () => [],
+            renderAll: () => {},
+            localStorage,
+          };
+          DailyWorkRunUi.init(deps);
+
+          let run = DailyWorkRun.createDraftRun({ id: "ui-health-approve-clean-run", workDate: "2026-07-25" });
+          run = DailyWorkRun.setFocusProject(run, getProjectById("health-upgrade-kompass"), "Snap", "2026-07-25T05:00:00Z");
+          run = DailyWorkRun.createWorkProposal(run, {
+            desiredOutcome: "Code und API für den Health Preview-Kernfluss technisch prüfen und den nächsten sicheren Schritt festlegen.",
+          });
+          run = DailyWorkRun.transitionRun(run, "READY_FOR_CODEX");
+          const internal = DailyWorkRunUi.getInternalState();
+          internal.dailyWorkRunUiState.store = DailyWorkRun.upsertRun(DailyWorkRun.createStore(), run);
+
+          const liveResponse = buildHealthLiveStatusResponse({
+            ok: true,
+            available: true,
+            status: "AVAILABLE",
+            readAt: "2026-07-25T05:00:00.000Z",
+            branch: "main",
+            head: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            workingTreeClean: true,
+            shortStatus: "## main",
+            workingTreeDetail: { dirtyPaths: [], untrackedPaths: [], fileHashes: [], baselineFingerprint: "wt-clean-ui-test", capturedAt: "2026-07-25T05:00:00.000Z", limitStatus: "OK" },
+          });
+          internal.healthHybridUiState.liveStatus = liveResponse;
+
+          function fakeClick(attr) {
+            const target = { closest(selector) { return selector === "[" + attr + "]" ? target : null; } };
+            return { target };
+          }
+
+          (async () => {
+            for (const handler of clickHandlers) {
+              await handler(fakeClick("data-health-package-approve"));
+            }
+            const active = DailyWorkRun.getActiveRun(internal.dailyWorkRunUiState.store);
+            assert.ok(active.executionPackage, "Clean-Baseline muss weiterhin in einem Klick ein Paket erzeugen.");
+            assert.strictEqual(active.executionPackage.status, "READY_TO_COPY");
+            assert.strictEqual(active.executionPackage.workingTreeCleanAtCreate, true);
+            assert.ok(!active.knownWorkingTreeBaseline || active.knownWorkingTreeBaseline.jamalConfirmedAt === null || active.knownWorkingTreeBaseline.jamalConfirmedClean === true);
+          })().catch((error) => {
+            console.error(error && error.stack ? error.stack : String(error));
+            process.exitCode = 1;
+          });
+        `,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.strictEqual(output, "");
+  });
+
   check("README und Betriebshandbuch sind vorhanden", () => {
     assert.strictEqual(fs.existsSync(path.join(__dirname, "README.md")), true);
     assert.strictEqual(fs.existsSync(path.join(__dirname, "V1_BETRIEBSHANDBUCH.md")), true);
