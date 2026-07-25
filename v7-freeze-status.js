@@ -13,8 +13,17 @@
 //
 // Der einzige live gelesene Wert ist der aktuelle Git-Commit/-Working-Tree
 // der Zentrale (read-only, shell:false, wie server-status.js). Damit kann
-// dieses Modul niemals FREEZE_CANDIDATE behaupten, während lokal noch
-// uncommittete Änderungen vorliegen.
+// die automatische Ableitung niemals mehr als FREEZE_CANDIDATE behaupten,
+// während lokal noch uncommittete Änderungen vorliegen.
+//
+// V7.0-Freeze-Entscheidung (25.07.2026): `FROZEN` wird ausschließlich durch
+// die unten hinterlegte, von Hand eingetragene MANUAL_FREEZE_DECISION erreicht
+// – niemals durch Git-Stand, Working-Tree-Sauberkeit oder Testzahl allein.
+// computeFreezeStatus() bleibt dieselbe reine, automatisch abgeleitete
+// Funktion wie zuvor (IN_REVIEW/FREEZE_CANDIDATE unverändert) und liefert nur
+// dann FROZEN, wenn ihr explizit dieses eine kanonische, geprüfte Objekt als
+// `manualFreezeDecision` übergeben wird. Es gibt bewusst keinen zweiten Weg,
+// FROZEN zu setzen: kein Schreib-Endpunkt, kein Button, kein Unfreeze.
 
 const { execFile } = require("child_process");
 
@@ -47,24 +56,63 @@ const PHASE_HISTORY = Object.freeze([
     status: "DONE",
     commit: "6553452",
   }),
+  Object.freeze({
+    phase: "E",
+    title: "Health-Ende-zu-Ende-Audit, Freeze-Status und Chef-Modus-Klarheit",
+    status: "DONE",
+    commit: "52ce012",
+  }),
 ]);
 
-// Letzter gesicherter Commit auf origin/main zum Zeitpunkt dieses Phase-E-
-// Standes. Bleibt bis zu Jamals Commit-Freigabe für Phase E bewusst auf dem
-// Phase-D-Commit stehen – dadurch zeigt dieses Modul während der laufenden
-// Phase-E-Arbeit (uncommittete Änderungen) korrekt IN_REVIEW statt
-// fälschlich FREEZE_CANDIDATE.
-const LAST_SECURED_COMMIT = "655345246839d787ab9f293892b6f3ae479bbd67";
+// Letzter gesicherter Commit auf origin/main – zugleich die Basis, auf der
+// Jamal die V7.0-Freeze-Entscheidung getroffen hat (siehe
+// MANUAL_FREEZE_DECISION.baseCommit, muss mit diesem Wert übereinstimmen).
+const LAST_SECURED_COMMIT = "52ce0125f0d641295bcc1b83ee9442e95abb199d";
 
 // Zuletzt tatsächlich gemessener automatisierter Teststand (siehe
-// Abschlussbericht Phase E). Wird bei jedem neuen gesicherten Phasenabschluss
-// von Hand aktualisiert, nicht bei jedem Request neu ausgeführt.
+// Abschlussbericht Phase E / V7.0-Freeze). Wird bei jedem neuen gesicherten
+// Phasenabschluss von Hand aktualisiert, nicht bei jedem Request neu
+// ausgeführt.
 const LAST_KNOWN_TEST_SUMMARY = Object.freeze({
   allGreen: true,
-  checkCount: 489,
-  recordedAtPhase: "D",
+  checkCount: 528,
+  recordedAtPhase: "E",
   command: "npm test",
 });
+
+// ---------------------------------------------------------------------------
+// Kanonische, manuelle V7.0-Freeze-Entscheidung durch Jamal.
+//
+// Dies ist die einzige Stelle im gesamten Projekt, an der `FROZEN` entstehen
+// kann. Sie wird von Hand eingetragen, genau wie LAST_SECURED_COMMIT und
+// PHASE_HISTORY, und niemals automatisch aus Tests, Git-Status oder einer
+// Anfrage abgeleitet oder verändert. Es gibt keinen Schreib-Endpunkt und
+// keinen Unfreeze-Mechanismus für dieses Objekt.
+// ---------------------------------------------------------------------------
+const MANUAL_FREEZE_DECISION = Object.freeze({
+  version: "V7.0",
+  status: "FROZEN",
+  decidedBy: "Jamal",
+  decisionDate: "2026-07-25",
+  baseCommit: "52ce0125f0d641295bcc1b83ee9442e95abb199d",
+  note:
+    "Phase A bis E sind abgeschlossen. V7.0 erhält keine neuen Funktionen mehr; " +
+    "Änderungen bleiben auf belegte Fehlerkorrekturen, Sicherheitskorrekturen sowie " +
+    "Wiederherstellungs-/Betriebsfixes begrenzt. Neue Funktionen beginnen ab V7.1.",
+});
+
+function isValidManualFreezeDecision(decision) {
+  return Boolean(
+    decision &&
+      decision.version === "V7.0" &&
+      decision.status === "FROZEN" &&
+      decision.decidedBy === "Jamal" &&
+      typeof decision.decisionDate === "string" &&
+      decision.decisionDate.length > 0 &&
+      typeof decision.baseCommit === "string" &&
+      /^[0-9a-f]{40}$/i.test(decision.baseCommit),
+  );
+}
 
 const KNOWN_NON_GOALS = Object.freeze([
   "Kein Commit, kein Push, kein Deployment durch dieses Modul oder diese Anzeige.",
@@ -84,9 +132,8 @@ const NEXT_PRODUCT_PATH_AFTER_V70 = Object.freeze([
 ]);
 
 const KNOWN_OPEN_JAMAL_STEPS = Object.freeze([
-  "Phase E: manuelle Abschlussabnahme (u. a. Safari) und Commit-/Push-Freigabe.",
-  "Endgültiger V7.0-Freeze auf FROZEN bleibt ausschließlich Jamals Entscheidung.",
-  "Jede spätere Autonomieerhöhung, Health-Schreibfreigabe oder Phase V7.1 benötigt eine neue ausdrückliche Freigabe.",
+  "V7.0 ist mit Jamals ausdrücklicher Entscheidung vom 2026-07-25 offiziell FROZEN (siehe MANUAL_FREEZE_DECISION).",
+  "Jede spätere Autonomieerhöhung, Health-Schreibfreigabe oder der Beginn von Phase V7.1 benötigt eine neue ausdrückliche Freigabe.",
 ]);
 
 function readGitCommitReadOnly(repoDir, options = {}) {
@@ -144,14 +191,29 @@ function readWorkingTreeCleanReadOnly(repoDir, options = {}) {
  * Reine Funktion ohne I/O. `currentGitCommit`/`workingTreeClean` müssen vom
  * Aufrufer bereits sicher (read-only, shell:false) gelesen worden sein –
  * analog zu server-status.js#buildServerStatusApiResponse.
+ *
+ * `manualFreezeDecision` ist optional und additiv: ohne dieses Argument
+ * verhält sich die Funktion exakt wie zuvor (niemals FROZEN, ausschließlich
+ * IN_REVIEW/FREEZE_CANDIDATE aus Git-Stand/Working-Tree/Teststand
+ * abgeleitet). Nur wenn hier das eine kanonische, geprüfte
+ * MANUAL_FREEZE_DECISION-Objekt übergeben wird, lautet der Status FROZEN –
+ * unabhängig vom aktuellen Git-Stand, damit spätere zulässige Fehler-/
+ * Sicherheits-/Betriebsfixes den Freeze nicht stillschweigend aufheben.
  */
-function computeFreezeStatus({ currentGitCommit, workingTreeClean } = {}) {
+function computeFreezeStatus({ currentGitCommit, workingTreeClean, manualFreezeDecision } = {}) {
   const gitMatchesLastSecuredCommit =
     typeof currentGitCommit === "string" && currentGitCommit.length > 0 && currentGitCommit === LAST_SECURED_COMMIT;
   const workingTreeCleanKnown = workingTreeClean === true;
   const readyForCandidate =
     gitMatchesLastSecuredCommit && workingTreeCleanKnown && LAST_KNOWN_TEST_SUMMARY.allGreen === true;
-  const status = readyForCandidate ? "FREEZE_CANDIDATE" : "IN_REVIEW";
+  const manualDecisionValid = isValidManualFreezeDecision(manualFreezeDecision);
+  const status = manualDecisionValid ? "FROZEN" : readyForCandidate ? "FREEZE_CANDIDATE" : "IN_REVIEW";
+
+  const note = manualDecisionValid
+    ? `V7.0 ist durch Jamals ausdrückliche Entscheidung vom ${manualFreezeDecision.decisionDate} offiziell FROZEN ` +
+      `(Basis-Commit ${manualFreezeDecision.baseCommit}). Phase A bis E sind abgeschlossen. Neue Funktionen beginnen ` +
+      `erst ab V7.1; V7.0 bleibt auf belegte Fehler-, Sicherheits- und Betriebsfixes begrenzt.`
+    : "Cursor kann höchstens FREEZE_CANDIDATE vorbereiten. Der endgültige V7.0-Freeze (FROZEN) bleibt eine separate Entscheidung von Jamal.";
 
   return {
     version: "V7.0",
@@ -163,10 +225,11 @@ function computeFreezeStatus({ currentGitCommit, workingTreeClean } = {}) {
     gitMatchesLastSecuredCommit,
     workingTreeClean: workingTreeClean === true ? true : workingTreeClean === false ? false : null,
     tests: LAST_KNOWN_TEST_SUMMARY,
+    manualFreezeDecision: manualDecisionValid ? manualFreezeDecision : null,
     openJamalSteps: KNOWN_OPEN_JAMAL_STEPS,
     knownNonGoals: KNOWN_NON_GOALS,
     nextProductPathAfterV70: NEXT_PRODUCT_PATH_AFTER_V70,
-    note: "Cursor kann höchstens FREEZE_CANDIDATE vorbereiten. Der endgültige V7.0-Freeze (FROZEN) bleibt eine separate Entscheidung von Jamal.",
+    note,
   };
 }
 
@@ -175,10 +238,12 @@ module.exports = {
   PHASE_HISTORY,
   LAST_SECURED_COMMIT,
   LAST_KNOWN_TEST_SUMMARY,
+  MANUAL_FREEZE_DECISION,
   KNOWN_NON_GOALS,
   NEXT_PRODUCT_PATH_AFTER_V70,
   KNOWN_OPEN_JAMAL_STEPS,
   readGitCommitReadOnly,
   readWorkingTreeCleanReadOnly,
+  isValidManualFreezeDecision,
   computeFreezeStatus,
 };

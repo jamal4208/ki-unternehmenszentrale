@@ -3,7 +3,8 @@
 ## 1. Verbindlicher V1-Stand
 
 - **Aussage:** V1 lokal fertig und betriebsbereit
-- **Aktuelle Arbeitsversion:** **V7.0 Phase A** gesichert (`4a74ebe`); **V7.0 Phase B** gesichert (`3487a84`); **V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor** gesichert (`0858b4e`); **V7.0 Phase D – Codex als kontrollierten Executor anbinden** gesichert (`6553452`); **V7.0 Phase E – Health-Ende-zu-Ende-Abnahme und Freeze-Kandidat** technisch umgesetzt (Umsetzungskandidat, noch nicht committed); V7.0 insgesamt noch nicht abgeschlossen, Phase V7.1 offen; vorheriger gesicherter Stand **V6.46.0** / `e611c9c`
+- **Aktuelle Arbeitsversion:** **V7.0 Phase A** gesichert (`4a74ebe`); **V7.0 Phase B** gesichert (`3487a84`); **V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor** gesichert (`0858b4e`); **V7.0 Phase D – Codex als kontrollierten Executor anbinden** gesichert (`6553452`); **V7.0 Phase E – Health-Ende-zu-Ende-Abnahme und Freeze-Kandidat** gesichert (`52ce012`); vorheriger gesicherter Stand **V6.46.0** / `e611c9c`
+- **V7.0 offiziell FROZEN:** Jamal-Entscheidung vom **25.07.2026** auf Basis von `52ce012`; Phase A bis E abgeschlossen; keine neuen Funktionen mehr in V7.0; Phase V7.1 offen und benötigt eine neue, separate Freigabe
 - **Gesicherter vorheriger Ausgangsstand:** **V6.45.2** / Commit **`fb9aa0d`**
 - **Historischer Freeze-Ausgang:** `16bbf45` (V6.43.1) – nur Historie
 - **Branch:** `main`
@@ -22,7 +23,7 @@
 - Manuelle Freigabe, Ergebnisannahme, Audit, Reload-Persistenz
 - Serverstatus (Port, Version, Commit, Startzeit, Status) kompakt in der Oberfläche anzeigen und den lokalen Betrieb über den separaten Controller `scripts/zentral-ctl.js` verständlich starten/stoppen/neustarten (V7.0 Phase B)
 - Isolierte Mock- und Codex-Testausführung vorbereiten, starten, abbrechen und nach Jamal-Freigabe nur in ein Fixture-Repository übernehmen (V7.0 Phase C/D); Mock-Executor ist keine KI, Codex läuft ausschließlich isoliert gegen das Fixture-Repository; Health-Apply und Codex-Start für Health bleiben hart blockiert; Apply ist kein Commit/Push/Deployment
-- Read-only V7.0-Freeze-Status anzeigen (`IN_REVIEW`/`FREEZE_CANDIDATE`/`FROZEN`); `FROZEN` wird von der Zentrale niemals selbst gesetzt (V7.0 Phase E)
+- Read-only V7.0-Freeze-Status anzeigen (`IN_REVIEW`/`FREEZE_CANDIDATE`/`FROZEN`); `FROZEN` entsteht ausschließlich durch die im Quellcode hinterlegte, von Hand eingetragene Jamal-Entscheidung (`v7-freeze-status.js#MANUAL_FREEZE_DECISION`), niemals automatisch aus Git-Stand oder Testzahl (V7.0 Phase E); aktuell zeigt die Zentrale `V7.0 · FROZEN` (Entscheidung vom 25.07.2026, Basis `52ce012`)
 
 ## 3. Was die Zentrale bewusst noch nicht kann
 

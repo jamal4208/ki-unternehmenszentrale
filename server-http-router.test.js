@@ -330,15 +330,22 @@ async function runTests() {
   check("POST /api/server-status bleibt 405", () => assert.strictEqual(serverStatusPost.statusCode, 405));
 
   const freezeStatusGet = await invokeJson(requestHandler, "GET", "/api/v7-freeze-status");
-  check("GET /api/v7-freeze-status liefert 200 mit sicheren Grundfeldern, niemals FROZEN", () => {
+  check("GET /api/v7-freeze-status liefert 200 mit sicheren Grundfeldern; FROZEN nur mit Jamals kanonischer Entscheidung", () => {
     assert.strictEqual(freezeStatusGet.statusCode, 200);
     assert.strictEqual(freezeStatusGet.json.writeOperationsBlocked, true);
     assert.strictEqual(freezeStatusGet.json.madeExternalRequest, false);
     assert.ok(["IN_REVIEW", "FREEZE_CANDIDATE", "FROZEN"].includes(freezeStatusGet.json.status));
-    assert.notStrictEqual(freezeStatusGet.json.status, "FROZEN", "Server setzt niemals FROZEN ohne Jamal");
+    // V7.0 wurde durch Jamals ausdrückliche, im Quellcode hinterlegte
+    // Entscheidung (v7-freeze-status.js#MANUAL_FREEZE_DECISION) offiziell auf
+    // FROZEN gesetzt – nicht automatisch aus Git-Stand oder Testzahl.
+    assert.strictEqual(freezeStatusGet.json.status, "FROZEN");
     assert.strictEqual(freezeStatusGet.json.version, "V7.0");
     assert.ok(Array.isArray(freezeStatusGet.json.phases) && freezeStatusGet.json.phases.length >= 4);
     assert.ok(Array.isArray(freezeStatusGet.json.openJamalSteps) && freezeStatusGet.json.openJamalSteps.length > 0);
+    assert.ok(freezeStatusGet.json.manualFreezeDecision, "manuelle Freeze-Entscheidung ist im Payload sichtbar");
+    assert.strictEqual(freezeStatusGet.json.manualFreezeDecision.decidedBy, "Jamal");
+    assert.strictEqual(freezeStatusGet.json.manualFreezeDecision.decisionDate, "2026-07-25");
+    assert.ok(/^[0-9a-f]{40}$/i.test(freezeStatusGet.json.manualFreezeDecision.baseCommit));
   });
 
   const freezeStatusPost = await invokeJson(requestHandler, "POST", "/api/v7-freeze-status");

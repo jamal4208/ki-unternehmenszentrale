@@ -883,6 +883,55 @@ function main() {
     assert.ok(noRunHtml.includes("Status ungeklärt") || noRunHtml.includes("In Prüfung"));
   });
 
+  check("V7.0-Freeze: FROZEN wird ruhig und eindeutig angezeigt, ohne Freeze-/Unfreeze-Button und ohne IN_REVIEW-Widerspruch", () => {
+    const deps = { escapeHtml: (value) => String(value) };
+    const run = buildReadyRun("freeze-status-frozen-run");
+    const frozenHtml = GuidedWorkUi.renderMainSurface(run, {
+      deps,
+      liveStatus: { live: dirtyLive(), ok: true, available: true },
+      freezeStatus: {
+        version: "V7.0",
+        phase: "E",
+        status: "FROZEN",
+        phases: [
+          { phase: "A", title: "Guided Work Foundation", status: "DONE", commit: "4a74ebe" },
+          { phase: "B", title: "Betriebsstabilität", status: "DONE", commit: "3487a84" },
+          { phase: "C", title: "Execution Bridge Isolation mit Mock-Executor", status: "DONE", commit: "0858b4e" },
+          { phase: "D", title: "Codex als kontrollierten Executor an die Execution Bridge anbinden", status: "DONE", commit: "6553452" },
+          { phase: "E", title: "Health-Ende-zu-Ende-Audit, Freeze-Status und Chef-Modus-Klarheit", status: "DONE", commit: "52ce012" },
+        ],
+        lastSecuredCommit: "52ce0125f0d641295bcc1b83ee9442e95abb199d",
+        gitMatchesLastSecuredCommit: true,
+        workingTreeClean: true,
+        tests: { allGreen: true, checkCount: 528, recordedAtPhase: "E" },
+        manualFreezeDecision: {
+          version: "V7.0",
+          status: "FROZEN",
+          decidedBy: "Jamal",
+          decisionDate: "2026-07-25",
+          baseCommit: "52ce0125f0d641295bcc1b83ee9442e95abb199d",
+          note: "Neue Funktionen beginnen ab V7.1.",
+        },
+        openJamalSteps: ["Jede spätere Autonomieerhöhung oder Phase V7.1 benötigt eine neue ausdrückliche Freigabe."],
+        knownNonGoals: ["Kein automatisches Setzen auf FROZEN ohne Jamal."],
+        nextProductPathAfterV70: ["Dokumenten- und Wissenseingang", "Werkzeug-/Lizenzregister"],
+      },
+    });
+    assert.ok(frozenHtml.includes("guided-work-freeze-status"), "Freeze-Status ist Teil der Oberfläche");
+    assert.ok(frozenHtml.includes("Eingefroren"), "FROZEN wird verständlich als 'Eingefroren' angezeigt");
+    assert.ok(!/<details[^>]*data-freeze-status[^>]*\bopen\b/.test(frozenHtml), "Freeze-Karte bleibt standardmäßig eingeklappt");
+    assert.ok(
+      !/<button/.test(frozenHtml.slice(frozenHtml.indexOf("guided-work-freeze-status"))),
+      "kein Freeze- oder Unfreeze-Button in der Freeze-Karte",
+    );
+    assert.ok(frozenHtml.includes("Jamal"), "Jamal als Entscheidungsträger ist sichtbar");
+    assert.ok(frozenHtml.includes("2026-07-25"), "Entscheidungsdatum ist sichtbar");
+    assert.ok(frozenHtml.includes("52ce012"), "Freeze-Basis-Commit ist sichtbar");
+    assert.ok(/Phase A[\s\S]*Phase E/.test(frozenHtml), "Phase A bis E sind als abgeschlossen sichtbar");
+    assert.ok(frozenHtml.includes("V7.1"), "Hinweis auf neue Funktionen ab V7.1 ist sichtbar");
+    assert.ok(!frozenHtml.includes(">In Prüfung<"), "keine widersprüchliche IN_REVIEW-Anzeige neben FROZEN");
+  });
+
   check("Phase E: Sticky-Kopf zeigt 'Wer arbeitet daran' und 'Ausführung/Evidenz' additiv ohne neues Datenmodell", () => {
     const deps = { escapeHtml: (value) => String(value) };
     let run = buildReadyRun("sticky-evidence-run");

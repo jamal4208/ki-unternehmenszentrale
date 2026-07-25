@@ -1,5 +1,11 @@
 # CURRENT STATUS
 
+## V7.0 offiziell FROZEN – Jamal-Entscheidung vom 2026-07-25
+
+**V7.0 ist mit Jamals ausdrücklicher Entscheidung vom 25.07.2026 offiziell auf `FROZEN` gesetzt.** Basis ist der gesicherte Phase-E-Stand **`52ce012`** (`52ce0125f0d641295bcc1b83ee9442e95abb199d`) auf `origin/main`; Phase A bis E sind damit vollständig abgeschlossen. Der read-only **V7.0-Freeze-Status** (`GET /api/v7-freeze-status`) zeigt diesen Stand jetzt korrekt als `FROZEN` an – ausschließlich weil im Quellcode (`v7-freeze-status.js#MANUAL_FREEZE_DECISION`) genau diese eine, von Hand eingetragene Jamal-Entscheidung hinterlegt ist, niemals automatisch aus Git-Stand oder Testzahl. Es gibt keinen neuen Schreib-Endpunkt, keinen Freeze-/Unfreeze-Button und keinen zweiten Weg, den Status zu ändern.
+
+**Bedeutung:** V7.0 erhält keine neuen Funktionen mehr. Änderungen an V7.0 sind nur noch als belegte Fehlerkorrektur, Sicherheitskorrektur oder Wiederherstellungs-/Betriebsfix zulässig. Neue Funktionen beginnen erst ab **V7.1**: Dokumenten-/Wissenseingang, Werkzeug-/Lizenzregister, Plugin-Gateway, Marketing-Agentur, Canva/HeyGen, Shopify und weitere Umsatzprojekte gehören ausdrücklich **nicht** mehr zu V7.0. Kein Deployment; Health bleibt weiterhin ausschließlich read-only; Codex bleibt weiterhin ausschließlich isoliert gegen das Fixture-Repository begrenzt; Apply bleibt weiterhin getrennt von Commit, Push und Deployment.
+
 ## Git- und Versionsstand
 
 - Vorheriger gesicherter Ausgangsstand: **V6.46.0** / Commit **`e611c9c`** (Health Hybrid End-to-End-Pilot)
@@ -7,9 +13,10 @@
 - **V7.0 Phase B – Betriebsstabilität:** umgesetzt, getestet, browserseitig abgenommen und gesichert mit Commit **`3487a84`** auf `origin/main`
 - **V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor:** umgesetzt, getestet, browserseitig abgenommen und gesichert mit Commit **`0858b4e`** auf `origin/main`
 - **V7.0 Phase D – Codex als kontrollierten Executor anbinden:** umgesetzt, getestet, echter Codex-Fixture-Pilot bestanden und gesichert mit Commit **`6553452`** auf `origin/main`
-- **V7.0 Phase E – Health-Ende-zu-Ende-Abnahme und Freeze-Kandidat:** technisch umgesetzt und getestet; **Umsetzungskandidat, noch nicht committed**
+- **V7.0 Phase E – Health-Ende-zu-Ende-Audit, Freeze-Status und Chef-Modus-Klarheit:** umgesetzt, getestet und gesichert mit Commit **`52ce012`** auf `origin/main`
+- **V7.0 offiziell FROZEN:** Jamal-Entscheidung vom **2026-07-25** auf Basis von `52ce012`; Phase A bis E abgeschlossen; keine neuen Funktionen mehr in V7.0
 - Branch: `main`
-- Verbindliche Aussage: Phase A bis D sind gesichert; Phase E ist technisch fertig, aber erst nach separater Commit-Freigabe verbindlich; ein read-only **V7.0-Freeze-Status** (`GET /api/v7-freeze-status`) zeigt technisch `FREEZE_CANDIDATE` erst dann, wenn der lokale Git-Stand exakt dem zuletzt gesicherten Commit entspricht und der Working Tree sauber ist – Cursor setzt nie `FROZEN`, das bleibt ausschließlich Jamals Entscheidung. **V7.0 insgesamt ist damit weiterhin nicht abgeschlossen** – Phase V7.1 ist nicht begonnen
+- Verbindliche Aussage: Phase A bis E sind gesichert und Jamal hat V7.0 auf dieser Basis offiziell eingefroren; der read-only **V7.0-Freeze-Status** (`GET /api/v7-freeze-status`) zeigt `FROZEN` ausschließlich wegen dieser hinterlegten Jamal-Entscheidung – niemals automatisch aus Git-Stand oder Testzahl allein. **Phase V7.1 ist nicht begonnen** und benötigt eine neue, separate Freigabe
 - Einstiegspunkte: `README.md`, `V1_BETRIEBSHANDBUCH.md`
 
 ## V7.0 Phase A – Guided Work Foundation (umgesetzt und abgenommen)
@@ -27,7 +34,7 @@
 - 322 automatisierte Prüfpunkte grün; vollständige Browser-Abnahme inkl. Mobile 390×844 ohne horizontalen Überlauf bestanden
 - **Nicht enthalten – weiterhin offen für spätere Phasen (siehe Phase C/D/E unten):** Codex-/Agentenstart, produktive Repository-Arbeit, Health-Schreiben, Commit/Push/Deployment, Autonomieerhöhung
 
-## V7.0 Phase E – Health-Ende-zu-Ende-Abnahme und Freeze-Kandidat (technisch umgesetzt, Umsetzungskandidat vor Commit)
+## V7.0 Phase E – Health-Ende-zu-Ende-Abnahme und Freeze-Kandidat (umgesetzt, getestet und gesichert mit Commit `52ce012`; V7.0 seit 25.07.2026 offiziell FROZEN)
 
 - Ziel war kein neuer Executor, sondern der Nachweis, dass der gesamte V7.0-Ablauf (Fokus → Vorschlag → Team → Baseline → Paket → isolierte Ausführung/Hybrid-Rückführung → Abschluss) stimmig, ehrlich und wiederholbar ist; nur echte Lücken wurden geschlossen
 - Neues read-only Modul `v7-freeze-status.js` + Route `GET /api/v7-freeze-status`: Statusmodell `IN_REVIEW | FREEZE_CANDIDATE | FROZEN`, abgeleitet aus Phasenhistorie, aktuellem Git-Commit/Working-Tree und dem zuletzt gemessenen Testlauf; `FROZEN` wird durch dieses Modul **niemals** gesetzt – ausschließlich Jamals separate Entscheidung
@@ -173,7 +180,7 @@ Siehe ältere Statusdokumentation und Git-Historie für Detailstände vor dem UI
 
 ## Genau ein empfohlener nächster Produktentwicklungsschritt
 
-Jamals Commit-/Push-Freigabe für V7.0 Phase E einholen (inkl. manueller Safari-Abschlussprüfung); danach ist V7.0 technisch ein Freeze-Kandidat. Der geplante Pfad nach V7.0 (nur Reihenfolge, keine Umsetzung ohne separate Freigabe): Dokumenten-/Wissenseingang, Werkzeug-/Lizenzregister, Plugin-Gateway, Marketing-Agentur, Canva/HeyGen, Shopify, weitere Umsatzprojekte. Keine Deployment-, V2- oder Außenwirkungsentscheidung aus diesem Stand ableiten.
+V7.0 ist mit Jamals Entscheidung vom 25.07.2026 offiziell FROZEN. Der nächste Schritt ist ausschließlich eine neue, separate Freigabe durch Jamal für den Start von V7.1. Der geplante Pfad nach V7.0 (nur Reihenfolge, keine Umsetzung ohne separate Freigabe): Dokumenten-/Wissenseingang, Werkzeug-/Lizenzregister, Plugin-Gateway, Marketing-Agentur, Canva/HeyGen, Shopify, weitere Umsatzprojekte. Bis zu dieser Freigabe sind an V7.0 nur belegte Fehler-, Sicherheits- oder Betriebsfixes zulässig. Keine Deployment-, V2- oder Außenwirkungsentscheidung aus diesem Stand ableiten.
 
 ## Bekannte Widersprüche
 

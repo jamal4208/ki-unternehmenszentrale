@@ -111,14 +111,21 @@
   function renderFreezeStatus(freezeStatusData, deps) {
     const data = freezeStatusData || null;
     const status = data?.status || "IN_REVIEW";
+    const decision = status === "FROZEN" ? data?.manualFreezeDecision || null : null;
     return `
       <details class="guided-work-block guided-work-freeze-status" data-freeze-status="${escape(deps, status)}">
-        <summary>V7.0-Freeze-Status · ${escape(deps, freezeStatusUiText(status))}</summary>
-        <p class="guided-work-note">Read-only, aus bestehenden Phasendaten und dem aktuellen Git-Stand abgeleitet. Cursor setzt hier niemals FROZEN – das bleibt ausschließlich Jamals Entscheidung.</p>
+        <summary>V7.0 · ${escape(deps, status)} — ${escape(deps, freezeStatusUiText(status))}</summary>
+        <p class="guided-work-note">Read-only, aus bestehenden Phasendaten und dem aktuellen Git-Stand abgeleitet. Der Status FROZEN kann ausschließlich durch eine explizite, im Quellcode hinterlegte Jamal-Entscheidung entstehen – niemals automatisch aus Tests oder Git-Status.</p>
         ${data ? `
+          ${decision ? `
+            <article class="daily-work-run-notice">
+              <strong>V7.0 offiziell eingefroren</strong>
+              <p>Entschieden durch <strong>${escape(deps, decision.decidedBy)}</strong> am <strong>${escape(deps, decision.decisionDate)}</strong> auf Basis von Commit <code>${escape(deps, shortHash(decision.baseCommit))}</code>. Phase A bis E sind abgeschlossen. Neue Funktionen beginnen erst ab V7.1; V7.0 bleibt auf belegte Fehler-, Sicherheits- und Betriebsfixes begrenzt.</p>
+            </article>
+          ` : ""}
           <dl class="daily-work-run-facts">
             <div><dt>Version</dt><dd>${escape(deps, data.version || "UNGEKLÄRT")} · Phase ${escape(deps, data.phase || "?")}</dd></div>
-            <div><dt>Zuletzt gesicherter Commit</dt><dd><code>${escape(deps, shortHash(data.lastSecuredCommit))}</code></dd></div>
+            <div><dt>Zuletzt gesicherter Basisstand (Commit)</dt><dd><code>${escape(deps, shortHash(data.lastSecuredCommit))}</code></dd></div>
             <div><dt>Aktueller Git-Stand entspricht gesichertem Commit</dt><dd>${data.gitMatchesLastSecuredCommit ? "ja" : "nein"}</dd></div>
             <div><dt>Working Tree sauber</dt><dd>${data.workingTreeClean === true ? "ja" : data.workingTreeClean === false ? "nein" : "UNGEKLÄRT"}</dd></div>
             <div><dt>Letzter gemessener Teststand</dt><dd>${data.tests?.allGreen ? "grün" : "ungeklärt/nicht grün"} · ${escape(deps, String(data.tests?.checkCount ?? "—"))} Prüfpunkte (Phase ${escape(deps, data.tests?.recordedAtPhase || "?")})</dd></div>
@@ -133,7 +140,7 @@
             <ul>${(data.openJamalSteps || []).map((entry) => `<li>${escape(deps, entry)}</li>`).join("")}</ul>
             <p><strong>Bekannte Nicht-Ziele:</strong></p>
             <ul>${(data.knownNonGoals || []).map((entry) => `<li>${escape(deps, entry)}</li>`).join("")}</ul>
-            <p><strong>Nächster Produktpfad nach V7.0 (nur Reihenfolge, keine Umsetzung):</strong></p>
+            <p><strong>Nächster Produktpfad nach V7.0 (nur Reihenfolge, keine Umsetzung, erst ab V7.1):</strong></p>
             <ol>${(data.nextProductPathAfterV70 || []).map((entry) => `<li>${escape(deps, entry)}</li>`).join("")}</ol>
           </details>
         ` : `<p class="guided-work-note">Freeze-Status noch nicht gelesen.</p>`}

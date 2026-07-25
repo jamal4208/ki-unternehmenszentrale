@@ -1,16 +1,27 @@
 # MIGRATION PLAN
 
-## V7.0 Phase E – Health-Ende-zu-Ende-Abnahme und Freeze-Kandidat (technisch umgesetzt, Umsetzungskandidat vor Commit)
+## V7.0 offiziell FROZEN – Jamal-Entscheidung (2026-07-25)
+
+Vorheriger gesicherter Ausgang: **V7.0 Phase E / `52ce012`**. Kein neuer Code-Pfad, keine Autonomieerhöhung, kein Deployment, keine Phase V7.1: nur der kanonische, auditierbare Nachweis von Jamals ausdrücklicher Entscheidung, V7.0 einzufrieren.
+
+| Bereich | Regel |
+|---|---|
+| v7-freeze-status.js (additiv) | neue Konstante `MANUAL_FREEZE_DECISION` (Version, Status FROZEN, `decidedBy: "Jamal"`, Entscheidungsdatum `2026-07-25`, Basis-Commit `52ce012`); `computeFreezeStatus()` liefert `FROZEN` ausschließlich, wenn genau dieses geprüfte Objekt explizit übergeben wird; ohne dieses Argument unverändert nur `IN_REVIEW`/`FREEZE_CANDIDATE` |
+| server.js | `GET /api/v7-freeze-status` übergibt `MANUAL_FREEZE_DECISION`; keine neue Route, keine neue Methode, weiterhin 405 für alles außer GET |
+| guided-work-ui.js | bestehende, eingeklappte Freeze-Karte zeigt bei FROZEN zusätzlich Entscheidungsträger, Datum und Basis-Commit; kein neuer Button, keine neue Primäraktion |
+| Verboten in diesem Schritt, offen für Phase V7.1 | Unfreeze-Mechanismus, zweiter Weg zu FROZEN, Commit/Push/Deploy außerhalb dieses einen Freeze-Commits, Autonomieerhöhung, Beginn von V7.1 |
+
+## V7.0 Phase E – Health-Ende-zu-Ende-Abnahme und Freeze-Kandidat (umgesetzt, getestet, gesichert mit Commit `52ce012`)
 
 Vorheriger gesicherter Ausgang: **V7.0 Phase D / `6553452`**. Phase E baut keinen neuen Executor, sondern prüft den gesamten bestehenden Ablauf (Fokus → Vorschlag → Team → Baseline → Paket → isolierte Ausführung/Hybrid-Rückführung → Abschluss) auf Stimmigkeit und schließt nur echte, bestätigte Lücken.
 
 | Bereich | Regel |
 |---|---|
-| v7-freeze-status.js (neu) | read-only Statusmodell `IN_REVIEW\|FREEZE_CANDIDATE\|FROZEN`; leitet Status aus Phasenhistorie, aktuellem Git-Commit/Working-Tree und zuletzt gemessenem Testlauf ab; setzt `FROZEN` nie selbst |
+| v7-freeze-status.js (neu) | read-only Statusmodell `IN_REVIEW\|FREEZE_CANDIDATE\|FROZEN`; leitet Status aus Phasenhistorie, aktuellem Git-Commit/Working-Tree und zuletzt gemessenem Testlauf ab; die automatische Ableitung setzt `FROZEN` nie selbst |
 | GET /api/v7-freeze-status | Route additiv (47. GET-Route); read-only; andere Methoden 405 |
 | guided-work-ui.js | eingeklappte Freeze-Status-Karte („unten nachschauen“); Sticky-Kopf und Tagesabschluss zeigen zusätzlich „Wer arbeitet daran“ und „Tatsächlich ausgeführt / Evidenz“ (bestehende Felder, kein neues Datenmodell) |
 | index.html | veraltete Aussage „Keine Execution Bridge“ korrigiert (Mock/Codex-Fixture existieren seit Phase C/D; Health bleibt unberührt) |
-| Verboten in Phase E, offen für Phase V7.1 | Setzen von `FROZEN` ohne Jamal, Codex-/Apply-Start für Health, Commit/Push/Deploy, Autonomieerhöhung, Beginn von V7.1 |
+| Verboten in Phase E, offen für Phase V7.1 | automatisches Setzen von `FROZEN` ohne Jamal, Codex-/Apply-Start für Health, Commit/Push/Deploy, Autonomieerhöhung, Beginn von V7.1 |
 
 ## V7.0 Phase D – Codex als kontrollierten Executor anbinden (umgesetzt, getestet, gesichert mit Commit `6553452`)
 

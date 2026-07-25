@@ -102,24 +102,29 @@ async function handleV7FreezeStatus(res) {
       v7FreezeStatusModule.readGitCommitReadOnly(rootDir),
       v7FreezeStatusModule.readWorkingTreeCleanReadOnly(rootDir),
     ]);
-    const payload = v7FreezeStatusModule.computeFreezeStatus({ currentGitCommit, workingTreeClean });
+    const payload = v7FreezeStatusModule.computeFreezeStatus({
+      currentGitCommit,
+      workingTreeClean,
+      manualFreezeDecision: v7FreezeStatusModule.MANUAL_FREEZE_DECISION,
+    });
     sendJson(res, 200, { ok: true, ...payload, ...API_SECURITY_FLAGS });
   } catch (_error) {
+    // Git-Stand nicht sicher lesbar: Jamals FROZEN-Entscheidung ist unabhängig
+    // vom Git-Stand (siehe v7-freeze-status.js), daher weiterhin über
+    // computeFreezeStatus() mit unbekanntem Git-Stand statt einer zweiten,
+    // hier fest verdrahteten Statuslogik.
+    const fallbackPayload = v7FreezeStatusModule.computeFreezeStatus({
+      currentGitCommit: null,
+      workingTreeClean: null,
+      manualFreezeDecision: v7FreezeStatusModule.MANUAL_FREEZE_DECISION,
+    });
     sendJson(res, 200, {
       ok: true,
-      version: "V7.0",
-      phase: "E",
-      status: "IN_REVIEW",
-      phases: v7FreezeStatusModule.PHASE_HISTORY,
-      lastSecuredCommit: v7FreezeStatusModule.LAST_SECURED_COMMIT,
-      currentGitCommit: null,
-      gitMatchesLastSecuredCommit: false,
-      workingTreeClean: null,
-      tests: v7FreezeStatusModule.LAST_KNOWN_TEST_SUMMARY,
-      openJamalSteps: v7FreezeStatusModule.KNOWN_OPEN_JAMAL_STEPS,
-      knownNonGoals: v7FreezeStatusModule.KNOWN_NON_GOALS,
-      nextProductPathAfterV70: v7FreezeStatusModule.NEXT_PRODUCT_PATH_AFTER_V70,
-      note: "Git-Stand konnte nicht sicher gelesen werden. Es wird kein FREEZE_CANDIDATE ohne sicheren Nachweis behauptet.",
+      ...fallbackPayload,
+      note:
+        fallbackPayload.status === "FROZEN"
+          ? fallbackPayload.note
+          : "Git-Stand konnte nicht sicher gelesen werden. Es wird kein FREEZE_CANDIDATE ohne sicheren Nachweis behauptet.",
       ...API_SECURITY_FLAGS,
     });
   }

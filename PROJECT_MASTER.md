@@ -1,6 +1,10 @@
 # PROJECT MASTER
 
-## Aktueller Arbeitsstand V7.0 (Phase A bis D gesichert; Phase E Umsetzungskandidat)
+## V7.0 offiziell FROZEN – Jamal-Entscheidung vom 2026-07-25
+
+V7.0 ist mit Jamals ausdrücklicher Entscheidung vom 25.07.2026 offiziell auf `FROZEN` gesetzt, auf Basis des gesicherten Phase-E-Stands **`52ce012`**. Phase A bis E sind damit abgeschlossen; V7.0 erhält keine neuen Funktionen mehr, Änderungen bleiben auf belegte Fehler-, Sicherheits- und Betriebsfixes begrenzt. Der read-only Freeze-Status (`GET /api/v7-freeze-status`, `v7-freeze-status.js#MANUAL_FREEZE_DECISION`) zeigt `FROZEN` ausschließlich wegen dieser einen, von Hand hinterlegten Entscheidung – nie automatisch aus Git-Stand oder Testzahl. Neue Funktionen beginnen erst nach separater Freigabe unter V7.1 (Dokumenten-/Wissenseingang, Werkzeug-/Lizenzregister, Plugin-Gateway, Marketing-Agentur, Canva/HeyGen, Shopify, weitere Umsatzprojekte). Kein Deployment, keine Autonomieerhöhung.
+
+## Aktueller Arbeitsstand V7.0 (Phase A bis E gesichert, V7.0 offiziell FROZEN)
 
 **V7.0 Phase A – Guided Work Foundation** ist umgesetzt, getestet, browserseitig abgenommen und mit Commit **`4a74ebe`** auf `origin/main` gesichert. Sie führt einen geführten Hauptarbeitsraum („Oben arbeiten. Unten nachschauen.“) mit deterministischen, quellenbasierten Arbeitsvorschlägen, editierbarem Agententeam, Re-Fingerprinting/Invalidierung, klarer Trennung von Live-/Snapshot-/Historienständen, bekannt-dirty-Baseline für Health und Evidenz-Prefill ein. Neue Tagesläufe erhalten `schemaVersion: 2`; `schemaVersion: 1` bleibt unverändert lesbar. Der V6.46.0-Hybrid-Fallback bleibt vollständig erhalten.
 
@@ -10,9 +14,11 @@
 
 **V7.0 Phase D – Codex als kontrollierten Executor anbinden** ist umgesetzt, getestet, der echte Codex-Fixture-Pilot bestanden und mit Commit **`6553452`** auf `origin/main` gesichert. Codex läuft ausschließlich isoliert gegen das Fixture-Repository (`--ask-for-approval never`, `spawn()`-basierte Prozessführung); Codex-Start und Apply für Health bleiben serverseitig hart blockiert; genau ein primärer Button je Zustand in der erweiterten Executor-Auswahl.
 
-**V7.0 Phase E – Health-Ende-zu-Ende-Abnahme und Freeze-Kandidat** ist technisch umgesetzt und getestet, aber **Umsetzungskandidat: noch nicht committed**. Kein neuer Executor, sondern Audit und gezielte Schließung echter Lücken im bestehenden Ablauf: neues read-only Modul `v7-freeze-status.js` (`GET /api/v7-freeze-status`, Statusmodell `IN_REVIEW | FREEZE_CANDIDATE | FROZEN`; `FROZEN` wird nie automatisch gesetzt), eingeklappte Freeze-Status-Karte im Hauptarbeitsraum, sichtbares „Wer arbeitet daran“/„Tatsächlich ausgeführt / Evidenz“ im Sticky-Kopf und im Tagesabschluss, korrigierte veraltete Startkarten-Aussage („Keine Execution Bridge“ existierte bereits nicht mehr korrekt).
+**V7.0 Phase E – Health-Ende-zu-Ende-Abnahme und Freeze-Kandidat** ist umgesetzt, getestet und mit Commit **`52ce012`** auf `origin/main` gesichert. Kein neuer Executor, sondern Audit und gezielte Schließung echter Lücken im bestehenden Ablauf: neues read-only Modul `v7-freeze-status.js` (`GET /api/v7-freeze-status`, Statusmodell `IN_REVIEW | FREEZE_CANDIDATE | FROZEN`; `FROZEN` wird von der automatischen Ableitung nie gesetzt), eingeklappte Freeze-Status-Karte im Hauptarbeitsraum, sichtbares „Wer arbeitet daran“/„Tatsächlich ausgeführt / Evidenz“ im Sticky-Kopf und im Tagesabschluss, korrigierte veraltete Startkarten-Aussage („Keine Execution Bridge“ existierte bereits nicht mehr korrekt).
 
-**Vorheriger gesicherter Ausgangsstand:** V6.46.0 / `e611c9c`. **V7.0 insgesamt ist nicht abgeschlossen** – Phase V7.1 ist weiterhin offen und nicht begonnen. Kein Codex-/Cursor-Agentenstart gegen Health, keine produktive Health-Apply-Freigabe, kein automatisches Commit/Push/Deployment, keine Autonomieerhöhung.
+**V7.0 ist mit Jamals ausdrücklicher Entscheidung vom 25.07.2026 offiziell FROZEN** (Basis `52ce012`, siehe `v7-freeze-status.js#MANUAL_FREEZE_DECISION`). Dies ist die einzige Stelle, an der `FROZEN` entstehen kann; es gibt keinen Schreib-Endpunkt und keinen Button dafür.
+
+**Vorheriger gesicherter Ausgangsstand:** V6.46.0 / `e611c9c`. **V7.0 insgesamt ist damit abgeschlossen und eingefroren** – Phase V7.1 ist weiterhin offen, nicht begonnen und benötigt eine neue ausdrückliche Freigabe. Kein Codex-/Cursor-Agentenstart gegen Health, keine produktive Health-Apply-Freigabe, kein automatisches Commit/Push/Deployment, keine Autonomieerhöhung.
 
 ## Verbindlicher Arbeitsstand V6.46.0
 
@@ -175,4 +181,4 @@ Ein Versionsschritt ist abgeschlossen, wenn Ziel und Nicht-Ziele erfüllt, betro
 
 ## Entscheidung durch Jamal erforderlich
 
-**V1 lokal eingefroren und betriebsbereit (V6.44.0/V6.44.1).** Health-Verifizierungsstand auf `28cdcf7` synchronisiert. Einstieg über `README.md` und `V1_BETRIEBSHANDBUCH.md`. Jede spätere produktive Außenwirkung, Deployment- oder V2-Entscheidung benötigt eine neue ausdrückliche Freigabe durch Jamal.
+**V1 lokal eingefroren und betriebsbereit (V6.44.0/V6.44.1). V7.0 offiziell eingefroren (25.07.2026, Basis `52ce012`).** Health-Verifizierungsstand auf `28cdcf7` synchronisiert. Einstieg über `README.md` und `V1_BETRIEBSHANDBUCH.md`. Jede spätere produktive Außenwirkung, Deployment-, V2- oder V7.1-Entscheidung benötigt eine neue ausdrückliche Freigabe durch Jamal.

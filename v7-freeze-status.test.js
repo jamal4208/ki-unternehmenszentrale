@@ -31,10 +31,10 @@ async function main() {
     assert.deepStrictEqual(freezeStatus.FREEZE_STATUS_VALUES, ["IN_REVIEW", "FREEZE_CANDIDATE", "FROZEN"]);
   });
 
-  check("PHASE_HISTORY enthält Phase A bis D, alle DONE, mit Commit", () => {
-    assert.strictEqual(freezeStatus.PHASE_HISTORY.length, 4);
+  check("PHASE_HISTORY enthält Phase A bis E, alle DONE, mit Commit", () => {
+    assert.strictEqual(freezeStatus.PHASE_HISTORY.length, 5);
     const phaseIds = freezeStatus.PHASE_HISTORY.map((entry) => entry.phase);
-    assert.deepStrictEqual(phaseIds, ["A", "B", "C", "D"]);
+    assert.deepStrictEqual(phaseIds, ["A", "B", "C", "D", "E"]);
     freezeStatus.PHASE_HISTORY.forEach((entry) => {
       assert.strictEqual(entry.status, "DONE");
       assert.ok(typeof entry.commit === "string" && entry.commit.length > 0);
@@ -43,8 +43,8 @@ async function main() {
     assert.ok(Object.isFrozen(freezeStatus.PHASE_HISTORY));
   });
 
-  check("LAST_SECURED_COMMIT ist der volle Phase-D-Commit-Hash", () => {
-    assert.strictEqual(freezeStatus.LAST_SECURED_COMMIT, "655345246839d787ab9f293892b6f3ae479bbd67");
+  check("LAST_SECURED_COMMIT ist der volle Freeze-Basis-Commit-Hash (Phase E / 52ce012)", () => {
+    assert.strictEqual(freezeStatus.LAST_SECURED_COMMIT, "52ce0125f0d641295bcc1b83ee9442e95abb199d");
     assert.ok(/^[0-9a-f]{40}$/.test(freezeStatus.LAST_SECURED_COMMIT));
   });
 
@@ -83,7 +83,7 @@ async function main() {
     assert.notStrictEqual(result.status, "FROZEN");
   });
 
-  check("computeFreezeStatus liefert niemals FROZEN, unabhängig von den Eingaben", () => {
+  check("computeFreezeStatus liefert ohne manuelle Freeze-Entscheidung niemals FROZEN, unabhängig von den Git-Eingaben", () => {
     const combos = [
       { currentGitCommit: freezeStatus.LAST_SECURED_COMMIT, workingTreeClean: true },
       { currentGitCommit: freezeStatus.LAST_SECURED_COMMIT, workingTreeClean: false },
@@ -93,7 +93,98 @@ async function main() {
     combos.forEach((input) => {
       const result = freezeStatus.computeFreezeStatus(input);
       assert.notStrictEqual(result.status, "FROZEN");
+      assert.strictEqual(result.manualFreezeDecision, null);
     });
+  });
+
+  check("MANUAL_FREEZE_DECISION enthält exakt Version, FROZEN, Jamal, Entscheidungsdatum und Basis-Commit", () => {
+    const decision = freezeStatus.MANUAL_FREEZE_DECISION;
+    assert.ok(Object.isFrozen(decision));
+    assert.strictEqual(decision.version, "V7.0");
+    assert.strictEqual(decision.status, "FROZEN");
+    assert.strictEqual(decision.decidedBy, "Jamal");
+    assert.strictEqual(decision.decisionDate, "2026-07-25");
+    assert.strictEqual(decision.baseCommit, "52ce0125f0d641295bcc1b83ee9442e95abb199d");
+    assert.strictEqual(decision.baseCommit, freezeStatus.LAST_SECURED_COMMIT);
+    assert.ok(/^[0-9a-f]{40}$/.test(decision.baseCommit));
+    assert.ok(/V7\.1/.test(decision.note));
+    assert.ok(!("email" in decision) && !("kontakt" in decision), "keine personenbezogenen Daten über 'Jamal' hinaus");
+  });
+
+  check("isValidManualFreezeDecision erkennt genau die kanonische Entscheidung, keine Fälschung", () => {
+    assert.strictEqual(freezeStatus.isValidManualFreezeDecision(freezeStatus.MANUAL_FREEZE_DECISION), true);
+    assert.strictEqual(freezeStatus.isValidManualFreezeDecision(null), false);
+    assert.strictEqual(freezeStatus.isValidManualFreezeDecision(undefined), false);
+    assert.strictEqual(freezeStatus.isValidManualFreezeDecision({}), false);
+    assert.strictEqual(
+      freezeStatus.isValidManualFreezeDecision({ ...freezeStatus.MANUAL_FREEZE_DECISION, decidedBy: "Cursor" }),
+      false,
+    );
+    assert.strictEqual(
+      freezeStatus.isValidManualFreezeDecision({ ...freezeStatus.MANUAL_FREEZE_DECISION, status: "FREEZE_CANDIDATE" }),
+      false,
+    );
+    assert.strictEqual(
+      freezeStatus.isValidManualFreezeDecision({ ...freezeStatus.MANUAL_FREEZE_DECISION, version: "V7.1" }),
+      false,
+    );
+    assert.strictEqual(
+      freezeStatus.isValidManualFreezeDecision({ ...freezeStatus.MANUAL_FREEZE_DECISION, baseCommit: "zu-kurz" }),
+      false,
+    );
+    assert.strictEqual(
+      freezeStatus.isValidManualFreezeDecision({ ...freezeStatus.MANUAL_FREEZE_DECISION, decisionDate: "" }),
+      false,
+    );
+  });
+
+  check("computeFreezeStatus: mit der kanonischen Jamal-Entscheidung wird V7.0 als FROZEN angezeigt", () => {
+    const result = freezeStatus.computeFreezeStatus({
+      currentGitCommit: freezeStatus.LAST_SECURED_COMMIT,
+      workingTreeClean: true,
+      manualFreezeDecision: freezeStatus.MANUAL_FREEZE_DECISION,
+    });
+    assert.strictEqual(result.status, "FROZEN");
+    assert.strictEqual(result.version, "V7.0");
+    assert.deepStrictEqual(result.manualFreezeDecision, freezeStatus.MANUAL_FREEZE_DECISION);
+    assert.ok(/FROZEN/.test(result.note));
+    assert.ok(/V7\.1/.test(result.note));
+  });
+
+  check("computeFreezeStatus: FROZEN wird nicht aus Testzahl oder sauberem Working Tree abgeleitet", () => {
+    // Dieselbe kanonische Entscheidung führt unabhängig vom aktuellen
+    // Git-Stand/Working-Tree zu FROZEN – der Freeze wird ausschließlich durch
+    // die manuelle Entscheidung getragen, niemals durch Git-Zustand allein.
+    const dirtyButDecided = freezeStatus.computeFreezeStatus({
+      currentGitCommit: freezeStatus.LAST_SECURED_COMMIT,
+      workingTreeClean: false,
+      manualFreezeDecision: freezeStatus.MANUAL_FREEZE_DECISION,
+    });
+    assert.strictEqual(dirtyButDecided.status, "FROZEN");
+
+    const unknownGitButDecided = freezeStatus.computeFreezeStatus({
+      currentGitCommit: null,
+      workingTreeClean: null,
+      manualFreezeDecision: freezeStatus.MANUAL_FREEZE_DECISION,
+    });
+    assert.strictEqual(unknownGitButDecided.status, "FROZEN");
+
+    // Umgekehrt: ein sauberer, passender Git-Stand allein (ohne die
+    // kanonische Entscheidung) darf niemals FROZEN erzeugen.
+    const cleanButNotDecided = freezeStatus.computeFreezeStatus({
+      currentGitCommit: freezeStatus.LAST_SECURED_COMMIT,
+      workingTreeClean: true,
+    });
+    assert.notStrictEqual(cleanButNotDecided.status, "FROZEN");
+
+    // Eine gefälschte/unvollständige "Entscheidung" darf trotz sauberem,
+    // passendem Git-Stand ebenfalls niemals FROZEN erzeugen.
+    const fakeDecision = freezeStatus.computeFreezeStatus({
+      currentGitCommit: freezeStatus.LAST_SECURED_COMMIT,
+      workingTreeClean: true,
+      manualFreezeDecision: { version: "V7.0", status: "FROZEN", decidedBy: "Cursor", decisionDate: "2026-07-25", baseCommit: freezeStatus.LAST_SECURED_COMMIT },
+    });
+    assert.notStrictEqual(fakeDecision.status, "FROZEN");
   });
 
   check("computeFreezeStatus enthält version/phase/openJamalSteps/knownNonGoals/nextProductPathAfterV70", () => {

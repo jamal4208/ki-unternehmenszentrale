@@ -4,7 +4,9 @@
 
 `server.js` registriert über `server-http-router.js` **47 GET-Routen** und **4 additive POST-Routen** (nur Execution Bridge, seit Phase C gesichert). Andere HTTP-Methoden bleiben 405. GET-Routen bleiben read-only. Die POST-Routen der Execution Bridge schreiben ausschließlich in App-Support und – nach Jamal-Freigabe – in ein Fixture-Testrepository; niemals in Health und niemals mit Commit/Push/Deployment.
 
-V7.0 Phase E (Umsetzungskandidat, noch nicht committed) ergänzt **genau eine neue GET-Route**: `GET /api/v7-freeze-status`. Sie liest ausschließlich Phasenhistorie, aktuellen Git-Commit/Working-Tree und den zuletzt gemessenen Testlauf; Statusmodell `IN_REVIEW|FREEZE_CANDIDATE|FROZEN`; setzt `FROZEN` niemals selbst. Andere Methoden bleiben 405.
+V7.0 Phase E (gesichert `52ce012`) ergänzte **genau eine neue GET-Route**: `GET /api/v7-freeze-status`. Sie liest Phasenhistorie, aktuellen Git-Commit/Working-Tree und den zuletzt gemessenen Testlauf; Statusmodell `IN_REVIEW|FREEZE_CANDIDATE|FROZEN`. Die automatische Ableitung setzt `FROZEN` niemals selbst. Andere Methoden bleiben 405.
+
+**V7.0 offiziell FROZEN (25.07.2026):** Dieselbe Route liefert seit Jamals ausdrücklicher Entscheidung zusätzlich `manualFreezeDecision` und zeigt `status: "FROZEN"` – ausschließlich weil server.js die eine kanonische, von Hand in `v7-freeze-status.js#MANUAL_FREEZE_DECISION` hinterlegte Entscheidung (Version, `FROZEN`, `decidedBy: "Jamal"`, Entscheidungsdatum `2026-07-25`, Basis-Commit `52ce012`) an `computeFreezeStatus()` übergibt. Kein neuer Endpunkt, keine neue Methode, kein Schreibpfad; POST bleibt 405.
 
 V7.0 Phase D (gesichert `6553452`) ergänzte **genau eine neue GET-Route**: `GET /api/execution/executors`. Sie liest die Executor-Registry (Mock/Codex) inkl. Verfügbarkeit/Autorisierung; kein Prozessstart. Codex-Ausführung und Apply bleiben für Health hart blockiert.
 
@@ -84,7 +86,7 @@ Nur `/api/agents/plugin-readiness` liest HTTP-Query-Parameter. Lokale Serverkonf
 | 44 | `/api/execution/attempts/status` | Attempt-Status der Execution Bridge | Query `attemptId` → Status, Apply-Status, Recovery | Read-only Attempt-Metadaten aus App Support; keine Secrets/Dateiinhalte; `madeExternalRequest: false` | NEIN | NEIN | V7.0 Phase C (gesichert `0858b4e`); Mock ≠ KI |
 | 45 | `/api/execution/attempts/result` | Attempt-Ergebnis / Evidenz | Query `attemptId` → Diff-Summary, Tests, Blocker, changedFiles | Read-only strukturierte Evidenz; kein Auto-ACCEPTED; keine Dateiinhalte | NEIN | NEIN | V7.0 Phase C (gesichert `0858b4e`) |
 | 46 | `/api/execution/executors` | Executor-Registry (Mock/Codex) | keine HTTP-Eingaben → Liste mit Verfügbarkeit/Autorisierung je Executor | Read-only; kein Prozessstart; keine Secrets | NEIN | NEIN | V7.0 Phase D (gesichert `6553452`); Codex nur gegen Fixture, Health hart blockiert |
-| 47 | `/api/v7-freeze-status` | V7.0 Freeze-/Abschlussstatus | keine HTTP-Eingaben → `status` (`IN_REVIEW\|FREEZE_CANDIDATE\|FROZEN`), Phasenhistorie, Git-Abgleich, Teststand, offene Jamal-Schritte | Read-only; abgeleitet aus bestehenden Daten; setzt `FROZEN` niemals selbst | NEIN | NEIN | V7.0 Phase E (Umsetzungskandidat); `FROZEN` bleibt ausschließlich Jamals Entscheidung |
+| 47 | `/api/v7-freeze-status` | V7.0 Freeze-/Abschlussstatus | keine HTTP-Eingaben → `status` (`IN_REVIEW\|FREEZE_CANDIDATE\|FROZEN`), Phasenhistorie, Git-Abgleich, Teststand, `manualFreezeDecision`, offene Jamal-Schritte | Read-only; automatische Ableitung setzt `FROZEN` niemals selbst; `FROZEN` entsteht ausschließlich durch die im Quellcode hinterlegte `MANUAL_FREEZE_DECISION` | NEIN | NEIN | V7.0 Phase E (gesichert `52ce012`); seit 25.07.2026 zeigt diese Route `V7.0 · FROZEN` aufgrund von Jamals ausdrücklicher Entscheidung |
 
 ### Additive POST-Routen (nur Execution Bridge, seit Phase C gesichert)
 
