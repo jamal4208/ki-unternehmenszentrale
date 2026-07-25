@@ -700,17 +700,20 @@ function main() {
     assert.strictEqual(withDefaults.executionAttempt, null, "v1-Läufe erhalten additiv null statt Fehler");
   });
 
-  check("Phase C UI: Isolierte Testausführung in Chef-Sprache, ein primärer Button je Zustand, Mock-Executor eindeutig gekennzeichnet", () => {
+  check("Phase C/D UI: Isolierte Testausführung in Chef-Sprache, ein primärer Button je Zustand, Executor eindeutig gekennzeichnet", () => {
     const deps = { escapeHtml: (value) => String(value) };
     let run = buildReadyRun("execution-attempt-ui-run");
 
     const idleHtml = GuidedWorkUi.renderExecutionAttempt(run, {}, deps);
     assert.ok(idleHtml.includes(GuidedWorkUi.MOCK_EXECUTOR_LABEL));
+    assert.ok(idleHtml.includes("data-execution-executor"), "Phase D: Executor ist explizit auswählbar");
     assert.ok(idleHtml.includes("data-execution-target"));
     assert.ok(idleHtml.includes("data-execution-scenario"));
     assert.ok(idleHtml.includes('data-execution-action="prepare"'));
     assert.strictEqual((idleHtml.match(/data-execution-action="/g) || []).length, 1, "genau ein primärer Button im Leerzustand");
-    assert.ok(!idleHtml.toLowerCase().includes("codex"));
+    // Phase D: Codex ist als zweite, klar gekennzeichnete Option verbindlich
+    // sichtbar (Auftrag E/I) – ohne dass ein Codex-Lauf ausgelöst wird.
+    assert.ok(idleHtml.toLowerCase().includes("codex"), "Codex muss als Executor-Option sichtbar sein");
     assert.ok(!idleHtml.toLowerCase().includes("ki-ausführung erfolgt") && !/\bKI-Agent\b/.test(idleHtml));
 
     run = GuidedWork.beginExecutionAttempt(run, {

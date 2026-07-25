@@ -232,6 +232,8 @@ const EXECUTION_PACKAGE_FIELDS = [
   "forbiddenPaths",
   "responsibleAgentId",
   "testCommand",
+  "executorId",
+  "codexTaskPresetId",
 ];
 
 const KNOWN_WORKING_TREE_BASELINE_FIELDS = [
@@ -347,6 +349,23 @@ function handleExecutionAttemptResult(res, context) {
   const attemptId = safeQueryParam(context.requestUrl, "attemptId");
   const result = executionBridgeModule.readOnlyAttemptResult(attemptId);
   sendJson(res, result.ok ? 200 : 404, { ...result, ...API_SECURITY_FLAGS });
+}
+
+// V7.0 Phase D – read-only Executor-Registry. Der Browser bekommt hier
+// ausschließlich das bereits serverseitig geprüfte Ergebnis (Verfügbarkeit,
+// Auth-Label, Version); er kann keine Executable-Pfade, CLI-Argumente,
+// Environment oder Sandboxmodus setzen (Auftrag E).
+function handleExecutionExecutors(res, context) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+    return;
+  }
+  try {
+    const executors = executionBridgeModule.executorRegistry.describeExecutorsForClient();
+    sendJson(res, 200, { ok: true, executors, ...API_SECURITY_FLAGS });
+  } catch (_error) {
+    sendJson(res, 200, { ok: true, executors: [], ...API_SECURITY_FLAGS });
+  }
 }
 
 async function handleHealthUpgradeKompassLiveStatus(res) {
@@ -22168,6 +22187,7 @@ const getRoutes = buildRouteMap([
   ["/api/server-status", (res) => handleServerStatus(res)],
   ["/api/execution/attempts/status", (res, context) => handleExecutionAttemptStatus(res, context)],
   ["/api/execution/attempts/result", (res, context) => handleExecutionAttemptResult(res, context)],
+  ["/api/execution/executors", (res, context) => handleExecutionExecutors(res, context)],
 ]);
 
 const postRoutes = buildRouteMap([

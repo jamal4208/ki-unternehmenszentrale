@@ -50084,6 +50084,7 @@ if (window.DailyWorkRunUi) {
     localStorage: window.localStorage,
   });
   window.DailyWorkRunUi.refreshServerStatus?.();
+  window.DailyWorkRunUi.refreshExecutionExecutors?.();
 }
 renderAll();
 refreshCanonicalProjectRegistry();

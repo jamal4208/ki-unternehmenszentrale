@@ -22,6 +22,8 @@ const serverStatusModule = require("./server-status");
 const healthRepoStatusModule = require("./health-repo-status");
 const healthHybridWorkModule = require("./health-hybrid-work");
 const mockAdapter = require("./execution-mock-adapter");
+const codexAdapter = require("./execution-codex-adapter");
+const executorRegistry = require("./execution-executor-registry");
 
 const HEALTH_PROJECT_ID = healthRepoStatusModule.HEALTH_PROJECT_ID;
 const FIXTURE_PROJECT_ID = "execution-bridge-fixture";
@@ -221,6 +223,14 @@ const MAX_WORKSPACE_FILES = 200;
 const MAX_WORKSPACE_FILE_BYTES = 512 * 1024;
 const MAX_WORKSPACE_TOTAL_BYTES = 8 * 1024 * 1024;
 const DEFAULT_ATTEMPT_TIMEOUT_MS = 15_000;
+// Codex braucht einen echten Netzwerk-/Modell-Roundtrip, der deutlich länger
+// dauert als der deterministische Mock. Der Codex-Adapter selbst begrenzt den
+// Kindprozess bereits auf codexAdapter.DEFAULT_CODEX_TIMEOUT_MS; dieser
+// Bridge-seitige Wert liegt bewusst etwas darüber, damit der Adapter-Timeout
+// im Normalfall zuerst zuschlägt und TIMED_OUT nicht allein durch die Bridge
+// verursacht wird. Test-Aufrufe können weiterhin options.attemptTimeoutMs
+// explizit setzen, um TIMED_OUT gezielt und schnell zu erzeugen.
+const DEFAULT_CODEX_ATTEMPT_TIMEOUT_MS = 150_000;
 const TOKEN_TTL_MS = 60_000;
 const MAX_AUDIT_FILE_BYTES = 512 * 1024;
 const MAX_ATTEMPTS_ON_DISK = 200;
@@ -228,8 +238,21 @@ const STALE_LOCK_MS = 5 * 60_000;
 
 const EXCLUDED_COPY_NAMES = new Set([".git", ".env", ".env.local", "node_modules", ".DS_Store"]);
 
-const FIXTURE_ALLOWED_FILES = Object.freeze(["FIXTURE_NOTE.md", "FIXTURE_DATA.json"]);
+// FIXTURE_CALC.js/.test.js sind additiv für Phase D (Codex-Pilot) ergänzt.
+// Bestehende Mock-Attempts, die ausschließlich FIXTURE_NOTE.md/FIXTURE_DATA.json
+// verwenden, sind davon unberührt.
+const FIXTURE_ALLOWED_FILES = Object.freeze([
+  "FIXTURE_NOTE.md",
+  "FIXTURE_DATA.json",
+  "FIXTURE_CALC.js",
+  "FIXTURE_CALC.test.js",
+]);
 const FIXTURE_FORBIDDEN_PATHS = Object.freeze([".env", ".env.local", "secrets"]);
+
+const FIXTURE_CALC_JS_CONTENT =
+  "\"use strict\";\n\n// Absichtlich fehlerhaft für den Phase-D-Codex-Pilot: subtrahiert statt zu addieren.\nfunction addFixtureNumbers(a, b) {\n  return a - b;\n}\n\nmodule.exports = { addFixtureNumbers };\n";
+const FIXTURE_CALC_TEST_JS_CONTENT =
+  "\"use strict\";\n\nconst assert = require(\"assert\");\nconst { addFixtureNumbers } = require(\"./FIXTURE_CALC.js\");\n\nassert.strictEqual(addFixtureNumbers(2, 3), 5);\nconsole.log(\"ok 1 - addFixtureNumbers addiert korrekt\");\n";
 
 // In-memory, RAM-only, one-time execution tokens. Never written to disk, never
 // part of any run object, never returned via GET, never logged with full value.
@@ -507,26 +530,43 @@ function ensureFixtureProjectRepo(options = {}) {
   ensureDirSecure(paths.fixturesDir);
   const repoDir = fixtureRepoPath(paths);
   const gitDir = path.join(repoDir, ".git");
-  if (fs.existsSync(gitDir)) {
-    return repoDir;
+  if (!fs.existsSync(gitDir)) {
+    fs.mkdirSync(repoDir, { recursive: true, mode: 0o700 });
+    runGitSync(repoDir, ["init", "-q"]);
+    runGitSync(repoDir, ["config", "user.email", "execution-bridge@local.invalid"]);
+    runGitSync(repoDir, ["config", "user.name", "Execution Bridge Fixture"]);
+    fs.writeFileSync(
+      path.join(repoDir, "FIXTURE_NOTE.md"),
+      "# Fixture-Notiz\n\nDiese Datei gehört zum Execution-Bridge-Fixture-Repository (Phase C).\n",
+      { mode: 0o600 },
+    );
+    fs.writeFileSync(
+      path.join(repoDir, "FIXTURE_DATA.json"),
+      JSON.stringify({ fixture: true, purpose: "execution-bridge-demo" }, null, 2),
+      { mode: 0o600 },
+    );
+    runGitSync(repoDir, ["add", "-A"]);
+    runGitSync(repoDir, ["commit", "-q", "-m", "Fixture-Repository für Execution Bridge (Phase C)"]);
   }
-  fs.mkdirSync(repoDir, { recursive: true, mode: 0o700 });
-  runGitSync(repoDir, ["init", "-q"]);
-  runGitSync(repoDir, ["config", "user.email", "execution-bridge@local.invalid"]);
-  runGitSync(repoDir, ["config", "user.name", "Execution Bridge Fixture"]);
-  fs.writeFileSync(
-    path.join(repoDir, FIXTURE_ALLOWED_FILES[0]),
-    "# Fixture-Notiz\n\nDiese Datei gehört zum Execution-Bridge-Fixture-Repository (Phase C).\n",
-    { mode: 0o600 },
-  );
-  fs.writeFileSync(
-    path.join(repoDir, FIXTURE_ALLOWED_FILES[1]),
-    JSON.stringify({ fixture: true, purpose: "execution-bridge-demo" }, null, 2),
-    { mode: 0o600 },
-  );
-  runGitSync(repoDir, ["add", "-A"]);
-  runGitSync(repoDir, ["commit", "-q", "-m", "Fixture-Repository für Execution Bridge (Phase C)"]);
+  ensureFixtureCodexPilotFiles(repoDir);
   return repoDir;
+}
+
+// Additive Migration für Phase D: bestehende, bereits initialisierte
+// Fixture-Repos (aus Phase C) erhalten die Codex-Pilotdateien nachträglich,
+// ohne die vorhandene Historie/Commits zu verändern. Nur wenn tatsächlich
+// etwas fehlt, wird ein einziger zusätzlicher Commit erzeugt; der Working
+// Tree bleibt danach sauber (Voraussetzung für neue Fixture-Attempts).
+function ensureFixtureCodexPilotFiles(repoDir) {
+  const calcPath = path.join(repoDir, "FIXTURE_CALC.js");
+  const calcTestPath = path.join(repoDir, "FIXTURE_CALC.test.js");
+  const missingCalc = !fs.existsSync(calcPath);
+  const missingCalcTest = !fs.existsSync(calcTestPath);
+  if (!missingCalc && !missingCalcTest) return;
+  if (missingCalc) fs.writeFileSync(calcPath, FIXTURE_CALC_JS_CONTENT, { mode: 0o600 });
+  if (missingCalcTest) fs.writeFileSync(calcTestPath, FIXTURE_CALC_TEST_JS_CONTENT, { mode: 0o600 });
+  runGitSync(repoDir, ["add", "-A"]);
+  runGitSync(repoDir, ["commit", "-q", "-m", "Fixture-Pilotdateien für Codex-Adapter ergänzen (Phase D)"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -798,6 +838,41 @@ function diffWorkspaceAgainstBaseline(workspaceDir, baselineHashes) {
   return [...new Set(changed)];
 }
 
+// V7.0 Phase D – unabhängig gemessener Diff. "Vorher" wird direkt aus dem
+// echten Quellrepository gelesen (nicht aus einer vom Executor gespeicherten
+// Kopie), "nachher" aus dem isolierten Workspace. Damit ist der Diff für
+// JEDEN Executor identisch verifiziert – Codex' eigener Text/Diff-Anspruch
+// wird hierfür nie herangezogen (Auftrag G: "Ein Codex-Text ist keine Evidenz").
+function buildVerifiedDiffEntries(sourceRepoPath, workspaceDir, changedFiles) {
+  return (changedFiles || []).map((relPath) => {
+    let beforeBuffer = null;
+    let afterBuffer = null;
+    try {
+      beforeBuffer = fs.readFileSync(path.join(sourceRepoPath, relPath));
+    } catch (_error) {
+      beforeBuffer = null;
+    }
+    try {
+      afterBuffer = fs.readFileSync(path.join(workspaceDir, relPath));
+    } catch (_error) {
+      afterBuffer = null;
+    }
+    const beforeLines = beforeBuffer ? beforeBuffer.toString("utf8").split(/\r?\n/) : [];
+    const afterLines = afterBuffer ? afterBuffer.toString("utf8").split(/\r?\n/) : [];
+    return {
+      path: relPath,
+      existedBefore: Boolean(beforeBuffer),
+      existedAfter: Boolean(afterBuffer),
+      beforeHash: beforeBuffer ? sha256Hex(beforeBuffer) : null,
+      afterHash: afterBuffer ? sha256Hex(afterBuffer) : null,
+      beforeBytes: beforeBuffer ? beforeBuffer.length : 0,
+      afterBytes: afterBuffer ? afterBuffer.length : 0,
+      linesAdded: Math.max(0, afterLines.length - beforeLines.length),
+      linesRemoved: Math.max(0, beforeLines.length - afterLines.length),
+    };
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Tokens – RAM-only, kurzlebig, einmalig, an Aktion + IDs + Fingerprint
 // gebunden. Niemals in localStorage, Backup oder URL.
@@ -831,7 +906,20 @@ function consumeToken(token, expectedBinding) {
     TOKENS.delete(token);
     return { ok: false, reason: "TOKEN_EXPIRED" };
   }
-  const fields = ["action", "runId", "executionPackageId", "fingerprint", "attemptId"];
+  // executorId/targetRepositoryIdentity/baselineFingerprint sind additive,
+  // ausschließlich für Codex-Token gesetzte Zusatzbindungen (Phase D). Für
+  // Mock-Token bleiben sie unbenutzt (undefined auf beiden Seiten), sodass
+  // sich das bisherige Verhalten nicht ändert.
+  const fields = [
+    "action",
+    "runId",
+    "executionPackageId",
+    "fingerprint",
+    "attemptId",
+    "executorId",
+    "targetRepositoryIdentity",
+    "baselineFingerprint",
+  ];
   for (const field of fields) {
     if (expectedBinding[field] !== undefined && record[field] !== expectedBinding[field]) {
       return { ok: false, reason: "TOKEN_BINDING_MISMATCH" };
@@ -844,6 +932,18 @@ function consumeToken(token, expectedBinding) {
 
 function clearAllTokensForTests() {
   TOKENS.clear();
+}
+
+// Token-Aktionsnamen bleiben für Mock exakt wie in Phase C ("start"/"cancel"),
+// damit sich am bestehenden, bereits getesteten Verhalten nichts ändert.
+// Codex erhält eigene, in Auftrag F verlangte Aktionsnamen mit zusätzlicher
+// Bindung an executorId/Zielrepository/Baseline-Fingerprint.
+function tokenActionFor(kind, executorId) {
+  if (executorId === "codex") {
+    if (kind === "start") return "START_CODEX_EXECUTION";
+    if (kind === "cancel") return "CANCEL_CODEX_EXECUTION";
+  }
+  return kind;
 }
 
 // ---------------------------------------------------------------------------
@@ -929,13 +1029,55 @@ async function prepareExecutionAttempt(input = {}, options = {}) {
     throw new Error("executionPackageId, executionPackageFingerprint und projectId sind erforderlich.");
   }
 
-  const allowedFiles = normalizeRelativePathList(pkg.allowedFiles, "allowedFiles");
-  const forbiddenPaths = normalizeRelativePathList(pkg.forbiddenPaths || [], "forbiddenPaths");
+  let allowedFiles = normalizeRelativePathList(pkg.allowedFiles, "allowedFiles");
+  let forbiddenPaths = normalizeRelativePathList(pkg.forbiddenPaths || [], "forbiddenPaths");
   if (allowedFiles.length === 0) {
     throw new Error("allowedFiles darf nicht leer sein.");
   }
 
   const context = requireSupportedProject(projectId, options);
+
+  // V7.0 Phase D – Executor-Auswahl. Fehlender/unbekannter Wert bedeutet Mock
+  // (Rückwärtskompatibilität zu Phase C). Health ist für Codex in Phase D
+  // hart blockiert – kein Token wird ausgestellt, bevor überhaupt etwas
+  // anderes geprüft wird.
+  const executorId = String(pkg.executorId || "mock").trim() || "mock";
+  if (!executorRegistry.hasExecutor(executorId)) {
+    throw new Error("Unbekannter Executor.");
+  }
+  if (context.isHealth && !executorRegistry.isHealthAllowedForExecutor(executorId)) {
+    throw new Error(
+      "Codex-Ausführung ist für Health in Phase D hart blockiert. Nur read-only Baseline und Paketvorbereitung sind erlaubt.",
+    );
+  }
+
+  let codexTaskPresetId = null;
+  let workspaceMaterializeFiles = null;
+  if (executorId === "codex") {
+    const availability = codexAdapter.detectCodexAvailability(options);
+    if (!availability.available) {
+      throw new Error("Codex ist lokal nicht verfügbar. Kein Start-Token wird ausgestellt.");
+    }
+    if (!availability.authenticated) {
+      throw new Error("Codex ist nicht authentifiziert. Kein Start-Token wird ausgestellt.");
+    }
+    codexTaskPresetId = String(pkg.codexTaskPresetId || "").trim();
+    const preset = codexAdapter.CODEX_TASK_PRESETS[codexTaskPresetId];
+    if (!preset) {
+      throw new Error("Unbekannte oder fehlende Codex-Preset-ID.");
+    }
+    if (preset.projectId !== projectId) {
+      throw new Error("Codex-Preset passt nicht zum gewählten Zielprojekt.");
+    }
+    // Serverautoritativ: Allowlist/Forbidden-Paths kommen ausschließlich aus
+    // dem geprüften Preset, nie aus einer freien Browser-Eingabe (Auftrag D/E).
+    allowedFiles = preset.allowedFiles.slice();
+    forbiddenPaths = preset.forbiddenPaths.slice();
+    // Zusätzlich zur Schreib-/Diff-Allowlist (allowedFiles) müssen die für das
+    // erlaubte Testkommando benötigten, read-only mitgelieferten Dateien im
+    // Workspace vorhanden sein. Sie zählen NICHT als von Codex veränderbar.
+    workspaceMaterializeFiles = [...new Set([...allowedFiles, ...(preset.testSupportFiles || [])])];
+  }
 
   if (context.isFixture) {
     const disallowed = allowedFiles.filter((entry) => !FIXTURE_ALLOWED_FILES.includes(entry));
@@ -1020,17 +1162,30 @@ async function prepareExecutionAttempt(input = {}, options = {}) {
     appliedAt: null,
     appliedFiles: [],
     mockExecutorLabel: mockAdapter.MOCK_EXECUTOR_LABEL,
+    executorId,
+    executorLabel: executorRegistry.getExecutorDescriptor(executorId)?.displayName || null,
+    codexTaskPresetId,
+    workspaceMaterializeFiles,
+    codexRawOutput: null,
   };
 
   saveAttempt(paths, attempt);
   appendAuditEntry(paths, { attemptId, runId, projectId, action: "PREPARE", status: "PREPARED" });
 
+  const startAction = tokenActionFor("start", executorId);
   const startToken = mintToken({
-    action: "start",
+    action: startAction,
     runId,
     executionPackageId,
     fingerprint: executionPackageFingerprint,
     attemptId,
+    ...(executorId === "codex"
+      ? {
+          executorId,
+          targetRepositoryIdentity: projectId,
+          baselineFingerprint: attempt.baseline.baselineFingerprint,
+        }
+      : {}),
   });
 
   return {
@@ -1040,6 +1195,8 @@ async function prepareExecutionAttempt(input = {}, options = {}) {
     startToken,
     expiresInMs: TOKEN_TTL_MS,
     baseline: attempt.baseline,
+    executorId,
+    executorLabel: attempt.executorLabel,
   };
 }
 
@@ -1060,21 +1217,6 @@ async function startExecutionAttempt(body = {}, options = {}) {
   if (body.approved !== true) {
     throw new Error("Start erfordert Jamals ausdrückliche Freigabe (approved: true).");
   }
-  const scenario = String(body.scenario || "").trim();
-  if (!mockAdapter.SUPPORTED_SCENARIOS.includes(scenario)) {
-    throw new Error("Unbekanntes oder fehlendes Szenario.");
-  }
-
-  const tokenResult = consumeToken(body.token, {
-    action: "start",
-    runId,
-    executionPackageId,
-    fingerprint: executionPackageFingerprint,
-    attemptId,
-  });
-  if (!tokenResult.ok) {
-    throw new Error("Start-Token ist ungültig, abgelaufen oder bereits verwendet.");
-  }
 
   const loaded = loadAttempt(paths, attemptId);
   if (!loaded.ok) throw new Error("Attempt nicht gefunden.");
@@ -1084,6 +1226,36 @@ async function startExecutionAttempt(body = {}, options = {}) {
   }
   if (attempt.status !== "PREPARED") {
     throw new Error(`Attempt kann aus Status ${attempt.status} nicht gestartet werden.`);
+  }
+
+  const executorId = attempt.executorId || "mock";
+  const adapter = executorRegistry.resolveExecutorAdapter(executorId);
+  const scenario = String(body.scenario || "").trim();
+  if (!adapter.SUPPORTED_SCENARIOS.includes(scenario)) {
+    throw new Error("Unbekanntes oder fehlendes Szenario.");
+  }
+  // Health-Hardblock erneut prüfen – unabhängig vom Zeitpunkt der Vorbereitung.
+  if (attempt.projectId === HEALTH_PROJECT_ID && !executorRegistry.isHealthAllowedForExecutor(executorId)) {
+    throw new Error("Codex-Ausführung ist für Health in Phase D hart blockiert.");
+  }
+
+  const startAction = tokenActionFor("start", executorId);
+  const tokenResult = consumeToken(body.token, {
+    action: startAction,
+    runId,
+    executionPackageId,
+    fingerprint: executionPackageFingerprint,
+    attemptId,
+    ...(executorId === "codex"
+      ? {
+          executorId,
+          targetRepositoryIdentity: attempt.projectId,
+          baselineFingerprint: attempt.baseline?.baselineFingerprint || null,
+        }
+      : {}),
+  });
+  if (!tokenResult.ok) {
+    throw new Error("Start-Token ist ungültig, abgelaufen oder bereits verwendet.");
   }
 
   const lockResult = acquireProjectLock(paths, attempt.projectId, attemptId);
@@ -1108,12 +1280,20 @@ async function startExecutionAttempt(body = {}, options = {}) {
   saveAttempt(paths, attempt);
   appendAuditEntry(paths, { attemptId, runId, projectId: attempt.projectId, action: "START", status: "RUNNING" });
 
+  const cancelAction = tokenActionFor("cancel", executorId);
   const cancelToken = mintToken({
-    action: "cancel",
+    action: cancelAction,
     runId,
     executionPackageId,
     fingerprint: executionPackageFingerprint,
     attemptId,
+    ...(executorId === "codex"
+      ? {
+          executorId,
+          targetRepositoryIdentity: attempt.projectId,
+          baselineFingerprint: attempt.baseline?.baselineFingerprint || null,
+        }
+      : {}),
   });
 
   RUNTIME.set(attemptId, { cancelRequested: false });
@@ -1130,6 +1310,8 @@ async function startExecutionAttempt(body = {}, options = {}) {
 async function runAttemptWorkflowInBackground(attemptSnapshot, paths, options) {
   const attemptId = attemptSnapshot.attemptId;
   const context = requireSupportedProject(attemptSnapshot.projectId, options);
+  const executorId = attemptSnapshot.executorId || "mock";
+  const adapter = executorRegistry.resolveExecutorAdapter(executorId);
   const workspaceId = computeWorkspaceId({
     runId: attemptSnapshot.runId,
     executionPackageId: attemptSnapshot.executionPackageId,
@@ -1144,11 +1326,29 @@ async function runAttemptWorkflowInBackground(attemptSnapshot, paths, options) {
     /* Health-Pfad evtl. nicht verfügbar; Ausschluss bleibt best-effort. */
   }
 
-  const timeoutMs = Number.isFinite(options.attemptTimeoutMs) ? options.attemptTimeoutMs : DEFAULT_ATTEMPT_TIMEOUT_MS;
+  const sourceRootForDiff = context.isHealth
+    ? healthRepoStatusModule.resolveCanonicalHealthPath().resolvedPath
+    : context.repoPath;
+
+  const defaultTimeoutForExecutor = executorId === "codex" ? DEFAULT_CODEX_ATTEMPT_TIMEOUT_MS : DEFAULT_ATTEMPT_TIMEOUT_MS;
+  const timeoutMs = Number.isFinite(options.attemptTimeoutMs) ? options.attemptTimeoutMs : defaultTimeoutForExecutor;
   const startedAtMs = Date.now();
 
   function runtimeState() {
     return RUNTIME.get(attemptId) || { cancelRequested: false };
+  }
+
+  // Beendet – falls es sich um einen realen Executor-Prozess handelt (Codex)
+  // – ausschließlich den eigenen, attemptgebundenen Kindprozess, bevor der
+  // Workspace aufgeräumt wird. Für Mock ist cancelRun nicht vorhanden (No-Op).
+  async function abortExecutorProcessIfAny() {
+    if (typeof adapter.cancelRun === "function") {
+      try {
+        await adapter.cancelRun(attemptId);
+      } catch (_error) {
+        /* best effort – Terminalstatus wird trotzdem gesetzt */
+      }
+    }
   }
 
   function persistAndAudit(patch, action) {
@@ -1212,7 +1412,11 @@ async function runAttemptWorkflowInBackground(attemptSnapshot, paths, options) {
           : context.repoPath,
         workspaceDir,
         forbiddenRoots,
-        allowedFilesOnly: attemptSnapshot.allowedFiles,
+        // Codex erhält zusätzlich die read-only Testunterstützungsdateien des
+        // Presets (z.B. den Fixture-Test selbst); die Schreib-/Diff-Allowlist
+        // (attemptSnapshot.allowedFiles) bleibt davon unabhängig und wird erst
+        // nach dem Lauf für die Auswertung verwendet (evaluateAllowlist).
+        allowedFilesOnly: attemptSnapshot.workspaceMaterializeFiles || attemptSnapshot.allowedFiles,
       });
       baselineHashes = materialized.baselineHashes;
     } catch (workspaceError) {
@@ -1236,6 +1440,8 @@ async function runAttemptWorkflowInBackground(attemptSnapshot, paths, options) {
       let waited = 0;
       while (waited < options.testDelayMs) {
         if (runtimeState().cancelRequested) {
+          // eslint-disable-next-line no-await-in-loop
+          await abortExecutorProcessIfAny();
           persistAndAudit(
             { status: "CANCELLED", finishedAt: nowIso(), cancelRequestedAt: nowIso() },
             "CANCELLED",
@@ -1246,6 +1452,8 @@ async function runAttemptWorkflowInBackground(attemptSnapshot, paths, options) {
           return;
         }
         if (Date.now() - startedAtMs > timeoutMs) {
+          // eslint-disable-next-line no-await-in-loop
+          await abortExecutorProcessIfAny();
           persistAndAudit({ status: "TIMED_OUT", finishedAt: nowIso() }, "TIMED_OUT");
           releaseProjectLock(paths, attemptSnapshot.projectId, attemptId);
           RUNTIME.delete(attemptId);
@@ -1258,22 +1466,47 @@ async function runAttemptWorkflowInBackground(attemptSnapshot, paths, options) {
       }
     }
 
-    const executionPromise = mockAdapter.runMockExecutionScenario({
-      workspaceDir,
-      allowedFiles: attemptSnapshot.allowedFiles,
-      scenario: attemptSnapshot.scenario,
-      attemptId,
-      timeoutDelayMs: attemptSnapshot.scenario === "TIMEOUT" ? timeoutMs + 5000 : undefined,
-      shouldAbort: () => Boolean(runtimeState().cancelRequested),
-    });
+    // Executor-Dispatch: die Bridge selbst kennt keine Codex-spezifische
+    // Sonderlogik in der State-Machine. Sie unterscheidet ausschließlich,
+    // welche der beiden Adapter-Funktionen (vom Registry aufgelöst) aufgerufen
+    // wird; beide liefern dieselbe Ergebnisform zurück.
+    const executionPromise =
+      executorId === "codex"
+        ? adapter.runCodexExecutionScenario({
+            workspaceDir,
+            allowedFiles: attemptSnapshot.allowedFiles,
+            forbiddenPaths: attemptSnapshot.forbiddenPaths,
+            scenario: attemptSnapshot.scenario,
+            attemptId,
+            codexTaskPresetId: attemptSnapshot.codexTaskPresetId,
+            forbiddenRoots,
+            attemptTimeoutMs: timeoutMs,
+            shouldAbort: () => Boolean(runtimeState().cancelRequested),
+            // Ausschließlich für Tests: erlaubt einen Fake-Kindprozess statt des
+            // echten Codex-CLI-Aufrufs. In Produktion nie gesetzt.
+            execFileImpl: options.codexExecFileImpl,
+          })
+        : adapter.runMockExecutionScenario({
+            workspaceDir,
+            allowedFiles: attemptSnapshot.allowedFiles,
+            scenario: attemptSnapshot.scenario,
+            attemptId,
+            timeoutDelayMs: attemptSnapshot.scenario === "TIMEOUT" ? timeoutMs + 5000 : undefined,
+            shouldAbort: () => Boolean(runtimeState().cancelRequested),
+          });
 
-    // Cancel und Timeout werden parallel zur Mock-Ausführung aktiv gepollt.
-    // Ohne diesen Poll würde ein Cancel während eines langen TIMEOUT-Szenarios
-    // erst nach dem Race-Ende wirken und den Attempt fälschlich als RUNNING
-    // oder TIMED_OUT belassen.
+    // Cancel und Timeout werden parallel zur Ausführung aktiv gepollt. Ohne
+    // diesen Poll würde ein Cancel während eines langen TIMEOUT-Szenarios erst
+    // nach dem Race-Ende wirken und den Attempt fälschlich als RUNNING oder
+    // TIMED_OUT belassen. `workflowSettled` stoppt den Poll spätestens einen
+    // Tick nach Entscheidung des Race – sonst würde diese Schleife bei einem
+    // gewonnenen executionPromise (Normalfall) bis zum vollen, bei Codex
+    // deutlich längeren timeoutMs weiterlaufen und u. a. Testprozesse ohne
+    // expliziten process.exit unnötig lange am Beenden hindern.
+    let workflowSettled = false;
     const controlPromise = (async () => {
       const sliceMs = 25;
-      while (true) {
+      while (!workflowSettled) {
         if (runtimeState().cancelRequested) {
           return { cancelled: true };
         }
@@ -1283,14 +1516,17 @@ async function runAttemptWorkflowInBackground(attemptSnapshot, paths, options) {
         // eslint-disable-next-line no-await-in-loop
         await new Promise((resolve) => setTimeout(resolve, sliceMs));
       }
+      return { settledElsewhere: true };
     })();
 
     const raceResult = await Promise.race([
       executionPromise.then((result) => ({ result })),
       controlPromise,
     ]);
+    workflowSettled = true;
 
     if (raceResult.cancelled || runtimeState().cancelRequested) {
+      await abortExecutorProcessIfAny();
       persistAndAudit({ status: "CANCELLED", finishedAt: nowIso(), cancelRequestedAt: nowIso() }, "CANCELLED");
       releaseProjectLock(paths, attemptSnapshot.projectId, attemptId);
       RUNTIME.delete(attemptId);
@@ -1299,6 +1535,7 @@ async function runAttemptWorkflowInBackground(attemptSnapshot, paths, options) {
     }
 
     if (raceResult.timedOut) {
+      await abortExecutorProcessIfAny();
       persistAndAudit({ status: "TIMED_OUT", finishedAt: nowIso() }, "TIMED_OUT");
       releaseProjectLock(paths, attemptSnapshot.projectId, attemptId);
       RUNTIME.delete(attemptId);
@@ -1309,6 +1546,7 @@ async function runAttemptWorkflowInBackground(attemptSnapshot, paths, options) {
     const execResult = raceResult.result;
 
     if (execResult.cancelled || runtimeState().cancelRequested) {
+      await abortExecutorProcessIfAny();
       persistAndAudit({ status: "CANCELLED", finishedAt: nowIso(), cancelRequestedAt: nowIso() }, "CANCELLED");
       releaseProjectLock(paths, attemptSnapshot.projectId, attemptId);
       RUNTIME.delete(attemptId);
@@ -1325,6 +1563,7 @@ async function runAttemptWorkflowInBackground(attemptSnapshot, paths, options) {
           testExitCode: execResult.testExitCode,
           testSummary: execResult.testSummary,
           errors: execResult.errors,
+          codexRawOutput: execResult.codexRawOutput || null,
         },
         "FAILED",
       );
@@ -1334,8 +1573,11 @@ async function runAttemptWorkflowInBackground(attemptSnapshot, paths, options) {
       return;
     }
 
+    // Unabhängig gemessen – niemals aus execResult.changedFiles/diff
+    // übernommen. Gilt identisch für Mock und Codex (Auftrag G).
     const changedInWorkspace = diffWorkspaceAgainstBaseline(workspaceDir, baselineHashes);
     const blockers = evaluateAllowlist(changedInWorkspace, attemptSnapshot.allowedFiles, attemptSnapshot.forbiddenPaths);
+    const verifiedDiff = buildVerifiedDiffEntries(sourceRootForDiff, workspaceDir, changedInWorkspace);
 
     if (blockers.length > 0) {
       persistAndAudit(
@@ -1343,11 +1585,12 @@ async function runAttemptWorkflowInBackground(attemptSnapshot, paths, options) {
           status: "BLOCKED",
           finishedAt: nowIso(),
           changedFiles: changedInWorkspace,
-          diff: execResult.diff,
+          diff: verifiedDiff,
           testStatus: execResult.testStatus,
           testExitCode: execResult.testExitCode,
           testSummary: execResult.testSummary,
           blockers,
+          codexRawOutput: execResult.codexRawOutput || null,
         },
         "BLOCKED",
       );
@@ -1361,12 +1604,13 @@ async function runAttemptWorkflowInBackground(attemptSnapshot, paths, options) {
       {
         status: "SUCCEEDED",
         finishedAt: nowIso(),
-        changedFiles: execResult.changedFiles,
-        diff: execResult.diff,
+        changedFiles: changedInWorkspace,
+        diff: verifiedDiff,
         testStatus: execResult.testStatus,
         testExitCode: execResult.testExitCode,
         testSummary: execResult.testSummary,
         blockers: [],
+        codexRawOutput: execResult.codexRawOutput || null,
       },
       "SUCCEEDED",
     );
@@ -1405,12 +1649,21 @@ async function cancelExecutionAttempt(body = {}, options = {}) {
     throw new Error(`Cancel ist nur bei aktivem Attempt zulässig (aktuell: ${attempt.status}).`);
   }
 
+  const cancelExecutorId = attempt.executorId || "mock";
+  const cancelAction = tokenActionFor("cancel", cancelExecutorId);
   const tokenResult = consumeToken(body.token, {
-    action: "cancel",
+    action: cancelAction,
     runId,
     executionPackageId,
     fingerprint: executionPackageFingerprint,
     attemptId,
+    ...(cancelExecutorId === "codex"
+      ? {
+          executorId: cancelExecutorId,
+          targetRepositoryIdentity: attempt.projectId,
+          baselineFingerprint: attempt.baseline?.baselineFingerprint || null,
+        }
+      : {}),
   });
   if (!tokenResult.ok) {
     throw new Error("Cancel-Token ist ungültig, abgelaufen oder bereits verwendet.");
@@ -1462,6 +1715,8 @@ function readOnlyAttemptStatus(attemptId, options = {}) {
     startedAt: attempt.startedAt,
     finishedAt: attempt.finishedAt,
     mockExecutorLabel: attempt.mockExecutorLabel,
+    executorId: attempt.executorId || "mock",
+    executorLabel: attempt.executorLabel || attempt.mockExecutorLabel || null,
     recovery,
   };
 }
@@ -1491,7 +1746,13 @@ function readOnlyAttemptResult(attemptId, options = {}) {
     errors: attempt.errors,
     blockers: attempt.blockers,
     mockExecutorLabel: attempt.mockExecutorLabel,
-    resultSource: "Isolierter Mock-Executor-Lauf · noch kein bestätigter Fachbefund",
+    executorId: attempt.executorId || "mock",
+    executorLabel: attempt.executorLabel || attempt.mockExecutorLabel || null,
+    codexRawOutput: attempt.codexRawOutput || null,
+    resultSource:
+      attempt.executorId === "codex"
+        ? "Isolierter Codex-Lauf · von der Zentrale selbst verifizierter Diff und Testlauf · noch kein bestätigter Fachbefund"
+        : "Isolierter Mock-Executor-Lauf · noch kein bestätigter Fachbefund",
   };
 }
 
@@ -1526,6 +1787,8 @@ async function requestApplyPreview(body = {}, options = {}) {
     executionPackageFingerprint: attempt.executionPackageFingerprint,
     baseline: attempt.baseline,
     attemptId: attempt.attemptId,
+    executorId: attempt.executorId || "mock",
+    executorLabel: attempt.executorLabel || attempt.mockExecutorLabel || null,
     changedFiles: attempt.changedFiles,
     diffSummary: attempt.diff.map((entry) => ({
       path: entry.path,
@@ -1544,7 +1807,7 @@ async function requestApplyPreview(body = {}, options = {}) {
   let applyToken = null;
   if (!isHealth) {
     applyToken = mintToken({
-      action: "apply",
+      action: "APPLY_VALIDATED_CHANGES",
       runId,
       executionPackageId,
       fingerprint: executionPackageFingerprint,
@@ -1573,7 +1836,7 @@ async function confirmApply(body = {}, options = {}) {
   }
 
   const tokenResult = consumeToken(body.token, {
-    action: "apply",
+    action: "APPLY_VALIDATED_CHANGES",
     runId,
     executionPackageId,
     fingerprint: executionPackageFingerprint,
@@ -1623,18 +1886,54 @@ async function confirmApply(body = {}, options = {}) {
     return { ok: false, applyStatus: "APPLY_FAILED", message: "Allowlist-Verstoß erreicht niemals das Ziel-Repository." };
   }
 
+  // Atomar im Sinne von "alles oder nichts": zuerst werden ALLE validierten
+  // Dateien vollständig aus dem isolierten Workspace gelesen (und ggf. die
+  // bisherigen Zielinhalte für einen Rollback gesichert), bevor überhaupt ein
+  // einziges Byte im Zielrepository geschrieben wird. Schlägt auch nur eine
+  // einzelne Datei fehl, wird nichts geschrieben – kein stiller Partial-Apply.
+  let preparedWrites;
   try {
-    attempt.changedFiles.forEach((relPath) => {
+    preparedWrites = attempt.changedFiles.map((relPath) => {
       const src = path.join(workspaceDir, relPath);
       const dest = path.join(context.repoPath, relPath);
-      fs.mkdirSync(path.dirname(dest), { recursive: true, mode: 0o700 });
-      fs.copyFileSync(src, dest);
+      const content = fs.readFileSync(src);
+      const existedBefore = fs.existsSync(dest);
+      const previousContent = existedBefore ? fs.readFileSync(dest) : null;
+      return { relPath, dest, content, existedBefore, previousContent };
     });
-  } catch (copyError) {
+  } catch (readError) {
     attempt.applyStatus = "APPLY_FAILED";
     saveAttempt(paths, attempt);
     appendAuditEntry(paths, { attemptId, runId, projectId: attempt.projectId, action: "APPLY_FAILED", status: attempt.status });
-    return { ok: false, applyStatus: "APPLY_FAILED", message: "Übernahme konnte nicht sicher abgeschlossen werden." };
+    return { ok: false, applyStatus: "APPLY_FAILED", message: "Übernahme konnte nicht sicher abgeschlossen werden. Keine Datei wurde geschrieben." };
+  }
+
+  const writtenSoFar = [];
+  try {
+    preparedWrites.forEach((entry) => {
+      fs.mkdirSync(path.dirname(entry.dest), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(entry.dest, entry.content);
+      writtenSoFar.push(entry);
+    });
+  } catch (writeError) {
+    // Vollständiger Rollback: bereits geschriebene Dateien dieses Apply-Versuchs
+    // werden auf ihren Vor-Apply-Zustand zurückgesetzt (gelöscht, falls sie vor
+    // dem Apply nicht existierten).
+    writtenSoFar.forEach((entry) => {
+      try {
+        if (entry.existedBefore) {
+          fs.writeFileSync(entry.dest, entry.previousContent);
+        } else {
+          fs.rmSync(entry.dest, { force: true });
+        }
+      } catch (_rollbackError) {
+        /* best effort */
+      }
+    });
+    attempt.applyStatus = "APPLY_FAILED";
+    saveAttempt(paths, attempt);
+    appendAuditEntry(paths, { attemptId, runId, projectId: attempt.projectId, action: "APPLY_FAILED", status: attempt.status });
+    return { ok: false, applyStatus: "APPLY_FAILED", message: "Übernahme wurde vollständig zurückgerollt (Teilfehler)." };
   }
 
   attempt.applyStatus = "APPLIED";
@@ -1662,6 +1961,7 @@ module.exports = {
   APPLY_STATUSES,
   KNOWN_WORKING_TREE_BASELINE_FIELDS,
   DEFAULT_ATTEMPT_TIMEOUT_MS,
+  DEFAULT_CODEX_ATTEMPT_TIMEOUT_MS,
   TOKEN_TTL_MS,
   MAX_WORKSPACE_FILES,
   MAX_WORKSPACE_FILE_BYTES,
@@ -1706,4 +2006,7 @@ module.exports = {
   requestApplyPreview,
   confirmApply,
   healthApplyBlockedMessage,
+  buildVerifiedDiffEntries,
+  executorRegistry,
+  codexAdapter,
 };

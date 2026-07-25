@@ -728,6 +728,8 @@
     "startedAt",
     "finishedAt",
     "mockExecutorLabel",
+    "executorId",
+    "executorLabel",
     "recovery",
   ]);
 
@@ -740,6 +742,7 @@
     "errors",
     "blockers",
     "resultSource",
+    "codexRawOutput",
   ]);
 
   function canStartNewExecutionAttempt(run) {
@@ -769,6 +772,10 @@
       startedAt: null,
       finishedAt: null,
       mockExecutorLabel: singleText(attemptInfo.mockExecutorLabel, "mockExecutorLabel") || null,
+      executorId: singleText(attemptInfo.executorId, "executorId") || "mock",
+      executorLabel: singleText(attemptInfo.executorLabel, "executorLabel") || null,
+      codexTaskPresetId: singleText(attemptInfo.codexTaskPresetId, "codexTaskPresetId") || null,
+      allowedFiles: textList(attemptInfo.allowedFiles),
       changedFiles: [],
       diff: [],
       testStatus: null,
@@ -776,6 +783,7 @@
       testSummary: null,
       errors: [],
       blockers: [],
+      codexRawOutput: null,
       recovery: { recovery: false },
       appliedAt: null,
       appliedFiles: [],

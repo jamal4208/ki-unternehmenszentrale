@@ -312,6 +312,15 @@
 
   const MOCK_EXECUTOR_LABEL = "Deterministischer Mock-Executor – technische Sicherheitsprüfung, keine KI-Ausführung.";
 
+  // V7.0 Phase D – rein präsentational. Die tatsächliche Verfügbarkeit/Auth von
+  // Codex kommt ausschließlich aus context.executors (serverseitig ermittelt,
+  // siehe execution-executor-registry.js). Hier wird nichts installiert,
+  // angemeldet oder ausgeführt – nur angezeigt und ausgewählt.
+  const EXECUTOR_SELECT_OPTIONS = Object.freeze([
+    { id: "mock", fallbackLabel: "Deterministischer Mock – keine KI" },
+    { id: "codex", fallbackLabel: "Codex – isolierter echter Code-Executor" },
+  ]);
+
   function isTerminalAttemptStatus(status) {
     return ["SUCCEEDED", "FAILED", "BLOCKED", "CANCELLED", "TIMED_OUT"].includes(status);
   }
@@ -395,18 +404,33 @@
     const recovery = attempt?.recovery?.recovery === true ? attempt.recovery : null;
     const uiState = context.executionUiState || {};
 
+    const executorEntries = (context.executors || []).length
+      ? context.executors
+      : EXECUTOR_SELECT_OPTIONS.map((entry) => ({ id: entry.id, displayName: entry.fallbackLabel, available: entry.id === "mock", unavailableReason: entry.id === "mock" ? null : "UNGEKLÄRT" }));
+    const selectedExecutorId = uiState.selectedExecutorId || "mock";
+    const selectedExecutorIsCodex = selectedExecutorId === "codex";
+
     const idleSelectors = !attempt ? `
       <div class="guided-work-execution-setup">
-        <label class="guided-work-field">Zielprojekt
-          <select data-execution-target>
-            ${EXECUTION_ATTEMPT_TARGETS.map((entry) => `<option value="${escape(deps, entry.id)}" ${uiState.selectedTargetId === entry.id ? "selected" : ""}>${escape(deps, entry.label)}</option>`).join("")}
+        <label class="guided-work-field">Executor
+          <select data-execution-executor>
+            ${executorEntries.map((entry) => `<option value="${escape(deps, entry.id)}" ${(!entry.available && entry.id !== "mock") ? "disabled" : ""} ${selectedExecutorId === entry.id ? "selected" : ""}>${escape(deps, entry.displayName)}${entry.id !== "mock" && !entry.available ? " (nicht verfügbar)" : ""}</option>`).join("")}
           </select>
         </label>
-        <label class="guided-work-field">Mock-Szenario
-          <select data-execution-scenario>
-            ${EXECUTION_ATTEMPT_SCENARIOS.map((entry) => `<option value="${escape(deps, entry.id)}" ${uiState.selectedScenario === entry.id ? "selected" : ""}>${escape(deps, entry.label)}</option>`).join("")}
-          </select>
-        </label>
+        ${selectedExecutorIsCodex ? `
+          <p class="guided-work-note">Codex arbeitet in Phase D ausschließlich am Fixture-Projekt mit einem festen, geprüften Pilotauftrag (eine Fixture-Funktion korrigieren). Health bleibt für Codex vollständig blockiert.</p>
+        ` : `
+          <label class="guided-work-field">Zielprojekt
+            <select data-execution-target>
+              ${EXECUTION_ATTEMPT_TARGETS.map((entry) => `<option value="${escape(deps, entry.id)}" ${uiState.selectedTargetId === entry.id ? "selected" : ""}>${escape(deps, entry.label)}</option>`).join("")}
+            </select>
+          </label>
+          <label class="guided-work-field">Mock-Szenario
+            <select data-execution-scenario>
+              ${EXECUTION_ATTEMPT_SCENARIOS.map((entry) => `<option value="${escape(deps, entry.id)}" ${uiState.selectedScenario === entry.id ? "selected" : ""}>${escape(deps, entry.label)}</option>`).join("")}
+            </select>
+          </label>
+        `}
         <button class="primary-button" type="button" data-execution-action="prepare">Isolierte Testausführung vorbereiten</button>
       </div>
     ` : "";
@@ -415,15 +439,27 @@
       ? `<button class="primary-button" type="button" data-execution-action="${escape(deps, state.primary.action)}" ${uiState.loading ? "disabled" : ""}>${escape(deps, state.primary.label)}</button>`
       : "";
 
+    const codexRawOutputBlock = attempt?.executorId === "codex" && attempt.codexRawOutput ? `
+      <details class="daily-work-run-technical-details">
+        <summary>Codex-Ausgabe anzeigen (unverifiziert, kein Fachbefund)</summary>
+        <p class="guided-work-note"><strong>${escape(deps, attempt.codexRawOutput.label || "Codex-Ausgabe – unverifiziert.")}</strong></p>
+        <p>Exitcode: <code>${escape(deps, String(attempt.codexRawOutput.exitCode ?? "UNGEKLÄRT"))}</code></p>
+        ${attempt.codexRawOutput.lastMessageSample ? `<p><strong>Letzte Codex-Nachricht (Auszug)</strong></p><pre>${escape(deps, attempt.codexRawOutput.lastMessageSample)}</pre>` : ""}
+        <p class="guided-work-note">Dies ist Codex' eigene, unverifizierte Aussage. Maßgeblich ist ausschließlich die Evidenz darunter (Diff und selbst ausgeführte Tests).</p>
+      </details>
+    ` : "";
+
     const evidenceBlock = attempt && isTerminalAttemptStatus(attempt.status) ? `
       <details class="daily-work-run-technical-details">
         <summary>Evidenz anzeigen (Diff, Tests, Blocker)</summary>
         <p><strong>Testergebnis</strong>: ${escape(deps, attempt.testStatus || "UNGEKLÄRT")} · ${escape(deps, attempt.testSummary || "")}</p>
         <p><strong>Geänderte Dateien</strong></p>
         <ul>${(attempt.changedFiles || []).map((entry) => `<li><code>${escape(deps, entry)}</code></li>`).join("") || "<li>keine</li>"}</ul>
+        ${(attempt.diff || []).length ? `<p><strong>Diff</strong></p><ul>${attempt.diff.map((entry) => `<li><code>${escape(deps, entry.path)}</code> +${escape(deps, String(entry.linesAdded || 0))} −${escape(deps, String(entry.linesRemoved || 0))}</li>`).join("")}</ul>` : ""}
         ${(attempt.blockers || []).length ? `<p><strong>Blocker</strong></p><ul>${attempt.blockers.map((entry) => `<li>${escape(deps, entry)}</li>`).join("")}</ul>` : ""}
         ${(attempt.errors || []).length ? `<p><strong>Fehler</strong></p><ul>${attempt.errors.map((entry) => `<li>${escape(deps, entry)}</li>`).join("")}</ul>` : ""}
         <p class="guided-work-note">Evidenz ist ein technischer Befund des isolierten Laufs, kein bestätigter Fachbefund.</p>
+        ${codexRawOutputBlock}
       </details>
     ` : "";
 
@@ -436,6 +472,7 @@
           <div><dt>Fingerprint</dt><dd><code>${escape(deps, preview.executionPackageFingerprint || attempt.executionPackageFingerprint || "—")}</code></dd></div>
           <div><dt>Baseline</dt><dd>${escape(deps, preview.baseline ? `${preview.baseline.branch || "?"} · ${shortHash(preview.baseline.head || "")}` : "—")}</dd></div>
           <div><dt>Attempt</dt><dd><code>${escape(deps, shortHash(preview.attemptId || attempt.attemptId || ""))}</code></dd></div>
+          <div><dt>Executor</dt><dd>${escape(deps, preview.executorId === "codex" ? "Codex – isolierter echter Code-Executor" : "Deterministischer Mock – keine KI")}</dd></div>
           <div><dt>Teststatus</dt><dd>${escape(deps, preview.testStatus || attempt.testStatus || "UNGEKLÄRT")} · ${escape(deps, preview.testSummary || attempt.testSummary || "")}</dd></div>
         </dl>
         <p><strong>Geänderte Dateien</strong></p>
@@ -448,10 +485,21 @@
       </article>
     ` : "";
 
+    const activeExecutorLabel = attempt?.executorLabel || (attempt?.executorId === "codex" ? "Codex – isolierter echter Code-Executor" : MOCK_EXECUTOR_LABEL);
+    // Vor dem ersten Attempt spiegelt die Kopfzeile bereits die aktuelle
+    // Browser-Auswahl (sonst stünde dort irreführend "(Mock)", während direkt
+    // darunter schon "Codex – isolierter echter Code-Executor" angezeigt wird).
+    const executionKindLabel = (attempt ? attempt.executorId : selectedExecutorId) === "codex" ? "Codex" : "Mock";
+    // Kein separater Warnhinweis hier: Codex ist in Phase D ohnehin immer nur
+    // gegen das Fixture-Projekt wählbar (siehe idleSelectors-Hinweistext
+    // direkt unter der Executor-Auswahl). Ein zusätzlicher gelber
+    // "Health blockiert"-Kasten allein durch die Codex-Auswahl würde einen
+    // aktiven Blocker suggerieren, obwohl gar kein Health-Bezug vorliegt.
+
     return `
       <details class="guided-work-block guided-work-execution-attempt" open data-execution-attempt-status="${escape(deps, attempt?.status || "NONE")}">
-        <summary>Isolierte Testausführung (Mock) · ${escape(deps, state.headline)}</summary>
-        <p class="guided-work-note"><strong>${escape(deps, MOCK_EXECUTOR_LABEL)}</strong></p>
+        <summary>Isolierte Testausführung (${escape(deps, executionKindLabel)}) · ${escape(deps, state.headline)}</summary>
+        <p class="guided-work-note"><strong>${escape(deps, activeExecutorLabel)}</strong></p>
         ${recovery ? `<article class="daily-work-run-notice daily-work-run-notice--warning"><strong>Recovery-Fall</strong><p>${escape(deps, recovery.reason)} ${escape(deps, recovery.recommendedAction)}</p></article>` : ""}
         ${attempt ? `
           <dl class="daily-work-run-facts">
@@ -459,10 +507,12 @@
             <div><dt>Attempt</dt><dd><code>${escape(deps, shortHash(attempt.attemptId))}</code></dd></div>
             <div><dt>Status</dt><dd>${escape(deps, attempt.status || "UNGEKLÄRT")}</dd></div>
             <div><dt>Übernahmestatus</dt><dd>${escape(deps, attempt.applyStatus || "NOT_REQUESTED")}</dd></div>
+            <div><dt>Erlaubte Dateien</dt><dd>${escape(deps, (attempt.allowedFiles || []).join(", ") || "UNGEKLÄRT")}</dd></div>
           </dl>
         ` : ""}
         <p>${escape(deps, state.note)}</p>
         ${uiState.errorMessage ? `<article class="daily-work-run-notice daily-work-run-notice--warning"><strong>Hinweis</strong><p>${escape(deps, uiState.errorMessage)}</p></article>` : ""}
+        <p class="guided-work-note">Apply ist kein Commit. Apply ist kein Push. Apply ist kein Deployment.</p>
         ${applyReviewBlock}
         ${idleSelectors}
         ${primaryButton}

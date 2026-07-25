@@ -96,6 +96,14 @@
   const executionAttemptUiState = {
     selectedTargetId: "execution-bridge-fixture",
     selectedScenario: "SUCCESS",
+    // V7.0 Phase D – zusätzlich zum Mock wählbarer Executor. Die tatsächliche
+    // Verfügbarkeit/Auth von Codex wird ausschließlich serverseitig ermittelt
+    // (executors) – der Browser wählt hier nur aus dem bereits geprüften
+    // Ergebnis, setzt nie Pfade, Argumente oder Environment.
+    selectedExecutorId: "mock",
+    executors: null,
+    executorsLoading: false,
+    executorsError: null,
     loading: false,
     errorMessage: null,
     pendingStartToken: null,
@@ -1140,6 +1148,7 @@ function renderDailyWorkRun() {
       ),
       serverStatus: serverStatusUiState.serverStatus,
       executionUiState: executionAttemptUiState,
+      executors: executionAttemptUiState.executors,
     }) || ""}
     <div class="daily-work-run-toolbar">
       <div>
@@ -1364,6 +1373,31 @@ async function refreshServerStatus() {
 // Tab-Speicher gehalten. Kein Codex-, KI- oder Netzwerkaufruf.
 // ---------------------------------------------------------------------------
 
+// V7.0 Phase D – read-only Abfrage der Executor-Registry. Liefert ausschließlich
+// bereits serverseitig geprüfte Verfügbarkeit/Auth-Label/Version; startet
+// nichts, installiert nichts, meldet nichts an.
+async function refreshExecutionExecutors() {
+  executionAttemptUiState.executorsLoading = true;
+  executionAttemptUiState.executorsError = null;
+  try {
+    const response = await fetch("/api/execution/executors", {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.message || "Executor-Liste konnte nicht gelesen werden.");
+    }
+    executionAttemptUiState.executors = payload.executors || [];
+  } catch (error) {
+    executionAttemptUiState.executorsError = error.message;
+  } finally {
+    executionAttemptUiState.executorsLoading = false;
+    renderDailyWorkRun();
+  }
+}
+
 function generateExecutionDemoId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -1425,10 +1459,24 @@ function pollExecutionAttempt(attemptId) {
   }, 700);
 }
 
+// V7.0 Phase D – einziges für den Codex-Piloten vorgesehenes, serverseitig
+// geprüftes Preset. Der Browser kann diese ID nur auswählen, nie frei Text,
+// Pfade oder Argumente an ihrer Stelle übergeben.
+const CODEX_FIXTURE_PRESET_ID = "FIXTURE_ADD_FUNCTION_FIX";
+
 async function prepareExecutionAttemptFlow() {
   const run = getActiveDailyWorkRun();
   if (!run) return;
-  const projectId = document.querySelector("[data-execution-target]")?.value || executionAttemptUiState.selectedTargetId;
+  const executorId = document.querySelector("[data-execution-executor]")?.value || executionAttemptUiState.selectedExecutorId;
+  executionAttemptUiState.selectedExecutorId = executorId;
+  // Codex ist in Phase D ausschließlich für das Fixture-Projekt mit dem
+  // festen Pilotauftrag vorgesehen – unabhängig davon, was zuvor im
+  // Zielprojekt-Auswahlfeld stand. Health bleibt für Codex serverseitig
+  // ohnehin hart blockiert; hier wird das bereits im Browser klar gehalten.
+  const projectId =
+    executorId === "codex"
+      ? "execution-bridge-fixture"
+      : document.querySelector("[data-execution-target]")?.value || executionAttemptUiState.selectedTargetId;
   const scenario = document.querySelector("[data-execution-scenario]")?.value || executionAttemptUiState.selectedScenario;
   executionAttemptUiState.selectedTargetId = projectId;
   executionAttemptUiState.selectedScenario = scenario;
@@ -1447,24 +1495,32 @@ async function prepareExecutionAttemptFlow() {
       projectId === "health-upgrade-kompass" && run.knownWorkingTreeBaseline?.jamalConfirmedAt
         ? run.knownWorkingTreeBaseline
         : undefined;
+    const requestedAllowedFiles = executorId === "codex" ? ["FIXTURE_CALC.js"] : allowedFiles;
     const payload = await callExecutionApi("/api/execution/prepare", "POST", {
       runId: run.id,
       executionPackage: {
         executionPackageId,
         executionPackageFingerprint,
         projectId,
-        allowedFiles,
+        allowedFiles: requestedAllowedFiles,
         forbiddenPaths,
+        executorId,
+        ...(executorId === "codex" ? { codexTaskPresetId: CODEX_FIXTURE_PRESET_ID } : {}),
       },
       ...(knownWorkingTreeBaseline ? { knownWorkingTreeBaseline } : {}),
     });
     executionAttemptUiState.pendingStartToken = payload.startToken;
+    const executorEntry = (executionAttemptUiState.executors || []).find((entry) => entry.id === payload.executorId);
     const updated = GuidedWork.beginExecutionAttempt(run, {
       attemptId: payload.attemptId,
       executionPackageId,
       executionPackageFingerprint,
       projectId,
       mockExecutorLabel: GuidedWorkUi?.MOCK_EXECUTOR_LABEL,
+      executorId: payload.executorId,
+      executorLabel: executorEntry?.displayName || payload.executorLabel || null,
+      codexTaskPresetId: executorId === "codex" ? CODEX_FIXTURE_PRESET_ID : null,
+      allowedFiles: requestedAllowedFiles,
     });
     saveDailyWorkRun(updated);
     deps.showToast("Isolierte Testausführung vorbereitet. Baseline gelesen. Noch nicht gestartet.");
@@ -1489,13 +1545,16 @@ async function startExecutionAttemptFlow() {
   executionAttemptUiState.errorMessage = null;
   renderDailyWorkRun();
   try {
+    // Codex hat in Phase D genau ein unterstütztes Szenario (REAL_RUN); das
+    // Mock-Szenario-Auswahlfeld gilt ausschließlich für den Mock-Executor.
+    const scenario = attempt.executorId === "codex" ? "REAL_RUN" : executionAttemptUiState.selectedScenario;
     const payload = await callExecutionApi("/api/execution/attempts/start", "POST", {
       token: executionAttemptUiState.pendingStartToken,
       runId: attempt.runId || run.id,
       executionPackageId: attempt.executionPackageId,
       executionPackageFingerprint: attempt.executionPackageFingerprint,
       attemptId: attempt.attemptId,
-      scenario: executionAttemptUiState.selectedScenario,
+      scenario,
       approved: true,
     });
     executionAttemptUiState.pendingStartToken = null;
@@ -2179,6 +2238,14 @@ function setupDailyWorkRun() {
   });
 
   document.addEventListener("change", (event) => {
+    // V7.0 Phase D – rein lokale Anzeigeumschaltung (Zielprojekt/Szenario nur
+    // für Mock relevant). Startet nichts, ruft keine API auf.
+    if (event.target.matches("[data-execution-executor]")) {
+      executionAttemptUiState.selectedExecutorId = event.target.value;
+      renderDailyWorkRun();
+      return;
+    }
+
     if (event.target.matches("input[name='guided-outcome-suggestion']")) {
       try {
         if (!GuidedWork) throw new Error("Guided Work Modul fehlt.");
@@ -2506,6 +2573,7 @@ function setupDailyWorkRun() {
     init,
     render,
     refreshServerStatus,
+    refreshExecutionExecutors,
     DAILY_STORAGE_KEY: DailyWorkRun?.DAILY_STORAGE_KEY || "ki-unternehmenszentrale-daily-work-runs-v1",
     LEGACY_MANAGEMENT_STORAGE_KEY: DailyWorkRun?.LEGACY_MANAGEMENT_STORAGE_KEY || "ki-unternehmenszentrale-v1",
     getInternalState() {

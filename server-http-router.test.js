@@ -302,8 +302,8 @@ async function runTests() {
   const serverSource = fs.readFileSync(path.join(__dirname, "server.js"), "utf8");
   const getRouteBlockMatch = serverSource.match(/const getRoutes = buildRouteMap\(\[([\s\S]*?)\n\]\);/);
   const routeCount = getRouteBlockMatch ? (getRouteBlockMatch[1].match(/^\s+\["\/api\//gm) || []).length : 0;
-  check("bestehende 45 GET-Routen bleiben registriert (Phase C: +2 GET Execution-Status/-Ergebnis)", () =>
-    assert.strictEqual(routeCount, 45),
+  check("bestehende 46 GET-Routen bleiben registriert (Phase C: +2 GET Execution-Status/-Ergebnis, Phase D: +1 GET Executor-Registry)", () =>
+    assert.strictEqual(routeCount, 46),
   );
 
   const postRouteBlockMatch = serverSource.match(/const postRoutes = buildRouteMap\(\[([\s\S]*?)\]\);/);
