@@ -19,6 +19,7 @@ const crypto = require("crypto");
 
 const projectRegistry = require("./project-registry");
 const agentRegistry = require("./agent-registry");
+const agencyTenantRegistry = require("./agency-tenant-registry");
 
 // ---------------------------------------------------------------------------
 // Abschnitt C – HeyGen-Capability-Profil (sachlich, additiv, ehrlich).
@@ -87,6 +88,22 @@ const HEYGEN_DATA_CLASSIFICATIONS = Object.freeze(["NORMAL", "SENSITIVE", "SECRE
 const HEYGEN_PILOT_ALLOWED_DATA_CLASSIFICATIONS = Object.freeze(["NORMAL"]);
 
 const HEYGEN_COST_STATUSES = Object.freeze(["UNKNOWN", "WITHIN_APPROVED_LIMIT", "REQUIRES_APPROVAL", "NOT_AVAILABLE"]);
+
+// V7.1 Phase B.1 – Kunden-/Paketzuordnung (Auftrag Abschnitt G). Getrennt von
+// HEYGEN_COST_STATUSES (interne Freigabeentscheidung): dies ist die
+// Abrechnungsklassifizierung gegenüber dem Kundenpaket. Keine erfundenen
+// Preise, keine automatische Abrechnung.
+const HEYGEN_COST_PACKAGE_STATUSES = Object.freeze([
+  "INCLUDED_IN_PACKAGE",
+  "ADDITIONAL_APPROVAL_REQUIRED",
+  "UNKNOWN",
+  "NOT_BILLABLE_TEST",
+]);
+
+// V7.1 Phase B.1 – fünfte, getrennte Freigabestufe (Auftrag Abschnitt E):
+// Kundenentwurfsfreigabe. Ausdrücklich NICHT gleichbedeutend mit
+// Veröffentlichung (Auftrag Abschnitt H/L, Regel 39).
+const HEYGEN_CUSTOMER_DRAFT_APPROVAL_STATUSES = Object.freeze(["PENDING", "APPROVED", "CHANGES_REQUESTED"]);
 
 const HEYGEN_PILOT_MAX_DURATION_SECONDS = 30;
 const HEYGEN_PILOT_MIN_DURATION_SECONDS = 1;
@@ -228,6 +245,13 @@ function computePackageFingerprint(pkg) {
     dataClassification: pkg.dataClassification,
     costCeiling: pkg.costCeiling,
     currency: pkg.currency,
+    // V7.1 Phase B.1 – Mandantenbindung ist inhaltsbestimmend: eine
+    // nachträgliche Umzuordnung zu einem anderen Kunden/einer anderen
+    // Marke/Kampagne ändert den Fingerprint und invalidiert damit jede
+    // frühere, fingerprintgebundene Freigabe.
+    customerId: pkg.customerId,
+    brandId: pkg.brandId,
+    campaignId: pkg.campaignId,
   };
   return crypto.createHash("sha256").update(JSON.stringify(contentSnapshot)).digest("hex");
 }
@@ -258,6 +282,29 @@ function assertKnownAgentIfProvided(agentId) {
     throw new Error(`Unbekannte Agenten-ID: ${agentId}`);
   }
   return agentId;
+}
+
+// V7.1 Phase B.1 (Auftrag Abschnitt C/D/E) – customerId/brandId/campaignId
+// sind auf jedem Medienauftrag verpflichtend. Unbekannte oder nicht
+// zusammengehörige IDs blockieren strukturell (wie unbekanntes Projekt/
+// Agent), analog zu assertProjectExists/assertKnownAgentIfProvided.
+function assertValidTenantBinding(input) {
+  const customerId = String(input.customerId || "").trim();
+  const brandId = String(input.brandId || "").trim();
+  const campaignId = String(input.campaignId || "").trim();
+  if (!customerId) throw new Error("customerId fehlt. Jeder HeyGen-Auftrag benötigt einen Kunden.");
+  if (!brandId) throw new Error("brandId fehlt. Jeder HeyGen-Auftrag benötigt eine Marke.");
+  if (!campaignId) throw new Error("campaignId fehlt. Jeder HeyGen-Auftrag benötigt eine Kampagne.");
+  const binding = agencyTenantRegistry.validateTenantBinding({
+    customerId,
+    brandId,
+    campaignId,
+    projectId: input.projectId,
+  });
+  if (!binding.ok) {
+    throw new Error(`Mandantenbindung ungültig: ${binding.reasons.join(" ")}`);
+  }
+  return { customerId, brandId, campaignId };
 }
 
 function assertKnownEnum(value, allowed, fieldName) {
@@ -314,6 +361,8 @@ function prepareHeygenJobPackage(input = {}, options = {}) {
   const projectId = String(input.projectId || "").trim();
   assertProjectExists(projectId);
 
+  const { customerId, brandId, campaignId } = assertValidTenantBinding({ ...input, projectId });
+
   const requestingAgentId = assertKnownAgentIfProvided(input.requestingAgentId);
 
   const videoType = String(input.videoType || "").trim();
@@ -346,6 +395,14 @@ function prepareHeygenJobPackage(input = {}, options = {}) {
     throw new Error("costCeiling muss eine nicht-negative Zahl oder null sein.");
   }
 
+  // V7.1 Phase B.1 (Auftrag Abschnitt G) – Kundenpaket-/Abrechnungsstatus.
+  // Default UNKNOWN statt erfundener Werte; ein Client kann NOT_BILLABLE_TEST
+  // nur als expliziten, bewussten Wert setzen (z. B. für Testaufträge).
+  const costPackageStatus = String(input.costPackageStatus || "UNKNOWN").trim();
+  assertKnownEnum(costPackageStatus, HEYGEN_COST_PACKAGE_STATUSES, "costPackageStatus");
+  const customerPackageId = trimmedOrNull(input.customerPackageId, 200);
+  const billableUnit = trimmedOrNull(input.billableUnit, 200) || "1 Videoauftrag (Einheit gemäß Kundenpaket)";
+
   const createdAt = nowIso(options.now);
   const jobPackageId = randomId("heygen-job");
 
@@ -353,6 +410,18 @@ function prepareHeygenJobPackage(input = {}, options = {}) {
     schemaVersion: HEYGEN_SCHEMA_VERSION,
     jobPackageId,
     projectId,
+    // V7.1 Phase B.1 – verpflichtende Mandantenbindung (Auftrag Abschnitt
+    // C/D/E). Bereits oben strukturell geprüft (assertValidTenantBinding).
+    customerId,
+    brandId,
+    campaignId,
+    // Keine echte HeyGen-Ordner-/Sub-Workspace-Anlage in dieser Phase
+    // (Auftrag Abschnitt F). Nur eine geplante, noch nicht angelegte
+    // Referenz.
+    providerFolderReference: { status: "PLANNED_NOT_CREATED", reference: null },
+    billableUnit,
+    customerPackageId,
+    costPackageStatus,
     sourceRunId: trimmedOrNull(input.sourceRunId, 200),
     createdAt,
     createdBy: trimmedOrNull(input.createdBy, 80) || "Jamal",
@@ -386,6 +455,10 @@ function prepareHeygenJobPackage(input = {}, options = {}) {
     // vorgesehenen, separaten Funktionen weiter unten.
     externalTransferApproved: false,
     costApprovalStatus: "UNKNOWN",
+    // V7.1 Phase B.1 – fünfte, getrennte Freigabestufe: Kundenentwurfs-
+    // freigabe. Startet IMMER auf PENDING, unabhängig von der Eingabe, und
+    // ist ausdrücklich NICHT gleichbedeutend mit Veröffentlichung.
+    customerDraftApprovalStatus: "PENDING",
     currency: trimmedOrNull(input.currency, 10) || "EUR",
     // Veröffentlichung bleibt in Phase B IMMER false – kein Eingabewert kann
     // dies überschreiben (Auftrag Abschnitt D/I).
@@ -544,6 +617,35 @@ function setCostApproval(pkgInput, costStatus) {
   return clone(pkg);
 }
 
+// V7.1 Phase B.1 (Auftrag Abschnitt G) – Kundenpaket-/Abrechnungs-
+// klassifizierung, getrennt von der internen Kostenfreigabe oben. Keine
+// erfundenen Preise, keine automatische Abrechnung.
+function setCostPackageStatus(pkgInput, costPackageStatus) {
+  const pkg = clone(pkgInput);
+  assertKnownEnum(costPackageStatus, HEYGEN_COST_PACKAGE_STATUSES, "costPackageStatus");
+  pkg.costPackageStatus = costPackageStatus;
+  return clone(pkg);
+}
+
+// V7.1 Phase B.1 (Auftrag Abschnitt E) – fünfte, getrennte Freigabestufe.
+// Ausdrücklich NICHT gleichbedeutend mit Veröffentlichung (Regel 39): diese
+// Funktion setzt niemals publicationApproved.
+function approveCustomerDraft(pkgInput) {
+  const pkg = clone(pkgInput);
+  if (pkg.contentApproved !== true) {
+    throw new Error("Kundenentwurfsfreigabe setzt eine bereits erteilte interne Inhaltsfreigabe voraus.");
+  }
+  pkg.customerDraftApprovalStatus = "APPROVED";
+  return clone(pkg);
+}
+
+function requestCustomerDraftChanges(pkgInput, note) {
+  const pkg = clone(pkgInput);
+  pkg.customerDraftApprovalStatus = "CHANGES_REQUESTED";
+  pkg.customerChangeRequestNote = trimmedOrNull(note, MAX_TEXT_FIELD_LENGTH);
+  return clone(pkg);
+}
+
 // Veröffentlichung bleibt in Phase B strukturell unerreichbar – es gibt
 // bewusst keine Funktion, die publicationApproved auf true setzt.
 function isPublicationApproved(pkg) {
@@ -591,6 +693,8 @@ module.exports = {
   HEYGEN_DATA_CLASSIFICATIONS,
   HEYGEN_PILOT_ALLOWED_DATA_CLASSIFICATIONS,
   HEYGEN_COST_STATUSES,
+  HEYGEN_COST_PACKAGE_STATUSES,
+  HEYGEN_CUSTOMER_DRAFT_APPROVAL_STATUSES,
   HEYGEN_PILOT_MAX_DURATION_SECONDS,
   HEYGEN_PILOT_MIN_DURATION_SECONDS,
   HEYGEN_ALWAYS_FORBIDDEN_ACTIONS,
@@ -600,6 +704,9 @@ module.exports = {
   approveContent,
   approveExternalTransfer,
   setCostApproval,
+  setCostPackageStatus,
+  approveCustomerDraft,
+  requestCustomerDraftChanges,
   isPublicationApproved,
   isPackageExpired,
   evaluateHandoffReadiness,

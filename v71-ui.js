@@ -590,6 +590,8 @@
       { label: "Inhalt", ok: pkg.contentApproved === true },
       { label: "Externe Übertragung", ok: pkg.externalTransferApproved === true },
       { label: "Kostenrahmen", ok: pkg.costApprovalStatus === "WITHIN_APPROVED_LIMIT" },
+      // V7.1 Phase B.1 (Auftrag Abschnitt E) – fünfte, getrennte Freigabestufe.
+      { label: "Kundenentwurf", ok: pkg.customerDraftApprovalStatus === "APPROVED" },
       { label: "Veröffentlichung", ok: false, always: "bleibt immer eine eigene, spätere Freigabe" },
     ];
     return items
@@ -600,6 +602,30 @@
           )}: ${item.ok ? "freigegeben" : "offen"}</span>`,
       )
       .join(" ");
+  }
+
+  // V7.1 Phase B.1 (Auftrag Abschnitt C/I) – Mandantenkennzeichnung je
+  // Jobpaket. Rein informativ, keine Kundenanmeldung, kein Kundenportal.
+  const HEYGEN_COST_PACKAGE_LABEL = {
+    INCLUDED_IN_PACKAGE: "im Kundenpaket enthalten",
+    ADDITIONAL_APPROVAL_REQUIRED: "Zusatzfreigabe nötig",
+    UNKNOWN: "unbekannt",
+    NOT_BILLABLE_TEST: "nicht abrechenbar (Test)",
+  };
+
+  const HEYGEN_CUSTOMER_DRAFT_LABEL = {
+    PENDING: "offen",
+    APPROVED: "freigegeben",
+    CHANGES_REQUESTED: "Änderungen angefordert",
+  };
+
+  function heygenTenantRow(pkg) {
+    return `
+      <span class="v71-pill v71-pill-neutral">Kunde: ${escapeHtml(pkg.customerId || "–")}</span>
+      <span class="v71-pill v71-pill-neutral">Marke: ${escapeHtml(pkg.brandId || "–")}</span>
+      <span class="v71-pill v71-pill-neutral">Kampagne: ${escapeHtml(pkg.campaignId || "–")}</span>
+      <span class="v71-pill v71-pill-neutral">Kostenpaket: ${escapeHtml(HEYGEN_COST_PACKAGE_LABEL[pkg.costPackageStatus] || pkg.costPackageStatus || "unbekannt")}</span>
+      <span class="v71-pill ${pkg.customerDraftApprovalStatus === "APPROVED" ? "v71-pill-direct" : "v71-pill-neutral"}">Kundenfreigabe: ${escapeHtml(HEYGEN_CUSTOMER_DRAFT_LABEL[pkg.customerDraftApprovalStatus] || "offen")}</span>`;
   }
 
   function heygenActionButtons(pkg) {
@@ -624,6 +650,13 @@
     if (["HANDED_OFF", "PROCESSING"].includes(pkg.status)) {
       buttons.push(`<button class="secondary-button" type="button" data-heygen-action="check-result" data-job-package-id="${escapeHtml(pkg.jobPackageId)}">Ergebnis prüfen</button>`);
     }
+    // V7.1 Phase B.1 (Auftrag Abschnitt E) – Kundenentwurfsfreigabe ist eine
+    // eigene, fünfte Freigabestufe und setzt eine bereits erteilte interne
+    // Inhaltsfreigabe voraus. Ausdrücklich KEINE Veröffentlichungsschaltfläche.
+    if (pkg.contentApproved === true && pkg.customerDraftApprovalStatus !== "APPROVED") {
+      buttons.push(`<button class="secondary-button" type="button" data-heygen-action="approve-customer-draft" data-job-package-id="${escapeHtml(pkg.jobPackageId)}">Kundenentwurf freigeben</button>`);
+      buttons.push(`<button class="secondary-button" type="button" data-heygen-action="request-customer-draft-changes" data-job-package-id="${escapeHtml(pkg.jobPackageId)}">Änderungen anfordern</button>`);
+    }
     // Ausdrücklich KEIN Button für Veröffentlichen/Video löschen/Avatar
     // klonen/Voice klonen/Credits kaufen (Auftrag Abschnitt L).
     return buttons.join(" ");
@@ -638,6 +671,7 @@
           <span class="${heygenStatusPillClass(pkg.status)}">${escapeHtml(HEYGEN_STATUS_LABEL[pkg.status] || pkg.status)}</span>
         </div>
         <div class="v71-tag-row">${heygenApprovalRow(pkg)}</div>
+        <div class="v71-tag-row">${heygenTenantRow(pkg)}</div>
         ${pkg.blockReasons && pkg.blockReasons.length ? `<p class="v71-note v71-note-warning">${escapeHtml(pkg.blockReasons[0])}</p>` : ""}
         <details class="v71-details">
           <summary>Technische Details</summary>
@@ -668,15 +702,49 @@
     const container = byId("v71-heygen-output");
     if (!container) return;
     const projects = await loadProjectsForSelect();
-    const [statusResult, packagesResult] = await Promise.all([
+    const [statusResult, packagesResult, pilotReviewResult] = await Promise.all([
       fetchJson("/api/v71/heygen/status"),
       fetchJson(`/api/v71/heygen/job-packages?projectId=${encodeURIComponent(heygenSelectedProjectId)}`),
+      fetchJson("/api/v71/agency/pilot-review"),
     ]);
     heygenStatusCache = statusResult.ok ? statusResult.json : null;
     const jobPackages = packagesResult.ok && Array.isArray(packagesResult.json?.jobPackages) ? packagesResult.json.jobPackages : [];
+    const pilotReview = pilotReviewResult.ok ? pilotReviewResult.json?.pilotReview : null;
+    const pilotLocallyVerified = pilotReviewResult.ok ? pilotReviewResult.json?.locallyVerifiedSuccess : null;
 
     container.innerHTML = `
       <div class="v71-layout">
+        <section class="panel">
+          <div class="section-head">
+            <div><p class="eyebrow">V7.1 Phase B.1 · Testmandant</p><h3>HeyGen-Agenturbetrieb · Testmandant</h3></div>
+          </div>
+          <div class="v71-tag-row">
+            <span class="v71-pill v71-pill-neutral">Testmandant</span>
+            <span class="v71-pill v71-pill-neutral">kein echtes Kundenportal</span>
+            <span class="v71-pill v71-pill-blocked">Kunde hat keinen HeyGen-Zugang</span>
+            <span class="v71-pill v71-pill-blocked">Providerkonto bleibt intern</span>
+            <span class="v71-pill v71-pill-blocked">Video noch nicht veröffentlicht</span>
+            <span class="v71-pill v71-pill-blocked">erster Pilot ist nicht abrechenbar</span>
+          </div>
+          ${
+            pilotReview
+              ? `<dl class="v71-detail-list">
+                  <div><dt>Kunde</dt><dd>${escapeHtml(pilotReview.customerId)}</dd></div>
+                  <div><dt>Marke</dt><dd>${escapeHtml(pilotReview.brandId)}</dd></div>
+                  <div><dt>Kampagne</dt><dd>${escapeHtml(pilotReview.campaignId)}</dd></div>
+                  <div><dt>Projekt</dt><dd>${escapeHtml(pilotReview.projectId)}</dd></div>
+                  <div><dt>Videoauftrag</dt><dd>HeyGen-Session ${escapeHtml(pilotReview.providerSessionId)} (intern, keine öffentliche Video-URL)</dd></div>
+                  <div><dt>Providerstatus</dt><dd>${escapeHtml(pilotReview.renderStatus)} (Providerangabe)</dd></div>
+                  <div><dt>Interner Status</dt><dd>${pilotLocallyVerified ? "lokal verifiziert" : "lokal nicht verifiziert (Session-ID allein genügt nicht)"}</dd></div>
+                  <div><dt>Kostenstatus</dt><dd>${escapeHtml(pilotReview.costStatus)}</dd></div>
+                  <div><dt>Kundenfreigabe</dt><dd>entfällt (kein echter Kunde, nur interner Test)</dd></div>
+                  <div><dt>Veröffentlichungsstatus</dt><dd>${escapeHtml(pilotReview.publicationStatus)}</dd></div>
+                  <div><dt>Nächster Jamal-Schritt</dt><dd>${escapeHtml(pilotReview.jamalDecision === "ACKNOWLEDGED_SUCCESSFUL_TEST_ONLY" ? "Manuelle Abnahme/Commit-Prüfung Phase B.1; keine Kundenfreigabe ohne echten Kunden." : pilotReview.jamalDecision)}</dd></div>
+                </dl>`
+              : `<p class="form-note">Pilot-Review derzeit nicht ladbar.</p>`
+          }
+        </section>
+
         <section class="panel">
           <div class="section-head"><div><p class="eyebrow">Status</p><h3>HeyGen-Verbindungsstatus</h3></div></div>
           <div class="v71-tag-row">${renderHeygenPilotBadges()}</div>
@@ -802,6 +870,20 @@
             }
           } else if (action === "check-result") {
             if (statusEl) statusEl.textContent = "Ergebnisprüfung erfolgt über die strukturierte Rückführung (Providerstatus, danach Jamal-Abnahme, danach getrennt Veröffentlichung).";
+          } else if (action === "approve-customer-draft") {
+            const draftResult = await heygenPostAction("/api/v71/heygen/job-package/approve-customer-draft", { jobPackageId });
+            if (statusEl) {
+              statusEl.textContent = draftResult.json?.ok
+                ? "Kundenentwurf freigegeben. Das ist keine Veröffentlichungsfreigabe."
+                : draftResult.json?.message || "Kundenentwurfsfreigabe nicht möglich.";
+            }
+          } else if (action === "request-customer-draft-changes") {
+            const note = window.prompt("Welche Änderung soll der Kunde erhalten? (kurze Notiz)", "");
+            if (note === null) return;
+            const changesResult = await heygenPostAction("/api/v71/heygen/job-package/request-customer-draft-changes", { jobPackageId, note });
+            if (statusEl) {
+              statusEl.textContent = changesResult.json?.ok ? "Änderungswunsch erfasst." : changesResult.json?.message || "Änderungswunsch nicht möglich.";
+            }
           }
         } catch (_error) {
           if (statusEl) statusEl.textContent = "Aktion nicht möglich.";

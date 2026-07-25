@@ -277,10 +277,48 @@ function buildHeygenPilotStatus(options = {}) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// V7.1 Phase B.1 (Auftrag Abschnitt F) – Agentur-Connectorbetrieb. Rein
+// beschreibend/dokumentierend: kein echter HeyGen-Ordner, kein Sub-
+// Workspace, keine Verbindungsaktion. Der Connector bleibt
+// CONTROLLED_HANDOFF, ist nicht kundenbedienbar und nicht öffentlich
+// erreichbar. Kunden erhalten niemals einen HeyGen-Login oder persönliche
+// Kontodaten.
+// ---------------------------------------------------------------------------
+
+function buildAgencyConnectorOperatingModel() {
+  return {
+    operatingModel: "AGENCY_SERVICE_ACCOUNT",
+    connectorMode: "CONTROLLED_HANDOFF",
+    customerHasHeyGenLogin: false,
+    customerCanTriggerRender: false,
+    customerCanPublish: false,
+    connectorVisibility: "INTERNAL_ONLY",
+    connectorPubliclyReachable: false,
+    customerAssignmentModel: "INTERNAL_ONLY_VIA_CUSTOMER_BRAND_CAMPAIGN_ID",
+    providerFolderStrategy: "PLANNED_NOT_YET_CREATED",
+    providerCredentialsExposedToCustomer: false,
+    personalAccountDataExposedToCustomer: false,
+    jobStatusFeedbackPath: [
+      "PROVIDER_PROCESSING",
+      "PROVIDER_SUCCEEDED_OR_FAILED",
+      "LOCAL_VALIDATED",
+      "INTERNAL_REVIEW",
+      "READY_FOR_CUSTOMER_REVIEW",
+      "CUSTOMER_APPROVED_OR_CHANGES_REQUESTED",
+      "PUBLICATION_NOT_APPROVED",
+    ],
+    resultReferenceFeedback: "Ausschließlich strukturierte Metadaten/Referenzen, kein Medien-Download durch diesen Connector.",
+    noRealHeyGenFolderCreatedInThisPhase: true,
+    noSubWorkspaceCreatedInThisPhase: true,
+    noConnectorActionExecuted: true,
+  };
+}
+
 function buildHeygenCapabilityResponse(options = {}) {
   const pilotStatus = buildHeygenPilotStatus(options);
   return {
-    version: "V7.1-Phase-B",
+    version: "V7.1-Phase-B.1",
     provider: "HeyGen",
     capabilityProfile: heygenJobPackage.HEYGEN_CAPABILITY_PROFILE,
     pilotStatus,
@@ -289,6 +327,7 @@ function buildHeygenCapabilityResponse(options = {}) {
     pilotMaxDurationSeconds: heygenJobPackage.HEYGEN_PILOT_MAX_DURATION_SECONDS,
     pilotAllowedDataClassifications: heygenJobPackage.HEYGEN_PILOT_ALLOWED_DATA_CLASSIFICATIONS,
     forbiddenActionsAlways: heygenJobPackage.HEYGEN_ALWAYS_FORBIDDEN_ACTIONS,
+    agencyConnectorOperatingModel: buildAgencyConnectorOperatingModel(),
     noApiKeyStored: true,
     noAutomaticExecution: true,
   };
@@ -302,5 +341,6 @@ module.exports = {
   requestResultValidationToken,
   validateHandoffResult,
   buildHeygenPilotStatus,
+  buildAgencyConnectorOperatingModel,
   buildHeygenCapabilityResponse,
 };

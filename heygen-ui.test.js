@@ -106,4 +106,62 @@ check("Formularfelder im Prepare-Formular sind kompakt begrenzt (maxlength geset
   assert.ok(/id="v71-heygen-script" rows="4" maxlength="4000"/.test(uiSource));
 });
 
+// ---------------------------------------------------------------------------
+// V7.1 Phase B.1 (Auftrag Abschnitt I) – "HeyGen-Agenturbetrieb ·
+// Testmandant" Erweiterung.
+// ---------------------------------------------------------------------------
+
+// 48. Testmandant sichtbar.
+check("48. UI zeigt 'HeyGen-Agenturbetrieb · Testmandant' als eigenen Bereich", () => {
+  assert.ok(uiSource.includes("HeyGen-Agenturbetrieb · Testmandant"));
+  assert.ok(uiSource.includes("Testmandant"));
+});
+
+// 49/50. kein HeyGen-Kundenzugang, kein Kundenportal behauptet.
+check("49/50. UI kennzeichnet ausdrücklich: kein HeyGen-Kundenzugang, kein echtes Kundenportal", () => {
+  assert.ok(uiSource.includes("Kunde hat keinen HeyGen-Zugang"));
+  assert.ok(uiSource.includes("kein echtes Kundenportal"));
+  assert.ok(uiSource.includes("Providerkonto bleibt intern"));
+});
+
+// 3/4. Video noch nicht veröffentlicht / erster Pilot nicht abrechenbar.
+check("UI kennzeichnet ausdrücklich: Video noch nicht veröffentlicht, erster Pilot nicht abrechenbar", () => {
+  assert.ok(uiSource.includes("Video noch nicht veröffentlicht"));
+  assert.ok(uiSource.includes("erster Pilot ist nicht abrechenbar"));
+});
+
+// 51. keine Veröffentlichungsschaltfläche, auch nicht im neuen Bereich.
+check("51. weiterhin kein Veröffentlichungsbutton nach der Testmandant-Erweiterung", () => {
+  assert.ok(!/>\s*Veröffentlichen\s*</.test(uiSource));
+  assert.ok(!/id="v71-heygen-publish"/.test(uiSource));
+});
+
+// 52. Mandantenfelder sichtbar (Kunde/Marke/Kampagne/Projekt) je Jobpaket.
+check("52. Mandantenfelder (Kunde/Marke/Kampagne) sind je Jobpaket-Karte sichtbar", () => {
+  assert.ok(uiSource.includes("heygenTenantRow"));
+  assert.ok(/Kunde:\s*\$\{escapeHtml\(pkg\.customerId/.test(uiSource));
+  assert.ok(/Marke:\s*\$\{escapeHtml\(pkg\.brandId/.test(uiSource));
+  assert.ok(/Kampagne:\s*\$\{escapeHtml\(pkg\.campaignId/.test(uiSource));
+});
+
+// 53. Kostenstatus sichtbar.
+check("53. Kostenstatus (Kostenpaket) ist je Jobpaket sichtbar", () => {
+  assert.ok(uiSource.includes("Kostenpaket:"));
+  assert.ok(uiSource.includes("HEYGEN_COST_PACKAGE_LABEL"));
+});
+
+// 54. nächster Jamal-Schritt.
+check("54. Testmandant-Panel zeigt einen 'Nächster Jamal-Schritt'", () => {
+  assert.ok(uiSource.includes("Nächster Jamal-Schritt"));
+});
+
+check("Testmandant-Panel lädt das kanonische Pilot-Review über die additive Agentur-Route", () => {
+  assert.ok(uiSource.includes("/api/v71/agency/pilot-review"));
+});
+
+check("Kundenentwurfsfreigabe und Änderungswunsch sind getrennte, eigene Aktionen (keine Sammelfreigabe)", () => {
+  assert.ok(uiSource.includes("/api/v71/heygen/job-package/approve-customer-draft"));
+  assert.ok(uiSource.includes("/api/v71/heygen/job-package/request-customer-draft-changes"));
+});
+
 console.log(`heygen-ui.test.js: ${passed} Prüfpunkte erfolgreich`);

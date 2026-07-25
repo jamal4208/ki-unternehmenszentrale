@@ -11,9 +11,18 @@ function check(label, assertion) {
   console.log(`ok ${passed} - ${label}`);
 }
 
+const TEST_CUSTOMER_ID = "test-customer-fiktives-cafe";
+const TEST_BRAND_ID = "test-brand-fiktives-cafe";
+const TEST_CAMPAIGN_ID = "test-campaign-fiktives-cafe-pilot";
+const OTHER_TEST_CUSTOMER_ID = "test-customer-fiktives-fitnessstudio";
+const OTHER_TEST_BRAND_ID = "test-brand-fiktives-fitnessstudio";
+
 function validAvatarVideoInput(overrides = {}) {
   return {
     projectId: "ki-unternehmenszentrale",
+    customerId: TEST_CUSTOMER_ID,
+    brandId: TEST_BRAND_ID,
+    campaignId: TEST_CAMPAIGN_ID,
     videoType: "AVATAR_VIDEO",
     title: "Café-Testvideo",
     script: "Willkommen in unserem Café. Heute gibt es einen neuen Kaffee.",
@@ -275,6 +284,133 @@ check("Auftragspaket enthält keine Netzwerklogik (kein http/https/fetch-Import)
   const source = fs.readFileSync(__filename.replace("heygen-job-package.test.js", "heygen-job-package.js"), "utf8");
   assert.ok(!/require\(["']https?["']\)/.test(source));
   assert.ok(!/\bfetch\(/.test(source));
+});
+
+// ---------------------------------------------------------------------------
+// V7.1 Phase B.1 – Mandantenbindung auf jedem HeyGen-Auftrag (Auftrag
+// Abschnitt C/D/E, Pflichttests 22–24).
+// ---------------------------------------------------------------------------
+
+// 22. customerId verpflichtend
+check("fehlende customerId wird strukturell abgewiesen", () => {
+  const input = validAvatarVideoInput();
+  delete input.customerId;
+  assert.throws(() => heygenJobPackage.prepareHeygenJobPackage(input), /customerId fehlt/);
+});
+
+// 23. brandId verpflichtend
+check("fehlende brandId wird strukturell abgewiesen", () => {
+  const input = validAvatarVideoInput();
+  delete input.brandId;
+  assert.throws(() => heygenJobPackage.prepareHeygenJobPackage(input), /brandId fehlt/);
+});
+
+// 24. campaignId verpflichtend
+check("fehlende campaignId wird strukturell abgewiesen", () => {
+  const input = validAvatarVideoInput();
+  delete input.campaignId;
+  assert.throws(() => heygenJobPackage.prepareHeygenJobPackage(input), /campaignId fehlt/);
+});
+
+check("unbekannte customerId wird strukturell abgewiesen", () => {
+  assert.throws(() => heygenJobPackage.prepareHeygenJobPackage(validAvatarVideoInput({ customerId: "unbekannt-xyz" })));
+});
+
+check("Marke, die nicht zum angegebenen Kunden gehört, wird abgewiesen", () => {
+  assert.throws(() =>
+    heygenJobPackage.prepareHeygenJobPackage(validAvatarVideoInput({ brandId: OTHER_TEST_BRAND_ID })),
+  );
+});
+
+check("Kampagne mit abweichendem Projekt wird abgewiesen (Projektbindung)", () => {
+  assert.throws(() =>
+    heygenJobPackage.prepareHeygenJobPackage(
+      validAvatarVideoInput({
+        customerId: OTHER_TEST_CUSTOMER_ID,
+        brandId: OTHER_TEST_BRAND_ID,
+        campaignId: TEST_CAMPAIGN_ID,
+      }),
+    ),
+  );
+});
+
+check("gültiger Auftrag trägt customerId/brandId/campaignId und beeinflusst den Fingerprint", () => {
+  const { package: pkg } = heygenJobPackage.prepareHeygenJobPackage(validAvatarVideoInput());
+  assert.strictEqual(pkg.customerId, TEST_CUSTOMER_ID);
+  assert.strictEqual(pkg.brandId, TEST_BRAND_ID);
+  assert.strictEqual(pkg.campaignId, TEST_CAMPAIGN_ID);
+  const fingerprintWithoutTenantChange = pkg.packageFingerprint;
+  const changedTenant = { ...pkg, customerId: OTHER_TEST_CUSTOMER_ID };
+  const newFingerprint = heygenJobPackage.computePackageFingerprint(changedTenant);
+  assert.notStrictEqual(newFingerprint, fingerprintWithoutTenantChange);
+});
+
+// 25. Providerreferenz intern (providerFolderReference bleibt geplant, nie real)
+check("providerFolderReference bleibt geplant und ohne echte Ablage (Auftrag Abschnitt F)", () => {
+  const { package: pkg } = heygenJobPackage.prepareHeygenJobPackage(validAvatarVideoInput());
+  assert.deepStrictEqual(pkg.providerFolderReference, { status: "PLANNED_NOT_CREATED", reference: null });
+});
+
+check("Kundenpaket-/Kostenklassifizierung startet bei UNKNOWN und lässt sich nur auf bekannte Werte setzen", () => {
+  const { package: pkg } = heygenJobPackage.prepareHeygenJobPackage(validAvatarVideoInput());
+  assert.strictEqual(pkg.costPackageStatus, "UNKNOWN");
+  const updated = heygenJobPackage.setCostPackageStatus(pkg, "NOT_BILLABLE_TEST");
+  assert.strictEqual(updated.costPackageStatus, "NOT_BILLABLE_TEST");
+  assert.throws(() => heygenJobPackage.setCostPackageStatus(pkg, "ERFUNDENER_STATUS"));
+});
+
+// 43-46. Kostenklassifizierung deckt alle vier vorgesehenen Werte ab
+check("alle vier Kostenklassifizierungen (43-46) sind gültig setzbar", () => {
+  const { package: pkg } = heygenJobPackage.prepareHeygenJobPackage(validAvatarVideoInput());
+  heygenJobPackage.HEYGEN_COST_PACKAGE_STATUSES.forEach((status) => {
+    const updated = heygenJobPackage.setCostPackageStatus(pkg, status);
+    assert.strictEqual(updated.costPackageStatus, status);
+  });
+});
+
+// 47. keine automatische Abrechnung: es existiert keine Kauf-/Abrechnungsfunktion
+check("keine automatische Abrechnungsfunktion existiert im Modul", () => {
+  assert.strictEqual(typeof heygenJobPackage.chargeCustomer, "undefined");
+  assert.strictEqual(typeof heygenJobPackage.purchaseCredits, "undefined");
+});
+
+// ---------------------------------------------------------------------------
+// V7.1 Phase B.1 – fünfte Freigabestufe: Kundenentwurfsfreigabe (Auftrag
+// Abschnitt E, Pflichttests 29-35).
+// ---------------------------------------------------------------------------
+
+// 29. interne Inhaltsfreigabe / 32. Kundenentwurfsfreigabe / 35. Kundenfreigabe ≠ Veröffentlichung
+check("Kundenentwurfsfreigabe setzt interne Inhaltsfreigabe voraus und ist von Veröffentlichung getrennt", () => {
+  const { package: draft } = heygenJobPackage.prepareHeygenJobPackage(validAvatarVideoInput());
+  const { package: validated } = heygenJobPackage.validateHeygenJobPackageContent(draft);
+  assert.strictEqual(validated.customerDraftApprovalStatus, "PENDING");
+  assert.throws(() => heygenJobPackage.approveCustomerDraft(validated));
+
+  const contentApproved = heygenJobPackage.approveContent(validated);
+  const customerApproved = heygenJobPackage.approveCustomerDraft(contentApproved);
+  assert.strictEqual(customerApproved.customerDraftApprovalStatus, "APPROVED");
+  // Kundenentwurfsfreigabe ist ausdrücklich keine Veröffentlichungsfreigabe.
+  assert.strictEqual(customerApproved.publicationApproved, false);
+});
+
+// 34. keine Sammelfreigabe: jede Freigabestufe ist ein eigener Aufruf mit eigenem Feld
+check("keine Sammelfreigabe: alle fünf Freigabestufen sind getrennte Felder/Funktionen", () => {
+  const { package: draft } = heygenJobPackage.prepareHeygenJobPackage(validAvatarVideoInput());
+  const { package: validated } = heygenJobPackage.validateHeygenJobPackageContent(draft);
+  const contentApproved = heygenJobPackage.approveContent(validated);
+  // Andere Freigabestufen bleiben nach reiner Inhaltsfreigabe unberührt.
+  assert.strictEqual(contentApproved.externalTransferApproved, false);
+  assert.strictEqual(contentApproved.costApprovalStatus, "UNKNOWN");
+  assert.strictEqual(contentApproved.customerDraftApprovalStatus, "PENDING");
+  assert.strictEqual(contentApproved.publicationApproved, false);
+  assert.strictEqual(typeof heygenJobPackage.approveAll, "undefined");
+});
+
+check("Kundenänderungswunsch (40) setzt customerDraftApprovalStatus auf CHANGES_REQUESTED", () => {
+  const { package: pkg } = heygenJobPackage.prepareHeygenJobPackage(validAvatarVideoInput());
+  const changed = heygenJobPackage.requestCustomerDraftChanges(pkg, "Bitte Ton freundlicher formulieren.");
+  assert.strictEqual(changed.customerDraftApprovalStatus, "CHANGES_REQUESTED");
+  assert.strictEqual(changed.customerChangeRequestNote, "Bitte Ton freundlicher formulieren.");
 });
 
 console.log(`heygen-job-package.test.js: ${passed} Prüfpunkte erfolgreich`);

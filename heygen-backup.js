@@ -40,6 +40,17 @@ const PACKAGE_EXPORT_FIELDS = Object.freeze([
   "schemaVersion",
   "jobPackageId",
   "projectId",
+  // V7.1 Phase B.1 – Mandantenbindung und Kunden-/Paketzuordnung (Auftrag
+  // Abschnitt E/G/J).
+  "customerId",
+  "brandId",
+  "campaignId",
+  "providerFolderReference",
+  "billableUnit",
+  "customerPackageId",
+  "costPackageStatus",
+  "customerDraftApprovalStatus",
+  "customerChangeRequestNote",
   "sourceRunId",
   "createdAt",
   "createdBy",
@@ -83,6 +94,13 @@ const PACKAGE_EXPORT_FIELDS = Object.freeze([
 
 const RESULT_EXPORT_FIELDS = Object.freeze([
   "jobPackageId",
+  // V7.1 Phase B.1 – Ergebnisrückgaben sind mandantengebunden (Auftrag
+  // Abschnitt D, Regel 4); die Bindung wird von heygen-store.js abgeleitet,
+  // nie vom Client übernommen.
+  "customerId",
+  "brandId",
+  "campaignId",
+  "projectId",
   "provider",
   "providerJobId",
   "status",
@@ -255,12 +273,16 @@ function buildRestorePreview(exportData, options = {}) {
   const now = options.now || Date.now();
   const staleCandidates = exportData.jobPackages.filter((pkg) => heygenJobPackage.isPackageExpired(pkg, now));
   const projectIds = [...new Set(exportData.jobPackages.map((pkg) => pkg.projectId).filter(Boolean))];
+  // V7.1 Phase B.1 (Auftrag Abschnitt J) – Mandantenzuordnung bleibt auch in
+  // der Restore-Vorschau sichtbar und nachvollziehbar.
+  const affectedCustomerIds = [...new Set(exportData.jobPackages.map((pkg) => pkg.customerId).filter(Boolean))];
   return {
     jobPackageCount: exportData.jobPackages.length,
     jobResultCount: exportData.jobResults.length,
     staleCandidateCount: staleCandidates.length,
     staleCandidateJobPackageIds: staleCandidates.map((pkg) => pkg.jobPackageId),
     affectedProjectIds: projectIds,
+    affectedCustomerIds,
     exportedAt: exportData.exportedAt,
   };
 }
@@ -298,31 +320,54 @@ function applyHeygenBackupRestore(exportData, options = {}) {
   const paths = heygenStore.resolveHeygenStorePaths(options);
   const now = options.now || Date.now();
   let staleMarkedCount = 0;
+  // V7.1 Phase B.1 (Auftrag Abschnitt D/J) – ein Restore darf die
+  // Mandantenzuordnung niemals verändern. Ein Datensatz, der einem bereits
+  // anders zugeordneten Jobpaket widerspricht, wird abgewiesen statt den
+  // gesamten Restore abzubrechen oder die Zuordnung stillschweigend zu
+  // überschreiben.
+  const rejectedJobPackageIds = [];
+  const rejectedJobResultJobPackageIds = [];
 
-  const restoredPackages = exportData.jobPackages.map((pkg) => {
-    const isExpired = heygenJobPackage.isPackageExpired(pkg, now);
-    const isTerminal = ["SUCCEEDED", "FAILED", "CANCELLED", "STALE"].includes(pkg.status);
-    let restored = { ...pkg };
-    if (isExpired && !isTerminal) {
-      restored = {
-        ...pkg,
-        status: "STALE",
-        blockReasons: [...new Set([...(pkg.blockReasons || []), "Paket ist nach Wiederherstellung abgelaufen (STALE)."])],
-      };
-      staleMarkedCount += 1;
+  const restoredPackages = exportData.jobPackages
+    .map((pkg) => {
+      const isExpired = heygenJobPackage.isPackageExpired(pkg, now);
+      const isTerminal = ["SUCCEEDED", "FAILED", "CANCELLED", "STALE"].includes(pkg.status);
+      let restored = { ...pkg };
+      if (isExpired && !isTerminal) {
+        restored = {
+          ...pkg,
+          status: "STALE",
+          blockReasons: [...new Set([...(pkg.blockReasons || []), "Paket ist nach Wiederherstellung abgelaufen (STALE)."])],
+        };
+        staleMarkedCount += 1;
+      }
+      try {
+        heygenStore.savePackage(paths, restored);
+        return restored;
+      } catch (_error) {
+        rejectedJobPackageIds.push(pkg.jobPackageId);
+        return null;
+      }
+    })
+    .filter(Boolean);
+
+  const restoredResultCount = exportData.jobResults.filter((result) => {
+    try {
+      heygenStore.saveResult(paths, result.jobPackageId, result);
+      return true;
+    } catch (_error) {
+      rejectedJobResultJobPackageIds.push(result.jobPackageId);
+      return false;
     }
-    heygenStore.savePackage(paths, restored);
-    return restored;
-  });
-
-  exportData.jobResults.forEach((result) => {
-    heygenStore.saveResult(paths, result.jobPackageId, result);
-  });
+  }).length;
 
   return {
     ok: true,
     restoredJobPackageCount: restoredPackages.length,
-    restoredJobResultCount: exportData.jobResults.length,
+    restoredJobResultCount: restoredResultCount,
+    rejectedJobPackageIds,
+    rejectedJobResultJobPackageIds,
+    tenantSeparationPreserved: true,
     staleMarkedCount,
     startedHeygenJob: false,
     repeatedHandoff: false,

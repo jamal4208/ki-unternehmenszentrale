@@ -30,11 +30,17 @@ function resolveHeygenStorePaths(options = {}) {
     heygenDir,
     packagesDir: path.join(heygenDir, "packages"),
     resultsDir: path.join(heygenDir, "results"),
+    // V7.1 Phase B.1 – additive Ablage für die Ergebnisrückführungs-
+    // Statuskette (siehe heygen-result-lifecycle.js). Ausschließlich
+    // Statusmetadaten, kein Rendermaterial.
+    lifecyclesDir: path.join(heygenDir, "lifecycles"),
   };
 }
 
 function ensureHeygenStoreDirs(paths) {
-  [paths.appSupportDir, paths.heygenDir, paths.packagesDir, paths.resultsDir].forEach(ensureDirSecure);
+  [paths.appSupportDir, paths.heygenDir, paths.packagesDir, paths.resultsDir, paths.lifecyclesDir]
+    .filter(Boolean)
+    .forEach(ensureDirSecure);
 }
 
 function writeJsonAtomic(filePath, data) {
@@ -88,10 +94,34 @@ function resultPath(paths, jobPackageId) {
   return path.join(paths.resultsDir, `${jobPackageId}.json`);
 }
 
+function lifecyclePath(paths, jobPackageId) {
+  return path.join(paths.lifecyclesDir, `${jobPackageId}.json`);
+}
+
+// V7.1 Phase B.1 (Auftrag Abschnitt D, Regel 3) – ein bereits gespeichertes
+// Jobpaket kann NICHT nachträglich einem anderen Kunden/einer anderen Marke
+// zugeordnet werden. Diese Prüfung sitzt bewusst an der Persistenzgrenze
+// (nicht nur im Modul), damit sie für jeden Aufrufer verbindlich gilt.
+function assertNoTenantReassignment(existing, incoming) {
+  if (!existing) return;
+  if (existing.customerId && incoming.customerId && existing.customerId !== incoming.customerId) {
+    throw new Error(
+      `Jobpaket "${incoming.jobPackageId}" ist bereits Kunde "${existing.customerId}" zugeordnet und kann nicht auf Kunde "${incoming.customerId}" umgestellt werden.`,
+    );
+  }
+  if (existing.brandId && incoming.brandId && existing.brandId !== incoming.brandId) {
+    throw new Error(
+      `Jobpaket "${incoming.jobPackageId}" ist bereits Marke "${existing.brandId}" zugeordnet und kann nicht auf Marke "${incoming.brandId}" umgestellt werden.`,
+    );
+  }
+}
+
 function savePackage(paths, pkg) {
   ensureHeygenStoreDirs(paths);
   const id = safeId(pkg.jobPackageId);
   if (!id) throw new Error("jobPackageId ist ungültig.");
+  const existing = loadPackage(paths, id);
+  assertNoTenantReassignment(existing, pkg);
   writeJsonAtomic(packagePath(paths, id), pkg);
   return clone(pkg);
 }
@@ -119,16 +149,39 @@ function listPackages(paths, filter = {}) {
   if (filter.projectId) {
     records = records.filter((record) => record.projectId === filter.projectId);
   }
+  // V7.1 Phase B.1 (Auftrag Abschnitt D) – Mandantentrennung: eine
+  // kundengebundene Ansicht darf ausschließlich Datensätze desselben Kunden
+  // liefern.
+  if (filter.customerId) {
+    records = records.filter((record) => record.customerId === filter.customerId);
+  }
   records.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   return records.map(clone);
 }
 
+// V7.1 Phase B.1 (Auftrag Abschnitt D, Regel 4) – Ergebnisrückgaben müssen
+// zum gleichen Mandanten wie das zugehörige Jobpaket gehören. customerId/
+// brandId/campaignId werden hier NICHT vom Aufrufer übernommen, sondern
+// ausschließlich aus dem bereits gespeicherten Jobpaket abgeleitet
+// (Foreign-Key-artige Bindung statt einer zweiten, manipulierbaren Wahrheit).
 function saveResult(paths, jobPackageId, result) {
   ensureHeygenStoreDirs(paths);
   const id = safeId(jobPackageId);
   if (!id) throw new Error("jobPackageId ist ungültig.");
-  writeJsonAtomic(resultPath(paths, id), result);
-  return clone(result);
+  const pkg = loadPackage(paths, id);
+  if (!pkg) {
+    throw new Error(`Kein HeyGen-Auftragspaket mit jobPackageId "${id}" gefunden; Ergebnis kann nicht zugeordnet werden.`);
+  }
+  const tenantBoundResult = {
+    ...result,
+    jobPackageId: id,
+    customerId: pkg.customerId,
+    brandId: pkg.brandId,
+    campaignId: pkg.campaignId,
+    projectId: pkg.projectId,
+  };
+  writeJsonAtomic(resultPath(paths, id), tenantBoundResult);
+  return clone(tenantBoundResult);
 }
 
 function loadResult(paths, jobPackageId) {
@@ -139,7 +192,7 @@ function loadResult(paths, jobPackageId) {
   return result.ok ? clone(result.record) : null;
 }
 
-function listResults(paths) {
+function listResults(paths, filter = {}) {
   ensureHeygenStoreDirs(paths);
   let files;
   try {
@@ -147,8 +200,48 @@ function listResults(paths) {
   } catch (_error) {
     return [];
   }
-  return files
+  let records = files
     .map((name) => readJsonSafe(path.join(paths.resultsDir, name), MAX_RECORD_BYTES))
+    .filter((result) => result.ok)
+    .map((result) => result.record);
+  if (filter.customerId) {
+    records = records.filter((record) => record.customerId === filter.customerId);
+  }
+  return records.map(clone);
+}
+
+// ---------------------------------------------------------------------------
+// V7.1 Phase B.1 – Ergebnisrückführungs-Statuskette (heygen-result-
+// lifecycle.js). Gleiche Sicherheitsmuster: atomar, restriktive Rechte,
+// niemals Rendermaterial.
+// ---------------------------------------------------------------------------
+
+function saveLifecycle(paths, jobPackageId, lifecycleRecord) {
+  ensureHeygenStoreDirs(paths);
+  const id = safeId(jobPackageId);
+  if (!id) throw new Error("jobPackageId ist ungültig.");
+  writeJsonAtomic(lifecyclePath(paths, id), lifecycleRecord);
+  return clone(lifecycleRecord);
+}
+
+function loadLifecycle(paths, jobPackageId) {
+  ensureHeygenStoreDirs(paths);
+  const id = safeId(jobPackageId);
+  if (!id) return null;
+  const result = readJsonSafe(lifecyclePath(paths, id), MAX_RECORD_BYTES);
+  return result.ok ? clone(result.record) : null;
+}
+
+function listLifecycles(paths) {
+  ensureHeygenStoreDirs(paths);
+  let files;
+  try {
+    files = fs.readdirSync(paths.lifecyclesDir).filter((name) => name.endsWith(".json"));
+  } catch (_error) {
+    return [];
+  }
+  return files
+    .map((name) => readJsonSafe(path.join(paths.lifecyclesDir, name), MAX_RECORD_BYTES))
     .filter((result) => result.ok)
     .map((result) => result.record)
     .map(clone);
@@ -163,4 +256,7 @@ module.exports = {
   saveResult,
   loadResult,
   listResults,
+  saveLifecycle,
+  loadLifecycle,
+  listLifecycles,
 };

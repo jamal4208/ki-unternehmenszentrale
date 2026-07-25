@@ -18,6 +18,9 @@ function check(label, assertion) {
 function buildApprovedPackage(overrides = {}) {
   const { package: draft } = heygenJobPackage.prepareHeygenJobPackage({
     projectId: "ki-unternehmenszentrale",
+    customerId: "test-customer-fiktives-cafe",
+    brandId: "test-brand-fiktives-cafe",
+    campaignId: "test-campaign-fiktives-cafe-pilot",
     videoType: "AVATAR_VIDEO",
     title: "Café-Testvideo",
     script: "Willkommen in unserem Café. Heute gibt es einen neuen Kaffee.",
@@ -146,6 +149,9 @@ check("abgelaufenes Paket wird auch mit gültigem Token blockiert", () => {
 check("fehlende Freigaben verhindern bereits die Tokenanfrage", () => {
   const { package: draft } = heygenJobPackage.prepareHeygenJobPackage({
     projectId: "ki-unternehmenszentrale",
+    customerId: "test-customer-fiktives-cafe",
+    brandId: "test-brand-fiktives-cafe",
+    campaignId: "test-campaign-fiktives-cafe-pilot",
     videoType: "AVATAR_VIDEO",
     title: "x",
     script: "Ein kurzer Testtext.",
@@ -221,6 +227,41 @@ check("Ergebnis-Token ist einmalig (Reuse blockiert)", () => {
   });
   heygenConnector.validateHandoffResult(tokenResult.token, resultCandidate);
   assert.throws(() => heygenConnector.validateHandoffResult(tokenResult.token, resultCandidate));
+});
+
+// ---------------------------------------------------------------------------
+// V7.1 Phase B.1 (Auftrag Abschnitt F) – Agentur-Connectorbetrieb.
+// ---------------------------------------------------------------------------
+
+check("Agentur-Connectorbetrieb: Kunden erhalten keinen HeyGen-Login und keine Kontodaten", () => {
+  const model = heygenConnector.buildAgencyConnectorOperatingModel();
+  assert.strictEqual(model.customerHasHeyGenLogin, false);
+  assert.strictEqual(model.customerCanTriggerRender, false);
+  assert.strictEqual(model.customerCanPublish, false);
+  assert.strictEqual(model.providerCredentialsExposedToCustomer, false);
+  assert.strictEqual(model.personalAccountDataExposedToCustomer, false);
+});
+
+check("Agentur-Connectorbetrieb bleibt CONTROLLED_HANDOFF, intern und nicht öffentlich erreichbar", () => {
+  const model = heygenConnector.buildAgencyConnectorOperatingModel();
+  assert.strictEqual(model.connectorMode, "CONTROLLED_HANDOFF");
+  assert.strictEqual(model.connectorVisibility, "INTERNAL_ONLY");
+  assert.strictEqual(model.connectorPubliclyReachable, false);
+});
+
+check("Agentur-Connectorbetrieb legt keine echten HeyGen-Ordner oder Sub-Workspaces an", () => {
+  const model = heygenConnector.buildAgencyConnectorOperatingModel();
+  assert.strictEqual(model.providerFolderStrategy, "PLANNED_NOT_YET_CREATED");
+  assert.strictEqual(model.noRealHeyGenFolderCreatedInThisPhase, true);
+  assert.strictEqual(model.noSubWorkspaceCreatedInThisPhase, true);
+  assert.strictEqual(model.noConnectorActionExecuted, true);
+});
+
+check("Capability-Antwort enthält additiv das Agentur-Betriebsmodell, ohne die Basiswahrheit zu verändern", () => {
+  const response = heygenConnector.buildHeygenCapabilityResponse();
+  assert.ok(response.agencyConnectorOperatingModel);
+  assert.strictEqual(response.agencyConnectorOperatingModel.customerHasHeyGenLogin, false);
+  assert.strictEqual(response.pilotStatus.directOrAutonomousConnection, false);
 });
 
 console.log(`heygen-connector.test.js: ${passed} Prüfpunkte erfolgreich`);

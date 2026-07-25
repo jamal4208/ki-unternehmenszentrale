@@ -24,6 +24,9 @@ function makeIsolatedPaths() {
 function draftValidPackage(overrides = {}) {
   const prepared = heygenJobPackage.prepareHeygenJobPackage({
     projectId: "ki-unternehmenszentrale",
+    customerId: "test-customer-fiktives-cafe",
+    brandId: "test-brand-fiktives-cafe",
+    campaignId: "test-campaign-fiktives-cafe-pilot",
     videoType: "AVATAR_VIDEO",
     title: "Café-Test",
     script: "Willkommen in unserem neutralen Test-Café.",
@@ -204,6 +207,63 @@ function runTests() {
     assert.strictEqual(resultExport.jobResults.length, 1);
     assert.strictEqual(resultExport.jobResults[0].providerJobId, "provider-job-1");
     assert.ok(!Object.prototype.hasOwnProperty.call(resultExport.jobResults[0], "providerRawResponse"));
+  });
+
+  // V7.1 Phase B.1 (Auftrag Abschnitt E/G/J) – neue Jobpaketfelder im Export.
+  check("Export enthält Mandanten-, Kosten- und Kundenfreigabefelder des Jobpakets", () => {
+    const entry = exported.jobPackages.find((p) => p.jobPackageId === pkg.jobPackageId);
+    assert.strictEqual(entry.customerId, "test-customer-fiktives-cafe");
+    assert.strictEqual(entry.brandId, "test-brand-fiktives-cafe");
+    assert.strictEqual(entry.campaignId, "test-campaign-fiktives-cafe-pilot");
+    assert.ok(entry.providerFolderReference);
+    assert.strictEqual(entry.providerFolderReference.status, "PLANNED_NOT_CREATED");
+    assert.ok(entry.billableUnit);
+    assert.strictEqual(entry.costPackageStatus, "UNKNOWN");
+    assert.strictEqual(entry.customerDraftApprovalStatus, "PENDING");
+  });
+
+  check("Ergebnis-Export enthält die vom Jobpaket abgeleitete Mandantenbindung", () => {
+    const isolatedPaths = makeIsolatedPaths();
+    const resultPkg = draftValidPackage();
+    heygenStore.savePackage(isolatedPaths, resultPkg);
+    heygenStore.saveResult(isolatedPaths, resultPkg.jobPackageId, {
+      jobPackageId: resultPkg.jobPackageId,
+      provider: "HeyGen",
+      providerJobId: "provider-job-tenant-1",
+      status: "SUCCEEDED",
+    });
+    const resultExport = heygenBackup.exportHeygenBackup({ appSupportDir: isolatedPaths.appSupportDir });
+    const resultEntry = resultExport.jobResults.find((r) => r.jobPackageId === resultPkg.jobPackageId);
+    assert.strictEqual(resultEntry.customerId, "test-customer-fiktives-cafe");
+    assert.strictEqual(resultEntry.brandId, "test-brand-fiktives-cafe");
+    assert.strictEqual(resultEntry.campaignId, "test-campaign-fiktives-cafe-pilot");
+  });
+
+  // 20/21. Backup wahrt Zuordnung / Restore wahrt Zuordnung.
+  check("20/21. Restore-Vorschau zeigt betroffene Kunden-IDs, ohne sie zu verändern", () => {
+    const restorePreview = heygenBackup.previewHeygenBackupRestore(exported);
+    assert.ok(restorePreview.preview.affectedCustomerIds.includes("test-customer-fiktives-cafe"));
+  });
+
+  check("19. Restore kann eine Mandanten-Neuzuordnung nicht durchsetzen (bestehendes Paket bleibt beim Ursprungskunden)", () => {
+    const isolatedPaths = makeIsolatedPaths();
+    const originalPkg = draftValidPackage();
+    heygenStore.savePackage(isolatedPaths, originalPkg);
+    const cleanExport = heygenBackup.exportHeygenBackup({ appSupportDir: isolatedPaths.appSupportDir });
+    const tamperedExport = {
+      ...cleanExport,
+      jobPackages: cleanExport.jobPackages.map((entry) =>
+        entry.jobPackageId === originalPkg.jobPackageId
+          ? { ...entry, customerId: "test-customer-fiktives-fitnessstudio" }
+          : entry
+      ),
+    };
+    const result = heygenBackup.applyHeygenBackupRestore(tamperedExport, { appSupportDir: isolatedPaths.appSupportDir });
+    assert.strictEqual(result.ok, true);
+    assert.ok(result.rejectedJobPackageIds.includes(originalPkg.jobPackageId));
+    assert.strictEqual(result.tenantSeparationPreserved, true);
+    const reloaded = heygenStore.loadPackage(isolatedPaths, originalPkg.jobPackageId);
+    assert.strictEqual(reloaded.customerId, "test-customer-fiktives-cafe");
   });
 
   console.log(`heygen-backup.test.js: ${passed} Prüfpunkte erfolgreich`);

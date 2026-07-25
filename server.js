@@ -25,6 +25,13 @@ const heygenJobPackageModule = require("./heygen-job-package");
 const heygenConnectorModule = require("./heygen-connector");
 const heygenStoreModule = require("./heygen-store");
 const heygenBackupModule = require("./heygen-backup");
+// V7.1 Phase B.1 (Auftrag Abschnitt C/H/J) – Mandantenbasis, Pilot-Review,
+// Ergebnisrückführungs-Statuskette und Agentur-Backup. Rein additiv, keine
+// Netzwerklogik, keine Zugangsdaten.
+const agencyTenantRegistryModule = require("./agency-tenant-registry");
+const heygenPilotReviewModule = require("./heygen-pilot-review");
+const heygenResultLifecycleModule = require("./heygen-result-lifecycle");
+const agencyBackupModule = require("./agency-backup");
 
 const rootDir = __dirname;
 const staticAssets = new Map([
@@ -22424,11 +22431,17 @@ function handleV71HeygenJobPackagesList(res, context) {
     return;
   }
   const projectId = safeQueryParam(context.requestUrl, "projectId");
+  // V7.1 Phase B.1 (Auftrag Abschnitt D) – optionale Mandantenansicht: nur
+  // Jobpakete desselben Kunden.
+  const customerId = safeQueryParam(context.requestUrl, "customerId");
   const paths = heygenStorePaths();
-  const jobPackages = heygenStoreModule.listPackages(paths, projectId ? { projectId } : {});
+  const filter = {};
+  if (projectId) filter.projectId = projectId;
+  if (customerId) filter.customerId = customerId;
+  const jobPackages = heygenStoreModule.listPackages(paths, filter);
   sendJson(res, 200, {
     ok: true,
-    version: "V7.1-Phase-B",
+    version: "V7.1-Phase-B.1",
     jobPackageCount: jobPackages.length,
     jobPackages,
     ...API_SECURITY_FLAGS,
@@ -22436,17 +22449,30 @@ function handleV71HeygenJobPackagesList(res, context) {
   });
 }
 
-function handleV71HeygenJobPackageById(res, jobPackageId) {
+function handleV71HeygenJobPackageById(res, jobPackageId, context) {
   const safeId = typeof jobPackageId === "string" ? jobPackageId.replace(/[^a-zA-Z0-9-]/g, "") : "";
   const paths = heygenStorePaths();
   const pkg = safeId ? heygenStoreModule.loadPackage(paths, safeId) : null;
-  if (!pkg) {
+  // V7.1 Phase B.1 (Auftrag Abschnitt D, Regel 16/K) – ein mitgegebener
+  // customerId-Filter, der nicht zum Paket passt, liefert bewusst 404 statt
+  // 403, um die Existenz eines fremden Kundendatensatzes nicht preiszugeben.
+  const requestedCustomerId = context ? safeQueryParam(context.requestUrl, "customerId") : null;
+  if (!pkg || (requestedCustomerId && pkg.customerId !== requestedCustomerId)) {
     sendJson(res, 404, heygenNotFoundPayload());
     return;
   }
   const readiness = heygenJobPackageModule.evaluateHandoffReadiness(pkg);
   const result = heygenStoreModule.loadResult(paths, pkg.jobPackageId);
-  sendJson(res, 200, { ok: true, package: pkg, readiness, result, ...API_SECURITY_FLAGS, madeExternalRequest: false });
+  const lifecycle = heygenStoreModule.loadLifecycle(paths, pkg.jobPackageId);
+  sendJson(res, 200, {
+    ok: true,
+    package: pkg,
+    readiness,
+    result,
+    lifecycle,
+    ...API_SECURITY_FLAGS,
+    madeExternalRequest: false,
+  });
 }
 
 function handleV71HeygenBackupExport(res, context) {
@@ -22464,6 +22490,13 @@ function handleV71HeygenBackupExport(res, context) {
 
 const HEYGEN_JOB_PACKAGE_PREPARE_FIELDS = Object.freeze([
   "projectId",
+  // V7.1 Phase B.1 – verpflichtende Mandantenbindung (Auftrag Abschnitt C/D/E).
+  "customerId",
+  "brandId",
+  "campaignId",
+  "costPackageStatus",
+  "customerPackageId",
+  "billableUnit",
   "sourceRunId",
   "createdBy",
   "requestingAgentId",
@@ -22572,14 +22605,197 @@ function handleV71HeygenResultValidate(res, context) {
     const validated = heygenConnectorModule.validateHandoffResult(body.token, body.result || {});
     if (validated.ok) {
       const paths = heygenStorePaths();
-      heygenStoreModule.saveResult(paths, validated.result.jobPackageId, validated.result);
+      const savedResult = heygenStoreModule.saveResult(paths, validated.result.jobPackageId, validated.result);
       const pkg = heygenStoreModule.loadPackage(paths, validated.result.jobPackageId);
       if (pkg && heygenJobPackageModule.HEYGEN_JOB_STATUSES.includes(validated.result.status)) {
         heygenStoreModule.savePackage(paths, { ...pkg, status: validated.result.status });
       }
+      // V7.1 Phase B.1 (Auftrag Abschnitt H) – die Ergebnisrückführungs-
+      // Statuskette wird ausschließlich mit dem tatsächlichen Providerstatus
+      // initialisiert (PROVIDER_PROCESSING/PROVIDER_SUCCEEDED). Kein
+      // automatischer Sprung zu einer höheren Freigabestufe.
+      try {
+        const lifecycle = heygenResultLifecycleModule.initLifecycleRecord(savedResult);
+        heygenStoreModule.saveLifecycle(paths, savedResult.jobPackageId, lifecycle);
+      } catch (_error) {
+        /* FAILED/CANCELLED Providerzustände starten keine Kunden-Review-Kette. */
+      }
     }
     return validated;
   });
+}
+
+// ---------------------------------------------------------------------------
+// V7.1 Phase B.1 (Auftrag Abschnitt C) – Mandantenbasis (Testkunden/Marken/
+// Kampagnen). Ausschließlich lesende, code-definierte Testdaten; keine
+// echten Kundendaten, keine Schreibaktion.
+// ---------------------------------------------------------------------------
+
+function handleV71AgencyCustomers(res, context) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+    return;
+  }
+  const customers = agencyTenantRegistryModule.listCustomers();
+  sendJson(res, 200, { ok: true, customerCount: customers.length, customers, ...API_SECURITY_FLAGS, madeExternalRequest: false });
+}
+
+function handleV71AgencyBrands(res, context) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+    return;
+  }
+  const customerId = safeQueryParam(context.requestUrl, "customerId");
+  const brands = agencyTenantRegistryModule.listBrands(customerId ? { customerId } : {});
+  sendJson(res, 200, { ok: true, brandCount: brands.length, brands, ...API_SECURITY_FLAGS, madeExternalRequest: false });
+}
+
+function handleV71AgencyCampaigns(res, context) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+    return;
+  }
+  const customerId = safeQueryParam(context.requestUrl, "customerId");
+  const brandId = safeQueryParam(context.requestUrl, "brandId");
+  const filter = {};
+  if (customerId) filter.customerId = customerId;
+  if (brandId) filter.brandId = brandId;
+  const campaigns = agencyTenantRegistryModule.listCampaigns(filter);
+  sendJson(res, 200, { ok: true, campaignCount: campaigns.length, campaigns, ...API_SECURITY_FLAGS, madeExternalRequest: false });
+}
+
+function handleV71AgencyPilotReview(res, context) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+    return;
+  }
+  const pilotReview = heygenPilotReviewModule.getCanonicalFirstPilotReview();
+  sendJson(res, 200, {
+    ok: true,
+    pilotReview,
+    locallyVerifiedSuccess: heygenPilotReviewModule.isLocallyVerifiedSuccess(pilotReview),
+    ...API_SECURITY_FLAGS,
+    madeExternalRequest: false,
+  });
+}
+
+function handleV71AgencyBackupExport(res, context) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+    return;
+  }
+  sendJson(res, 200, {
+    ok: true,
+    ...agencyBackupModule.exportAgencyBackup(),
+    ...API_SECURITY_FLAGS,
+    madeExternalRequest: false,
+  });
+}
+
+function handleV71AgencyBackupRestorePreview(res, context) {
+  return withV71ApiGuards(
+    context.req,
+    res,
+    agencyBackupModule.ALLOWED_ROOT_FIELDS,
+    "agency/backup/restore-preview",
+    (body) => agencyBackupModule.previewAgencyBackupRestore(body),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// V7.1 Phase B.1 (Auftrag Abschnitt E/H) – fünfte Freigabestufe
+// (Kundenentwurf), Kostenpaketstatus und Ergebnisrückführungs-Statuskette.
+// Jeder Übergang ist ein eigener, expliziter Aufruf; keine Sammelfreigabe.
+// ---------------------------------------------------------------------------
+
+function handleV71HeygenJobPackageApproveCustomerDraft(res, context) {
+  return withV71ApiGuards(context.req, res, ["jobPackageId"], "heygen/job-package/approve-customer-draft", (body) => {
+    const paths = heygenStorePaths();
+    const pkg = loadHeygenPackageOrThrow(paths, body.jobPackageId);
+    const approved = heygenJobPackageModule.approveCustomerDraft(pkg);
+    heygenStoreModule.savePackage(paths, approved);
+    return { ok: true, package: approved };
+  });
+}
+
+function handleV71HeygenJobPackageRequestCustomerDraftChanges(res, context) {
+  return withV71ApiGuards(context.req, res, ["jobPackageId", "note"], "heygen/job-package/request-customer-draft-changes", (body) => {
+    const paths = heygenStorePaths();
+    const pkg = loadHeygenPackageOrThrow(paths, body.jobPackageId);
+    const updated = heygenJobPackageModule.requestCustomerDraftChanges(pkg, body.note);
+    heygenStoreModule.savePackage(paths, updated);
+    return { ok: true, package: updated };
+  });
+}
+
+function handleV71HeygenJobPackageSetCostPackageStatus(res, context) {
+  return withV71ApiGuards(context.req, res, ["jobPackageId", "costPackageStatus"], "heygen/job-package/set-cost-package-status", (body) => {
+    const paths = heygenStorePaths();
+    const pkg = loadHeygenPackageOrThrow(paths, body.jobPackageId);
+    const updated = heygenJobPackageModule.setCostPackageStatus(pkg, body.costPackageStatus);
+    heygenStoreModule.savePackage(paths, updated);
+    return { ok: true, package: updated };
+  });
+}
+
+const HEYGEN_RESULT_LIFECYCLE_ACTIONS = Object.freeze([
+  "LOCAL_VALIDATE",
+  "START_INTERNAL_REVIEW",
+  "COMPLETE_INTERNAL_REVIEW",
+  "READY_FOR_CUSTOMER_REVIEW",
+  "REQUEST_CUSTOMER_CHANGES",
+  "RETURN_TO_INTERNAL_REVIEW",
+  "CUSTOMER_APPROVE",
+]);
+
+function handleV71HeygenResultLifecycleAdvance(res, context) {
+  return withV71ApiGuards(
+    context.req,
+    res,
+    ["jobPackageId", "action", "note", "passed"],
+    "heygen/result-lifecycle/advance",
+    (body) => {
+      const jobPackageId = String(body.jobPackageId || "").trim();
+      if (!jobPackageId) throw new Error("jobPackageId fehlt.");
+      if (!HEYGEN_RESULT_LIFECYCLE_ACTIONS.includes(body.action)) {
+        throw new Error(`action "${body.action}" ist ungültig.`);
+      }
+      const paths = heygenStorePaths();
+      const resultRecord = heygenStoreModule.loadResult(paths, jobPackageId);
+      if (!resultRecord) {
+        throw new Error(`Kein HeyGen-Ergebnis für jobPackageId "${jobPackageId}" gefunden.`);
+      }
+      let record = heygenStoreModule.loadLifecycle(paths, jobPackageId) || heygenResultLifecycleModule.initLifecycleRecord(resultRecord);
+
+      switch (body.action) {
+        case "LOCAL_VALIDATE":
+          record = heygenResultLifecycleModule.advanceToLocalValidated(record, resultRecord);
+          break;
+        case "START_INTERNAL_REVIEW":
+          record = heygenResultLifecycleModule.startInternalReview(record);
+          break;
+        case "COMPLETE_INTERNAL_REVIEW":
+          record = heygenResultLifecycleModule.completeInternalReview(record, body.passed === true, body.note);
+          break;
+        case "READY_FOR_CUSTOMER_REVIEW":
+          record = heygenResultLifecycleModule.markReadyForCustomerReview(record);
+          break;
+        case "REQUEST_CUSTOMER_CHANGES":
+          record = heygenResultLifecycleModule.requestCustomerChanges(record, body.note);
+          break;
+        case "RETURN_TO_INTERNAL_REVIEW":
+          record = heygenResultLifecycleModule.returnToInternalReviewAfterChanges(record);
+          break;
+        case "CUSTOMER_APPROVE":
+          record = heygenResultLifecycleModule.approveByCustomer(record);
+          break;
+        default:
+          throw new Error(`action "${body.action}" ist ungültig.`);
+      }
+      heygenStoreModule.saveLifecycle(paths, jobPackageId, record);
+      return { ok: true, lifecycle: record };
+    },
+  );
 }
 
 function handleV71HeygenBackupRestorePreview(res, context) {
@@ -22650,6 +22866,12 @@ const getRoutes = buildRouteMap([
   ["/api/v71/heygen/status", (res, context) => handleV71HeygenStatus(res, context)],
   ["/api/v71/heygen/job-packages", (res, context) => handleV71HeygenJobPackagesList(res, context)],
   ["/api/v71/heygen/backup/export", (res, context) => handleV71HeygenBackupExport(res, context)],
+  // V7.1 Phase B.1 (Auftrag Abschnitt C/J) – Mandantenbasis, Pilot-Review, Agentur-Backup.
+  ["/api/v71/agency/customers", (res, context) => handleV71AgencyCustomers(res, context)],
+  ["/api/v71/agency/brands", (res, context) => handleV71AgencyBrands(res, context)],
+  ["/api/v71/agency/campaigns", (res, context) => handleV71AgencyCampaigns(res, context)],
+  ["/api/v71/agency/pilot-review", (res, context) => handleV71AgencyPilotReview(res, context)],
+  ["/api/v71/agency/backup/export", (res, context) => handleV71AgencyBackupExport(res, context)],
 ]);
 
 const postRoutes = buildRouteMap([
@@ -22670,6 +22892,13 @@ const postRoutes = buildRouteMap([
   ["/api/v71/heygen/result/request-token", (res, context) => handleV71HeygenResultRequestToken(res, context)],
   ["/api/v71/heygen/result/validate", (res, context) => handleV71HeygenResultValidate(res, context)],
   ["/api/v71/heygen/backup/restore-preview", (res, context) => handleV71HeygenBackupRestorePreview(res, context)],
+  // V7.1 Phase B.1 (Auftrag Abschnitt E/H/J) – Kundenentwurfsfreigabe, Kostenpaketstatus,
+  // Ergebnisrückführungs-Statuskette, Agentur-Backup-Restore-Vorschau.
+  ["/api/v71/heygen/job-package/approve-customer-draft", (res, context) => handleV71HeygenJobPackageApproveCustomerDraft(res, context)],
+  ["/api/v71/heygen/job-package/request-customer-draft-changes", (res, context) => handleV71HeygenJobPackageRequestCustomerDraftChanges(res, context)],
+  ["/api/v71/heygen/job-package/set-cost-package-status", (res, context) => handleV71HeygenJobPackageSetCostPackageStatus(res, context)],
+  ["/api/v71/heygen/result-lifecycle/advance", (res, context) => handleV71HeygenResultLifecycleAdvance(res, context)],
+  ["/api/v71/agency/backup/restore-preview", (res, context) => handleV71AgencyBackupRestorePreview(res, context)],
 ]);
 
 const { requestHandler } = createHttpRouter({
@@ -22702,7 +22931,7 @@ const { requestHandler } = createHttpRouter({
           return;
         }
         const jobPackageId = decodeURIComponent(context.pathname.slice("/api/v71/heygen/job-packages/".length));
-        handleV71HeygenJobPackageById(res, jobPackageId);
+        handleV71HeygenJobPackageById(res, jobPackageId, context);
       },
     },
   ],

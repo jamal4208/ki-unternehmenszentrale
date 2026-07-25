@@ -302,16 +302,16 @@ async function runTests() {
   const serverSource = fs.readFileSync(path.join(__dirname, "server.js"), "utf8");
   const getRouteBlockMatch = serverSource.match(/const getRoutes = buildRouteMap\(\[([\s\S]*?)\n\]\);/);
   const routeCount = getRouteBlockMatch ? (getRouteBlockMatch[1].match(/^\s+\["\/api\//gm) || []).length : 0;
-  check("bestehende 55 GET-Routen bleiben registriert (Phase C: +2 GET Execution-Status/-Ergebnis, Phase D: +1 GET Executor-Registry, Phase E: +1 GET Freeze-Status, V7.1 Phase A: +5 GET Dokumente/Tools/Plugin-Gateway/Tool-Routing/Backup-Export, V7.1 Phase B: +3 GET HeyGen-Status/Jobpakete/Backup-Export)", () =>
-    assert.strictEqual(routeCount, 55),
+  check("bestehende 60 GET-Routen bleiben registriert (Phase C: +2 GET Execution-Status/-Ergebnis, Phase D: +1 GET Executor-Registry, Phase E: +1 GET Freeze-Status, V7.1 Phase A: +5 GET Dokumente/Tools/Plugin-Gateway/Tool-Routing/Backup-Export, V7.1 Phase B: +3 GET HeyGen-Status/Jobpakete/Backup-Export, V7.1 Phase B.1: +5 GET Agentur-Mandantenbasis/Pilot-Review/Backup-Export)", () =>
+    assert.strictEqual(routeCount, 60),
   );
 
   const postRouteBlockMatch = serverSource.match(/const postRoutes = buildRouteMap\(\[([\s\S]*?)\]\);/);
   const postRouteCount = postRouteBlockMatch
     ? (postRouteBlockMatch[1].match(/^\s+\["\/api\//gm) || []).length
     : 0;
-  check("genau 17 additive POST-Routen sind registriert (Execution Bridge + V7.1 Phase A Dokumente/Backup + V7.1 Phase B HeyGen-Connector-Pilot)", () =>
-    assert.strictEqual(postRouteCount, 17),
+  check("genau 22 additive POST-Routen sind registriert (Execution Bridge + V7.1 Phase A Dokumente/Backup + V7.1 Phase B HeyGen-Connector-Pilot + V7.1 Phase B.1 Kundenentwurf/Kostenpaket/Ergebnisrückführung/Agentur-Backup)", () =>
+    assert.strictEqual(postRouteCount, 22),
   );
 
   const serverStatusGet = await invokeJson(requestHandler, "GET", "/api/server-status");
