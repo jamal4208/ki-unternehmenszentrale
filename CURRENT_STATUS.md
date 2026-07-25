@@ -5,9 +5,11 @@
 - Vorheriger gesicherter Ausgangsstand: **V6.46.0** / Commit **`e611c9c`** (Health Hybrid End-to-End-Pilot)
 - **V7.0 Phase A – Guided Work Foundation:** umgesetzt, getestet, browserseitig abgenommen und gesichert mit Commit **`4a74ebe`** auf `origin/main`
 - **V7.0 Phase B – Betriebsstabilität:** umgesetzt, getestet, browserseitig abgenommen und gesichert mit Commit **`3487a84`** auf `origin/main`
-- **V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor:** technisch umgesetzt und getestet; **Umsetzungskandidat, noch nicht committed**
+- **V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor:** umgesetzt, getestet, browserseitig abgenommen und gesichert mit Commit **`0858b4e`** auf `origin/main`
+- **V7.0 Phase D – Codex als kontrollierten Executor anbinden:** umgesetzt, getestet, echter Codex-Fixture-Pilot bestanden und gesichert mit Commit **`6553452`** auf `origin/main`
+- **V7.0 Phase E – Health-Ende-zu-Ende-Abnahme und Freeze-Kandidat:** technisch umgesetzt und getestet; **Umsetzungskandidat, noch nicht committed**
 - Branch: `main`
-- Verbindliche Aussage: Phase A und Phase B sind gesichert; Phase C ist technisch fertig, aber erst nach separater Commit-Freigabe verbindlich; **V7.0 insgesamt ist damit nicht abgeschlossen** – Phase D und Phase E sind weiterhin offen und nicht umgesetzt
+- Verbindliche Aussage: Phase A bis D sind gesichert; Phase E ist technisch fertig, aber erst nach separater Commit-Freigabe verbindlich; ein read-only **V7.0-Freeze-Status** (`GET /api/v7-freeze-status`) zeigt technisch `FREEZE_CANDIDATE` erst dann, wenn der lokale Git-Stand exakt dem zuletzt gesicherten Commit entspricht und der Working Tree sauber ist – Cursor setzt nie `FROZEN`, das bleibt ausschließlich Jamals Entscheidung. **V7.0 insgesamt ist damit weiterhin nicht abgeschlossen** – Phase V7.1 ist nicht begonnen
 - Einstiegspunkte: `README.md`, `V1_BETRIEBSHANDBUCH.md`
 
 ## V7.0 Phase A – Guided Work Foundation (umgesetzt und abgenommen)
@@ -23,9 +25,29 @@
 - Backup-Schutz bleibt aktiv: Secret-Heuristik unverändert scharf; einzig der bestätigte False Positive bei bloßer `.env`/`.env.local`-Pfadnennung (z. B. in `forbiddenPaths`) wurde gezielt korrigiert, ohne die Erkennung realer Zugangsdaten zu schwächen
 - Bekannter, bewusst offener Bedienpunkt: Für `acknowledgeV2Overwrite` (Schutz gegen stilles Überschreiben lokaler v2-Läufe durch einen reinen v1-Import) gibt es noch keine UI-Freigabesteuerung; der sichere Standard („nicht überschreiben“) bleibt dadurch aktiv, ein bewusster Override ist aktuell nur außerhalb der UI möglich
 - 322 automatisierte Prüfpunkte grün; vollständige Browser-Abnahme inkl. Mobile 390×844 ohne horizontalen Überlauf bestanden
-- **Nicht enthalten – weiterhin offen für Phase D und Phase E (Phase C siehe unten):** Codex-/Agentenstart, produktive Repository-Arbeit, Health-Schreiben, Commit/Push/Deployment, Autonomieerhöhung
+- **Nicht enthalten – weiterhin offen für spätere Phasen (siehe Phase C/D/E unten):** Codex-/Agentenstart, produktive Repository-Arbeit, Health-Schreiben, Commit/Push/Deployment, Autonomieerhöhung
 
-## V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor (technisch umgesetzt, Umsetzungskandidat vor Commit)
+## V7.0 Phase E – Health-Ende-zu-Ende-Abnahme und Freeze-Kandidat (technisch umgesetzt, Umsetzungskandidat vor Commit)
+
+- Ziel war kein neuer Executor, sondern der Nachweis, dass der gesamte V7.0-Ablauf (Fokus → Vorschlag → Team → Baseline → Paket → isolierte Ausführung/Hybrid-Rückführung → Abschluss) stimmig, ehrlich und wiederholbar ist; nur echte Lücken wurden geschlossen
+- Neues read-only Modul `v7-freeze-status.js` + Route `GET /api/v7-freeze-status`: Statusmodell `IN_REVIEW | FREEZE_CANDIDATE | FROZEN`, abgeleitet aus Phasenhistorie, aktuellem Git-Commit/Working-Tree und dem zuletzt gemessenen Testlauf; `FROZEN` wird durch dieses Modul **niemals** gesetzt – ausschließlich Jamals separate Entscheidung
+- Neue, eingeklappte Freeze-Status-Karte im Guided-Work-Hauptarbeitsraum („unten nachschauen“); keine konkurrierende Primäraktion, kein Button, der den Status verändert
+- Sticky-Kopfbereich um „Wer arbeitet daran“ und „Tatsächlich ausgeführt / Evidenz“ ergänzt (liest ausschließlich bereits vorhandene, sicher gefilterte Felder – kein neues Datenmodell)
+- Tagesabschluss zeigt jetzt explizit „Ergebnis erreicht/nicht erreicht“, verantwortlichen Agenten und Ausführungs-/Evidenzstand
+- Veraltete Oberflächenaussage korrigiert: Der Startkarten-Text behauptete fälschlich „Keine Execution Bridge“, obwohl Mock- und Codex-Fixture-Ausführung seit Phase C/D bereits existieren (Health bleibt davon unberührt: weiterhin read-only, Codex-/Apply-Start für Health bleiben hart blockiert)
+- Audit bestätigt: Reload startet nie automatisch einen Attempt neu (Recovery-Fall statt Auto-Resume); `CANCELLED` ist terminal ohne Folgeübergänge; Backup/Restore bleibt vollständig auf `localStorage` beschränkt und startet nie einen Executor
+- 47. GET-Route additiv (`/api/v7-freeze-status`); weiterhin keine neue Schreib-Route, keine neue Autonomieerhöhung
+- **Nicht enthalten – weiterhin offen für Phase V7.1:** Dokumenten-/Wissenseingang, Werkzeug-/Lizenzregister, Plugin-Gateway, Marketing-Agentur, Canva/HeyGen, Shopify, weitere Umsatzprojekte
+
+## V7.0 Phase D – Codex als kontrollierten Executor anbinden (umgesetzt, getestet, gesichert mit Commit `6553452`)
+
+- Neues Modul `execution-codex-adapter.js`; Codex läuft ausschließlich isoliert, mit `--ask-for-approval never`, gegen das Execution-Bridge-Fixture-Repository – niemals gegen Health oder die Zentrale
+- Codex-Start für das Health-Projekt ist serverseitig hart blockiert (Codex-Ausführung und Apply bleiben für Health verboten)
+- Erweiterte Executor-Registry (`GET /api/execution/executors`) weist Mock und Codex mit Verfügbarkeit/Autorisierung aus; genau ein primärer Button je Zustand in der UI
+- Echter Codex-Fixture-Pilot bestanden: Timeout auf `150000ms` korrigiert (`DEFAULT_CODEX_ATTEMPT_TIMEOUT_MS`), Prozessführung auf `spawn()` mit `stdio: ["ignore","pipe","pipe"]` umgestellt (behebt reales Hängenbleiben von `execFile` bei offenem stdin)
+- **Nicht enthalten – weiterhin offen für Phase E:** Health-E2E-Gesamtaudit, Freeze-Status, produktive Codex-/Apply-Freigabe für Health, Commit/Push/Deployment, Autonomieerhöhung
+
+## V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor (umgesetzt, getestet und browserseitig abgenommen, gesichert mit Commit `0858b4e`)
 
 - Eigenständige Module `execution-bridge.js` und `execution-mock-adapter.js`; Tageslauf-, Hybrid- und Guided-Work-Module bleiben kanonisch
 - Isolierter Workspace ausschließlich unter `~/Library/Application Support/KI-Unternehmenszentrale/workspaces/` – außerhalb Zentrale und Health
@@ -151,7 +173,7 @@ Siehe ältere Statusdokumentation und Git-Historie für Detailstände vor dem UI
 
 ## Genau ein empfohlener nächster Produktentwicklungsschritt
 
-Kein Hybrid-Ausbau für weitere Projekte. Nächste Schritte nur nach Jamals ausdrücklicher Freigabe; keine Deployment-, V2- oder Außenwirkungsentscheidung aus diesem Stand ableiten.
+Jamals Commit-/Push-Freigabe für V7.0 Phase E einholen (inkl. manueller Safari-Abschlussprüfung); danach ist V7.0 technisch ein Freeze-Kandidat. Der geplante Pfad nach V7.0 (nur Reihenfolge, keine Umsetzung ohne separate Freigabe): Dokumenten-/Wissenseingang, Werkzeug-/Lizenzregister, Plugin-Gateway, Marketing-Agentur, Canva/HeyGen, Shopify, weitere Umsatzprojekte. Keine Deployment-, V2- oder Außenwirkungsentscheidung aus diesem Stand ableiten.
 
 ## Bekannte Widersprüche
 

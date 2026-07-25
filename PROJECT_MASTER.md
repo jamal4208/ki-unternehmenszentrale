@@ -1,14 +1,18 @@
 # PROJECT MASTER
 
-## Aktueller Arbeitsstand V7.0 (Phase A und Phase B gesichert; Phase C Umsetzungskandidat)
+## Aktueller Arbeitsstand V7.0 (Phase A bis D gesichert; Phase E Umsetzungskandidat)
 
 **V7.0 Phase A – Guided Work Foundation** ist umgesetzt, getestet, browserseitig abgenommen und mit Commit **`4a74ebe`** auf `origin/main` gesichert. Sie führt einen geführten Hauptarbeitsraum („Oben arbeiten. Unten nachschauen.“) mit deterministischen, quellenbasierten Arbeitsvorschlägen, editierbarem Agententeam, Re-Fingerprinting/Invalidierung, klarer Trennung von Live-/Snapshot-/Historienständen, bekannt-dirty-Baseline für Health und Evidenz-Prefill ein. Neue Tagesläufe erhalten `schemaVersion: 2`; `schemaVersion: 1` bleibt unverändert lesbar. Der V6.46.0-Hybrid-Fallback bleibt vollständig erhalten.
 
 **V7.0 Phase B – Betriebsstabilität** ist umgesetzt, getestet, browserseitig abgenommen und mit Commit **`3487a84`** auf `origin/main` gesichert. Separater lokaler Controller, Serverstatus-API und kompakte Statusanzeige ohne Steuerbuttons. Health bleibt ausschließlich read-only Pilotquelle.
 
-**V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor** ist technisch umgesetzt und getestet, aber **Umsetzungskandidat: noch nicht committed**. Isolierter Workspace unter App Support, deterministischer Mock-Executor (keine KI), Attempt-/Apply-State-Machine, One-Time-Token-API, Apply nur gegen Fixture-Repository nach Jamal-Freigabe. Health-Apply bleibt in Phase C hart blockiert. Apply ist kein Commit, kein Push, kein Deployment.
+**V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor** ist umgesetzt, getestet, browserseitig abgenommen und mit Commit **`0858b4e`** auf `origin/main` gesichert. Isolierter Workspace unter App Support, deterministischer Mock-Executor (keine KI), Attempt-/Apply-State-Machine, One-Time-Token-API, Apply nur gegen Fixture-Repository nach Jamal-Freigabe. Health-Apply bleibt hart blockiert. Apply ist kein Commit, kein Push, kein Deployment.
 
-**Vorheriger gesicherter Ausgangsstand:** V6.46.0 / `e611c9c`. **V7.0 insgesamt ist nicht abgeschlossen** – Phase D und Phase E sind weiterhin offen und nicht umgesetzt. Kein Codex-/Cursor-Agentenstart, keine produktive Health-Apply-Freigabe, kein automatisches Commit/Push/Deployment, keine Autonomieerhöhung.
+**V7.0 Phase D – Codex als kontrollierten Executor anbinden** ist umgesetzt, getestet, der echte Codex-Fixture-Pilot bestanden und mit Commit **`6553452`** auf `origin/main` gesichert. Codex läuft ausschließlich isoliert gegen das Fixture-Repository (`--ask-for-approval never`, `spawn()`-basierte Prozessführung); Codex-Start und Apply für Health bleiben serverseitig hart blockiert; genau ein primärer Button je Zustand in der erweiterten Executor-Auswahl.
+
+**V7.0 Phase E – Health-Ende-zu-Ende-Abnahme und Freeze-Kandidat** ist technisch umgesetzt und getestet, aber **Umsetzungskandidat: noch nicht committed**. Kein neuer Executor, sondern Audit und gezielte Schließung echter Lücken im bestehenden Ablauf: neues read-only Modul `v7-freeze-status.js` (`GET /api/v7-freeze-status`, Statusmodell `IN_REVIEW | FREEZE_CANDIDATE | FROZEN`; `FROZEN` wird nie automatisch gesetzt), eingeklappte Freeze-Status-Karte im Hauptarbeitsraum, sichtbares „Wer arbeitet daran“/„Tatsächlich ausgeführt / Evidenz“ im Sticky-Kopf und im Tagesabschluss, korrigierte veraltete Startkarten-Aussage („Keine Execution Bridge“ existierte bereits nicht mehr korrekt).
+
+**Vorheriger gesicherter Ausgangsstand:** V6.46.0 / `e611c9c`. **V7.0 insgesamt ist nicht abgeschlossen** – Phase V7.1 ist weiterhin offen und nicht begonnen. Kein Codex-/Cursor-Agentenstart gegen Health, keine produktive Health-Apply-Freigabe, kein automatisches Commit/Push/Deployment, keine Autonomieerhöhung.
 
 ## Verbindlicher Arbeitsstand V6.46.0
 

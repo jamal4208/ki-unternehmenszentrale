@@ -302,8 +302,8 @@ async function runTests() {
   const serverSource = fs.readFileSync(path.join(__dirname, "server.js"), "utf8");
   const getRouteBlockMatch = serverSource.match(/const getRoutes = buildRouteMap\(\[([\s\S]*?)\n\]\);/);
   const routeCount = getRouteBlockMatch ? (getRouteBlockMatch[1].match(/^\s+\["\/api\//gm) || []).length : 0;
-  check("bestehende 46 GET-Routen bleiben registriert (Phase C: +2 GET Execution-Status/-Ergebnis, Phase D: +1 GET Executor-Registry)", () =>
-    assert.strictEqual(routeCount, 46),
+  check("bestehende 47 GET-Routen bleiben registriert (Phase C: +2 GET Execution-Status/-Ergebnis, Phase D: +1 GET Executor-Registry, Phase E: +1 GET Freeze-Status)", () =>
+    assert.strictEqual(routeCount, 47),
   );
 
   const postRouteBlockMatch = serverSource.match(/const postRoutes = buildRouteMap\(\[([\s\S]*?)\]\);/);
@@ -328,6 +328,21 @@ async function runTests() {
 
   const serverStatusPost = await invokeJson(requestHandler, "POST", "/api/server-status");
   check("POST /api/server-status bleibt 405", () => assert.strictEqual(serverStatusPost.statusCode, 405));
+
+  const freezeStatusGet = await invokeJson(requestHandler, "GET", "/api/v7-freeze-status");
+  check("GET /api/v7-freeze-status liefert 200 mit sicheren Grundfeldern, niemals FROZEN", () => {
+    assert.strictEqual(freezeStatusGet.statusCode, 200);
+    assert.strictEqual(freezeStatusGet.json.writeOperationsBlocked, true);
+    assert.strictEqual(freezeStatusGet.json.madeExternalRequest, false);
+    assert.ok(["IN_REVIEW", "FREEZE_CANDIDATE", "FROZEN"].includes(freezeStatusGet.json.status));
+    assert.notStrictEqual(freezeStatusGet.json.status, "FROZEN", "Server setzt niemals FROZEN ohne Jamal");
+    assert.strictEqual(freezeStatusGet.json.version, "V7.0");
+    assert.ok(Array.isArray(freezeStatusGet.json.phases) && freezeStatusGet.json.phases.length >= 4);
+    assert.ok(Array.isArray(freezeStatusGet.json.openJamalSteps) && freezeStatusGet.json.openJamalSteps.length > 0);
+  });
+
+  const freezeStatusPost = await invokeJson(requestHandler, "POST", "/api/v7-freeze-status");
+  check("POST /api/v7-freeze-status bleibt 405 (read-only)", () => assert.strictEqual(freezeStatusPost.statusCode, 405));
 
   const controllerScriptAsset = await invoke(requestHandler, "GET", "/scripts/zentral-ctl.js");
   check("scripts/zentral-ctl.js wird nicht statisch ausgeliefert", () =>
@@ -719,8 +734,8 @@ async function runTests() {
     /* best effort cleanup */
   }
 
-  assert.strictEqual(passed, 67);
-  console.log("server-http-router.test.js: 67 Prüfpunkte erfolgreich");
+  assert.strictEqual(passed, 69);
+  console.log("server-http-router.test.js: 69 Prüfpunkte erfolgreich");
 }
 
 runTests().catch((error) => {

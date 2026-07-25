@@ -90,6 +90,15 @@
     serverStatusLoading: false,
   };
 
+  // V7.0 Phase E – rein lesender Zustand für den Freeze-/Abschlussstatus.
+  // Derselbe fire-once-Lademodus wie serverStatusUiState/executionExecutors:
+  // kein Polling, keine Aktion, die den Status verändert.
+  const freezeStatusUiState = {
+    freezeStatus: null,
+    freezeStatusError: null,
+    freezeStatusLoading: false,
+  };
+
   // V7.0 Phase C – rein clientseitiger UI-Zustand für die Execution Bridge.
   // Tokens leben ausschließlich hier im Arbeitsspeicher des Tabs – niemals im
   // Tageslauf, niemals in localStorage, niemals im Backup, niemals in der URL.
@@ -1012,9 +1021,12 @@ function renderDailyWorkRunClosure(run) {
       <div class="daily-work-run-stage-number">G</div>
       <div><h4 id="daily-closure-title">Tagesabschluss</h4><p>${deps.escapeHtml(dailyWorkRunStatusLabel(run.status))}</p></div>
       <dl class="daily-work-run-facts daily-work-run-field--wide">
+        <div><dt>Ergebnis</dt><dd>${run.status === "CLOSED" ? "erreicht (abgeschlossen)" : "nicht erreicht (offen)"}</dd></div>
         <div><dt>Jamals Entscheidung</dt><dd>${deps.escapeHtml(run.closure.jamalDecision)}</dd></div>
         <div><dt>Nächster sicherer Schritt</dt><dd>${deps.escapeHtml(run.closure.nextSafeStep)}</dd></div>
         <div><dt>Abschlusszeit</dt><dd>${deps.escapeHtml(run.closure.closedAt || "UNGEKLÄRT")}</dd></div>
+        <div><dt>Wer hat daran gearbeitet</dt><dd>${deps.escapeHtml(GuidedWorkUi?.describeResponsibleAgentSummary?.(run) || "UNGEKLÄRT")}</dd></div>
+        <div><dt>Tatsächlich ausgeführt / Evidenz</dt><dd>${deps.escapeHtml(GuidedWorkUi?.describeExecutionEvidenceSummary?.(run) || "UNGEKLÄRT")}</dd></div>
       </dl>
       <div class="daily-work-run-history-preview daily-work-run-field--wide">
         <strong>Vorschau des Verlaufseintrags</strong>
@@ -1112,7 +1124,7 @@ function renderDailyWorkRun() {
   const run = getActiveDailyWorkRun();
   if (!run) {
     output.innerHTML = `
-      ${GuidedWorkUi?.renderMainSurface?.(null, { deps, serverStatus: serverStatusUiState.serverStatus }) || `
+      ${GuidedWorkUi?.renderMainSurface?.(null, { deps, serverStatus: serverStatusUiState.serverStatus, freezeStatus: freezeStatusUiState.freezeStatus }) || `
         <article class="daily-work-run-start-card">
           <p class="eyebrow">Bereit für einen bewussten Start</p>
           <h4>Noch kein Tageslauf begonnen</h4>
@@ -1147,6 +1159,7 @@ function renderDailyWorkRun() {
         GuidedWork?.detectBaselineDrift?.(run, healthHybridUiState.liveStatus)?.drifted,
       ),
       serverStatus: serverStatusUiState.serverStatus,
+      freezeStatus: freezeStatusUiState.freezeStatus,
       executionUiState: executionAttemptUiState,
       executors: executionAttemptUiState.executors,
     }) || ""}
@@ -1361,6 +1374,31 @@ async function refreshServerStatus() {
     serverStatusUiState.serverStatusError = error.message;
   } finally {
     serverStatusUiState.serverStatusLoading = false;
+    renderDailyWorkRun();
+  }
+}
+
+// Read-only background read of the V7.0 Freeze-/Abschlussstatus. Never sets
+// anything, never approves anything; the server itself never returns FROZEN
+// without a separate Jamal decision recorded elsewhere.
+async function refreshFreezeStatus() {
+  freezeStatusUiState.freezeStatusLoading = true;
+  freezeStatusUiState.freezeStatusError = null;
+  try {
+    const response = await fetch("/api/v7-freeze-status", {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload?.message || "Freeze-Status konnte nicht gelesen werden.");
+    }
+    freezeStatusUiState.freezeStatus = payload;
+  } catch (error) {
+    freezeStatusUiState.freezeStatusError = error.message;
+  } finally {
+    freezeStatusUiState.freezeStatusLoading = false;
     renderDailyWorkRun();
   }
 }
@@ -2573,6 +2611,7 @@ function setupDailyWorkRun() {
     init,
     render,
     refreshServerStatus,
+    refreshFreezeStatus,
     refreshExecutionExecutors,
     DAILY_STORAGE_KEY: DailyWorkRun?.DAILY_STORAGE_KEY || "ki-unternehmenszentrale-daily-work-runs-v1",
     LEGACY_MANAGEMENT_STORAGE_KEY: DailyWorkRun?.LEGACY_MANAGEMENT_STORAGE_KEY || "ki-unternehmenszentrale-v1",
@@ -2583,6 +2622,7 @@ function setupDailyWorkRun() {
         dailyWorkRunUiState,
         localDataBackupUiState,
         serverStatusUiState,
+        freezeStatusUiState,
         executionAttemptUiState,
         healthHybridUiState,
       };

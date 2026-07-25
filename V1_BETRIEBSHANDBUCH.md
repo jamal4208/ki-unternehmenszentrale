@@ -3,7 +3,7 @@
 ## 1. Verbindlicher V1-Stand
 
 - **Aussage:** V1 lokal fertig und betriebsbereit
-- **Aktuelle Arbeitsversion:** **V7.0 Phase A** gesichert (`4a74ebe`); **V7.0 Phase B** gesichert (`3487a84`); **V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor** technisch umgesetzt (Umsetzungskandidat, noch nicht committed); V7.0 insgesamt noch nicht abgeschlossen, Phase D und Phase E offen; vorheriger gesicherter Stand **V6.46.0** / `e611c9c`
+- **Aktuelle Arbeitsversion:** **V7.0 Phase A** gesichert (`4a74ebe`); **V7.0 Phase B** gesichert (`3487a84`); **V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor** gesichert (`0858b4e`); **V7.0 Phase D – Codex als kontrollierten Executor anbinden** gesichert (`6553452`); **V7.0 Phase E – Health-Ende-zu-Ende-Abnahme und Freeze-Kandidat** technisch umgesetzt (Umsetzungskandidat, noch nicht committed); V7.0 insgesamt noch nicht abgeschlossen, Phase V7.1 offen; vorheriger gesicherter Stand **V6.46.0** / `e611c9c`
 - **Gesicherter vorheriger Ausgangsstand:** **V6.45.2** / Commit **`fb9aa0d`**
 - **Historischer Freeze-Ausgang:** `16bbf45` (V6.43.1) – nur Historie
 - **Branch:** `main`
@@ -21,11 +21,13 @@
 - Lokalen deterministischen Runtime-Piloten für Health Upgrade Kompass bedienen
 - Manuelle Freigabe, Ergebnisannahme, Audit, Reload-Persistenz
 - Serverstatus (Port, Version, Commit, Startzeit, Status) kompakt in der Oberfläche anzeigen und den lokalen Betrieb über den separaten Controller `scripts/zentral-ctl.js` verständlich starten/stoppen/neustarten (V7.0 Phase B)
-- Isolierte Mock-Testausführung vorbereiten, starten, abbrechen und nach Jamal-Freigabe nur in ein Fixture-Repository übernehmen (V7.0 Phase C); Mock-Executor ist keine KI; Health-Apply bleibt blockiert; Apply ist kein Commit/Push/Deployment
+- Isolierte Mock- und Codex-Testausführung vorbereiten, starten, abbrechen und nach Jamal-Freigabe nur in ein Fixture-Repository übernehmen (V7.0 Phase C/D); Mock-Executor ist keine KI, Codex läuft ausschließlich isoliert gegen das Fixture-Repository; Health-Apply und Codex-Start für Health bleiben hart blockiert; Apply ist kein Commit/Push/Deployment
+- Read-only V7.0-Freeze-Status anzeigen (`IN_REVIEW`/`FREEZE_CANDIDATE`/`FROZEN`); `FROZEN` wird von der Zentrale niemals selbst gesetzt (V7.0 Phase E)
 
 ## 3. Was die Zentrale bewusst noch nicht kann
 
-- Zweiten Executor oder externe KI-Agenten ausführen
+- Codex oder Mock produktiv gegen Health oder ein anderes echtes Repository ausführen (nur Fixture-Repository)
+- Einen V7.0-Freeze auf `FROZEN` selbst setzen (ausschließlich Jamals Entscheidung)
 - Produktive Plugins oder Schreib-APIs betreiben
 - Automatisches Git, Deployment oder Cloud-Synchronisation
 - Mehrbenutzerbetrieb

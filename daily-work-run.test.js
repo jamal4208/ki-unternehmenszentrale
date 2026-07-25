@@ -947,7 +947,7 @@ function runTests() {
   const serverSource = fs.readFileSync(path.join(__dirname, "server.js"), "utf8");
   const getRouteBlockMatch = serverSource.match(/const getRoutes = buildRouteMap\(\[([\s\S]*?)\n\]\);/);
   const routeCount = getRouteBlockMatch ? (getRouteBlockMatch[1].match(/^\s+\["\/api\//gm) || []).length : 0;
-  check("46 GET-Routen bleiben erhalten (Phase C: +2 GET Execution-Status/-Ergebnis, Phase D: +1 GET Executor-Registry)", () => assert.strictEqual(routeCount, 46));
+  check("47 GET-Routen bleiben erhalten (Phase C: +2 GET Execution-Status/-Ergebnis, Phase D: +1 GET Executor-Registry, Phase E: +1 GET Freeze-Status)", () => assert.strictEqual(routeCount, 47));
   check("unbekannte Projekt-ID bleibt 404", () => assert.strictEqual(invoke("GET", "/api/projects/unbekannt").statusCode, 404));
   check("POST bleibt 405", () => assert.strictEqual(invoke("POST", "/api/projects").statusCode, 405));
   check("writeOperationsBlocked bleibt true", () => assert.strictEqual(API_SECURITY_FLAGS.writeOperationsBlocked, true));

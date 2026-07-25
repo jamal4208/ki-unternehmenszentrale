@@ -5,7 +5,9 @@
 - **V1 lokal fertig und betriebsbereit**
 - Version: **V7.0 Phase A – Guided Work Foundation** (umgesetzt, abgenommen, gesichert mit Commit `4a74ebe`)
 - **V7.0 Phase B – Betriebsstabilität** ist umgesetzt, getestet, browserseitig abgenommen und mit Commit `3487a84` gesichert
-- **V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor** ist technisch umgesetzt (Umsetzungskandidat, noch nicht committed); Mock-Executor ist keine KI; Apply nur Fixture, Health-Apply blockiert
+- **V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor** ist umgesetzt, getestet, abgenommen und mit Commit `0858b4e` gesichert; Mock-Executor ist keine KI; Apply nur Fixture, Health-Apply blockiert
+- **V7.0 Phase D – Codex als kontrollierten Executor anbinden** ist umgesetzt, getestet, echter Codex-Fixture-Pilot bestanden und mit Commit `6553452` gesichert; Codex läuft ausschließlich isoliert gegen das Fixture-Repository, Codex-Start und Apply für Health bleiben hart blockiert
+- **V7.0 Phase E – Health-Ende-zu-Ende-Abnahme und Freeze-Kandidat** ist technisch umgesetzt (Umsetzungskandidat, noch nicht committed); read-only V7.0-Freeze-Status (`IN_REVIEW|FREEZE_CANDIDATE|FROZEN`); `FROZEN` bleibt ausschließlich Jamals Entscheidung
 - Gesicherter vorheriger Ausgang: **V6.46.0** / `e611c9c`
 - Betrieb nur lokal auf diesem Mac – kein Cloud- oder Deploymentbetrieb
 

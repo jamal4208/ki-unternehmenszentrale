@@ -1,6 +1,30 @@
 # MIGRATION PLAN
 
-## V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor (technisch umgesetzt, Umsetzungskandidat vor Commit)
+## V7.0 Phase E – Health-Ende-zu-Ende-Abnahme und Freeze-Kandidat (technisch umgesetzt, Umsetzungskandidat vor Commit)
+
+Vorheriger gesicherter Ausgang: **V7.0 Phase D / `6553452`**. Phase E baut keinen neuen Executor, sondern prüft den gesamten bestehenden Ablauf (Fokus → Vorschlag → Team → Baseline → Paket → isolierte Ausführung/Hybrid-Rückführung → Abschluss) auf Stimmigkeit und schließt nur echte, bestätigte Lücken.
+
+| Bereich | Regel |
+|---|---|
+| v7-freeze-status.js (neu) | read-only Statusmodell `IN_REVIEW\|FREEZE_CANDIDATE\|FROZEN`; leitet Status aus Phasenhistorie, aktuellem Git-Commit/Working-Tree und zuletzt gemessenem Testlauf ab; setzt `FROZEN` nie selbst |
+| GET /api/v7-freeze-status | Route additiv (47. GET-Route); read-only; andere Methoden 405 |
+| guided-work-ui.js | eingeklappte Freeze-Status-Karte („unten nachschauen“); Sticky-Kopf und Tagesabschluss zeigen zusätzlich „Wer arbeitet daran“ und „Tatsächlich ausgeführt / Evidenz“ (bestehende Felder, kein neues Datenmodell) |
+| index.html | veraltete Aussage „Keine Execution Bridge“ korrigiert (Mock/Codex-Fixture existieren seit Phase C/D; Health bleibt unberührt) |
+| Verboten in Phase E, offen für Phase V7.1 | Setzen von `FROZEN` ohne Jamal, Codex-/Apply-Start für Health, Commit/Push/Deploy, Autonomieerhöhung, Beginn von V7.1 |
+
+## V7.0 Phase D – Codex als kontrollierten Executor anbinden (umgesetzt, getestet, gesichert mit Commit `6553452`)
+
+Vorheriger gesicherter Ausgang: **V7.0 Phase C / `0858b4e`**. Phase D bindet Codex als ersten realen Executor an die Execution Bridge an, ausschließlich isoliert gegen das Fixture-Repository. Health bleibt für Codex und Apply hart blockiert.
+
+| Bereich | Regel |
+|---|---|
+| execution-codex-adapter.js | `spawn()`-basierte Prozessführung, `stdio: ["ignore","pipe","pipe"]`, `--ask-for-approval never`; kein `shell: true` |
+| execution-executor-registry.js | listet Mock und Codex mit Verfügbarkeit/Autorisierung; genau ein primärer Button je Zustand in der UI |
+| Health-Blockade | Codex-Start und Apply für das Health-Projekt serverseitig hart blockiert |
+| DEFAULT_CODEX_ATTEMPT_TIMEOUT_MS | `150000`ms (echter Fixture-Pilot zeigte: 15s reichte nicht) |
+| Verboten in Phase D, offen für Phase E | Health-E2E-Gesamtaudit/Freeze-Status, produktive Codex-/Apply-Freigabe für Health, Commit/Push/Deploy, Autonomieerhöhung |
+
+## V7.0 Phase C – Execution Bridge Isolation mit Mock-Executor (umgesetzt, getestet, browserseitig abgenommen und gesichert mit Commit `0858b4e`)
 
 Vorheriger gesicherter Ausgang: **V7.0 Phase B / `3487a84`**. Phase C baut die isolierte Ausführungsgrundlage mit deterministischem Mock-Executor. Kein Codex, keine KI, kein Commit/Push/Deployment. Health bleibt Apply-gesperrt. Apply nur gegen Fixture-Repository nach Jamal-Freigabe.
 

@@ -95,6 +95,87 @@
     `;
   }
 
+  // V7.0 Phase E – read-only Freeze-/Abschlussstatus. Rein darstellend: der
+  // Status selbst (IN_REVIEW/FREEZE_CANDIDATE/FROZEN) wird ausschließlich vom
+  // Server berechnet (v7-freeze-status.js); diese Ansicht erzeugt keinen
+  // eigenen Status und keinen Button, der ihn ändert. "Unten nachschauen":
+  // eingeklappt, keine primäre Aktion konkurriert mit dem Sticky-Bereich.
+  function freezeStatusUiText(status) {
+    return {
+      IN_REVIEW: "In Prüfung",
+      FREEZE_CANDIDATE: "Freeze-Kandidat (technisch bereit, Jamal-Entscheidung offen)",
+      FROZEN: "Eingefroren",
+    }[status] || "Status ungeklärt";
+  }
+
+  function renderFreezeStatus(freezeStatusData, deps) {
+    const data = freezeStatusData || null;
+    const status = data?.status || "IN_REVIEW";
+    return `
+      <details class="guided-work-block guided-work-freeze-status" data-freeze-status="${escape(deps, status)}">
+        <summary>V7.0-Freeze-Status · ${escape(deps, freezeStatusUiText(status))}</summary>
+        <p class="guided-work-note">Read-only, aus bestehenden Phasendaten und dem aktuellen Git-Stand abgeleitet. Cursor setzt hier niemals FROZEN – das bleibt ausschließlich Jamals Entscheidung.</p>
+        ${data ? `
+          <dl class="daily-work-run-facts">
+            <div><dt>Version</dt><dd>${escape(deps, data.version || "UNGEKLÄRT")} · Phase ${escape(deps, data.phase || "?")}</dd></div>
+            <div><dt>Zuletzt gesicherter Commit</dt><dd><code>${escape(deps, shortHash(data.lastSecuredCommit))}</code></dd></div>
+            <div><dt>Aktueller Git-Stand entspricht gesichertem Commit</dt><dd>${data.gitMatchesLastSecuredCommit ? "ja" : "nein"}</dd></div>
+            <div><dt>Working Tree sauber</dt><dd>${data.workingTreeClean === true ? "ja" : data.workingTreeClean === false ? "nein" : "UNGEKLÄRT"}</dd></div>
+            <div><dt>Letzter gemessener Teststand</dt><dd>${data.tests?.allGreen ? "grün" : "ungeklärt/nicht grün"} · ${escape(deps, String(data.tests?.checkCount ?? "—"))} Prüfpunkte (Phase ${escape(deps, data.tests?.recordedAtPhase || "?")})</dd></div>
+          </dl>
+          <p><strong>Phasen:</strong></p>
+          <ul>
+            ${(data.phases || []).map((entry) => `<li>Phase ${escape(deps, entry.phase)} – ${escape(deps, entry.title)}: ${escape(deps, entry.status)} (<code>${escape(deps, shortHash(entry.commit))}</code>)</li>`).join("")}
+          </ul>
+          <details>
+            <summary>Offene Jamal-Schritte, Nicht-Ziele und nächster Produktpfad</summary>
+            <p><strong>Offene Jamal-Schritte:</strong></p>
+            <ul>${(data.openJamalSteps || []).map((entry) => `<li>${escape(deps, entry)}</li>`).join("")}</ul>
+            <p><strong>Bekannte Nicht-Ziele:</strong></p>
+            <ul>${(data.knownNonGoals || []).map((entry) => `<li>${escape(deps, entry)}</li>`).join("")}</ul>
+            <p><strong>Nächster Produktpfad nach V7.0 (nur Reihenfolge, keine Umsetzung):</strong></p>
+            <ol>${(data.nextProductPathAfterV70 || []).map((entry) => `<li>${escape(deps, entry)}</li>`).join("")}</ol>
+          </details>
+        ` : `<p class="guided-work-note">Freeze-Status noch nicht gelesen.</p>`}
+      </details>
+    `;
+  }
+
+  // Kompakte Sticky-Antwort auf "Wer arbeitet daran?". Liest ausschließlich
+  // bereits vorhandene Felder (kein neues Datenmodell): responsibleAgentId
+  // vom Paket, sonst der bevorzugte Vorschlag, sonst der Lead (PM).
+  function describeResponsibleAgentSummary(guided) {
+    const responsibleId =
+      guided?.executionPackage?.responsibleAgentId ||
+      guided?.workProposal?.preferredResponsibleAgentId ||
+      guided?.workProposal?.leadAgentId ||
+      null;
+    if (!responsibleId) return "Noch kein verantwortlicher Agent festgelegt";
+    const agent = AgentRegistry?.getAgentById?.(responsibleId);
+    const label = agent?.name || responsibleId;
+    const isLead = responsibleId === guided?.workProposal?.leadAgentId;
+    return isLead ? `${label} (Projektmanager)` : label;
+  }
+
+  // Kompakte Sticky-Antwort auf "Was wurde tatsächlich ausgeführt? Welche
+  // Evidenz liegt vor?". Liest ausschließlich die bereits sicher gefilterten
+  // SAFE_EXECUTION_ATTEMPT_*-Felder (siehe guided-work.js) – nie Tokens,
+  // Rohdaten oder unbestätigte Aussagen als Erfolg.
+  function describeExecutionEvidenceSummary(guided) {
+    const attempt = guided?.executionAttempt;
+    if (!attempt || !attempt.status) {
+      return "Noch kein isolierter Ausführungsversuch gestartet";
+    }
+    const testInfo =
+      attempt.testStatus === "PASSED"
+        ? "Tests bestanden"
+        : attempt.testStatus === "FAILED"
+          ? "Tests fehlgeschlagen"
+          : "Testbefund ausstehend";
+    const changed = Array.isArray(attempt.changedFiles) ? attempt.changedFiles.length : 0;
+    return `${attempt.status} (${attempt.executorLabel || attempt.executorId || "Mock"}) · ${testInfo} · ${changed} geänderte Datei(en) · Übernahmestatus ${attempt.applyStatus || "NOT_REQUESTED"}`;
+  }
+
   function renderPrimaryAction(action, deps) {
     if (!action) return "";
     return `
@@ -561,6 +642,7 @@
           ${renderServerStatus(context.serverStatus, deps)}
           ${renderPrimaryAction(action, deps)}
           </div>
+          ${renderFreezeStatus(context.freezeStatus, deps)}
         </section>
       `;
     }
@@ -595,6 +677,8 @@
           <p><b>Gewünschtes Ergebnis:</b> ${escape(deps, desired)}</p>
           <p><b>Nächster Schritt:</b> ${escape(deps, action?.label || "Prüfen")}</p>
           <p><b>Blocker / Entscheidung:</b> ${escape(deps, blocker)}</p>
+          <p><b>Wer arbeitet daran:</b> ${escape(deps, describeResponsibleAgentSummary(guided))}</p>
+          <p><b>Tatsächlich ausgeführt / Evidenz:</b> ${escape(deps, describeExecutionEvidenceSummary(guided))}</p>
           ${renderServerStatus(context.serverStatus, deps)}
           ${renderPrimaryAction(action, deps)}
         </div>
@@ -604,6 +688,7 @@
         ${renderExecutionAttempt(guided, context, deps)}
         ${renderDraftFindings(guided, deps)}
         ${renderCompactMeta(guided, deps)}
+        ${renderFreezeStatus(context.freezeStatus, deps)}
       </section>
     `;
   }
@@ -618,6 +703,10 @@
     describeExecutionAttemptState,
     renderServerStatus,
     serverStatusUiText,
+    renderFreezeStatus,
+    freezeStatusUiText,
+    describeResponsibleAgentSummary,
+    describeExecutionEvidenceSummary,
     phaseLabel,
     MOCK_EXECUTOR_LABEL,
     EXECUTION_ATTEMPT_TARGETS,

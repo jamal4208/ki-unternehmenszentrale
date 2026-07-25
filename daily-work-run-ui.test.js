@@ -194,8 +194,8 @@ function runTests() {
     assert.strictEqual(validation.ok, true);
   });
 
-  check("V7.0 Phase A WIP und V6.46.0-Hybrid-Fallback sind sichtbar", () => {
-    assert.match(htmlSource, /V7\.0 Phase A · Guided Work Foundation · WIP/);
+  check("V7.0 Phase E, Execution Bridge und V6.46.0-Hybrid-Fallback sind sichtbar", () => {
+    assert.match(htmlSource, /V7\.0 Phase E · Guided Work · Execution Bridge \(Mock\/Codex-Fixture\)/);
     assert.match(htmlSource, /Hybrid-Fallback V6\.46\.0/);
   });
 

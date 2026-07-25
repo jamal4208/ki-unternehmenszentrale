@@ -16,6 +16,7 @@ const {
 } = require("./health-repo-status");
 const serverStatusModule = require("./server-status");
 const executionBridgeModule = require("./execution-bridge");
+const v7FreezeStatusModule = require("./v7-freeze-status");
 
 const rootDir = __dirname;
 const staticAssets = new Map([
@@ -93,6 +94,35 @@ function handleProjects(res) {
 
 function handleHealthUpgradeKompassProject(res) {
   sendJson(res, 200, buildProjectResponse("health-upgrade-kompass"));
+}
+
+async function handleV7FreezeStatus(res) {
+  try {
+    const [currentGitCommit, workingTreeClean] = await Promise.all([
+      v7FreezeStatusModule.readGitCommitReadOnly(rootDir),
+      v7FreezeStatusModule.readWorkingTreeCleanReadOnly(rootDir),
+    ]);
+    const payload = v7FreezeStatusModule.computeFreezeStatus({ currentGitCommit, workingTreeClean });
+    sendJson(res, 200, { ok: true, ...payload, ...API_SECURITY_FLAGS });
+  } catch (_error) {
+    sendJson(res, 200, {
+      ok: true,
+      version: "V7.0",
+      phase: "E",
+      status: "IN_REVIEW",
+      phases: v7FreezeStatusModule.PHASE_HISTORY,
+      lastSecuredCommit: v7FreezeStatusModule.LAST_SECURED_COMMIT,
+      currentGitCommit: null,
+      gitMatchesLastSecuredCommit: false,
+      workingTreeClean: null,
+      tests: v7FreezeStatusModule.LAST_KNOWN_TEST_SUMMARY,
+      openJamalSteps: v7FreezeStatusModule.KNOWN_OPEN_JAMAL_STEPS,
+      knownNonGoals: v7FreezeStatusModule.KNOWN_NON_GOALS,
+      nextProductPathAfterV70: v7FreezeStatusModule.NEXT_PRODUCT_PATH_AFTER_V70,
+      note: "Git-Stand konnte nicht sicher gelesen werden. Es wird kein FREEZE_CANDIDATE ohne sicheren Nachweis behauptet.",
+      ...API_SECURITY_FLAGS,
+    });
+  }
 }
 
 async function handleServerStatus(res) {
@@ -22185,6 +22215,7 @@ const getRoutes = buildRouteMap([
   ["/api/agents/content-design-plugin-task/usable-canva-task", (res) => handleContentDesignUsableCanvaTask(res)],
   ["/api/agents/projectmanager-plugin-task/autonomy-applied", (res) => handleProjectManagerAutonomyApplied(res)],
   ["/api/server-status", (res) => handleServerStatus(res)],
+  ["/api/v7-freeze-status", (res) => handleV7FreezeStatus(res)],
   ["/api/execution/attempts/status", (res, context) => handleExecutionAttemptStatus(res, context)],
   ["/api/execution/attempts/result", (res, context) => handleExecutionAttemptResult(res, context)],
   ["/api/execution/executors", (res, context) => handleExecutionExecutors(res, context)],

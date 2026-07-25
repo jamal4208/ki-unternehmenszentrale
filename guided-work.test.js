@@ -851,6 +851,65 @@ function main() {
     }
   });
 
+  check("Phase E: Freeze-Status-Karte ist eingeklappt, setzt niemals FROZEN und macht keine eigene Statuslogik", () => {
+    const deps = { escapeHtml: (value) => String(value) };
+    const run = buildReadyRun("freeze-status-ui-run");
+    const withFreeze = GuidedWorkUi.renderMainSurface(run, {
+      deps,
+      liveStatus: { live: dirtyLive(), ok: true, available: true },
+      freezeStatus: {
+        version: "V7.0",
+        phase: "E",
+        status: "FREEZE_CANDIDATE",
+        phases: [{ phase: "D", title: "Codex anbinden", status: "DONE", commit: "6553452" }],
+        lastSecuredCommit: "6".repeat(40),
+        gitMatchesLastSecuredCommit: true,
+        workingTreeClean: true,
+        tests: { allGreen: true, checkCount: 489, recordedAtPhase: "D" },
+        openJamalSteps: ["Phase E Commit-Freigabe"],
+        knownNonGoals: ["Kein automatisches Setzen auf FROZEN ohne Jamal"],
+        nextProductPathAfterV70: ["Dokumenten- und Wissenseingang"],
+      },
+    });
+    assert.ok(withFreeze.includes("guided-work-freeze-status"), "Freeze-Status ist Teil der Oberfläche");
+    assert.ok(withFreeze.includes("<details") && withFreeze.includes("guided-work-freeze-status"));
+    assert.ok(!/<details[^>]*data-freeze-status[^>]*\bopen\b/.test(withFreeze), "Freeze-Karte ist standardmäßig eingeklappt");
+    assert.ok(withFreeze.includes("Freeze-Kandidat"));
+    assert.ok(!withFreeze.includes(">FROZEN<") && !withFreeze.includes("Eingefroren"), "keine FROZEN-Behauptung ohne entsprechenden Status");
+    assert.ok(!/<button/.test(withFreeze.slice(withFreeze.indexOf("guided-work-freeze-status"))), "keine Steuerbutton in der Freeze-Karte");
+
+    const noRunHtml = GuidedWorkUi.renderMainSurface(null, { deps, freezeStatus: null });
+    assert.ok(noRunHtml.includes("guided-work-freeze-status"), "Freeze-Status auch ohne aktiven Lauf sichtbar");
+    assert.ok(noRunHtml.includes("Status ungeklärt") || noRunHtml.includes("In Prüfung"));
+  });
+
+  check("Phase E: Sticky-Kopf zeigt 'Wer arbeitet daran' und 'Ausführung/Evidenz' additiv ohne neues Datenmodell", () => {
+    const deps = { escapeHtml: (value) => String(value) };
+    let run = buildReadyRun("sticky-evidence-run");
+    const idleHtml = GuidedWorkUi.renderMainSurface(run, { deps, liveStatus: { live: dirtyLive(), ok: true, available: true } });
+    assert.ok(idleHtml.includes("Wer arbeitet daran"));
+    assert.ok(idleHtml.includes("Tatsächlich ausgeführt / Evidenz"));
+    assert.ok(idleHtml.includes("Noch kein isolierter Ausführungsversuch gestartet"));
+
+    run = {
+      ...run,
+      executionAttempt: {
+        attemptId: "att-sticky-evidence",
+        status: "SUCCEEDED",
+        executorId: "mock",
+        executorLabel: "Mock-Executor",
+        testStatus: "PASSED",
+        changedFiles: ["FIXTURE_NOTE.md"],
+        applyStatus: "APPLIED",
+      },
+    };
+    const doneHtml = GuidedWorkUi.renderMainSurface(run, { deps, liveStatus: { live: dirtyLive(), ok: true, available: true } });
+    assert.ok(doneHtml.includes("SUCCEEDED"));
+    assert.ok(doneHtml.includes("Tests bestanden"));
+    assert.ok(doneHtml.includes("APPLIED"));
+    assert.strictEqual(GuidedWorkUi.describeExecutionEvidenceSummary(run).includes("SUCCEEDED"), true);
+  });
+
   console.log(`\n${passed} guided-work checks passed`);
 }
 
