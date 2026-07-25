@@ -211,11 +211,38 @@ const TOOL_REGISTRY = Object.freeze(
       displayName: "HeyGen",
       category: "Avatar",
       provider: "HeyGen",
-      capabilities: ["Avatar-/Video-Rendering (geplant)"],
+      // V7.1 Phase B – additiv erweitertes, sachliches Capability-Profil
+      // (Auftrag Abschnitt C). Ausführliche Details (unterstützt/vorgesehen,
+      // ausdrücklich nicht im ersten Pilot, Pilotumfang) liegen zusätzlich
+      // strukturiert in heygen-job-package.js#HEYGEN_CAPABILITY_PROFILE –
+      // dieses Feld bleibt bewusst kurz für das allgemeine Werkzeugregister.
+      capabilities: [
+        "Avatarvideo aus bestehendem Avatar",
+        "Video aus Bild",
+        "Text-to-Speech-Avatarvideo",
+        "Untertitel",
+        "Lip-Sync (nur vorgemerkt, kein erster Pilot)",
+        "Videoübersetzung (nur vorgemerkt, kein erster Pilot)",
+      ],
+      allowedDataClassifications: ["NORMAL"],
       publicationCapability: true,
       costModel: "USAGE_BASED",
       allowedAgents: [],
-      notes: [...BASE_SAFETY_NOTES, "Kein autonomer HeyGen-Renderlauf in Phase A."],
+      // connectionStatus/executionMode bleiben bewusst auf der Phase-A-
+      // Basiswahrheit (NOT_CONNECTED/RECOMMENDATION_ONLY): Es fand noch
+      // keine tatsächliche, authentifizierte HeyGen-Verbindungserkennung
+      // statt (Auftrag Abschnitt K: Hochstufung "erst ... wenn ... nach
+      // erfolgreicher Verbindungserkennung"). Der additive, technisch
+      // getestete CONTROLLED_HANDOFF-Pilotpfad wird ausschließlich separat
+      // über heygen-connector.js#buildHeygenPilotStatus() ausgewiesen, ohne
+      // diese Basiswahrheit zu verändern (keine zweite, widersprüchliche
+      // Quelle).
+      notes: [
+        ...BASE_SAFETY_NOTES,
+        "Kein autonomer HeyGen-Renderlauf in Phase A oder Phase B.",
+        "Phase B: additiver, getesteter CONTROLLED_CONNECTOR_HANDOFF-Pilotpfad vorbereitet (heygen-job-package.js/heygen-connector.js/heygen-job-result.js); keine echte HeyGen-Anfrage, kein API-Key gespeichert.",
+        "Erster Pilot ausschließlich AVATAR_VIDEO mit öffentlichem Avatar, NORMAL-Daten, ohne Veröffentlichung; echter Renderlauf erfordert separate Jamal-Freigabe.",
+      ],
     }),
     createTool({
       toolId: "bildgenerierung",

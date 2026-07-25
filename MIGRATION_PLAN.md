@@ -1,5 +1,24 @@
 # MIGRATION PLAN
 
+## V7.1 Phase B – HeyGen als erster kontrollierter Medien-Connector (lokal umgesetzt, ungesichert – Commit/Push stehen aus)
+
+Vorheriger gesicherter Ausgang: **V7.1 Phase A / lokal umgesetzt, ungesichert**. Phase B ist additiv; kein bestehender V7.0- oder V7.1-Phase-A-Codepfad wurde umgeschrieben oder ersetzt. Architektur-Entscheidung: `CONTROLLED_CONNECTOR_HANDOFF` – kein direkter HTTP-Client mit API-Key im Node-Server.
+
+| Bereich | Regel |
+|---|---|
+| heygen-job-package.js (neu) | kanonisches `heygenJobPackage`-Modell; Capability-Profil; Datenschutz-/Rechteprüfung (nur `NORMAL`, kein Voice Clone, kein privater Avatar ohne Zustimmung, keine Gesundheits-/Kunden-/Kinderdaten, keine Secrets/absoluten Pfade); Fingerprint über inhaltsbestimmende Felder; `externalTransferApproved`/`costApprovalStatus`/`publicationApproved` starten immer auf Nicht-Freigabe; `publicationApproved` kann durch keine Funktion auf `true` gesetzt werden |
+| heygen-connector.js (neu) | kontrollierter Adapter; keine Netzwerklogik (kein `http`/`https`/`fetch`); minimales Hand-off-Payload per strikter Allowlist (keine internen Pfade, keine App-Support-Pfade, keine Secrets, keine Governance-Felder); Hand-off-/Ergebnis-Token nutzen ausschließlich die bestehende `execution-bridge.js`-Tokenarchitektur (`mintToken`/`consumeToken`, RAM-only, einmalig); additiver Pilotstatus (`PARTIALLY_CONNECTED`/`CONTROLLED_HANDOFF`) ohne Änderung der kanonischen `tool-registry.js`/`plugin-gateway.js`-Basiswahrheit |
+| heygen-job-result.js (neu) | strukturierte Ergebnisrückführung; `providerJobId` allein ist kein Erfolg; nur gültige HTTPS-Ergebnisreferenzen (kein `file://`, kein localhost, keine private IP, keine Credentials in URL); keine automatische Veröffentlichung, kein automatischer Dateidownload |
+| heygen-store.js (neu) | lokale, dateibasierte Metadaten-Persistenz unter App Support (`heygen/{packages,results}`), analog zu `document-registry.js`; keine Videos/Audios/Bilder, keine Secrets |
+| heygen-backup.js (neu) | additiver Export von Auftragspaket-/Ergebnis-Metadaten ohne Originaldateien, API-Keys, Tokens oder Credentials; Restore startet keinen HeyGen-Job, wiederholt keinen Hand-off, veröffentlicht/kauft nichts, markiert nur abgelaufene Pakete `STALE` |
+| tool-registry.js | additiv erweiterter HeyGen-Eintrag (Capability-Details, Pilotgrenzen als Hinweistexte); Basis-`connectionStatus`/`executionMode` bleiben unverändert `NOT_CONNECTED`/`RECOMMENDATION_ONLY` |
+| server.js (additive Routen) | 3 neue GET (`/api/v71/heygen/status`, `/api/v71/heygen/job-packages` inkl. Präfixroute für Einzelabruf, `/api/v71/heygen/backup/export`) + 10 neue POST (Paket vorbereiten/validieren, Inhalt/externe Übertragung/Kosten getrennt freigeben, Hand-off-Token anfordern, Hand-off vorbereiten, Ergebnis-Token anfordern, Ergebnis validieren, Restore-Vorschau); insgesamt 55 GET / 17 POST; keine Route für API-Key-Speicherung, Login, Löschen, Kauf, Upgrade, automatische Veröffentlichung oder freien URL-Abruf |
+| index.html / v71-ui.js / styles.css (additiv) | neuer Chef-Modus-Bereich „HeyGen-Pilot“; vier getrennte Freigabeschritte über getrennte Buttons/Routen (keine Sammelfreigabe); keine verbotenen Buttons (Veröffentlichen/Löschen/Klonen/Credits kaufen); technische Details einklappbar; bestehende, mobilgeprüfte Layoutklassen wiederverwendet |
+| Verboten in Phase B, offen für spätere, separat freigegebene Phasen | echter HeyGen-Renderlauf, jede externe Übertragung, jede Kostenübernahme, jede Veröffentlichung, direkter HeyGen-API-Adapter im Node-Server, Avatar-/Voice-Erstellung, Löschaktionen, Canva-Connector, Marketing-Agentur-Gesamtsystem, Commit/Push/Deploy, Autonomieerhöhung |
+| Korrigierte Fehleinschätzung aus der Vorprüfung | ein scheinbarer Baseline-Konflikt zwischen der vorgeschriebenen Fixture-Dirty-Baseline und der Execution-Bridge-Prüfung erwies sich bei genauerer Prüfung als Einschränkung der verwendeten Ausführungsumgebung (Dateisystemzugriff), nicht als echter Code- oder Repository-Fehler; mit regulären Rechten läuft der betroffene Test grün; Fixture-Repository blieb währenddessen unverändert im vorgeschriebenen Dirty-Zustand |
+
+144 neue automatisierte Prüfpunkte (7 neue Testdateien); gesamt 816 von 816 Prüfpunkten grün. Trockenlauf (neutraler, nicht-existenter Café-Test) und vollständige Browser-/Mobile-Abnahme (eigener isolierter Testserver, Port 4599, danach beendet) bestanden; keine externe Netzwerkanfrage, keine Kosten, keine Veröffentlichung.
+
 ## V7.1 Phase A – Dokumenten-/Wissenseingang, Werkzeug-/Lizenzregister, Plugin-Gateway (lokal umgesetzt, ungesichert – Commit/Push stehen aus)
 
 Vorheriger gesicherter Ausgang: **V7.0 offiziell FROZEN / `15ce8bb`**. V7.1 Phase A ist additiv; kein bestehender V7.0-Codepfad wurde umgeschrieben oder ersetzt.
