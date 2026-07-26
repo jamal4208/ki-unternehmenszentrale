@@ -185,6 +185,24 @@ function findUserOrThrow(db, userId) {
   return user;
 }
 
+// V7.2 Phase A Schritt 4 (Auftrag Abschnitt G/R, Befund der Architektur-
+// prüfung) – die Benutzeraktionsrouten (.../suspend, .../reactivate,
+// .../revoke-sessions, .../reissue-invitation, .../revoke-invitation,
+// .../prepare-password-reset) sind laut Auftrag ausschließlich
+// "Kundenverwaltung". Ohne diese Prüfung könnte eine gültige OWNER-Session
+// über dieselbe Fläche auch eine fremde OWNER- oder SUPPORT-Benutzer-ID
+// adressieren (z. B. eine andere Owner-Instanz sperren) – außerhalb der
+// erklärten Grenze dieser Verwaltung. Generisches 404 (wie bei jedem
+// unbekannten Benutzer), damit keine Rolleninformation über eine
+// existierende, aber unzuständige Benutzer-ID preisgegeben wird.
+function findCustomerUserOrThrow(db, userId) {
+  const user = findUserOrThrow(db, userId);
+  if (!INVITABLE_ROLES.includes(user.role)) {
+    throw notFound("Benutzer unbekannt.");
+  }
+  return user;
+}
+
 // Owner kann ausschließlich Kunden innerhalb eines Mandanten einladen –
 // weder eine zweite OWNER-Rolle noch SUPPORT (Auftrag Abschnitt G:
 // "Verbindliche Grenzen").
@@ -248,7 +266,7 @@ function inviteUser(db, customerId, input, actorUserId) {
 }
 
 function suspendUser(db, userId, actorUserId) {
-  const user = findUserOrThrow(db, userId);
+  const user = findCustomerUserOrThrow(db, userId);
   const now = nowIso();
   const updated = authDb.updateUserStatus(db, userId, "DISABLED", now);
   auditSafe(db, {
@@ -262,7 +280,7 @@ function suspendUser(db, userId, actorUserId) {
 }
 
 function reactivateUser(db, userId, actorUserId) {
-  const user = findUserOrThrow(db, userId);
+  const user = findCustomerUserOrThrow(db, userId);
   if (user.status !== "DISABLED") {
     throw conflict("Nur gesperrte Benutzer können reaktiviert werden.");
   }
@@ -280,7 +298,7 @@ function reactivateUser(db, userId, actorUserId) {
 }
 
 function revokeSessionsForUser(db, userId, actorUserId) {
-  const user = findUserOrThrow(db, userId);
+  const user = findCustomerUserOrThrow(db, userId);
   const now = nowIso();
   authDb.revokeAllSessionsForUser(db, userId, now);
   auditSafe(db, {
@@ -294,7 +312,7 @@ function revokeSessionsForUser(db, userId, actorUserId) {
 }
 
 function reissueInvitation(db, userId, actorUserId) {
-  const user = findUserOrThrow(db, userId);
+  const user = findCustomerUserOrThrow(db, userId);
   if (user.status !== "INVITED") {
     throw conflict("Nur eingeladene, noch nicht aktivierte Benutzer können eine neue Einladung erhalten.");
   }
@@ -312,7 +330,7 @@ function reissueInvitation(db, userId, actorUserId) {
 }
 
 function revokeInvitation(db, userId, actorUserId) {
-  const user = findUserOrThrow(db, userId);
+  const user = findCustomerUserOrThrow(db, userId);
   if (user.status !== "INVITED") {
     throw conflict("Nur eine offene Einladung kann widerrufen werden.");
   }
@@ -329,7 +347,7 @@ function revokeInvitation(db, userId, actorUserId) {
 }
 
 function preparePasswordReset(db, userId, actorUserId) {
-  const user = findUserOrThrow(db, userId);
+  const user = findCustomerUserOrThrow(db, userId);
   if (!["ACTIVE", "LOCKED"].includes(user.status)) {
     throw conflict("Für diesen Benutzer kann kein Passwort-Reset vorbereitet werden.");
   }

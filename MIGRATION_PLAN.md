@@ -1,5 +1,20 @@
 # MIGRATION PLAN
 
+## V7.2 Phase A Schritt 4 – Betriebs-, Sicherheits- und Produktabnahme der Portalbasis (geprüft, lokal korrigiert, ungesichert – Commit/Push stehen aus)
+
+Vorheriger gesicherter Ausgang: **V7.2 Phase A Schritt 3**, Commit `5bd302d7df7a848222ae55cdd7e29258153e02c2` (Working Tree sauber, 68 GET/51 POST/54 Testdateien, 1535 automatisierte Prüfpunkte grün). Schritt 4 ist eine reine Gesamtabnahme – kein neuer Produktfunktions-Sprint, keine neue Route, keine Frameworkmigration, keine neue npm-Abhängigkeit.
+
+| Bereich | Regel |
+|---|---|
+| owner-admin-service.js (korrigiert) | neue Funktion `findCustomerUserOrThrow(db, userId)`: prüft zusätzlich zu `findUserOrThrow`, dass die Rolle in `INVITABLE_ROLES` (`CUSTOMER_ADMIN`/`CUSTOMER_USER`) liegt, sonst generisches `404` (`notFound("Benutzer unbekannt.")`); ersetzt `findUserOrThrow` in `suspendUser`/`reactivateUser`/`revokeSessionsForUser`/`reissueInvitation`/`revokeInvitation`/`preparePasswordReset`; verhindert, dass die Owner-Kundenverwaltungsfläche fremde OWNER-/SUPPORT-Konten adressieren kann; keine Verhaltensänderung für echte Kundenbenutzer |
+| package.json (erweitert) | drei neue Testdateien in `test`- und `check`-Skript eingehängt; keine neue Abhängigkeit |
+| portal-security-acceptance.test.js (neu) | 27 Prüfpunkte: echte Cross-Tenant-Isolation mit zwei kanonischen Mandanten, Rollenmatrix (OWNER/CUSTOMER_ADMIN/CUSTOMER_USER/SUPPORT), Regressionstest für die obige Korrektur, Cookie-/CSRF-Manipulation, Prod-Modus ohne Dev-Bypass, keine Secrets in Antworten |
+| portal-operations-acceptance.test.js (neu) | 15 Prüfpunkte: echter Erststart/Wiederanlauf, eine über ein isoliertes Einwegskript nachgebildete echte Vor-Schritt-3-Datenbank (nur Migrationen 1–6) wird beim Öffnen auf Migration 7 gehoben und behält ihre Auditdaten, beschädigte Datenbank bricht fail-closed ab, Owner-Bootstrap als echter Kindprozess (idempotent), Backup-Abgrenzung, WAL-Mehrfachverbindung, In-Memory-Ratenlimiter-Grenze |
+| portal-usability-acceptance.test.js (neu) | 20 Prüfpunkte: statische Prüfung der ausgelieferten HTML-/CSS-/JS-Dateien auf deutsche Sprache, Hauptaktionen, fehlende IDs/technische Codes/externe Ressourcen, Tastaturlabels, `aria-live`, Fokuszustände, fehlende Fachauftrags-/Publish-/Billing-Aktionen |
+| Verboten in Schritt 4, offen für spätere Phasen | jede neue Fachfunktion, Veröffentlichung, Billing, echter Mailversand, Mehrsprachigkeitsfunktion, Phase B, Commit/Push/Deploy |
+
+0 neue/entfernte Routen (weiterhin 68 GET/51 POST/8 Prefix/23 statische Assets). +62 neue Prüfpunkte, +3 Testdateien: alte Summe 1535, neue Gesamtsumme **1597** (57 Testdateien, `npm run check`/`npm test` Exit-Code 0, `npm audit` 0 Schwachstellen, `better-sqlite3@13.0.1` unverändert gepinnt, `git diff --check` sauber). Vollständige manuelle End-to-End-Abnahme mit zwei eigenständigen isolierten Testservern (Dev und Prod, eigenes `HOME`/`KUZ_DATA_DIR`, eigener Port) und zwei echten Mandanten (33/33 Schritte grün) durchgeführt und danach gezielt beendet – fremde, langlaufende Serverprozesse aus früheren Sitzungen wurden dabei nachweislich nicht angefasst. Vollständiger Bericht mit allen Einzelprüfungen: `V7_2_PHASE_A_ACCEPTANCE.md`.
+
 ## V7.2 Phase A Schritt 3 – Deutsches Kundenportal und Owner-Verwaltung (lokal umgesetzt, ungesichert – Commit/Push stehen aus)
 
 Vorheriger gesicherter Ausgang: **V7.2 Phase A Schritt 2**, verifiziert am Commit `41b6dbc602f9fd4f5e91099492cc08be72b0014c` (Working Tree sauber, 65 GET/51 POST/51 Testdateien, 1450 automatisierte Prüfpunkte grün laut realem, isoliertem Testlauf desselben Commits). Schritt 3 ist additiv; kein bestehender V7.0-, V7.1- oder Schritt-1/2-Codepfad wurde umgeschrieben, außer der notwendigen additiven Router-Erweiterung um POST-Präfixrouten. Kein Kundenportal-Fachauftrag, keine Canva-/HeyGen-Kundenfreigabe, kein Billing, kein echter Mailversand, keine Mehrsprachigkeit, keine Phase B.
