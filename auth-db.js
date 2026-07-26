@@ -1014,6 +1014,138 @@ function listWorkOrderCustomerApprovalsForWorkOrder(db, workOrderId) {
     .all(workOrderId);
 }
 
+// ---------------------------------------------------------------------------
+// V7.3 Persistenznachtrag (Auftrag Abschnitt C) – Jamal-Arbeitsmodus
+// (Migration 12, siehe auth-db-migrations.js). Ausschließlich
+// jamal-work-mode-store.js ruft diese Funktionen auf; jamal-work-mode.js
+// selbst bleibt weiterhin ohne jeden Datenbankbezug. "Upsert" bildet die
+// fachliche Lebenszyklus-Aktualisierung eines EINZELNEN Arbeitswunsches ab
+// (gleicher Datensatz von NOT_STARTED bis DONE/STOPPED); ein neuer
+// Arbeitswunsch (startNewItem) erhält immer eine neue id und damit eine
+// neue Zeile – bestehende Zeilen werden dabei nie verändert oder gelöscht.
+// Ergebnisversionen (jamal_work_results) sind zusätzlich durch die
+// Trigger aus Migration 12 auf Datenbankebene vor UPDATE/DELETE geschützt;
+// dieses Modul exportiert dafür bewusst keine Update-/Delete-Funktion.
+// ---------------------------------------------------------------------------
+
+function upsertJamalWorkItem(db, input = {}) {
+  const record = {
+    id: input.id,
+    projectId: input.projectId ?? null,
+    projectDisplayName: input.projectDisplayName ?? null,
+    projectSource: input.projectSource ?? null,
+    desiredOutcome: input.desiredOutcome ?? "",
+    importantNotes: input.importantNotes ?? "",
+    preferredTiming: input.preferredTiming ?? "",
+    status: input.status,
+    clarifyingQuestionJson: input.clarifyingQuestionJson ?? null,
+    selectedAgentsJson: input.selectedAgentsJson ?? null,
+    workPlanJson: input.workPlanJson ?? null,
+    safetyDecisionJson: input.safetyDecisionJson ?? null,
+    qualityStatus: input.qualityStatus ?? null,
+    qualityNote: input.qualityNote ?? null,
+    decision: input.decision ?? null,
+    decidedAt: input.decidedAt ?? null,
+    doneAt: input.doneAt ?? null,
+    stoppedAt: input.stoppedAt ?? null,
+    postponedAt: input.postponedAt ?? null,
+    stopReason: input.stopReason ?? null,
+    pendingChangeText: input.pendingChangeText ?? null,
+    escalationJson: input.escalationJson ?? null,
+    lastUsedProjectId: input.lastUsedProjectId ?? null,
+    lastUsedProjectDisplayName: input.lastUsedProjectDisplayName ?? null,
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
+    completedAt: input.completedAt ?? null,
+  };
+  db.prepare(
+    `INSERT INTO jamal_work_items
+      (id, projectId, projectDisplayName, projectSource, desiredOutcome, importantNotes, preferredTiming, status,
+       clarifyingQuestionJson, selectedAgentsJson, workPlanJson, safetyDecisionJson, qualityStatus, qualityNote,
+       decision, decidedAt, doneAt, stoppedAt, postponedAt, stopReason, pendingChangeText, escalationJson,
+       lastUsedProjectId, lastUsedProjectDisplayName, createdAt, updatedAt, completedAt)
+     VALUES
+      (@id, @projectId, @projectDisplayName, @projectSource, @desiredOutcome, @importantNotes, @preferredTiming, @status,
+       @clarifyingQuestionJson, @selectedAgentsJson, @workPlanJson, @safetyDecisionJson, @qualityStatus, @qualityNote,
+       @decision, @decidedAt, @doneAt, @stoppedAt, @postponedAt, @stopReason, @pendingChangeText, @escalationJson,
+       @lastUsedProjectId, @lastUsedProjectDisplayName, @createdAt, @updatedAt, @completedAt)
+     ON CONFLICT(id) DO UPDATE SET
+       projectId = excluded.projectId,
+       projectDisplayName = excluded.projectDisplayName,
+       projectSource = excluded.projectSource,
+       desiredOutcome = excluded.desiredOutcome,
+       importantNotes = excluded.importantNotes,
+       preferredTiming = excluded.preferredTiming,
+       status = excluded.status,
+       clarifyingQuestionJson = excluded.clarifyingQuestionJson,
+       selectedAgentsJson = excluded.selectedAgentsJson,
+       workPlanJson = excluded.workPlanJson,
+       safetyDecisionJson = excluded.safetyDecisionJson,
+       qualityStatus = excluded.qualityStatus,
+       qualityNote = excluded.qualityNote,
+       decision = excluded.decision,
+       decidedAt = excluded.decidedAt,
+       doneAt = excluded.doneAt,
+       stoppedAt = excluded.stoppedAt,
+       postponedAt = excluded.postponedAt,
+       stopReason = excluded.stopReason,
+       pendingChangeText = excluded.pendingChangeText,
+       escalationJson = excluded.escalationJson,
+       lastUsedProjectId = excluded.lastUsedProjectId,
+       lastUsedProjectDisplayName = excluded.lastUsedProjectDisplayName,
+       updatedAt = excluded.updatedAt,
+       completedAt = excluded.completedAt`,
+  ).run(record);
+  return getJamalWorkItemById(db, record.id);
+}
+
+function getJamalWorkItemById(db, id) {
+  return db.prepare("SELECT * FROM jamal_work_items WHERE id = ?").get(id) || null;
+}
+
+// "Aktuell" = die zuletzt angelegte Zeile (siehe Migration-12-Kommentar in
+// auth-db-migrations.js) – rowid als zweites Sortierkriterium schützt
+// zusätzlich gegen den seltenen Fall zweier Zeilen mit identischem
+// createdAt (gleiche Millisekunde).
+function getLatestJamalWorkItem(db) {
+  return db.prepare("SELECT * FROM jamal_work_items ORDER BY createdAt DESC, rowid DESC LIMIT 1").get() || null;
+}
+
+function appendJamalWorkResult(db, input = {}) {
+  const record = {
+    id: input.id || crypto.randomUUID(),
+    workItemId: input.workItemId,
+    versionNumber: input.versionNumber,
+    resultTitle: input.resultTitle,
+    resultSummary: input.resultSummary,
+    resultBody: input.resultBody,
+    qualityStatus: input.qualityStatus,
+    qualityNote: input.qualityNote ?? null,
+    openPointsJson: input.openPointsJson ?? null,
+    agentsInvolvedJson: input.agentsInvolvedJson,
+    triggerType: input.triggerType,
+    changeRequestText: input.changeRequestText ?? null,
+    createdAt: input.createdAt,
+  };
+  db.prepare(
+    `INSERT INTO jamal_work_results
+      (id, workItemId, versionNumber, resultTitle, resultSummary, resultBody, qualityStatus, qualityNote,
+       openPointsJson, agentsInvolvedJson, triggerType, changeRequestText, createdAt)
+     VALUES
+      (@id, @workItemId, @versionNumber, @resultTitle, @resultSummary, @resultBody, @qualityStatus, @qualityNote,
+       @openPointsJson, @agentsInvolvedJson, @triggerType, @changeRequestText, @createdAt)`,
+  ).run(record);
+  return getJamalWorkResultById(db, record.id);
+}
+
+function getJamalWorkResultById(db, id) {
+  return db.prepare("SELECT * FROM jamal_work_results WHERE id = ?").get(id) || null;
+}
+
+function listJamalWorkResultsForWorkItem(db, workItemId) {
+  return db.prepare("SELECT * FROM jamal_work_results WHERE workItemId = ? ORDER BY versionNumber ASC").all(workItemId);
+}
+
 module.exports = {
   AuthDatabaseStartupError,
   resolveAuthDbPaths,
@@ -1097,4 +1229,11 @@ module.exports = {
   createWorkOrderCustomerApproval,
   getWorkOrderCustomerApprovalByResultId,
   listWorkOrderCustomerApprovalsForWorkOrder,
+  // Jamal-Arbeitsmodus (V7.3 Persistenznachtrag)
+  upsertJamalWorkItem,
+  getJamalWorkItemById,
+  getLatestJamalWorkItem,
+  appendJamalWorkResult,
+  getJamalWorkResultById,
+  listJamalWorkResultsForWorkItem,
 };

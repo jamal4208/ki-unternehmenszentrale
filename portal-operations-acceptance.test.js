@@ -35,14 +35,16 @@ async function checkAsync(label, assertion) {
 const REPO_ROOT = __dirname;
 
 // ---------------------------------------------------------------------------
-// 1. Erststart: leere Datenbank, Migrationen 1–11 in korrekter Reihenfolge
+// 1. Erststart: leere Datenbank, Migrationen 1–12 in korrekter Reihenfolge
 //    (V7.2 Phase B Schritt 1 ergänzt Migration 8: work_orders-Tabelle;
 //    V7.2 Phase B Schutz-/Einwilligungsgrundlage ergänzt Migration 9:
 //    policy_violations-Tabelle; V7.2 Phase C Schritt 1 ergänzt Migration 10:
 //    work_order_runs/work_order_run_agents/work_order_results; V7.2 Phase C
 //    Schritt 2 ergänzt Migration 11: work_order_change_requests/
-//    work_order_customer_approvals), danach echter Wiederanlauf (zweites
-//    Öffnen desselben Verzeichnisses) idempotent und ohne erneute Anwendung.
+//    work_order_customer_approvals; V7.3 Persistenznachtrag ergänzt
+//    Migration 12: jamal_work_items/jamal_work_results), danach echter
+//    Wiederanlauf (zweites Öffnen desselben Verzeichnisses) idempotent und
+//    ohne erneute Anwendung.
 // ---------------------------------------------------------------------------
 
 function withIsolatedDataDir(fn) {
@@ -63,9 +65,9 @@ withIsolatedDataDir((dataDir) => {
   const migrations = require("./auth-db-migrations");
 
   const opened = authDb.openAuthDatabase({ dataDir });
-  check("Erststart: alle 11 Migrationen werden in aufsteigender Reihenfolge angewendet", () => {
+  check("Erststart: alle 12 Migrationen werden in aufsteigender Reihenfolge angewendet", () => {
     const applied = migrations.getAppliedVersions(opened.db);
-    assert.deepStrictEqual(applied, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    assert.deepStrictEqual(applied, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
   });
   check("Erststart: die Datenbankdatei existiert unter dem erwarteten isolierten Pfad", () => {
     assert.ok(fs.existsSync(path.join(dataDir, "auth", "auth.sqlite")));
@@ -134,8 +136,8 @@ withIsolatedDataDir((dataDir) => {
   }
 
   const opened = authDb.openAuthDatabase({ dataDir });
-  check("Migration 7 bis 11 werden auf einer bestehenden Vor-Schritt-3-Datenbank nachträglich angewendet", () => {
-    assert.deepStrictEqual(migrations.getAppliedVersions(opened.db), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  check("Migration 7 bis 12 werden auf einer bestehenden Vor-Schritt-3-Datenbank nachträglich angewendet", () => {
+    assert.deepStrictEqual(migrations.getAppliedVersions(opened.db), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
   });
   check("Migration 7 erhält bestehende Auditdaten vollständig (keine verlorene Zeile)", () => {
     const row = authAudit.listAuditEventsByType(opened.db, "LOGIN_SUCCESS");

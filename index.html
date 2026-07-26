@@ -94,26 +94,61 @@
         </header>
 
         <section class="view is-active" id="cockpit-view" data-title="Cockpit">
-          <section class="daily-work-run-section" id="daily-work-run-section" aria-labelledby="daily-work-run-title">
-            <div class="daily-work-run-head">
+          <!--
+            V7.3 – Jamal-Arbeitsmodus (Auftrag Abschnitt C/J): die einzige
+            zentrale Arbeitskarte ganz oben im Cockpit ("Oben arbeiten. Unten
+            nachschauen."). Der gesamte zustandsabhängige Inhalt wird von
+            jamal-work-mode-ui.js in #jamal-work-output gerendert (gleiches
+            Grundmuster wie der bisherige Tageslauf-Ausgabebereich weiter
+            unten).
+          -->
+          <section class="jamal-work-card" id="jamal-work-card" aria-labelledby="jamal-work-title">
+            <div class="jamal-work-head">
               <div>
-                <p class="eyebrow">V7.0 Phase E · Guided Work · Execution Bridge (Mock/Codex-Fixture) · Hybrid-Fallback V6.46.0</p>
-                <h3 id="daily-work-run-title">Ein Projekt. Ein Ergebniswunsch. Ein klarer Arbeitsvorschlag.</h3>
-                <p>Jamal arbeitet oben geführt. Unten bleiben Details, die isolierte Testausführung (Mock/Codex nur gegen Fixture) und der V6.46.0-Hybrid-Weg erreichbar. Health bleibt read-only; Codex- und Apply-Start für Health sind hart blockiert. Kein Commit, kein Push, kein Deployment, keine Autonomieerhöhung.</p>
+                <p class="eyebrow">Heute arbeiten</p>
+                <h2 id="jamal-work-title">Heute arbeiten</h2>
               </div>
-              <span class="system-pill system-pill-safe">lokal · manuell · keine Ausführung</span>
             </div>
-            <aside class="v1-ops-status" aria-label="V1-Betriebsstatus">
-              <p class="v1-ops-status__title">V1 lokal fertig und betriebsbereit</p>
-              <dl class="v1-ops-status__facts">
-                <div><dt>Betrieb</dt><dd>lokal auf diesem Mac</dd></div>
-                <div><dt>Daten</dt><dd>lokal im Browser</dd></div>
-                <div><dt>Außenwirkung</dt><dd>blockiert</dd></div>
-              </dl>
-              <p class="v1-ops-status__next"><span>Nächster Schritt</span> Fokusprojekt wählen und Tagesergebnis formulieren</p>
-            </aside>
-            <div id="daily-work-run-output" class="daily-work-run-output" aria-live="polite"></div>
+            <div id="jamal-work-output" aria-live="polite">Lade deinen Arbeitsmodus…</div>
+            <!-- Auftrag Abschnitt J: "Weiter unten bzw. einklappbar: technische
+                 Diagnostik" – bewusst unterhalb des Hauptergebnisses, nicht im
+                 Kopf der Karte. -->
+            <details class="jamal-work-diagnostics">
+              <summary>Technische Details</summary>
+              <div id="jamal-work-diagnostics-output" aria-live="polite">Keine technischen Details verfügbar.</div>
+            </details>
           </section>
+
+          <!--
+            V7.3 – Jamal-Arbeitsmodus (Auftrag Abschnitt J): "Oben arbeiten.
+            Unten nachschauen." – der bisherige Tageslauf bleibt vollständig
+            erhalten (keine Funktion gelöscht) und ist standardmäßig weiter
+            offen sichtbar, aber jetzt einklappbar unterhalb der neuen
+            zentralen Arbeitskarte.
+          -->
+          <details class="jamal-work-secondary" open>
+            <summary>Bisheriger Tageslauf (Guided Work, Execution Bridge)</summary>
+            <section class="daily-work-run-section" id="daily-work-run-section" aria-labelledby="daily-work-run-title">
+              <div class="daily-work-run-head">
+                <div>
+                  <p class="eyebrow">V7.0 Phase E · Guided Work · Execution Bridge (Mock/Codex-Fixture) · Hybrid-Fallback V6.46.0</p>
+                  <h3 id="daily-work-run-title">Ein Projekt. Ein Ergebniswunsch. Ein klarer Arbeitsvorschlag.</h3>
+                  <p>Jamal arbeitet oben geführt. Unten bleiben Details, die isolierte Testausführung (Mock/Codex nur gegen Fixture) und der V6.46.0-Hybrid-Weg erreichbar. Health bleibt read-only; Codex- und Apply-Start für Health sind hart blockiert. Kein Commit, kein Push, kein Deployment, keine Autonomieerhöhung.</p>
+                </div>
+                <span class="system-pill system-pill-safe">lokal · manuell · keine Ausführung</span>
+              </div>
+              <aside class="v1-ops-status" aria-label="V1-Betriebsstatus">
+                <p class="v1-ops-status__title">V1 lokal fertig und betriebsbereit</p>
+                <dl class="v1-ops-status__facts">
+                  <div><dt>Betrieb</dt><dd>lokal auf diesem Mac</dd></div>
+                  <div><dt>Daten</dt><dd>lokal im Browser</dd></div>
+                  <div><dt>Außenwirkung</dt><dd>blockiert</dd></div>
+                </dl>
+                <p class="v1-ops-status__next"><span>Nächster Schritt</span> Fokusprojekt wählen und Tagesergebnis formulieren</p>
+              </aside>
+              <div id="daily-work-run-output" class="daily-work-run-output" aria-live="polite"></div>
+            </section>
+          </details>
 
           <section class="demo-cockpit-section" id="demo-cockpit-section" aria-labelledby="demo-cockpit-title">
             <div class="demo-cockpit-head">
@@ -1369,5 +1404,6 @@
     <script src="daily-work-run-ui.js"></script>
     <script src="app.js"></script>
     <script src="v71-ui.js"></script>
+    <script src="jamal-work-mode-ui.js"></script>
   </body>
 </html>

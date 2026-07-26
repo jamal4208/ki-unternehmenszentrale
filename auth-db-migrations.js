@@ -404,6 +404,39 @@ const WORK_ORDER_RESULT_QUALITY_STATUS_VALUES = Object.freeze(["PASSED", "PASSED
 // stille Teilverarbeitung.
 const WORK_ORDER_CHANGE_REQUEST_STATUS_VALUES = Object.freeze(["SUBMITTED", "IN_PROGRESS", "COMPLETED", "CANCELLED"]);
 
+// V7.3 Persistenznachtrag (Auftrag Abschnitt C) – Jamal-Arbeitsmodus
+// (jamal-work-mode.js#STATUS). Bewusst hier als eigener, unabhängiger
+// Wertebereich dupliziert statt aus jamal-work-mode.js importiert: dieses
+// Migrationsmodul importiert grundsätzlich KEINE Fachlogikmodule (gleiches
+// Prinzip wie die eingefrorenen AUDIT_EVENT_TYPES_AT_MIGRATION_N-Snapshots
+// oben), und jamal-work-mode.js selbst darf laut Auftrag umgekehrt KEINEN
+// Bezug zu auth-db.js/auth-db-migrations.js haben (kein Owner-/
+// Auth-Rollenmix in der reinen Fachlogik). Ändert sich der Statuswertebereich
+// in jamal-work-mode.js künftig inhaltlich, braucht das eine eigene,
+// spätere additive Migration (gleiches Vorgehen wie bei den Audit-Event-
+// Typen: bestehende Migrationen werden nicht nachträglich verändert).
+const JAMAL_WORK_ITEM_STATUS_VALUES = Object.freeze([
+  "NOT_STARTED",
+  "READY",
+  "IN_PROGRESS",
+  "CLARIFICATION_NEEDED",
+  "RESULT_READY",
+  "CHANGE_IN_PROGRESS",
+  "DONE",
+  "STOPPED",
+  "ESCALATION_NEEDED",
+]);
+
+// jamal-work-mode.js#resolvePrioritizedProject/#chooseProject.
+const JAMAL_WORK_ITEM_PROJECT_SOURCE_VALUES = Object.freeze(["CONTINUITY", "DEFAULT", "NONE", "MANUAL"]);
+
+// jamal-work-mode.js#markDone/#stopWorkItem.
+const JAMAL_WORK_ITEM_DECISION_VALUES = Object.freeze(["PASST", "GESTOPPT"]);
+
+// jamal-work-mode.js#pushImmutableVersion (trigger je Ergebnisversion:
+// erste Fertigstellung oder Änderungsrunde).
+const JAMAL_WORK_RESULT_TRIGGER_VALUES = Object.freeze(["INITIAL", "CHANGE_REQUEST"]);
+
 function sqlEnum(values) {
   return values.map((value) => `'${value}'`).join(",");
 }
@@ -1010,6 +1043,112 @@ const MIGRATIONS = Object.freeze([
       CREATE INDEX idx_auth_audit_events_tenantId ON auth_audit_events(tenantId);
     `,
   }),
+  // V7.3 Persistenznachtrag (Auftrag Abschnitt C) – der Jamal-Arbeitsmodus
+  // (jamal-work-mode.js/jamal-work-mode-store.js) lebte bisher ausschließlich
+  // in einer Prozessspeichervariable von server.js und ging bei jedem
+  // Serverneustart verloren (echter Betriebsblocker für den täglichen
+  // Arbeitsmodus). Additive Migration, KEINE Änderung an Migration 1–11.
+  //
+  // Zwei neue Tabellen, gleiche Technik wie Migration 8/9/10/11:
+  // (a) jamal_work_items – genau EIN fachlicher Arbeitswunsch-Datensatz pro
+  // Zeile, fortlaufend per UPDATE aktualisiert während sein Status noch
+  // nicht abgeschlossen ist (kein Owner-/Mandantenbezug, ausschließlich
+  // Jamal selbst – siehe route-access-policy.js#OWNER_ONLY). Ein neuer
+  // Arbeitswunsch (jamal-work-mode.js#startNewItem) legt IMMER eine neue
+  // Zeile mit neuer id an; ältere, bereits abgeschlossene Zeilen werden
+  // NIE gelöscht, sondern bleiben unverändert als Historie stehen – "der
+  // aktuelle Arbeitswunsch" ist für jamal-work-mode-store.js schlicht die
+  // zuletzt angelegte Zeile (ORDER BY createdAt DESC). (b) jamal_work_results
+  // – unveränderliche, append-only Ergebnisversion je Arbeitswunsch,
+  // exakt gleiches Trigger-Muster wie work_order_results (Migration 10):
+  // kein UPDATE, kein DELETE, fortlaufende versionNumber pro workItemId.
+  //
+  // Bewusst KEINE Erweiterung von auth_audit_events: der Jamal-Arbeitsmodus
+  // schreibt bislang (V7.3, siehe server.js) keine Auditereignisse – diese
+  // Migration führt dafür keine neue Protokollierung ein, sondern
+  // ausschließlich die beiden fachlichen Tabellen selbst.
+  //
+  // Spaltenbenennung bewusst weiterhin camelCase (identisches Muster wie
+  // ALLE bisherigen Tabellen dieser Datenbank, z. B. workOrderId/
+  // versionNumber/resultTitle) – nicht die im Auftrag beispielhaft in
+  // snake_case genannten Feldnamen (project_id, desired_result, ...),
+  // damit die Datenbank durchgehend eine einzige Namenskonvention behält.
+  // Fachlich entsprechen sich: projectId=project_id,
+  // desiredOutcome=desired_result, importantNotes=important_notes,
+  // preferredTiming=desired_timing, clarifyingQuestionJson=
+  // clarification_question, selectedAgentsJson=selected_agents_json,
+  // workPlanJson=work_plan_json, completedAt=completed_at (siehe
+  // jamal-work-mode-store.js für die vollständige Feldabbildung).
+  Object.freeze({
+    version: 12,
+    name: "create_jamal_work_items_and_results",
+    sql: `
+      CREATE TABLE jamal_work_items (
+        id TEXT PRIMARY KEY,
+        projectId TEXT,
+        projectDisplayName TEXT,
+        projectSource TEXT CHECK (projectSource IS NULL OR projectSource IN (${sqlEnum(JAMAL_WORK_ITEM_PROJECT_SOURCE_VALUES)})),
+        desiredOutcome TEXT NOT NULL,
+        importantNotes TEXT NOT NULL DEFAULT '',
+        preferredTiming TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL CHECK (status IN (${sqlEnum(JAMAL_WORK_ITEM_STATUS_VALUES)})),
+        clarifyingQuestionJson TEXT,
+        selectedAgentsJson TEXT,
+        workPlanJson TEXT,
+        safetyDecisionJson TEXT,
+        qualityStatus TEXT CHECK (qualityStatus IS NULL OR qualityStatus IN (${sqlEnum(WORK_ORDER_RESULT_QUALITY_STATUS_VALUES)})),
+        qualityNote TEXT,
+        decision TEXT CHECK (decision IS NULL OR decision IN (${sqlEnum(JAMAL_WORK_ITEM_DECISION_VALUES)})),
+        decidedAt TEXT,
+        doneAt TEXT,
+        stoppedAt TEXT,
+        postponedAt TEXT,
+        stopReason TEXT,
+        pendingChangeText TEXT,
+        escalationJson TEXT,
+        lastUsedProjectId TEXT,
+        lastUsedProjectDisplayName TEXT,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        completedAt TEXT
+      );
+
+      CREATE INDEX idx_jamal_work_items_createdAt ON jamal_work_items(createdAt);
+      CREATE INDEX idx_jamal_work_items_status ON jamal_work_items(status);
+
+      CREATE TABLE jamal_work_results (
+        id TEXT PRIMARY KEY,
+        workItemId TEXT NOT NULL,
+        versionNumber INTEGER NOT NULL CHECK (versionNumber >= 1),
+        resultTitle TEXT NOT NULL CHECK (length(resultTitle) BETWEEN 1 AND 200),
+        resultSummary TEXT NOT NULL CHECK (length(resultSummary) BETWEEN 1 AND 1000),
+        resultBody TEXT NOT NULL CHECK (length(resultBody) BETWEEN 1 AND 40000),
+        qualityStatus TEXT NOT NULL CHECK (qualityStatus IN (${sqlEnum(WORK_ORDER_RESULT_QUALITY_STATUS_VALUES)})),
+        qualityNote TEXT,
+        openPointsJson TEXT,
+        agentsInvolvedJson TEXT NOT NULL,
+        triggerType TEXT NOT NULL CHECK (triggerType IN (${sqlEnum(JAMAL_WORK_RESULT_TRIGGER_VALUES)})),
+        changeRequestText TEXT,
+        createdAt TEXT NOT NULL,
+        FOREIGN KEY (workItemId) REFERENCES jamal_work_items(id) ON DELETE RESTRICT,
+        UNIQUE (workItemId, versionNumber)
+      );
+
+      CREATE INDEX idx_jamal_work_results_workItemId ON jamal_work_results(workItemId);
+
+      CREATE TRIGGER trg_jamal_work_results_no_update
+      BEFORE UPDATE ON jamal_work_results
+      BEGIN
+        SELECT RAISE(ABORT, 'jamal_work_results ist append-only/unveränderlich: UPDATE ist nicht erlaubt.');
+      END;
+
+      CREATE TRIGGER trg_jamal_work_results_no_delete
+      BEFORE DELETE ON jamal_work_results
+      BEGIN
+        SELECT RAISE(ABORT, 'jamal_work_results ist append-only/unveränderlich: DELETE ist nicht erlaubt.');
+      END;
+    `,
+  }),
 ]);
 
 function ensureMigrationsTable(db) {
@@ -1065,6 +1204,10 @@ module.exports = {
   WORK_ORDER_RUN_AGENT_STATUS_VALUES,
   WORK_ORDER_RESULT_QUALITY_STATUS_VALUES,
   WORK_ORDER_CHANGE_REQUEST_STATUS_VALUES,
+  JAMAL_WORK_ITEM_STATUS_VALUES,
+  JAMAL_WORK_ITEM_PROJECT_SOURCE_VALUES,
+  JAMAL_WORK_ITEM_DECISION_VALUES,
+  JAMAL_WORK_RESULT_TRIGGER_VALUES,
   MIGRATIONS,
   ensureMigrationsTable,
   getAppliedVersions,

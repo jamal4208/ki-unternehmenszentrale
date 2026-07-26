@@ -240,16 +240,15 @@ async function run() {
     }
   });
 
-  // V7.2 Phase B Schritt 1 (Auftrag Abschnitt G/L/M) – Zuwachs gegenüber der
-  // Phase-A-Schritt-4-Baseline (68/51/6/2/23): zwei neue GET-Routen
-  // (/api/portal/work-orders, /api/owner/work-orders), eine neue POST-Route
-  // (/api/portal/work-orders), zwei neue GET-Prefixe
-  // (/api/portal/work-orders/, /api/owner/work-orders/), zwei neue
-  // POST-Prefixe (/api/portal/work-orders/, /api/owner/work-orders/) und
-  // vier neue statische Arbeitsauftrags-Assets.
-  await check("Routenzahlen in Policy und Server sind identisch (70/52/8/4/27)", () => {
-    assert.strictEqual(server.getRoutes.size, 70);
-    assert.strictEqual(routeAccessPolicy.GET_POLICIES.length, 70);
+  // V7.3 – Jamal-Arbeitsmodus (Auftrag Abschnitt C/M) – Zuwachs gegenüber
+  // der V7.2-Phase-C-Schritt-2-Baseline (70/52/8/4/27): eine neue GET-Route
+  // (/api/jamal-work-mode/state), keine neue POST-Route, keine neue
+  // GET-Prefix-Route, ein neuer POST-Prefix (/api/jamal-work-mode/ – eine
+  // Aktion je Anfrage über .../:action statt vieler Einzelrouten) und ein
+  // neues statisches Chef-UI-Skript (jamal-work-mode-ui.js).
+  await check("Routenzahlen in Policy und Server sind identisch (71/52/8/5/28)", () => {
+    assert.strictEqual(server.getRoutes.size, 71);
+    assert.strictEqual(routeAccessPolicy.GET_POLICIES.length, 71);
     assert.strictEqual(server.postRoutes.size, 52);
     assert.strictEqual(routeAccessPolicy.POST_POLICIES.length, 52);
     assert.strictEqual(server.routePrefixHandlers.length, 8);
@@ -257,13 +256,13 @@ async function run() {
       routeAccessPolicy.PREFIX_POLICIES.filter((entry) => entry.method === "GET").length,
       8,
     );
-    assert.strictEqual(server.postRoutePrefixHandlers.length, 4);
+    assert.strictEqual(server.postRoutePrefixHandlers.length, 5);
     assert.strictEqual(
       routeAccessPolicy.PREFIX_POLICIES.filter((entry) => entry.method === "POST").length,
-      4,
+      5,
     );
-    assert.strictEqual(server.staticAssets.size, 27);
-    assert.strictEqual(routeAccessPolicy.STATIC_POLICIES.length, 27);
+    assert.strictEqual(server.staticAssets.size, 28);
+    assert.strictEqual(routeAccessPolicy.STATIC_POLICIES.length, 28);
   });
 
   // -------------------------------------------------------------------

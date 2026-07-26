@@ -318,6 +318,10 @@ const GET_POLICIES = [
   // kein Prüf-Posteingang (der OWNER ist kein Pflichtschritt).
   customerTenantGet("/api/portal/work-orders", "Kundenportal Arbeitsauftragsliste (eigener Mandant)"),
   ownerGet("/api/owner/work-orders", "Owner-Betriebsübersicht Arbeitsaufträge (mandantenübergreifend)"),
+  // V7.3 – Jamal-Arbeitsmodus (Auftrag Abschnitt C/F): einzige zentrale
+  // Arbeitskarte "Heute arbeiten" – ausschließlich für Jamal (OWNER_ONLY),
+  // kein Kunden-/Mandantenbezug.
+  ownerGet("/api/jamal-work-mode/state", "Jamal-Arbeitsmodus Zustand (Heute arbeiten)"),
 ];
 
 const POST_POLICIES = [
@@ -424,6 +428,13 @@ const PREFIX_POLICIES = [
   // Freigeben/Ablehnen/Rückfrage-Anfordern mehr.
   ownerPrefix("/api/owner/work-orders/", "Owner-Arbeitsauftrag-Einzelabruf"),
   ownerPostPrefix("/api/owner/work-orders/", "Owner-Arbeitsauftrag-Ausnahmeaktion (Eskalation/Stopp)"),
+  // V7.3 – Jamal-Arbeitsmodus (Auftrag Abschnitt C/D/F/H/I): eine einzige
+  // Aktion je Anfrage über ".../:action" (z. B. start-new-item,
+  // set-desired-outcome, choose-project, start-run, answer-clarification,
+  // request-change, mark-done, mark-later, stop) – bewusst ein einziger
+  // Prefix statt vieler neuer Exakt-Routen (Auftrag Abschnitt M: minimaler
+  // Dateiumfang, keine parallele neue Architektur).
+  ownerPostPrefix("/api/jamal-work-mode/", "Jamal-Arbeitsmodus Aktion (eine Hauptaktion je Zustand)"),
 ];
 
 const STATIC_POLICIES = [
@@ -479,6 +490,10 @@ const STATIC_POLICIES = [
   // fachliche Prüfung.
   staticOwnerOnly("/owner/auftraege", "Owner-Arbeitsauftrags-Betriebsübersicht"),
   staticOwnerOnly("/owner-work-orders.js", "Owner-Arbeitsauftrags-UI-Skript"),
+  // V7.3 – Jamal-Arbeitsmodus (Auftrag Abschnitt C/M): eigenständiges
+  // additives Chef-UI-Skript, gleiches Muster wie v71-ui.js (kein Umbau von
+  // app.js selbst).
+  staticOwnerOnly("/jamal-work-mode-ui.js", "Chef-UI-Skript Jamal-Arbeitsmodus"),
 ];
 
 const ALL_POLICIES = Object.freeze([

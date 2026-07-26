@@ -7,6 +7,7 @@ const {
   API_SECURITY_FLAGS,
   buildProjectResponse,
   buildProjectsResponse,
+  listProjects,
 } = require("./project-registry");
 const { PRODUCTIVE_AGENT_REGISTRY } = require("./agent-registry");
 const { createHttpRouter, buildRouteMap } = require("./server-http-router");
@@ -64,6 +65,16 @@ const authHttpRoutesModule = require("./auth-http-routes");
 const ownerAdminRoutesModule = require("./owner-admin-routes");
 const customerPortalRoutesModule = require("./customer-portal-routes");
 const workOrderRoutesModule = require("./work-order-routes");
+// V7.3 – Jamal-Arbeitsmodus (Auftrag Abschnitt F/M): reine, DB-lose
+// Fachlogik (siehe jamal-work-mode.js#Kopfkommentar). jamal-work-mode.js
+// selbst bleibt bewusst ohne jeden Datenbankbezug. Persistenznachtrag
+// (Auftrag Abschnitt C, spätere V7.3-Ergänzung): server.js verwendet
+// jamal-work-mode-store.js, um den Zustand serverseitig in der
+// bestehenden Auth-Datenbank (Migration 12, additiv) zu speichern – kein
+// Prozessspeicher-Zwischenstand mehr, kein LocalStorage, keine neue
+// npm-Abhängigkeit.
+const jamalWorkMode = require("./jamal-work-mode");
+const jamalWorkModeStoreModule = require("./jamal-work-mode-store");
 
 const rootDir = __dirname;
 const staticAssets = new Map([
@@ -77,6 +88,9 @@ const staticAssets = new Map([
   ["/agent-runtime.js", "agent-runtime.js"],
   ["/local-data-backup.js", "local-data-backup.js"],
   ["/daily-work-run-ui.js", "daily-work-run-ui.js"],
+  // V7.3 – Jamal-Arbeitsmodus (Auftrag Abschnitt C/M): eigenständiges,
+  // additives Chef-UI-Skript (gleiches Muster wie v71-ui.js).
+  ["/jamal-work-mode-ui.js", "jamal-work-mode-ui.js"],
   ["/app.js", "app.js"],
   ["/styles.css", "styles.css"],
   ["/v71-ui.js", "v71-ui.js"],
@@ -23492,6 +23506,117 @@ function handleV71CanvaPilotResultEscalate(res, context) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// V7.3 – Jamal-Arbeitsmodus (Auftrag Abschnitt C/D/F/G/H/I): HTTP-Glue für
+// die einzige zentrale Arbeitskarte "Heute arbeiten". Reine Übersetzung
+// (Body lesen, Aktion auf eine Fachfunktion abbilden, sichere Fehler) –
+// jede Fachregel lebt ausschließlich in jamal-work-mode.js. Gleiches
+// Randsicherheitsmuster wie withV71ApiGuards oben (Origin-/Host-Prüfung,
+// JSON-Content-Type, Größenlimit, bekannte Feldmengen, keine Stacktraces).
+// ---------------------------------------------------------------------------
+
+const JAMAL_WORK_MODE_API_MAX_BODY_BYTES = 16 * 1024;
+
+// Persistenznachtrag (Auftrag Abschnitt C): kein Prozessspeicher-Singleton
+// mehr. Jede Anfrage lädt den vollständigen aktuellen Zustand frisch aus
+// der bestehenden Auth-Datenbank (jamal-work-mode-store.js -> Migration 12)
+// und schreibt ihn nach einer erfolgreichen Aktion vollständig zurück –
+// so sehen mehrere Serverprozesse denselben Zustand, und ein
+// Serverneustart verliert Jamals aktuellen Arbeitswunsch nicht mehr.
+// OWNER_ONLY (route-access-policy.js) – ausschließlich Jamal selbst kann
+// diesen Zustand lesen/verändern, kein Mandantenbezug, keine neue Tabelle
+// über die additiven Migration-12-Tabellen hinaus.
+function jamalWorkModeErrorPayload(message) {
+  return {
+    ok: false,
+    message: String(message || "Aktion ist im aktuellen Zustand nicht möglich."),
+    ...API_SECURITY_FLAGS,
+  };
+}
+
+function handleJamalWorkModeState(res) {
+  const db = ensureAuthDbReady();
+  const store = jamalWorkModeStoreModule.loadStore(db);
+  const view = jamalWorkMode.getSafeView(store, listProjects());
+  sendJson(res, 200, { ok: true, ...view, ...API_SECURITY_FLAGS });
+}
+
+// Auftrag Abschnitt C/F: "Arbeitslauf starten" und "Änderung anfordern"
+// sind je EINE Hauptaktion für Jamal, auch wenn intern zwei Fachschritte
+// (Start + Abschluss bzw. Änderung anfordern + Änderung abschließen)
+// nacheinander ausgeführt werden. jamal-work-mode.test.js prüft jeden
+// Fachschritt zusätzlich einzeln und granular.
+function runJamalWorkModeStartRun(store, now) {
+  let next = jamalWorkMode.startRun(store, { now });
+  if (next.currentItem.status === jamalWorkMode.STATUS.IN_PROGRESS) {
+    next = jamalWorkMode.completeRun(next, { now });
+  }
+  return next;
+}
+
+function runJamalWorkModeRequestChange(store, changeText, now) {
+  let next = jamalWorkMode.requestChange(store, changeText, { now });
+  if (next.currentItem.status === jamalWorkMode.STATUS.CHANGE_IN_PROGRESS) {
+    next = jamalWorkMode.completeChange(next, { now });
+  }
+  return next;
+}
+
+const JAMAL_WORK_MODE_ACTIONS = Object.freeze({
+  "start-new-item": { fields: [], run: (store, _body, now) => jamalWorkMode.startNewItem(store, listProjects(), { now }) },
+  "set-desired-outcome": {
+    fields: ["desiredOutcome", "notes", "preferredTiming"],
+    run: (store, body, now) => jamalWorkMode.setDesiredOutcome(store, body, { now }),
+  },
+  "choose-project": {
+    fields: ["projectId", "displayName"],
+    run: (store, body, now) => jamalWorkMode.chooseProject(store, body, { now }),
+  },
+  "start-run": { fields: [], run: (store, _body, now) => runJamalWorkModeStartRun(store, now) },
+  "answer-clarification": {
+    fields: ["answer"],
+    run: (store, body, now) => jamalWorkMode.answerClarifyingQuestion(store, body.answer, { now }),
+  },
+  "request-change": {
+    fields: ["changeText"],
+    run: (store, body, now) => runJamalWorkModeRequestChange(store, body.changeText, now),
+  },
+  "mark-done": { fields: [], run: (store, _body, now) => jamalWorkMode.markDone(store, { now }) },
+  "mark-later": { fields: [], run: (store, _body, now) => jamalWorkMode.markLater(store, { now }) },
+  stop: { fields: ["reason"], run: (store, body, now) => jamalWorkMode.stopWorkItem(store, body.reason, { now }) },
+});
+
+async function dispatchJamalWorkModeActionPostPrefix(res, context, remainder) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+    return;
+  }
+  const actionName = typeof remainder === "string" ? remainder : "";
+  const action = !actionName.includes("/") ? JAMAL_WORK_MODE_ACTIONS[actionName] : undefined;
+  if (!action) {
+    sendJson(res, 404, jamalWorkModeErrorPayload("Nicht gefunden."));
+    return;
+  }
+  let body;
+  try {
+    body = await readJsonRequestBody(context.req, JAMAL_WORK_MODE_API_MAX_BODY_BYTES);
+    assertKnownFieldsOnly(body, action.fields, `jamal-work-mode-action-${actionName}`);
+  } catch (error) {
+    sendJson(res, error.statusCode || 400, jamalWorkModeErrorPayload(error.message));
+    return;
+  }
+  try {
+    const db = ensureAuthDbReady();
+    const store = jamalWorkModeStoreModule.loadStore(db);
+    const next = action.run(store, body, new Date());
+    jamalWorkModeStoreModule.persistStore(db, next);
+    const view = jamalWorkMode.getSafeView(next, listProjects());
+    sendJson(res, 200, { ok: true, ...view, ...API_SECURITY_FLAGS });
+  } catch (error) {
+    sendJson(res, 400, jamalWorkModeErrorPayload(error.message));
+  }
+}
+
 const getRoutes = buildRouteMap([
   ["/api/projects", (res) => handleProjects(res)],
   ["/api/projects/health-upgrade-kompass", (res) => handleHealthUpgradeKompassProject(res)],
@@ -23576,6 +23701,9 @@ const getRoutes = buildRouteMap([
   // prüfen, Status verfolgen.
   ["/api/portal/work-orders", (res, context) => workOrderRoutesModule.handlePortalWorkOrdersList(res, context, authRouteDeps())],
   ["/api/owner/work-orders", (res, context) => workOrderRoutesModule.handleOwnerWorkOrdersList(res, context, authRouteDeps())],
+  // V7.3 – Jamal-Arbeitsmodus (Auftrag Abschnitt C) – Zustand der einzigen
+  // zentralen Arbeitskarte "Heute arbeiten".
+  ["/api/jamal-work-mode/state", (res) => handleJamalWorkModeState(res)],
 ]);
 
 const postRoutes = buildRouteMap([
@@ -23778,6 +23906,15 @@ const postRoutePrefixHandlers = [
     handler: (res, context) => {
       const remainder = decodeURIComponent(context.pathname.slice("/api/owner/work-orders/".length));
       workOrderRoutesModule.dispatchOwnerWorkOrdersPostPrefix(res, context, authRouteDeps(), remainder);
+    },
+  },
+  {
+    // V7.3 – Jamal-Arbeitsmodus (Auftrag Abschnitt C/D/F/H/I) – eine
+    // Aktion je Anfrage (POST .../:action, siehe JAMAL_WORK_MODE_ACTIONS).
+    prefix: "/api/jamal-work-mode/",
+    handler: (res, context) => {
+      const remainder = decodeURIComponent(context.pathname.slice("/api/jamal-work-mode/".length));
+      dispatchJamalWorkModeActionPostPrefix(res, context, remainder);
     },
   },
 ];

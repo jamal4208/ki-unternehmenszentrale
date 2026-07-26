@@ -9033,3 +9033,244 @@ details.local-agent-assignment-details > summary {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   V7.3 – Jamal-Arbeitsmodus (Auftrag Abschnitt C/K): die einzige zentrale
+   Arbeitskarte "Heute arbeiten" ganz oben im Cockpit. Leitprinzip "Apple
+   statt Dubai": großzügige Weißräume, ruhige Typografie, gedeckte
+   Statusfarben (Wiederverwendung der bestehenden --badge-*-Tokens statt
+   neuer grellerer Farben), keine dekorative Überladung.
+   --------------------------------------------------------------------- */
+
+.jamal-work-card {
+  display: grid;
+  gap: 18px;
+  margin-bottom: 20px;
+  padding: clamp(20px, 3.4vw, 34px);
+  border: 1px solid var(--line-strong);
+  border-radius: 22px;
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.99), rgba(250, 246, 239, 0.97));
+  box-shadow: 0 22px 54px rgba(50, 39, 25, 0.09);
+}
+
+.jamal-work-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.jamal-work-head h2 {
+  margin: 4px 0 0;
+  font-size: 1.35rem;
+  letter-spacing: -0.01em;
+}
+
+.jamal-work-diagnostics {
+  flex: 0 0 auto;
+}
+
+.jamal-work-diagnostics summary {
+  cursor: pointer;
+  font-size: var(--text-xs, 12px);
+  color: var(--muted);
+  font-weight: var(--font-medium);
+}
+
+.jamal-work-diagnostics[open] summary {
+  color: var(--ink);
+}
+
+.jamal-work-diagnostics-output {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--card-border-soft);
+  border-radius: var(--radius);
+  background: var(--card-bg-muted);
+  font-size: var(--text-xs, 12px);
+  color: var(--muted);
+  display: grid;
+  gap: 4px;
+}
+
+#jamal-work-output {
+  display: grid;
+  gap: 16px;
+}
+
+.jamal-work-project {
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.jamal-work-project strong {
+  color: var(--ink);
+}
+
+.jamal-work-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Bewusst gedeckte, wiederverwendete Badge-Farben statt neuer grellerer
+   Statusfarben (Auftrag Abschnitt K: "keine grellen Statusfarben") – Status
+   wird zusätzlich immer als Text angezeigt (Auftrag Abschnitt K: "keine
+   reine Farbcodierung"). */
+.jamal-work-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: var(--text-xs, 12px);
+  font-weight: var(--font-medium);
+  background: var(--badge-neutral-bg);
+  color: var(--badge-neutral-fg);
+}
+
+.jamal-work-status[data-tone="progress"] {
+  background: var(--badge-info-bg);
+  color: var(--badge-info-fg);
+}
+
+.jamal-work-status[data-tone="attention"] {
+  background: var(--badge-warn-bg);
+  color: var(--badge-warn-fg);
+}
+
+.jamal-work-status[data-tone="done"] {
+  background: var(--badge-success-bg);
+  color: var(--badge-success-fg);
+}
+
+.jamal-work-status[data-tone="blocked"] {
+  background: var(--badge-blocked-bg);
+  color: var(--badge-blocked-fg);
+}
+
+.jamal-work-next-step {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.jamal-work-question {
+  padding: 14px 16px;
+  border: 1px solid rgba(161, 98, 7, 0.28);
+  border-radius: var(--radius-card);
+  background: var(--badge-warn-bg);
+  display: grid;
+  gap: 10px;
+}
+
+.jamal-work-question p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.jamal-work-result {
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--card-bg);
+  display: grid;
+  gap: 12px;
+}
+
+.jamal-work-result h3 {
+  margin: 0;
+}
+
+.jamal-work-result-body {
+  white-space: pre-wrap;
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+.jamal-work-open-points {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.jamal-work-agents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.jamal-work-agent-pill {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--card-bg-muted);
+  border: 1px solid var(--card-border-soft);
+  font-size: var(--text-xs, 12px);
+  color: var(--muted);
+}
+
+.jamal-work-primary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.jamal-work-secondary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.jamal-work-secondary-row .secondary-button,
+.jamal-work-secondary-row .link-button {
+  font-size: var(--text-sm);
+}
+
+.jamal-work-form {
+  display: grid;
+  gap: 10px;
+}
+
+.jamal-work-form label {
+  font-weight: var(--font-medium);
+  font-size: var(--text-sm);
+}
+
+.jamal-work-form textarea,
+.jamal-work-form input {
+  width: 100%;
+}
+
+.jamal-work-error {
+  margin: 0;
+  color: var(--red);
+  font-size: var(--text-sm);
+}
+
+.jamal-work-project-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.jamal-work-secondary summary {
+  cursor: pointer;
+  font-weight: var(--font-medium);
+  padding: 8px 0;
+  color: var(--muted);
+}
+
+@media (max-width: 640px) {
+  .jamal-work-head {
+    flex-direction: column;
+  }
+
+  .jamal-work-primary-row,
+  .jamal-work-secondary-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

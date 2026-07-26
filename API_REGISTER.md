@@ -2,7 +2,28 @@
 
 ## Überblick
 
-`server.js` registriert über `server-http-router.js` **70 GET-Routen** und **52 additive POST-Routen** (Execution Bridge seit Phase C gesichert + V7.1 Phase A Dokumente/Backup gesichert `59f985f` + V7.1 Phase B HeyGen-Connector-Pilot gesichert `ff43089` + V7.1 Phase B.1 Mandantenbasis/Ergebnisrückführung gesichert `37e8a28` + V7.1 Phase C Canva-Connector-Pilot gesichert `52b2d02` + V7.1 Phase C.1 Pilot-Ergebnisakte/Kundenfeedback-Schleife und V7.1 Phase C.1.1 skalierbares Reviewmodell gemeinsam gesichert `6621d93` + V7.2 Phase A Schritt 2 Auth-Routen/Route-Gates + V7.2 Phase A Schritt 3 Owner-Verwaltung/Kundenportal-API + V7.2 Phase A Schritt 4 Betriebsabnahme + V7.2 Phase B Schritt 1 Arbeitsauftrags-API + V7.2 Phase C Schritt 1 Agentenlauf-/Ergebnis-Endpunkte + V7.2 Phase C Schritt 2 Änderungswunsch-/Freigabe-/Versions-Endpunkte innerhalb bestehender Präfixe, lokal umgesetzt, noch ungesichert). Andere HTTP-Methoden bleiben 405. GET-Routen bleiben read-only. Die POST-Routen schreiben ausschließlich lokal (App-Support-Metadaten bzw. die Auth-Datenbank bzw. – nach Jamal-Freigabe – ein Fixture-Testrepository); niemals in Health und niemals mit Commit/Push/Deployment.
+`server.js` registriert über `server-http-router.js` **71 GET-Routen** und **52 additive POST-Routen** (Execution Bridge seit Phase C gesichert + V7.1 Phase A Dokumente/Backup gesichert `59f985f` + V7.1 Phase B HeyGen-Connector-Pilot gesichert `ff43089` + V7.1 Phase B.1 Mandantenbasis/Ergebnisrückführung gesichert `37e8a28` + V7.1 Phase C Canva-Connector-Pilot gesichert `52b2d02` + V7.1 Phase C.1 Pilot-Ergebnisakte/Kundenfeedback-Schleife und V7.1 Phase C.1.1 skalierbares Reviewmodell gemeinsam gesichert `6621d93` + V7.2 Phase A Schritt 2 Auth-Routen/Route-Gates + V7.2 Phase A Schritt 3 Owner-Verwaltung/Kundenportal-API + V7.2 Phase A Schritt 4 Betriebsabnahme + V7.2 Phase B Schritt 1 Arbeitsauftrags-API + V7.2 Phase C Schritt 1 Agentenlauf-/Ergebnis-Endpunkte + V7.2 Phase C Schritt 2 Änderungswunsch-/Freigabe-/Versions-Endpunkte innerhalb bestehender Präfixe + V7.3 Jamal-Arbeitsmodus-Zustand/-Aktionen, lokal umgesetzt, noch ungesichert). Andere HTTP-Methoden bleiben 405. GET-Routen bleiben read-only. Die POST-Routen schreiben ausschließlich lokal (App-Support-Metadaten bzw. die Auth-Datenbank bzw. – nach Jamal-Freigabe – ein Fixture-Testrepository); niemals in Health und niemals mit Commit/Push/Deployment.
+
+## V7.3 – Jamal-Arbeitsmodus: vom Ergebniswunsch zum prüfbaren internen Ergebnis (lokal umgesetzt, ungesichert – Commit/Push stehen aus)
+
+Eine neue Route auf oberster Ebene plus ein neuer POST-Präfix (beide `OWNER_ONLY`, ausschließlich Jamal, kein Mandantenbezug): **71 GET, 52 POST, 8 GET-Präfixe, 5 POST-Präfixe, 28 statische Assets** (jeweils +1 gegenüber dem Ausgangsstand 70/52/8/4/27).
+
+| Methode | Pfad | Zweck |
+|---|---|---|
+| GET | `/api/jamal-work-mode/state` | aktuellen Zustand der zentralen Arbeitskarte „Heute arbeiten“ lesen (aktueller Arbeitswunsch, Status, priorisiertes Projekt, kompakte Projektauswahl) |
+| POST | `/api/jamal-work-mode/start-new-item` | neuen Arbeitswunsch beginnen (nur wenn kein aktiver, unabgeschlossener Wunsch existiert) |
+| POST | `/api/jamal-work-mode/set-desired-outcome` | gewünschtes Ergebnis (Pflicht), Hinweise/Zeitpunkt (optional) festlegen |
+| POST | `/api/jamal-work-mode/choose-project` | Projekt bewusst wechseln (kein Pflichtschritt) |
+| POST | `/api/jamal-work-mode/start-run` | internen Agentenlauf starten (Safety-Gate, Rückfrageerkennung, Projektmanager-Strukturierung, Ergebniserzeugung – serverseitig als eine Hauptaktion verkettet) |
+| POST | `/api/jamal-work-mode/answer-clarification` | offene Rückfrage beantworten |
+| POST | `/api/jamal-work-mode/request-change` | Änderung zum aktuellen Ergebnis anfordern (neue unveränderliche Version, alte bleibt lesbar) |
+| POST | `/api/jamal-work-mode/mark-done` | aktuelles Ergebnis als „Passt“ intern erledigt markieren (keine externe Aktion) |
+| POST | `/api/jamal-work-mode/mark-later` | aktuellen Arbeitswunsch als „Später“ markieren (Status bleibt unverändert) |
+| POST | `/api/jamal-work-mode/stop` | aktuellen Arbeitswunsch stoppen (mit Grund) |
+
+Statisches Asset: `/jamal-work-mode-ui.js` (`STATIC_OWNER_ONLY`). Jede Route: Origin-/Host-Prüfung, CSRF-Pflicht bei POST (außer im lokalen Dev-Bypass), Bodylimit, Known-fields-Allowlist, generische sichere Fehlermeldungen, `Cache-Control: no-store`. Kein externer Provideraufruf, kein Canva, kein HeyGen, keine Veröffentlichung, kein Billing, kein Mailversand. **Nicht enthalten:** neue Kunden-/Mandantenroute, Commit/Push/Deployment.
+
+**Persistenznachtrag (vor Commit-Freigabe geschlossen):** die Routen und Routenzahlen oben bleiben unverändert (**71/52/8/5/28**, keine neue Route für die Persistenz nötig). `GET /api/jamal-work-mode/state` und alle `POST /api/jamal-work-mode/*`-Aktionen laden/schreiben ihren Zustand jetzt gegen eine additive **Migration 12** (`jamal_work_items`, `jamal_work_results`) auf der bestehenden Auth-Datenbank statt gegen einen Prozessspeicher-Singleton – der Arbeitswunsch, sein Status, offene Rückfragen, die Agentenauswahl/der Arbeitsplan und alle Ergebnisversionen überstehen dadurch einen Serverneustart. Ergebnisversionen bleiben append-only per Datenbank-Trigger. Kein LocalStorage, keine neue npm-Abhängigkeit.
 
 ## V7.2 Phase C Schritt 2 – Kundenänderungsrunde, Versionierung und echte fachliche Kundenfreigabe (lokal umgesetzt, ungesichert – Commit/Push stehen aus)
 
