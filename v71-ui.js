@@ -893,11 +893,430 @@
     });
   }
 
+  // ---------------------------------------------------------------------
+  // V7.1 Phase C – Canva-Designpilot (CONTROLLED_CONNECTOR_HANDOFF).
+  //
+  // Nutzt ausschließlich die additiven /api/v71/canva/*-Routen. Kein
+  // Button für Veröffentlichen/Öffentlich teilen/Kunden zu Canva einladen/
+  // Design löschen/Credits kaufen/Alles freigeben (siehe Auftrag Abschnitt
+  // N). Jede Freigabe ist ein eigener, getrennter Aufruf – keine
+  // Sammelfreigabe.
+  // ---------------------------------------------------------------------
+
+  const CANVA_STATUS_LABEL = {
+    DRAFT: "Entwurf",
+    READY_FOR_REVIEW: "geprüft, wartet auf Freigaben",
+    BLOCKED: "blockiert",
+    APPROVED_FOR_HANDOFF: "freigegeben für Übergabe",
+    HANDED_OFF: "übergeben (Ausführung noch nicht bestätigt)",
+    CANDIDATES_READY: "Designkandidaten verfügbar (noch kein Design)",
+    DRAFT_EDITING: "Bearbeitungsentwurf (nicht gespeichert)",
+    PREVIEW_READY: "Vorschau bereit (nicht gespeichert)",
+    APPROVED_TO_SAVE: "Speicherung freigegeben",
+    SAVED: "gespeichert (Providerangabe, nicht veröffentlicht)",
+    INTERNAL_REVIEW: "internes Review",
+    READY_FOR_CUSTOMER_REVIEW: "bereit für Kundenreview",
+    CUSTOMER_CHANGES_REQUESTED: "Kunde wünscht Änderungen",
+    CUSTOMER_APPROVED: "vom Kunden freigegeben (keine Veröffentlichung)",
+    FAILED: "fehlgeschlagen",
+    CANCELLED: "abgebrochen",
+    STALE: "abgelaufen",
+  };
+
+  function canvaStatusPillClass(status) {
+    const map = {
+      DRAFT: "v71-pill v71-pill-neutral",
+      READY_FOR_REVIEW: "v71-pill v71-pill-recommendation",
+      BLOCKED: "v71-pill v71-pill-blocked",
+      APPROVED_FOR_HANDOFF: "v71-pill v71-pill-handoff",
+      HANDED_OFF: "v71-pill v71-pill-handoff",
+      CANDIDATES_READY: "v71-pill v71-pill-handoff",
+      DRAFT_EDITING: "v71-pill v71-pill-handoff",
+      PREVIEW_READY: "v71-pill v71-pill-handoff",
+      APPROVED_TO_SAVE: "v71-pill v71-pill-handoff",
+      SAVED: "v71-pill v71-pill-direct",
+      INTERNAL_REVIEW: "v71-pill v71-pill-recommendation",
+      READY_FOR_CUSTOMER_REVIEW: "v71-pill v71-pill-recommendation",
+      CUSTOMER_CHANGES_REQUESTED: "v71-pill v71-pill-blocked",
+      CUSTOMER_APPROVED: "v71-pill v71-pill-direct",
+      FAILED: "v71-pill v71-pill-blocked",
+      CANCELLED: "v71-pill v71-pill-blocked",
+      STALE: "v71-pill v71-pill-blocked",
+    };
+    return map[status] || "v71-pill v71-pill-neutral";
+  }
+
+  let canvaStatusCache = null;
+  let canvaSelectedProjectId = "ki-unternehmenszentrale";
+
+  function renderCanvaPilotBadges() {
+    return `
+      <span class="v71-pill v71-pill-handoff">kontrollierte Übergabe</span>
+      <span class="v71-pill v71-pill-handoff">externe Verarbeitung</span>
+      <span class="v71-pill v71-pill-neutral">Testmandant</span>
+      <span class="v71-pill v71-pill-neutral">nicht abrechenbarer Pilot</span>
+      <span class="v71-pill v71-pill-blocked">noch nicht veröffentlicht</span>
+      <span class="v71-pill v71-pill-blocked">Canva-Konto intern</span>
+      <span class="v71-pill v71-pill-blocked">Kunde hat keinen Canva-Zugang</span>
+      <span class="v71-pill v71-pill-neutral">kein automatischer Start</span>`;
+  }
+
+  function canvaApprovalRow(pkg) {
+    const items = [
+      { label: "Briefing", ok: pkg.briefingApproved === true },
+      { label: "Assets/Rechte", ok: pkg.assetsAndRightsApproved === true },
+      { label: "Externe Übertragung", ok: pkg.externalTransferApproved === true },
+      { label: "Kostenrahmen", ok: pkg.internalCostApprovalStatus === "WITHIN_APPROVED_LIMIT" },
+      { label: "Kundenentwurf", ok: pkg.customerDraftApprovalStatus === "APPROVED" },
+      { label: "Veröffentlichung", ok: false, always: "bleibt immer eine eigene, spätere Freigabe" },
+    ];
+    return items
+      .map(
+        (item) =>
+          `<span class="v71-pill ${item.ok ? "v71-pill-direct" : "v71-pill-neutral"}" title="${escapeHtml(item.always || "")}">${escapeHtml(
+            item.label,
+          )}: ${item.ok ? "freigegeben" : "offen"}</span>`,
+      )
+      .join(" ");
+  }
+
+  const CANVA_COST_PACKAGE_LABEL = {
+    INCLUDED_IN_PACKAGE: "im Kundenpaket enthalten",
+    ADDITIONAL_APPROVAL_REQUIRED: "Zusatzfreigabe nötig",
+    UNKNOWN: "unbekannt",
+    NOT_BILLABLE_TEST: "nicht abrechenbar (Test)",
+  };
+
+  const CANVA_CUSTOMER_DRAFT_LABEL = {
+    PENDING: "offen",
+    APPROVED: "freigegeben",
+    CHANGES_REQUESTED: "Änderungen angefordert",
+  };
+
+  function canvaTenantRow(pkg) {
+    return `
+      <span class="v71-pill v71-pill-neutral">Kunde: ${escapeHtml(pkg.customerId || "–")}</span>
+      <span class="v71-pill v71-pill-neutral">Marke: ${escapeHtml(pkg.brandId || "–")}</span>
+      <span class="v71-pill v71-pill-neutral">Kampagne: ${escapeHtml(pkg.campaignId || "–")}</span>
+      <span class="v71-pill v71-pill-neutral">Kostenpaket: ${escapeHtml(CANVA_COST_PACKAGE_LABEL[pkg.costPackageStatus] || pkg.costPackageStatus || "unbekannt")}</span>
+      <span class="v71-pill ${pkg.customerDraftApprovalStatus === "APPROVED" ? "v71-pill-direct" : "v71-pill-neutral"}">Kundenfreigabe: ${escapeHtml(CANVA_CUSTOMER_DRAFT_LABEL[pkg.customerDraftApprovalStatus] || "offen")}</span>`;
+  }
+
+  // Sicherheits-/Fachkorrektur: Die Kundenentwurfsaktionen dürfen
+  // ausschließlich erscheinen, wenn tatsächlich ein mandantengebundener
+  // Kundenentwurf existiert – eine bloße Briefingfreigabe genügt nicht.
+  // Erfordert mindestens: ein erzeugter UND ausdrücklich ausgewählter
+  // Designkandidat (selectedCandidateId), lokalen Status mindestens
+  // READY_FOR_CUSTOMER_REVIEW (erst nach Kandidat -> Design/gespeichertem
+  // Entwurf -> internem Review erreichbar) sowie eine vollständige
+  // Mandantenbindung (Kunde/Marke/Kampagne).
+  function canvaCustomerDraftActionsAvailable(pkg) {
+    return (
+      pkg.status === "READY_FOR_CUSTOMER_REVIEW" &&
+      Boolean(pkg.selectedCandidateId) &&
+      Boolean(pkg.customerId) &&
+      Boolean(pkg.brandId) &&
+      Boolean(pkg.campaignId)
+    );
+  }
+
+  function canvaActionButtons(pkg) {
+    const buttons = [];
+    if (pkg.status === "DRAFT") {
+      buttons.push(`<button class="secondary-button" type="button" data-canva-action="validate" data-job-package-id="${escapeHtml(pkg.jobPackageId)}">Inhalt prüfen</button>`);
+    }
+    if (pkg.status === "READY_FOR_REVIEW") {
+      if (!pkg.briefingApproved) {
+        buttons.push(`<button class="secondary-button" type="button" data-canva-action="approve-briefing" data-job-package-id="${escapeHtml(pkg.jobPackageId)}">Briefing freigeben</button>`);
+      }
+      if (!pkg.assetsAndRightsApproved) {
+        buttons.push(`<button class="secondary-button" type="button" data-canva-action="approve-assets" data-job-package-id="${escapeHtml(pkg.jobPackageId)}">Assets und Rechte freigeben</button>`);
+      }
+      if (!pkg.externalTransferApproved) {
+        buttons.push(`<button class="secondary-button" type="button" data-canva-action="approve-transfer" data-job-package-id="${escapeHtml(pkg.jobPackageId)}">Externe Verarbeitung bestätigen</button>`);
+      }
+      if (pkg.internalCostApprovalStatus !== "WITHIN_APPROVED_LIMIT") {
+        buttons.push(`<button class="secondary-button" type="button" data-canva-action="approve-cost" data-job-package-id="${escapeHtml(pkg.jobPackageId)}">Kostenrahmen bestätigen</button>`);
+      }
+      if (pkg.briefingApproved && pkg.assetsAndRightsApproved && pkg.externalTransferApproved && pkg.internalCostApprovalStatus === "WITHIN_APPROVED_LIMIT") {
+        buttons.push(`<button class="primary-button" type="button" data-canva-action="handoff" data-job-package-id="${escapeHtml(pkg.jobPackageId)}">Canva-Übergabe freigeben</button>`);
+      }
+    }
+    if (["HANDED_OFF", "CANDIDATES_READY"].includes(pkg.status)) {
+      buttons.push(`<button class="secondary-button" type="button" data-canva-action="check-result" data-job-package-id="${escapeHtml(pkg.jobPackageId)}">Designkandidat auswählen / Ergebnis prüfen</button>`);
+    }
+    if (canvaCustomerDraftActionsAvailable(pkg) && pkg.customerDraftApprovalStatus !== "APPROVED") {
+      buttons.push(`<button class="secondary-button" type="button" data-canva-action="approve-customer-draft" data-job-package-id="${escapeHtml(pkg.jobPackageId)}">Kundenentwurf freigeben</button>`);
+      buttons.push(`<button class="secondary-button" type="button" data-canva-action="request-customer-draft-changes" data-job-package-id="${escapeHtml(pkg.jobPackageId)}">Änderungen anfordern</button>`);
+    }
+    // Ausdrücklich KEIN Button für Veröffentlichen/Öffentlich teilen/Kunden
+    // zu Canva einladen/Design löschen/Credits kaufen/Alles freigeben
+    // (Auftrag Abschnitt N).
+    return buttons.join(" ");
+  }
+
+  function renderCanvaPackageCard(pkg) {
+    const dims = pkg.dimensions ? `${pkg.dimensions.widthPx}×${pkg.dimensions.heightPx}px (${pkg.dimensions.label || ""})` : "Standardformat";
+    return `
+      <li class="v71-card" data-canva-package-card="${escapeHtml(pkg.jobPackageId)}">
+        <div class="v71-card-head">
+          <strong>${escapeHtml(pkg.title || "Ohne Titel")}</strong>
+          <span class="${canvaStatusPillClass(pkg.status)}">${escapeHtml(CANVA_STATUS_LABEL[pkg.status] || pkg.status)}</span>
+        </div>
+        <div class="v71-tag-row">${canvaApprovalRow(pkg)}</div>
+        <div class="v71-tag-row">${canvaTenantRow(pkg)}</div>
+        ${pkg.blockReasons && pkg.blockReasons.length ? `<p class="v71-note v71-note-warning">${escapeHtml(pkg.blockReasons[0])}</p>` : ""}
+        <details class="v71-details">
+          <summary>Technische Details</summary>
+          <dl class="v71-detail-list">
+            <div><dt>Designtyp</dt><dd>${escapeHtml(pkg.designType)} · ${escapeHtml(dims)}</dd></div>
+            <div><dt>Botschaft</dt><dd>${escapeHtml(pkg.primaryMessage || "–")}</dd></div>
+            <div><dt>Briefing</dt><dd>${escapeHtml(pkg.brief || "–")}</dd></div>
+            <div><dt>Datenklassifizierung</dt><dd>${escapeHtml(pkg.dataClassification)}</dd></div>
+            <div><dt>Ausgewählter Kandidat</dt><dd>${escapeHtml(pkg.selectedCandidateId || "noch keiner ausgewählt")}</dd></div>
+            <div><dt>Nur vorbereitet oder übergeben?</dt><dd>${escapeHtml(pkg.status === "DRAFT" || pkg.status === "READY_FOR_REVIEW" ? "nur vorbereitet" : "an Connector übergeben")}</dd></div>
+            <div><dt>Nächster Jamal-Schritt</dt><dd>${escapeHtml(pkg.nextAllowedStep || "–")}</dd></div>
+          </dl>
+        </details>
+        <div class="button-row">${canvaActionButtons(pkg)}</div>
+        <p class="form-note" data-canva-package-status="${escapeHtml(pkg.jobPackageId)}" aria-live="polite"></p>
+      </li>`;
+  }
+
+  async function canvaPostAction(path, payload) {
+    return fetchJson(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  function tenantOptions(entries, idField, selectedId) {
+    return entries
+      .map(
+        (entry) =>
+          `<option value="${escapeHtml(entry[idField])}" ${entry[idField] === selectedId ? "selected" : ""}>${escapeHtml(
+            entry.displayName || entry.title || entry[idField],
+          )}</option>`,
+      )
+      .join("");
+  }
+
+  async function renderCanvaView() {
+    const container = byId("v71-canva-output");
+    if (!container) return;
+    const projects = await loadProjectsForSelect();
+    const [statusResult, packagesResult, customersResult] = await Promise.all([
+      fetchJson("/api/v71/canva/status"),
+      fetchJson(`/api/v71/canva/job-packages?projectId=${encodeURIComponent(canvaSelectedProjectId)}`),
+      fetchJson("/api/v71/agency/customers"),
+    ]);
+    canvaStatusCache = statusResult.ok ? statusResult.json : null;
+    const jobPackages = packagesResult.ok && Array.isArray(packagesResult.json?.jobPackages) ? packagesResult.json.jobPackages : [];
+    const customers = customersResult.ok && Array.isArray(customersResult.json?.customers) ? customersResult.json.customers : [];
+    const canvaSelectedCustomerId = customers.find((c) => c.customerId === "test-customer-fiktives-cafe")
+      ? "test-customer-fiktives-cafe"
+      : customers[0]?.customerId || "";
+    const [brandsResult, campaignsResult] = await Promise.all([
+      fetchJson(`/api/v71/agency/brands?customerId=${encodeURIComponent(canvaSelectedCustomerId)}`),
+      fetchJson(`/api/v71/agency/campaigns?customerId=${encodeURIComponent(canvaSelectedCustomerId)}`),
+    ]);
+    const brands = brandsResult.ok && Array.isArray(brandsResult.json?.brands) ? brandsResult.json.brands : [];
+    const campaigns = campaignsResult.ok && Array.isArray(campaignsResult.json?.campaigns) ? campaignsResult.json.campaigns : [];
+    const canvaSelectedBrandId = brands.find((b) => b.brandId === "test-brand-fiktives-cafe") ? "test-brand-fiktives-cafe" : brands[0]?.brandId || "";
+    const canvaSelectedCampaignId = campaigns.find((c) => c.campaignId === "test-campaign-fiktives-cafe-pilot")
+      ? "test-campaign-fiktives-cafe-pilot"
+      : campaigns[0]?.campaignId || "";
+
+    container.innerHTML = `
+      <div class="v71-layout">
+        <section class="panel">
+          <div class="section-head"><div><p class="eyebrow">Status</p><h3>Canva-Verbindungsstatus</h3></div></div>
+          <div class="v71-tag-row">${renderCanvaPilotBadges()}</div>
+          <details class="v71-details">
+            <summary>Technische Details (Capability-Profil, Pilotgrenzen)</summary>
+            <ul class="v71-note-list">
+              ${(canvaStatusCache?.capabilityProfile?.supportedOrPlanned || []).map((entry) => `<li>${escapeHtml(entry)}</li>`).join("")}
+            </ul>
+            <p class="form-note">Ausdrücklich nicht im ersten Pilot: ${escapeHtml((canvaStatusCache?.capabilityProfile?.explicitlyNotAvailableInFirstPilot || []).join(", "))}</p>
+          </details>
+        </section>
+
+        <form class="panel v71-form" id="v71-canva-prepare-form">
+          <div class="section-head">
+            <div><p class="eyebrow">Primäraktion</p><h3>Designauftrag vorbereiten</h3></div>
+          </div>
+          <label>Projekt
+            <select id="v71-canva-project">${projectOptions(projects, canvaSelectedProjectId)}</select>
+          </label>
+          <div class="form-grid">
+            <label>Kunde (Testmandant)
+              <select id="v71-canva-customer">${tenantOptions(customers, "customerId", canvaSelectedCustomerId)}</select>
+            </label>
+            <label>Marke (Testmarke)
+              <select id="v71-canva-brand">${tenantOptions(brands, "brandId", canvaSelectedBrandId)}</select>
+            </label>
+          </div>
+          <label>Kampagne (Testkampagne)
+            <select id="v71-canva-campaign">${tenantOptions(campaigns, "campaignId", canvaSelectedCampaignId)}</select>
+          </label>
+          <label>Titel
+            <input type="text" id="v71-canva-title" maxlength="200" placeholder="z. B. Sonntagsfrühstück im Test-Café" required />
+          </label>
+          <label>Briefing
+            <textarea id="v71-canva-brief" rows="3" maxlength="4000" placeholder="Kurzer, neutraler Briefingtext ohne Kundendaten" required></textarea>
+          </label>
+          <label>Botschaft (primaryMessage)
+            <input type="text" id="v71-canva-message" maxlength="400" placeholder="z. B. Sonntagsfrühstück ab 9 Uhr" required />
+          </label>
+          <div class="form-grid">
+            <label>Designtyp
+              <select id="v71-canva-design-type">
+                <option value="INSTAGRAM_POST">Instagram-Post</option>
+                <option value="STORY">Story</option>
+                <option value="FACEBOOK_POST">Facebook-Post</option>
+                <option value="FLYER">Flyer</option>
+                <option value="DOCUMENT">Dokument</option>
+                <option value="YOUTUBE_THUMBNAIL">YouTube-Thumbnail</option>
+              </select>
+            </label>
+            <label>Kostenpaketstatus
+              <select id="v71-canva-cost-package-status">
+                <option value="NOT_BILLABLE_TEST">nicht abrechenbar (Test)</option>
+                <option value="INCLUDED_IN_PACKAGE">im Kundenpaket enthalten</option>
+                <option value="ADDITIONAL_APPROVAL_REQUIRED">Zusatzfreigabe nötig</option>
+                <option value="UNKNOWN">unbekannt</option>
+              </select>
+            </label>
+          </div>
+          <div class="form-grid">
+            <label class="v71-checkbox" for="v71-canva-asset-rights">
+              <input type="checkbox" id="v71-canva-asset-rights" />
+              <span class="v71-checkbox-label">Assetrechte bestätigt (falls Assets verwendet werden)</span>
+            </label>
+            <label class="v71-checkbox" for="v71-canva-brand-rights">
+              <input type="checkbox" id="v71-canva-brand-rights" checked />
+              <span class="v71-checkbox-label">Markenrechte bestätigt</span>
+            </label>
+          </div>
+          <p class="form-note">Datenklassifizierung im ersten Pilot: ausschließlich NORMAL. Kein Kundendaten-, Gesundheits- oder Kinderbezug, kein privates Brand-Kit.</p>
+          <div class="button-row">
+            <button class="primary-button" type="submit">Designauftrag vorbereiten</button>
+          </div>
+          <p class="form-note" id="v71-canva-prepare-status" aria-live="polite"></p>
+        </form>
+
+        <section class="panel">
+          <div class="section-head">
+            <div><p class="eyebrow">Bestand</p><h3>Vorbereitete Canva-Aufträge (${jobPackages.length})</h3></div>
+          </div>
+          ${
+            jobPackages.length
+              ? `<ul class="v71-card-list">${jobPackages.map(renderCanvaPackageCard).join("")}</ul>`
+              : `<div class="empty-state">Für dieses Projekt ist noch kein Canva-Auftrag vorbereitet. Nutze die Primäraktion oben.</div>`
+          }
+          <p class="form-note">Jede Freigabe (Briefing, Assets/Rechte, externe Übertragung, Kostenrahmen) ist ein eigener, getrennter Schritt. Veröffentlichung bleibt immer eine eigene, spätere Freigabe.</p>
+        </section>
+      </div>`;
+
+    byId("v71-canva-project").addEventListener("change", (event) => {
+      canvaSelectedProjectId = event.target.value;
+      renderCanvaView();
+    });
+
+    byId("v71-canva-prepare-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const statusEl = byId("v71-canva-prepare-status");
+      statusEl.textContent = "Wird vorbereitet…";
+      const payload = {
+        projectId: byId("v71-canva-project").value,
+        customerId: byId("v71-canva-customer").value,
+        brandId: byId("v71-canva-brand").value,
+        campaignId: byId("v71-canva-campaign").value,
+        designOperation: "GENERATE_NEW_DESIGN",
+        designType: byId("v71-canva-design-type").value,
+        title: byId("v71-canva-title").value.trim(),
+        brief: byId("v71-canva-brief").value.trim(),
+        primaryMessage: byId("v71-canva-message").value.trim(),
+        dataClassification: "NORMAL",
+        assetRightsConfirmed: byId("v71-canva-asset-rights").checked,
+        brandRightsConfirmed: byId("v71-canva-brand-rights").checked,
+        costPackageStatus: byId("v71-canva-cost-package-status").value,
+      };
+      const result = await canvaPostAction("/api/v71/canva/job-package/prepare", payload);
+      if (result.ok && result.json?.ok) {
+        statusEl.textContent = "Auftragspaket vorbereitet (DRAFT). Noch keine Ausführung, keine externe Übertragung.";
+        renderCanvaView();
+      } else {
+        statusEl.textContent = result.json?.message || "Vorbereitung nicht möglich.";
+      }
+    });
+
+    container.querySelectorAll("[data-canva-action]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const jobPackageId = button.getAttribute("data-job-package-id");
+        const action = button.getAttribute("data-canva-action");
+        const statusEl = container.querySelector(`[data-canva-package-status="${jobPackageId}"]`);
+        if (statusEl) statusEl.textContent = "Wird verarbeitet…";
+        try {
+          if (action === "validate") {
+            await canvaPostAction("/api/v71/canva/job-package/validate", { jobPackageId });
+          } else if (action === "approve-briefing") {
+            await canvaPostAction("/api/v71/canva/job-package/approve-briefing", { jobPackageId });
+          } else if (action === "approve-assets") {
+            await canvaPostAction("/api/v71/canva/job-package/approve-assets-and-rights", { jobPackageId });
+          } else if (action === "approve-transfer") {
+            await canvaPostAction("/api/v71/canva/job-package/approve-external-transfer", { jobPackageId });
+          } else if (action === "approve-cost") {
+            await canvaPostAction("/api/v71/canva/job-package/approve-cost", { jobPackageId, internalCostApprovalStatus: "WITHIN_APPROVED_LIMIT" });
+          } else if (action === "handoff") {
+            const tokenResult = await canvaPostAction("/api/v71/canva/handoff/request-token", { jobPackageId, providerOperation: "GENERATE_DESIGN_CANDIDATES" });
+            if (!tokenResult.ok || !tokenResult.json?.ok) {
+              if (statusEl) statusEl.textContent = (tokenResult.json?.missing || []).join(", ") || "Handoff-Voraussetzungen nicht erfüllt.";
+              renderCanvaView();
+              return;
+            }
+            const handoffResult = await canvaPostAction("/api/v71/canva/handoff/prepare", {
+              jobPackageId,
+              providerOperation: "GENERATE_DESIGN_CANDIDATES",
+              token: tokenResult.json.token,
+            });
+            if (statusEl) {
+              statusEl.textContent = handoffResult.json?.ok
+                ? "Hand-off vorbereitet (Designkandidaten anfordern). Tatsächliche Ausführung noch nicht gestartet – erfolgt außerhalb dieses Servers nach Jamals Freigabe."
+                : handoffResult.json?.message || "Hand-off nicht möglich.";
+            }
+          } else if (action === "check-result") {
+            if (statusEl) statusEl.textContent = "Kandidatenprüfung und -auswahl erfolgen über die strukturierte Ergebnisrückführung (Providerstatus, danach getrennte Kandidatenauswahl, danach Jamal-Abnahme).";
+          } else if (action === "approve-customer-draft") {
+            const draftResult = await canvaPostAction("/api/v71/canva/job-package/approve-customer-draft", { jobPackageId });
+            if (statusEl) {
+              statusEl.textContent = draftResult.json?.ok
+                ? "Kundenentwurf freigegeben. Das ist keine Veröffentlichungsfreigabe."
+                : draftResult.json?.message || "Kundenentwurfsfreigabe nicht möglich.";
+            }
+          } else if (action === "request-customer-draft-changes") {
+            const note = window.prompt("Welche Änderung soll der Kunde erhalten? (kurze Notiz)", "");
+            if (note === null) return;
+            const changesResult = await canvaPostAction("/api/v71/canva/job-package/request-customer-draft-changes", { jobPackageId, note });
+            if (statusEl) {
+              statusEl.textContent = changesResult.json?.ok ? "Änderungswunsch erfasst." : changesResult.json?.message || "Änderungswunsch nicht möglich.";
+            }
+          }
+        } catch (_error) {
+          if (statusEl) statusEl.textContent = "Aktion nicht möglich.";
+        }
+        renderCanvaView();
+      });
+    });
+  }
+
   function initV71Views() {
     renderDocumentsView();
     renderToolsView();
     renderPluginGatewayView();
     renderHeygenView();
+    renderCanvaView();
   }
 
   if (document.readyState === "loading") {
@@ -911,5 +1330,6 @@
     renderToolsView,
     renderPluginGatewayView,
     renderHeygenView,
+    renderCanvaView,
   };
 })();

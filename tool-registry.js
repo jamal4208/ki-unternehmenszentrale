@@ -197,14 +197,36 @@ const TOOL_REGISTRY = Object.freeze(
       displayName: "Canva",
       category: "Design",
       provider: "Canva",
-      capabilities: ["Design-/Präsentationserstellung (geplant)"],
+      // V7.1 Phase C – additiv erweitertes, sachliches Capability-Profil
+      // (Auftrag Abschnitt C). Ausführliche Details (unterstützt/vorgesehen,
+      // ausdrücklich nicht im ersten Pilot, Pilotumfang) liegen zusätzlich
+      // strukturiert in canva-design-job-package.js#CANVA_CAPABILITY_PROFILE
+      // – dieses Feld bleibt bewusst kurz für das allgemeine Werkzeugregister.
+      capabilities: [
+        "Social-Media-Design generieren (Instagram-Post/-Story, Facebook-Post, Flyer, Poster, Infografik, YouTube-Thumbnail)",
+        "Dokument und visuelles Angebot",
+        "vorhandenes Design lesen/kopieren/bearbeiten (nur vorgemerkt, kein erster Pilot)",
+        "Designentwurf über Brand-Template erzeugen (nur vorgemerkt, kein erster Pilot)",
+      ],
       allowedDataClassifications: ["NORMAL"],
       writeCapability: false,
       publicationCapability: true,
       costModel: "SUBSCRIPTION",
       allowedAgents: ["ui-agent"],
       fallbackToolIds: ["figma"],
-      notes: [...BASE_SAFETY_NOTES, "Kein autonomer Canva-Produktivlauf in Phase A."],
+      // connectionStatus/executionMode bleiben bewusst auf der Phase-A-
+      // Basiswahrheit (NOT_CONNECTED/RECOMMENDATION_ONLY): Es fand noch
+      // keine tatsächliche, authentifizierte Canva-Verbindungserkennung
+      // statt. Der additive, technisch getestete CONTROLLED_HANDOFF-
+      // Pilotpfad wird ausschließlich separat über
+      // canva-connector.js#buildCanvaPilotStatus() ausgewiesen, ohne diese
+      // Basiswahrheit zu verändern (keine zweite, widersprüchliche Quelle).
+      notes: [
+        ...BASE_SAFETY_NOTES,
+        "Kein autonomer Canva-Produktivlauf in Phase A oder Phase C.",
+        "Phase C: additiver, getesteter CONTROLLED_CONNECTOR_HANDOFF-Pilotpfad vorbereitet (canva-design-job-package.js/canva-connector.js/canva-design-result.js); keine echte Canva-Anfrage, kein API-Key gespeichert.",
+        "Erster Pilot ausschließlich GENERATE_NEW_DESIGN mit neutralem Testmandant, NORMAL-Daten, ohne Veröffentlichung; echte Designerstellung erfordert separate Jamal-Freigabe.",
+      ],
     }),
     createTool({
       toolId: "heygen",

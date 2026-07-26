@@ -32,6 +32,14 @@ const agencyTenantRegistryModule = require("./agency-tenant-registry");
 const heygenPilotReviewModule = require("./heygen-pilot-review");
 const heygenResultLifecycleModule = require("./heygen-result-lifecycle");
 const agencyBackupModule = require("./agency-backup");
+// V7.1 Phase C (Auftrag Abschnitt G/I/L/O) – Canva als zweiter kontrollierter
+// Medien-Connector (CONTROLLED_CONNECTOR_HANDOFF). Rein additiv, keine
+// Netzwerklogik, keine Zugangsdaten; spiegelt dieselben Muster wie Phase B
+// (HeyGen).
+const canvaDesignJobPackageModule = require("./canva-design-job-package");
+const canvaConnectorModule = require("./canva-connector");
+const canvaStoreModule = require("./canva-store");
+const canvaBackupModule = require("./canva-backup");
 
 const rootDir = __dirname;
 const staticAssets = new Map([
@@ -22808,6 +22816,320 @@ function handleV71HeygenBackupRestorePreview(res, context) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// V7.1 Phase C – Canva als zweiter kontrollierter Medien-Connector
+// (CONTROLLED_CONNECTOR_HANDOFF, siehe canva-design-job-package.js/
+// canva-connector.js/canva-design-result.js/canva-backup.js/canva-store.js).
+//
+// Dieselben Rand-Sicherheitsmuster wie die HeyGen-Routen (Abschnitt B):
+// Origin-/Host-Prüfung, JSON-Content-Type, Größenlimit, bekannte Feldmengen,
+// keine Stacktraces. KEINE dieser Routen führt einen HTTP-Aufruf zu Canva
+// aus, speichert einen API-Key, löscht etwas, veröffentlicht etwas oder
+// kauft etwas. Die einzige Wirkung ist das Lesen/Schreiben strukturierter,
+// lokaler Metadaten (canva-store.js). Editing-Transaktionen (Auftrag
+// Abschnitt G/H) werden im ersten Pilot bewusst NICHT über eine Route
+// exponiert – sie sind vollständig in canva-connector.js modelliert und
+// getestet, aber ohne HTTP-Zugang, solange kein realer, gespeicherter
+// Canva-Design existiert.
+// ---------------------------------------------------------------------------
+
+function canvaStorePaths() {
+  return canvaStoreModule.resolveCanvaStorePaths();
+}
+
+function canvaNotFoundPayload(message) {
+  return { ok: false, message: String(message || "Canva-Auftragspaket nicht gefunden."), ...API_SECURITY_FLAGS, madeExternalRequest: false };
+}
+
+function loadCanvaPackageOrThrow(paths, jobPackageId) {
+  const id = String(jobPackageId || "").trim();
+  if (!id) throw new Error("jobPackageId fehlt.");
+  const pkg = canvaStoreModule.loadPackage(paths, id);
+  if (!pkg) throw new Error(`Kein Canva-Auftragspaket mit jobPackageId "${id}" gefunden.`);
+  return pkg;
+}
+
+function handleV71CanvaStatus(res, context) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+    return;
+  }
+  const projectId = safeQueryParam(context.requestUrl, "projectId") || null;
+  sendJson(res, 200, {
+    ok: true,
+    ...canvaConnectorModule.buildCanvaCapabilityResponse({ projectId }),
+    ...API_SECURITY_FLAGS,
+    madeExternalRequest: false,
+  });
+}
+
+function handleV71CanvaJobPackagesList(res, context) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+    return;
+  }
+  const projectId = safeQueryParam(context.requestUrl, "projectId");
+  const customerId = safeQueryParam(context.requestUrl, "customerId");
+  const paths = canvaStorePaths();
+  const filter = {};
+  if (projectId) filter.projectId = projectId;
+  if (customerId) filter.customerId = customerId;
+  const jobPackages = canvaStoreModule.listPackages(paths, filter);
+  sendJson(res, 200, {
+    ok: true,
+    version: "V7.1-Phase-C",
+    jobPackageCount: jobPackages.length,
+    jobPackages,
+    ...API_SECURITY_FLAGS,
+    madeExternalRequest: false,
+  });
+}
+
+function handleV71CanvaJobPackageById(res, jobPackageId, context) {
+  const safeId = typeof jobPackageId === "string" ? jobPackageId.replace(/[^a-zA-Z0-9-]/g, "") : "";
+  const paths = canvaStorePaths();
+  const pkg = safeId ? canvaStoreModule.loadPackage(paths, safeId) : null;
+  // Ein mitgegebener customerId-Filter, der nicht zum Paket passt, liefert
+  // bewusst 404 statt 403, um die Existenz eines fremden Kundendatensatzes
+  // nicht preiszugeben (gleiches Muster wie HeyGen, Auftrag Abschnitt D).
+  const requestedCustomerId = context ? safeQueryParam(context.requestUrl, "customerId") : null;
+  if (!pkg || (requestedCustomerId && pkg.customerId !== requestedCustomerId)) {
+    sendJson(res, 404, canvaNotFoundPayload());
+    return;
+  }
+  const readiness = canvaDesignJobPackageModule.evaluateHandoffReadiness(pkg);
+  const result = canvaStoreModule.loadResult(paths, pkg.jobPackageId);
+  sendJson(res, 200, {
+    ok: true,
+    package: pkg,
+    readiness,
+    result,
+    ...API_SECURITY_FLAGS,
+    madeExternalRequest: false,
+  });
+}
+
+function handleV71CanvaBackupExport(res, context) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+    return;
+  }
+  sendJson(res, 200, {
+    ok: true,
+    ...canvaBackupModule.exportCanvaBackup(),
+    ...API_SECURITY_FLAGS,
+    madeExternalRequest: false,
+  });
+}
+
+const CANVA_JOB_PACKAGE_PREPARE_FIELDS = Object.freeze([
+  "projectId",
+  "customerId",
+  "brandId",
+  "campaignId",
+  "costPackageStatus",
+  "customerPackageId",
+  "billableUnit",
+  "internalCostCeiling",
+  "sourceRunId",
+  "createdBy",
+  "requestingAgentId",
+  "purpose",
+  "designOperation",
+  "designType",
+  "title",
+  "brief",
+  "primaryMessage",
+  "callToAction",
+  "targetAudience",
+  "tone",
+  "language",
+  "dimensions",
+  "brandKitReference",
+  "brandTemplateReference",
+  "sourceDesignReference",
+  "sourceAssetReferences",
+  "textContent",
+  "visualDirection",
+  "requiredPages",
+  "outputPurpose",
+  "dataClassification",
+  "containsPersonalData",
+  "containsCustomerData",
+  "containsHealthData",
+  "containsChildren",
+  "assetRightsConfirmed",
+  "brandRightsConfirmed",
+  "expiresAt",
+]);
+
+function handleV71CanvaJobPackagePrepare(res, context) {
+  return withV71ApiGuards(context.req, res, CANVA_JOB_PACKAGE_PREPARE_FIELDS, "canva/job-package/prepare", (body) => {
+    const prepared = canvaDesignJobPackageModule.prepareCanvaDesignJobPackage(body);
+    canvaStoreModule.savePackage(canvaStorePaths(), prepared.package);
+    return prepared;
+  });
+}
+
+function handleV71CanvaJobPackageValidate(res, context) {
+  return withV71ApiGuards(context.req, res, ["jobPackageId"], "canva/job-package/validate", (body) => {
+    const paths = canvaStorePaths();
+    const pkg = loadCanvaPackageOrThrow(paths, body.jobPackageId);
+    const validated = canvaDesignJobPackageModule.validateCanvaDesignJobPackageContent(pkg);
+    canvaStoreModule.savePackage(paths, validated.package);
+    return validated;
+  });
+}
+
+function handleV71CanvaJobPackageApproveBriefing(res, context) {
+  return withV71ApiGuards(context.req, res, ["jobPackageId"], "canva/job-package/approve-briefing", (body) => {
+    const paths = canvaStorePaths();
+    const pkg = loadCanvaPackageOrThrow(paths, body.jobPackageId);
+    const approved = canvaDesignJobPackageModule.approveBriefingAndText(pkg);
+    canvaStoreModule.savePackage(paths, approved);
+    return { ok: true, package: approved };
+  });
+}
+
+function handleV71CanvaJobPackageApproveAssetsAndRights(res, context) {
+  return withV71ApiGuards(context.req, res, ["jobPackageId"], "canva/job-package/approve-assets-and-rights", (body) => {
+    const paths = canvaStorePaths();
+    const pkg = loadCanvaPackageOrThrow(paths, body.jobPackageId);
+    const approved = canvaDesignJobPackageModule.approveAssetsAndRights(pkg);
+    canvaStoreModule.savePackage(paths, approved);
+    return { ok: true, package: approved };
+  });
+}
+
+function handleV71CanvaJobPackageApproveExternalTransfer(res, context) {
+  return withV71ApiGuards(context.req, res, ["jobPackageId"], "canva/job-package/approve-external-transfer", (body) => {
+    const paths = canvaStorePaths();
+    const pkg = loadCanvaPackageOrThrow(paths, body.jobPackageId);
+    const approved = canvaDesignJobPackageModule.approveExternalTransfer(pkg);
+    canvaStoreModule.savePackage(paths, approved);
+    return { ok: true, package: approved };
+  });
+}
+
+function handleV71CanvaJobPackageApproveCost(res, context) {
+  return withV71ApiGuards(context.req, res, ["jobPackageId", "internalCostApprovalStatus"], "canva/job-package/approve-cost", (body) => {
+    const paths = canvaStorePaths();
+    const pkg = loadCanvaPackageOrThrow(paths, body.jobPackageId);
+    const approved = canvaDesignJobPackageModule.setInternalCostApproval(pkg, body.internalCostApprovalStatus);
+    canvaStoreModule.savePackage(paths, approved);
+    return { ok: true, package: approved };
+  });
+}
+
+function handleV71CanvaJobPackageSetCostPackageStatus(res, context) {
+  return withV71ApiGuards(context.req, res, ["jobPackageId", "costPackageStatus"], "canva/job-package/set-cost-package-status", (body) => {
+    const paths = canvaStorePaths();
+    const pkg = loadCanvaPackageOrThrow(paths, body.jobPackageId);
+    const updated = canvaDesignJobPackageModule.setCostPackageStatus(pkg, body.costPackageStatus);
+    canvaStoreModule.savePackage(paths, updated);
+    return { ok: true, package: updated };
+  });
+}
+
+function handleV71CanvaHandoffRequestToken(res, context) {
+  return withV71ApiGuards(context.req, res, ["jobPackageId", "providerOperation"], "canva/handoff/request-token", (body) => {
+    const paths = canvaStorePaths();
+    const pkg = loadCanvaPackageOrThrow(paths, body.jobPackageId);
+    return canvaConnectorModule.requestHandoffToken(pkg, body.providerOperation);
+  });
+}
+
+function handleV71CanvaHandoffPrepare(res, context) {
+  return withV71ApiGuards(context.req, res, ["jobPackageId", "providerOperation", "token"], "canva/handoff/prepare", (body) => {
+    const paths = canvaStorePaths();
+    const pkg = loadCanvaPackageOrThrow(paths, body.jobPackageId);
+    const handoff = canvaConnectorModule.prepareHandoffPayload(pkg, body.providerOperation, body.token);
+    canvaStoreModule.savePackage(paths, handoff.package);
+    return handoff;
+  });
+}
+
+function handleV71CanvaCandidateRequestToken(res, context) {
+  return withV71ApiGuards(context.req, res, ["jobPackageId", "candidateId"], "canva/candidate/request-token", (body) => {
+    const paths = canvaStorePaths();
+    const pkg = loadCanvaPackageOrThrow(paths, body.jobPackageId);
+    const candidatesResult = canvaStoreModule.loadResult(paths, pkg.jobPackageId);
+    if (!candidatesResult) throw new Error("Kein Kandidatenergebnis für dieses Auftragspaket gefunden.");
+    return canvaConnectorModule.requestCandidateApprovalToken(pkg, candidatesResult, body.candidateId);
+  });
+}
+
+function handleV71CanvaCandidateApprove(res, context) {
+  return withV71ApiGuards(context.req, res, ["jobPackageId", "candidateId", "token"], "canva/candidate/approve", (body) => {
+    const paths = canvaStorePaths();
+    const pkg = loadCanvaPackageOrThrow(paths, body.jobPackageId);
+    const candidatesResult = canvaStoreModule.loadResult(paths, pkg.jobPackageId);
+    if (!candidatesResult) throw new Error("Kein Kandidatenergebnis für dieses Auftragspaket gefunden.");
+    const updated = canvaConnectorModule.approveCandidateSelection(pkg, candidatesResult, body.candidateId, body.token);
+    canvaStoreModule.savePackage(paths, updated);
+    return { ok: true, package: updated };
+  });
+}
+
+function handleV71CanvaResultRequestToken(res, context) {
+  return withV71ApiGuards(context.req, res, ["jobPackageId", "providerJobId", "resultCandidate"], "canva/result/request-token", (body) =>
+    canvaConnectorModule.requestResultValidationToken(body),
+  );
+}
+
+// Providerstatus (was Canva behauptet) ist keine 1:1-Paketstatus-Wahrheit
+// (Abschnitt I). Der Paketstatus wird nur dann additiv gespiegelt, wenn der
+// Providerstatus wortgleich einem bekannten Paketstatus entspricht
+// (CANDIDATES_READY/SAVED/FAILED/CANCELLED) – jede weitergehende
+// Freigabestufe (Kandidatenauswahl, Speichern, Kundenentwurf) bleibt ein
+// eigener, expliziter Aufruf.
+const CANVA_RESULT_TO_PACKAGE_STATUS_MIRROR = Object.freeze(["CANDIDATES_READY", "SAVED", "FAILED", "CANCELLED"]);
+
+function handleV71CanvaResultValidate(res, context) {
+  return withV71ApiGuards(context.req, res, ["token", "result"], "canva/result/validate", (body) => {
+    const validated = canvaConnectorModule.validateHandoffResult(body.token, body.result || {});
+    if (validated.ok) {
+      const paths = canvaStorePaths();
+      canvaStoreModule.saveResult(paths, validated.result.jobPackageId, validated.result);
+      const pkg = canvaStoreModule.loadPackage(paths, validated.result.jobPackageId);
+      if (pkg && CANVA_RESULT_TO_PACKAGE_STATUS_MIRROR.includes(validated.result.providerStatus)) {
+        canvaStoreModule.savePackage(paths, { ...pkg, status: validated.result.providerStatus });
+      }
+    }
+    return validated;
+  });
+}
+
+function handleV71CanvaJobPackageApproveCustomerDraft(res, context) {
+  return withV71ApiGuards(context.req, res, ["jobPackageId"], "canva/job-package/approve-customer-draft", (body) => {
+    const paths = canvaStorePaths();
+    const pkg = loadCanvaPackageOrThrow(paths, body.jobPackageId);
+    const approved = canvaDesignJobPackageModule.approveCustomerDraft(pkg);
+    canvaStoreModule.savePackage(paths, approved);
+    return { ok: true, package: approved };
+  });
+}
+
+function handleV71CanvaJobPackageRequestCustomerDraftChanges(res, context) {
+  return withV71ApiGuards(context.req, res, ["jobPackageId", "note"], "canva/job-package/request-customer-draft-changes", (body) => {
+    const paths = canvaStorePaths();
+    const pkg = loadCanvaPackageOrThrow(paths, body.jobPackageId);
+    const updated = canvaDesignJobPackageModule.requestCustomerDraftChanges(pkg, body.note);
+    canvaStoreModule.savePackage(paths, updated);
+    return { ok: true, package: updated };
+  });
+}
+
+function handleV71CanvaBackupRestorePreview(res, context) {
+  return withV71ApiGuards(
+    context.req,
+    res,
+    canvaBackupModule.ALLOWED_ROOT_FIELDS,
+    "canva/backup/restore-preview",
+    (body) => canvaBackupModule.previewCanvaBackupRestore(body),
+  );
+}
+
 const getRoutes = buildRouteMap([
   ["/api/projects", (res) => handleProjects(res)],
   ["/api/projects/health-upgrade-kompass", (res) => handleHealthUpgradeKompassProject(res)],
@@ -22872,6 +23194,10 @@ const getRoutes = buildRouteMap([
   ["/api/v71/agency/campaigns", (res, context) => handleV71AgencyCampaigns(res, context)],
   ["/api/v71/agency/pilot-review", (res, context) => handleV71AgencyPilotReview(res, context)],
   ["/api/v71/agency/backup/export", (res, context) => handleV71AgencyBackupExport(res, context)],
+  // V7.1 Phase C (Auftrag Abschnitt G/L) – Canva-Connectorstatus, Jobpaketliste, Backup-Export.
+  ["/api/v71/canva/status", (res, context) => handleV71CanvaStatus(res, context)],
+  ["/api/v71/canva/job-packages", (res, context) => handleV71CanvaJobPackagesList(res, context)],
+  ["/api/v71/canva/backup/export", (res, context) => handleV71CanvaBackupExport(res, context)],
 ]);
 
 const postRoutes = buildRouteMap([
@@ -22899,6 +23225,24 @@ const postRoutes = buildRouteMap([
   ["/api/v71/heygen/job-package/set-cost-package-status", (res, context) => handleV71HeygenJobPackageSetCostPackageStatus(res, context)],
   ["/api/v71/heygen/result-lifecycle/advance", (res, context) => handleV71HeygenResultLifecycleAdvance(res, context)],
   ["/api/v71/agency/backup/restore-preview", (res, context) => handleV71AgencyBackupRestorePreview(res, context)],
+  // V7.1 Phase C (Auftrag Abschnitt D/F/G/I/L) – Canva-Jobpaket-Freigabestufen,
+  // Handoff, Kandidatenlogik, Ergebnisrückführung, Kundenentwurf, Backup-Restore-Vorschau.
+  ["/api/v71/canva/job-package/prepare", (res, context) => handleV71CanvaJobPackagePrepare(res, context)],
+  ["/api/v71/canva/job-package/validate", (res, context) => handleV71CanvaJobPackageValidate(res, context)],
+  ["/api/v71/canva/job-package/approve-briefing", (res, context) => handleV71CanvaJobPackageApproveBriefing(res, context)],
+  ["/api/v71/canva/job-package/approve-assets-and-rights", (res, context) => handleV71CanvaJobPackageApproveAssetsAndRights(res, context)],
+  ["/api/v71/canva/job-package/approve-external-transfer", (res, context) => handleV71CanvaJobPackageApproveExternalTransfer(res, context)],
+  ["/api/v71/canva/job-package/approve-cost", (res, context) => handleV71CanvaJobPackageApproveCost(res, context)],
+  ["/api/v71/canva/job-package/set-cost-package-status", (res, context) => handleV71CanvaJobPackageSetCostPackageStatus(res, context)],
+  ["/api/v71/canva/handoff/request-token", (res, context) => handleV71CanvaHandoffRequestToken(res, context)],
+  ["/api/v71/canva/handoff/prepare", (res, context) => handleV71CanvaHandoffPrepare(res, context)],
+  ["/api/v71/canva/candidate/request-token", (res, context) => handleV71CanvaCandidateRequestToken(res, context)],
+  ["/api/v71/canva/candidate/approve", (res, context) => handleV71CanvaCandidateApprove(res, context)],
+  ["/api/v71/canva/result/request-token", (res, context) => handleV71CanvaResultRequestToken(res, context)],
+  ["/api/v71/canva/result/validate", (res, context) => handleV71CanvaResultValidate(res, context)],
+  ["/api/v71/canva/job-package/approve-customer-draft", (res, context) => handleV71CanvaJobPackageApproveCustomerDraft(res, context)],
+  ["/api/v71/canva/job-package/request-customer-draft-changes", (res, context) => handleV71CanvaJobPackageRequestCustomerDraftChanges(res, context)],
+  ["/api/v71/canva/backup/restore-preview", (res, context) => handleV71CanvaBackupRestorePreview(res, context)],
 ]);
 
 const { requestHandler } = createHttpRouter({
@@ -22932,6 +23276,17 @@ const { requestHandler } = createHttpRouter({
         }
         const jobPackageId = decodeURIComponent(context.pathname.slice("/api/v71/heygen/job-packages/".length));
         handleV71HeygenJobPackageById(res, jobPackageId, context);
+      },
+    },
+    {
+      prefix: "/api/v71/canva/job-packages/",
+      handler: (res, context) => {
+        if (!isExecutionRequestOriginAllowed(context.req)) {
+          sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+          return;
+        }
+        const jobPackageId = decodeURIComponent(context.pathname.slice("/api/v71/canva/job-packages/".length));
+        handleV71CanvaJobPackageById(res, jobPackageId, context);
       },
     },
   ],

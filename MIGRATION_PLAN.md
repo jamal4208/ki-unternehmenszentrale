@@ -1,8 +1,26 @@
 # MIGRATION PLAN
 
-## V7.1 Phase B.1 – HeyGen-Pilot abgeschlossen, Agenturbetrieb mandantenfähig vorbereitet (lokal umgesetzt, ungesichert – Commit/Push stehen aus)
+## V7.1 Phase C – Canva als zweiter kontrollierter Design-Connector (lokal umgesetzt, ungesichert – Commit/Push stehen aus)
 
-Vorheriger gesicherter Ausgang: **V7.1 Phase B / lokal umgesetzt, ungesichert**. Phase B.1 ist additiv; kein bestehender V7.0-, V7.1-Phase-A- oder V7.1-Phase-B-Codepfad wurde umgeschrieben oder ersetzt. Neue mandantenfähige Kern-Felder (`customerId`/`brandId`/`campaignId`) wurden bewusst als verpflichtend eingeführt (Schema-Weiterentwicklung innerhalb derselben Phase, keine zweite, widersprüchliche Wahrheit) und bestehende Tests/Fixtures entsprechend additiv erweitert.
+Vorheriger gesicherter Ausgang: **V7.1 Phase B.1 / gesichert mit Commit `37e8a28`**. Phase C ist additiv; kein bestehender V7.0-, V7.1-Phase-A-, -B- oder -B.1-Codepfad wurde umgeschrieben oder ersetzt. Architektur-Entscheidung: `CONTROLLED_CONNECTOR_HANDOFF` – kein direkter HTTP-Client mit API-Key im Node-Server (dasselbe Muster wie Phase B, eigenständige, isolierte Canva-Module).
+
+| Bereich | Regel |
+|---|---|
+| canva-design-job-package.js (neu) | kanonisches `canvaDesignJobPackage`-Modell; Capability-Profil; Datenschutz-/Marken-/Rechteprüfung (nur `NORMAL`, kein Kunden-/Gesundheits-/Kinderbezug, keine ungeklärten Asset-/Markenrechte, kein privates Brand-Kit/Template im ersten Pilot, keine Secrets/absoluten Pfade); `customerId`/`brandId`/`campaignId` verpflichtend und gegen `agency-tenant-registry.js` geprüft; Fingerprint über inhaltsbestimmende Felder invalidiert frühere Freigaben bei Änderung; sieben getrennte Freigabefunktionen (`approveBriefingAndText`, `approveAssetsAndRights`, `approveExternalTransfer`, `setInternalCostApproval`, Handoff-Freigabe über Token, Kandidatenauswahl-Freigabe über Token, Save-Freigabe über Token); `publicationApprovalStatus` startet immer auf `PUBLICATION_NOT_APPROVED` und kann durch keine Funktion auf `APPROVED` gesetzt werden |
+| canva-connector.js (neu) | kontrollierter Adapter; keine Netzwerklogik (kein `http`/`https`/`fetch`); minimales Hand-off-Payload per strikter Allowlist (keine internen Pfade, keine App-Support-Pfade, keine Secrets, keine Governance-Felder); Hand-off-/Kandidaten-/Ergebnis-/Save-Token nutzen ausschließlich die bestehende `execution-bridge.js`-Tokenarchitektur (`mintToken`/`consumeToken`, RAM-only, einmalig); Kandidaten- und Editing-Transaktionslogik korrekt gespiegelt (Kandidat ≠ Design, Vorschau ≠ gespeichert, Commit nur mit eigener Freigabe, Cancel verwirft kontrolliert); im ersten realen Pilot ausschließlich `GENERATE_DESIGN_CANDIDATES`/`CREATE_SELECTED_CANDIDATE` vorgesehen, Brand-Template-/Edit-Aktionen nur modelliert/getestet; additiver Pilotstatus (`PARTIALLY_CONNECTED`/`CONTROLLED_HANDOFF`) ohne Änderung der kanonischen `tool-registry.js`/`plugin-gateway.js`-Basiswahrheit |
+| canva-design-result.js (neu) | strukturierte Ergebnisrückführung `canvaDesignJobResult`; `providerJobId` allein ist kein Erfolg; Candidate-ID ist keine Design-ID (identische Werte werden abgewiesen); nur gültige HTTPS-Ergebnisreferenzen (kein `file://`, kein localhost, keine private IP, keine Credentials in URL); keine automatische Veröffentlichung, kein automatischer Dateidownload |
+| canva-store.js (neu) | lokale, dateibasierte Metadaten-Persistenz unter App Support (`canva/{packages,results,editing-transactions}`), analog zu `heygen-store.js`; `assertNoTenantReassignment` blockiert eine nachträgliche Kunden-/Markenumstellung eines bereits gespeicherten Jobpakets; `listPackages`/`listResults` filtern optional nach `customerId`; keine Videos/Bilder, keine Secrets |
+| canva-backup.js (neu) | additiver Export von Auftragspaket-/Ergebnis-/Editing-Transaktions-Metadaten ohne Originaldateien, API-Keys, Tokens, Credentials oder private Brand-Kit-/Template-Assets; Restore startet keine Canva-Aktion (keine Generierung, kein Design, keine Editing-Transaktion, keine Veröffentlichung), setzt keine Freigabe zurück, markiert nur abgelaufene Pakete `STALE` |
+| tool-registry.js | additiv erweiterter Canva-Eintrag (Capability-Details, Pilotgrenzen als Hinweistexte); Basis-`connectionStatus`/`executionMode` bleiben unverändert `NOT_CONNECTED`/`RECOMMENDATION_ONLY` |
+| server.js (additive Routen) | 3 neue GET (`/api/v71/canva/status`, `/api/v71/canva/job-packages` inkl. Präfixroute für Einzelabruf, `/api/v71/canva/backup/export`) + 16 neue POST (Paket vorbereiten/validieren, vier getrennte Freigaben, Kostenpaketstatus setzen, Hand-off-Token anfordern/einlösen, Kandidaten-Token anfordern/einlösen, Ergebnis-Token anfordern/einlösen, Kundenentwurf freigeben/Änderungen anfordern, Restore-Vorschau); insgesamt jetzt 63 GET / 38 POST; keine Route für Canva-Login, API-Key-Speicherung, automatische Veröffentlichung, öffentliche Freigabelinks, Kunden-/Team-Einladung, Designlöschung, Kontoverwaltung, Creditkauf oder Abrechnung |
+| index.html / v71-ui.js (additiv) | neuer Chef-Modus-Bereich „Canva-Designpilot · Testmandant“; editierbare Kunde-/Marke-/Kampagne-Auswahl (Testmandantenbasis); vier getrennte Freigabeschritte über getrennte Buttons/Routen vor der Übergabe (keine Sammelfreigabe); keine verbotenen Buttons (Veröffentlichen/Öffentlich teilen/Kunden einladen/Löschen/Credits kaufen); Status Kandidat/Entwurf/Vorschau/gespeichert textlich klar unterscheidbar; technische Details einklappbar; bestehende, mobilgeprüfte Layoutklassen wiederverwendet |
+| Verboten in Phase C, offen für spätere, separat freigegebene Phasen | echte Canva-Designerstellung, jede externe Übertragung, jede Kostenübernahme, jede Veröffentlichung, Brand-Template-/Edit-Transaktion im realen Pilot, direkter Canva-API-Adapter im Node-Server, Löschaktionen, Marketing-Agentur-Gesamtsystem, Shopify-Anbindung, Commit/Push/Deploy, Autonomieerhöhung |
+
+236 neue automatisierte Prüfpunkte (8 neue Testdateien); gesamt 1165 von 1165 Prüfpunkten grün. Trockenlauf (neutraler, fiktiver Café-Test, Instagram-Post, `NOT_BILLABLE_TEST`) und vollständige Browser-/Mobile-Abnahme (eigener isolierter Testserver, Port 4199, danach beendet, Testauftragspaket aus dem App-Support-Speicher wieder entfernt) bestanden; keine externe Netzwerkanfrage, keine Kosten, keine Veröffentlichung.
+
+## V7.1 Phase B.1 – HeyGen-Pilot abgeschlossen, Agenturbetrieb mandantenfähig vorbereitet (umgesetzt, getestet und gesichert mit Commit `37e8a28`)
+
+Vorheriger gesicherter Ausgang: **V7.1 Phase B / gesichert mit Commit `ff43089`**. Phase B.1 ist additiv; kein bestehender V7.0-, V7.1-Phase-A- oder V7.1-Phase-B-Codepfad wurde umgeschrieben oder ersetzt. Neue mandantenfähige Kern-Felder (`customerId`/`brandId`/`campaignId`) wurden bewusst als verpflichtend eingeführt (Schema-Weiterentwicklung innerhalb derselben Phase, keine zweite, widersprüchliche Wahrheit) und bestehende Tests/Fixtures entsprechend additiv erweitert.
 
 | Bereich | Regel |
 |---|---|
@@ -20,9 +38,9 @@ Vorheriger gesicherter Ausgang: **V7.1 Phase B / lokal umgesetzt, ungesichert**.
 
 188 neue/erweiterte automatisierte Prüfpunkte (5 neue Testdateien plus additive Erweiterungen in 9 bestehenden Testdateien); gesamt 929 von 929 Prüfpunkten grün. Browser-/Mobile-Abnahme gegen einen eigenen isolierten Testserver bestanden; keine externe Netzwerkanfrage, kein weiterer HeyGen-Render, keine Kosten, keine Veröffentlichung.
 
-## V7.1 Phase B – HeyGen als erster kontrollierter Medien-Connector (lokal umgesetzt, ungesichert – Commit/Push stehen aus)
+## V7.1 Phase B – HeyGen als erster kontrollierter Medien-Connector (umgesetzt, getestet und gesichert mit Commit `ff43089`)
 
-Vorheriger gesicherter Ausgang: **V7.1 Phase A / lokal umgesetzt, ungesichert**. Phase B ist additiv; kein bestehender V7.0- oder V7.1-Phase-A-Codepfad wurde umgeschrieben oder ersetzt. Architektur-Entscheidung: `CONTROLLED_CONNECTOR_HANDOFF` – kein direkter HTTP-Client mit API-Key im Node-Server.
+Vorheriger gesicherter Ausgang: **V7.1 Phase A / gesichert mit Commit `59f985f`**. Phase B ist additiv; kein bestehender V7.0- oder V7.1-Phase-A-Codepfad wurde umgeschrieben oder ersetzt. Architektur-Entscheidung: `CONTROLLED_CONNECTOR_HANDOFF` – kein direkter HTTP-Client mit API-Key im Node-Server.
 
 | Bereich | Regel |
 |---|---|
@@ -39,7 +57,7 @@ Vorheriger gesicherter Ausgang: **V7.1 Phase A / lokal umgesetzt, ungesichert**.
 
 144 neue automatisierte Prüfpunkte (7 neue Testdateien); gesamt 816 von 816 Prüfpunkten grün. Trockenlauf (neutraler, nicht-existenter Café-Test) und vollständige Browser-/Mobile-Abnahme (eigener isolierter Testserver, Port 4599, danach beendet) bestanden; keine externe Netzwerkanfrage, keine Kosten, keine Veröffentlichung.
 
-## V7.1 Phase A – Dokumenten-/Wissenseingang, Werkzeug-/Lizenzregister, Plugin-Gateway (lokal umgesetzt, ungesichert – Commit/Push stehen aus)
+## V7.1 Phase A – Dokumenten-/Wissenseingang, Werkzeug-/Lizenzregister, Plugin-Gateway (umgesetzt, getestet und gesichert mit Commit `59f985f`)
 
 Vorheriger gesicherter Ausgang: **V7.0 offiziell FROZEN / `15ce8bb`**. V7.1 Phase A ist additiv; kein bestehender V7.0-Codepfad wurde umgeschrieben oder ersetzt.
 

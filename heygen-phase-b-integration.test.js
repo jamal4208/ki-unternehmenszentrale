@@ -217,10 +217,11 @@ check("78. keine HeyGen-Route löst ein Deployment aus (kein Vercel-/Deploy-Bezu
   });
 });
 
-// 79. keine Canva-/Shopify-Änderung.
-check("79. keine Canva-/Shopify-Route oder -Logik wurde durch Phase B verändert", () => {
+// 79. keine Shopify-Änderung; Canva bleibt ein eigener, isolierter Connector
+// (V7.1 Phase C fügt Canva additiv über eigene Module/Routen hinzu – dies
+// verändert keine HeyGen-Datei und keine Shopify-Logik).
+check("79. keine Shopify-Route oder -Logik existiert; HeyGen-Module bleiben von Canva/Shopify unberührt", () => {
   const serverSource = fs.readFileSync(path.join(__dirname, "server.js"), "utf8");
-  assert.ok(!serverSource.includes('"/api/v71/canva'));
   assert.ok(!serverSource.includes('"/api/v71/shopify'));
   ALL_HEYGEN_AGENCY_FILES.forEach((file) => {
     const source = fs.readFileSync(path.join(__dirname, file), "utf8");
@@ -400,18 +401,22 @@ check("79. keine Veröffentlichung: kein Modul kann publicationStatus/publicatio
   assert.ok(!/publicationStatus\s*=\s*["']PUBLISHED["']/.test(pilotReviewSource));
 });
 
-// 80 (Section-L-Nummerierung). keine Phase C.
-check("80. keine Phase C: Module/Routen tragen keine V7.1-Phase-C-Kennzeichnung, kein produktiver Kundenanlage-Mechanismus", () => {
-  // Gezielt "V7.1 Phase C" (die hier verbotene, zukünftige Ausbaustufe),
-  // NICHT das historische, bereits bestehende "V7.0 Phase C" (Execution
-  // Bridge Isolation) fälschlich als Verstoß werten.
+// 80 (Section-L-Nummerierung). Phase C bleibt strukturell isoliert von den
+// HeyGen-/Agentur-Phase-B/B.1-Modulen (eigene Canva-Dateien, kein Vermischen
+// der Connectoren) und trägt weiterhin keinen produktiven
+// Kundenanlage-Mechanismus. V7.1 Phase C selbst (Canva-Connector-Pilot) ist
+// als eigener, additiver Umsetzungsauftrag ausdrücklich vorgesehen und in
+// server.js/canva-*.js dokumentiert (siehe canva-connector.test.js u. a.);
+// dieser Test prüft nur, dass Phase C NICHT rückwirkend in die HeyGen-
+// Phase-B/B.1-Dateien selbst eingemischt wurde.
+check("80. Phase C bleibt strukturell getrennt von den HeyGen-/Agentur-Modulen, kein produktiver Kundenanlage-Mechanismus", () => {
+  // Gezielt "V7.1 Phase C", NICHT das historische, bereits bestehende
+  // "V7.0 Phase C" (Execution Bridge Isolation) fälschlich als Verstoß werten.
   const v71PhaseCPattern = /V7\.1[\s-]?Phase[\s-]?C\b/i;
   HEYGEN_PHASE_B1_FILES.forEach((file) => {
     const source = fs.readFileSync(path.join(__dirname, file), "utf8");
     assert.ok(!v71PhaseCPattern.test(source));
   });
-  const serverSource = fs.readFileSync(path.join(__dirname, "server.js"), "utf8");
-  assert.ok(!v71PhaseCPattern.test(serverSource));
   // Testkunden sind statisch/code-definiert – kein Schreibpfad für eine
   // produktive Neuanlage echter Kunden in dieser Phase.
   assert.strictEqual(typeof agencyTenantRegistry.listCustomers, "function");
