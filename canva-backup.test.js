@@ -8,6 +8,10 @@ const path = require("path");
 const canvaBackup = require("./canva-backup");
 const canvaStore = require("./canva-store");
 const canvaDesignJobPackage = require("./canva-design-job-package");
+// V7.1 Phase C.1 (Auftrag Abschnitt H/I, Pflichttests 13/14) – Backup/
+// Restore der kanonischen Pilot-Ergebnisakte.
+const canvaPilotStore = require("./canva-pilot-store");
+const canvaPilotResultRecord = require("./canva-pilot-result-record");
 
 let passed = 0;
 function check(label, assertion) {
@@ -306,6 +310,81 @@ function runTests() {
     assert.ok(!Object.prototype.hasOwnProperty.call(entry, "previewReference"));
     const text = JSON.stringify(editExport);
     assert.ok(!text.includes("sollte-nicht-exportiert-werden"));
+  });
+
+  // -------------------------------------------------------------------
+  // V7.1 Phase C.1 (Auftrag Abschnitt H/I, Pflichttests 13/14) – Backup/
+  // Restore der kanonischen Pilot-Ergebnisakte.
+  // -------------------------------------------------------------------
+
+  check("13. Export der Pilot-Ergebnisakte enthält keine Medien/Tokens/URLs", () => {
+    const isolatedPaths = makeIsolatedPaths();
+    const pilotPaths = canvaPilotStore.resolveCanvaPilotStorePaths({ appSupportDir: isolatedPaths.appSupportDir });
+    const seed = canvaPilotResultRecord.buildRealPilotResultRecordSeed();
+    canvaPilotStore.savePilotResultRecord(pilotPaths, seed);
+
+    const pilotExport = canvaBackup.exportCanvaBackup({ appSupportDir: isolatedPaths.appSupportDir });
+    assert.strictEqual(pilotExport.summary.pilotResultCount, 1);
+    const entry = pilotExport.pilotResults[0];
+    assert.strictEqual(entry.designId, "DAHQeIjc2ls");
+    assert.strictEqual(entry.pilotId, seed.pilotId);
+    const text = JSON.stringify(pilotExport);
+    assert.ok(!/https?:\/\//i.test(text), "Export darf keine http(s)-URL enthalten.");
+    assert.ok(!/"token"|"credential|"apiKey"|providerRawResponse|imageBuffer|videoBuffer|fileBuffer|base64Content|brandKitAsset/i.test(text));
+    const validation = canvaBackup.validateCanvaBackup(pilotExport);
+    assert.strictEqual(validation.ok, true);
+  });
+
+  check("14. Restore der Pilot-Ergebnisakte startet keine externe Aktion und verändert die Mandantenbindung nicht", () => {
+    const sourcePaths = makeIsolatedPaths();
+    const sourcePilotPaths = canvaPilotStore.resolveCanvaPilotStorePaths({ appSupportDir: sourcePaths.appSupportDir });
+    const seed = canvaPilotResultRecord.buildRealPilotResultRecordSeed();
+    canvaPilotStore.savePilotResultRecord(sourcePilotPaths, seed);
+    const pilotExport = canvaBackup.exportCanvaBackup({ appSupportDir: sourcePaths.appSupportDir });
+
+    const targetPaths = makeIsolatedPaths();
+    const restoreResult = canvaBackup.applyCanvaBackupRestore(pilotExport, { appSupportDir: targetPaths.appSupportDir });
+    assert.strictEqual(restoreResult.ok, true);
+    assert.strictEqual(restoreResult.restoredPilotResultCount, 1);
+    assert.strictEqual(restoreResult.startedGeneration, false);
+    assert.strictEqual(restoreResult.createdDesign, false);
+    assert.strictEqual(restoreResult.startedEditingTransaction, false);
+    assert.strictEqual(restoreResult.savedEdit, false);
+    assert.strictEqual(restoreResult.publishedAnything, false);
+    assert.strictEqual(restoreResult.downloadedAssets, false);
+    assert.strictEqual(restoreResult.resetApprovals, false);
+
+    const targetPilotPaths = canvaPilotStore.resolveCanvaPilotStorePaths({ appSupportDir: targetPaths.appSupportDir });
+    const restored = canvaPilotStore.loadPilotResultRecord(targetPilotPaths, seed.pilotId);
+    assert.strictEqual(restored.designId, seed.designId);
+    assert.strictEqual(restored.customerReviewStatus, seed.customerReviewStatus);
+    assert.strictEqual(restored.publicationApprovalStatus, "NOT_APPROVED");
+  });
+
+  check("14b. Restore kann die Mandantenbindung der Pilot-Ergebnisakte nicht neu zuordnen", () => {
+    const isolatedPaths = makeIsolatedPaths();
+    const pilotPaths = canvaPilotStore.resolveCanvaPilotStorePaths({ appSupportDir: isolatedPaths.appSupportDir });
+    const seed = canvaPilotResultRecord.buildRealPilotResultRecordSeed();
+    canvaPilotStore.savePilotResultRecord(pilotPaths, seed);
+    const cleanExport = canvaBackup.exportCanvaBackup({ appSupportDir: isolatedPaths.appSupportDir });
+    const tamperedExport = {
+      ...cleanExport,
+      pilotResults: cleanExport.pilotResults.map((entry) =>
+        entry.pilotId === seed.pilotId ? { ...entry, customerId: "ein-anderer-kunde" } : entry,
+      ),
+    };
+    const result = canvaBackup.applyCanvaBackupRestore(tamperedExport, { appSupportDir: isolatedPaths.appSupportDir });
+    assert.strictEqual(result.ok, true);
+    assert.ok(result.rejectedPilotResultIds.includes(seed.pilotId));
+    const reloaded = canvaPilotStore.loadPilotResultRecord(pilotPaths, seed.pilotId);
+    assert.strictEqual(reloaded.customerId, seed.customerId);
+  });
+
+  check("ältere Sicherungen aus Phase C ohne pilotResults werden weiterhin akzeptiert (additiv, abwärtskompatibel)", () => {
+    const legacyExport = { ...exported };
+    delete legacyExport.pilotResults;
+    const validation = canvaBackup.validateCanvaBackup(legacyExport);
+    assert.strictEqual(validation.ok, true);
   });
 
   console.log(`canva-backup.test.js: ${passed} Prüfpunkte erfolgreich`);

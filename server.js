@@ -40,6 +40,12 @@ const canvaDesignJobPackageModule = require("./canva-design-job-package");
 const canvaConnectorModule = require("./canva-connector");
 const canvaStoreModule = require("./canva-store");
 const canvaBackupModule = require("./canva-backup");
+// V7.1 Phase C.1 (Auftrag Abschnitt C/D/E) – kanonische Pilot-Ergebnisakte
+// des real durchgeführten Canva-Pilotlaufs und kontrollierte
+// Kundenfeedback-Schleife. Rein additiv, keine Netzwerklogik, keine
+// Canva-Aktion.
+const canvaPilotResultRecordModule = require("./canva-pilot-result-record");
+const canvaPilotStoreModule = require("./canva-pilot-store");
 
 const rootDir = __dirname;
 const staticAssets = new Map([
@@ -23130,6 +23136,270 @@ function handleV71CanvaBackupRestorePreview(res, context) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// V7.1 Phase C.1 (Auftrag Abschnitt C/D/E/F) – kanonische Pilot-Ergebnisakte
+// des real durchgeführten, neutralen Canva-Pilotlaufs (fiktiver Testkunde
+// "Café Amore") sowie kontrollierte Kundenfeedback-Schleife. Dieselben
+// Rand-Sicherheitsmuster wie die übrigen Canva-Routen: Origin-/Host-Prüfung,
+// JSON-Content-Type, Größenlimit, bekannte Feldmengen, keine Stacktraces,
+// Mandantenmismatch liefert 404. KEINE dieser Routen führt einen HTTP-Aufruf
+// zu Canva aus, veröffentlicht etwas, postet in sozialen Netzwerken, öffnet
+// Canva für den Kunden oder setzt eine Kosten-/Rechtefreigabe. Die einzige
+// Wirkung ist Lesen/Schreiben strukturierter, lokaler Pilot-Metadaten
+// (canva-pilot-store.js).
+// ---------------------------------------------------------------------------
+
+function canvaPilotStorePaths() {
+  return canvaPilotStoreModule.resolveCanvaPilotStorePaths();
+}
+
+function canvaPilotNotFoundPayload(message) {
+  return { ok: false, message: String(message || "Canva-Pilot-Ergebnisakte nicht gefunden."), ...API_SECURITY_FLAGS, madeExternalRequest: false };
+}
+
+// Der eine, real durchgeführte Pilot wird beim ersten Zugriff einmalig aus
+// den kanonischen, hartkodierten Pilotdaten (Auftrag Abschnitt C/E)
+// angelegt, sofern er nicht bereits existiert. Danach lebt der Datensatz
+// ausschließlich in canva-pilot-store.js weiter; spätere Aufrufe verändern
+// niemals die ursprünglich berichteten Kernfakten (Design-ID, Titel,
+// Provider-Ausführungsstatus), sondern ausschließlich Review-/Feedback-/
+// Freigabefelder über die dafür vorgesehenen Aktionen.
+function ensureRealPilotSeeded(paths) {
+  const seedPilotId = canvaPilotResultRecordModule.buildRealPilotResultRecordSeed().pilotId;
+  const existing = canvaPilotStoreModule.loadPilotResultRecord(paths, seedPilotId);
+  if (!existing) {
+    const seed = canvaPilotResultRecordModule.buildRealPilotResultRecordSeed();
+    return canvaPilotStoreModule.savePilotResultRecord(paths, seed);
+  }
+  // V7.1 Phase C.1.1 – rein additive Backfill der neuen Reviewmodell-Felder
+  // für bereits aus Phase C.1 gespeicherte Café-Amore-Akten. Ändert niemals
+  // Design-ID, Evidence, Entscheidungsverlauf, Feedback-Historie oder
+  // Freigabestatus (reales Pilotprotokoll bleibt unverfälscht).
+  if (!existing.reviewMode || !existing.serviceTier || !existing.qualityReviewStatus) {
+    const backfilled = {
+      ...existing,
+      serviceTier: existing.serviceTier || "INTERNAL",
+      reviewMode: existing.reviewMode || "OWNER_REVIEW",
+      ownerReviewRequired: existing.ownerReviewRequired === undefined ? true : existing.ownerReviewRequired,
+      customerSelfReviewAllowed: existing.customerSelfReviewAllowed === undefined ? false : existing.customerSelfReviewAllowed,
+      humanReviewRequired: existing.humanReviewRequired === undefined ? false : existing.humanReviewRequired,
+      riskEscalationRequired: existing.riskEscalationRequired === undefined ? false : existing.riskEscalationRequired,
+      qualityReviewStatus: existing.qualityReviewStatus || "NOT_STARTED",
+      agentQaHistory: Array.isArray(existing.agentQaHistory) ? existing.agentQaHistory : [],
+      reviewerRole: existing.reviewerRole || (existing.internalReviewStatus !== "NOT_REVIEWED" ? "JAMAL_OWNER" : null),
+    };
+    return canvaPilotStoreModule.savePilotResultRecord(paths, backfilled);
+  }
+  return existing;
+}
+
+function loadCanvaPilotResultRecordOrThrow(paths, pilotId) {
+  const id = String(pilotId || "").trim();
+  if (!id) throw new Error("pilotId fehlt.");
+  const record = canvaPilotStoreModule.loadPilotResultRecord(paths, id);
+  if (!record) throw new Error(`Keine Canva-Pilot-Ergebnisakte mit pilotId "${id}" gefunden.`);
+  return record;
+}
+
+function handleV71CanvaPilotResultsList(res, context) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+    return;
+  }
+  const paths = canvaPilotStorePaths();
+  ensureRealPilotSeeded(paths);
+  const projectId = safeQueryParam(context.requestUrl, "projectId");
+  const customerId = safeQueryParam(context.requestUrl, "customerId");
+  const filter = {};
+  if (projectId) filter.projectId = projectId;
+  if (customerId) filter.customerId = customerId;
+  const pilotResults = canvaPilotStoreModule.listPilotResultRecords(paths, filter);
+  sendJson(res, 200, {
+    ok: true,
+    version: "V7.1-Phase-C.1.1",
+    pilotResultCount: pilotResults.length,
+    pilotResults,
+    ...API_SECURITY_FLAGS,
+    madeExternalRequest: false,
+  });
+}
+
+function handleV71CanvaPilotResultById(res, pilotId, context) {
+  const safeId = typeof pilotId === "string" ? pilotId.replace(/[^a-zA-Z0-9-]/g, "") : "";
+  const paths = canvaPilotStorePaths();
+  ensureRealPilotSeeded(paths);
+  const record = safeId ? canvaPilotStoreModule.loadPilotResultRecord(paths, safeId) : null;
+  // Ein mitgegebener customerId-Filter, der nicht zum Datensatz passt,
+  // liefert bewusst 404 statt 403 (Mandantenmismatch, gleiches Muster wie
+  // die übrigen V7.1-Routen) – Kunde A kann Kunde B nicht lesen.
+  const requestedCustomerId = context ? safeQueryParam(context.requestUrl, "customerId") : null;
+  if (!record || (requestedCustomerId && record.customerId !== requestedCustomerId)) {
+    sendJson(res, 404, canvaPilotNotFoundPayload());
+    return;
+  }
+  sendJson(res, 200, { ok: true, pilotResult: record, ...API_SECURITY_FLAGS, madeExternalRequest: false });
+}
+
+function handleV71CanvaPilotResultFeedback(res, pilotId, context) {
+  const safeId = typeof pilotId === "string" ? pilotId.replace(/[^a-zA-Z0-9-]/g, "") : "";
+  const paths = canvaPilotStorePaths();
+  ensureRealPilotSeeded(paths);
+  const record = safeId ? canvaPilotStoreModule.loadPilotResultRecord(paths, safeId) : null;
+  const requestedCustomerId = context ? safeQueryParam(context.requestUrl, "customerId") : null;
+  if (!record || (requestedCustomerId && record.customerId !== requestedCustomerId)) {
+    sendJson(res, 404, canvaPilotNotFoundPayload());
+    return;
+  }
+  sendJson(res, 200, {
+    ok: true,
+    pilotId: record.pilotId,
+    feedbackCount: record.feedbackHistory.length,
+    feedbackHistory: record.feedbackHistory,
+    changeRequestHistory: record.changeRequestHistory,
+    ...API_SECURITY_FLAGS,
+    madeExternalRequest: false,
+  });
+}
+
+function handleV71CanvaPilotResultInternalReview(res, context) {
+  return withV71ApiGuards(context.req, res, ["pilotId", "internalReviewStatus", "note", "evidence"], "canva/pilot-result/internal-review", (body) => {
+    const paths = canvaPilotStorePaths();
+    ensureRealPilotSeeded(paths);
+    const record = loadCanvaPilotResultRecordOrThrow(paths, body.pilotId);
+    const updated = canvaPilotResultRecordModule.recordInternalReview(record, {
+      internalReviewStatus: body.internalReviewStatus,
+      note: body.note,
+      evidence: body.evidence,
+    });
+    canvaPilotStoreModule.savePilotResultRecord(paths, updated);
+    return { ok: true, pilotResult: updated };
+  });
+}
+
+function handleV71CanvaPilotResultCustomerFeedback(res, context) {
+  return withV71ApiGuards(
+    context.req,
+    res,
+    ["pilotId", "feedbackText", "feedbackType", "requestedChanges", "createdByRole"],
+    "canva/pilot-result/customer-feedback",
+    (body) => {
+      const paths = canvaPilotStorePaths();
+      ensureRealPilotSeeded(paths);
+      const record = loadCanvaPilotResultRecordOrThrow(paths, body.pilotId);
+      const updated = canvaPilotResultRecordModule.recordCustomerFeedback(record, {
+        feedbackText: body.feedbackText,
+        feedbackType: body.feedbackType,
+        requestedChanges: body.requestedChanges,
+        createdByRole: body.createdByRole,
+      });
+      canvaPilotStoreModule.savePilotResultRecord(paths, updated);
+      return { ok: true, pilotResult: updated };
+    },
+  );
+}
+
+function handleV71CanvaPilotResultRequestChanges(res, context) {
+  return withV71ApiGuards(
+    context.req,
+    res,
+    ["pilotId", "feedbackId", "requestedChanges", "note"],
+    "canva/pilot-result/request-changes",
+    (body) => {
+      const paths = canvaPilotStorePaths();
+      ensureRealPilotSeeded(paths);
+      const record = loadCanvaPilotResultRecordOrThrow(paths, body.pilotId);
+      const updated = canvaPilotResultRecordModule.requestChanges(record, {
+        feedbackId: body.feedbackId,
+        requestedChanges: body.requestedChanges,
+        note: body.note,
+      });
+      canvaPilotStoreModule.savePilotResultRecord(paths, updated);
+      return { ok: true, pilotResult: updated };
+    },
+  );
+}
+
+function handleV71CanvaPilotResultMarkReadyAfterChanges(res, context) {
+  return withV71ApiGuards(context.req, res, ["pilotId", "note"], "canva/pilot-result/mark-ready-after-changes", (body) => {
+    const paths = canvaPilotStorePaths();
+    ensureRealPilotSeeded(paths);
+    const record = loadCanvaPilotResultRecordOrThrow(paths, body.pilotId);
+    const updated = canvaPilotResultRecordModule.markReadyAfterChanges(record, { note: body.note });
+    canvaPilotStoreModule.savePilotResultRecord(paths, updated);
+    return { ok: true, pilotResult: updated };
+  });
+}
+
+function handleV71CanvaPilotResultCustomerApprove(res, context) {
+  return withV71ApiGuards(context.req, res, ["pilotId"], "canva/pilot-result/customer-approve", (body) => {
+    const paths = canvaPilotStorePaths();
+    ensureRealPilotSeeded(paths);
+    const record = loadCanvaPilotResultRecordOrThrow(paths, body.pilotId);
+    const updated = canvaPilotResultRecordModule.approveByCustomer(record);
+    canvaPilotStoreModule.savePilotResultRecord(paths, updated);
+    return { ok: true, pilotResult: updated };
+  });
+}
+
+// V7.1 Phase C.1.1 (Auftrag Abschnitt E/F) – Agenten-QS erfassen. Keine
+// Veröffentlichung, keine Canva-Aktion, keine Kosten-/Rechtefreigabe.
+function handleV71CanvaPilotResultAgentQa(res, context) {
+  return withV71ApiGuards(
+    context.req,
+    res,
+    ["pilotId", "result", "checklist", "note", "reviewedByActorId"],
+    "canva/pilot-result/agent-qa",
+    (body) => {
+      const paths = canvaPilotStorePaths();
+      ensureRealPilotSeeded(paths);
+      const record = loadCanvaPilotResultRecordOrThrow(paths, body.pilotId);
+      const updated = canvaPilotResultRecordModule.recordAgentQaResult(record, {
+        result: body.result,
+        checklist: body.checklist,
+        note: body.note,
+        reviewedByActorId: body.reviewedByActorId,
+      });
+      canvaPilotStoreModule.savePilotResultRecord(paths, updated);
+      return { ok: true, pilotResult: updated };
+    },
+  );
+}
+
+// V7.1 Phase C.1.1 (Auftrag Abschnitt B/F) – optionales menschliches Review
+// ausschließlich bei PREMIUM_INTERNAL_REVIEW mit humanReviewRequired.
+function handleV71CanvaPilotResultHumanReview(res, context) {
+  return withV71ApiGuards(
+    context.req,
+    res,
+    ["pilotId", "note", "reviewedByActorId", "evidence"],
+    "canva/pilot-result/human-review",
+    (body) => {
+      const paths = canvaPilotStorePaths();
+      ensureRealPilotSeeded(paths);
+      const record = loadCanvaPilotResultRecordOrThrow(paths, body.pilotId);
+      const updated = canvaPilotResultRecordModule.recordHumanReview(record, {
+        note: body.note,
+        reviewedByActorId: body.reviewedByActorId,
+        evidence: body.evidence,
+      });
+      canvaPilotStoreModule.savePilotResultRecord(paths, updated);
+      return { ok: true, pilotResult: updated };
+    },
+  );
+}
+
+// V7.1 Phase C.1.1 (Auftrag Abschnitt D/F) – Risikofall-Eskalation.
+function handleV71CanvaPilotResultEscalate(res, context) {
+  return withV71ApiGuards(context.req, res, ["pilotId", "reason"], "canva/pilot-result/escalate", (body) => {
+    const paths = canvaPilotStorePaths();
+    ensureRealPilotSeeded(paths);
+    const record = loadCanvaPilotResultRecordOrThrow(paths, body.pilotId);
+    const updated = canvaPilotResultRecordModule.escalate(record, { reason: body.reason });
+    canvaPilotStoreModule.savePilotResultRecord(paths, updated);
+    return { ok: true, pilotResult: updated };
+  });
+}
+
 const getRoutes = buildRouteMap([
   ["/api/projects", (res) => handleProjects(res)],
   ["/api/projects/health-upgrade-kompass", (res) => handleHealthUpgradeKompassProject(res)],
@@ -23198,6 +23468,10 @@ const getRoutes = buildRouteMap([
   ["/api/v71/canva/status", (res, context) => handleV71CanvaStatus(res, context)],
   ["/api/v71/canva/job-packages", (res, context) => handleV71CanvaJobPackagesList(res, context)],
   ["/api/v71/canva/backup/export", (res, context) => handleV71CanvaBackupExport(res, context)],
+  // V7.1 Phase C.1 (Auftrag Abschnitt C/F) – kanonische Pilot-Ergebnisakte(n),
+  // Kundenfeedback-Ansicht (siehe zusätzlich Prefix-Handler unten für
+  // pilotId-Einzelabruf).
+  ["/api/v71/canva/pilot-results", (res, context) => handleV71CanvaPilotResultsList(res, context)],
 ]);
 
 const postRoutes = buildRouteMap([
@@ -23243,6 +23517,23 @@ const postRoutes = buildRouteMap([
   ["/api/v71/canva/job-package/approve-customer-draft", (res, context) => handleV71CanvaJobPackageApproveCustomerDraft(res, context)],
   ["/api/v71/canva/job-package/request-customer-draft-changes", (res, context) => handleV71CanvaJobPackageRequestCustomerDraftChanges(res, context)],
   ["/api/v71/canva/backup/restore-preview", (res, context) => handleV71CanvaBackupRestorePreview(res, context)],
+  // V7.1 Phase C.1 (Auftrag Abschnitt D/E/F) – kontrollierte
+  // Kundenfeedback-Schleife der Pilot-Ergebnisakte. Keine Route für
+  // Veröffentlichung, Social Posting, Canva-Login, API-Key, Einladung,
+  // Freigabelink, Löschen, Abrechnung, Credits, Brand-Kit-Zugang oder
+  // Direktbearbeitung durch den Kunden.
+  ["/api/v71/canva/pilot-result/internal-review", (res, context) => handleV71CanvaPilotResultInternalReview(res, context)],
+  ["/api/v71/canva/pilot-result/customer-feedback", (res, context) => handleV71CanvaPilotResultCustomerFeedback(res, context)],
+  ["/api/v71/canva/pilot-result/request-changes", (res, context) => handleV71CanvaPilotResultRequestChanges(res, context)],
+  ["/api/v71/canva/pilot-result/mark-ready-after-changes", (res, context) => handleV71CanvaPilotResultMarkReadyAfterChanges(res, context)],
+  ["/api/v71/canva/pilot-result/customer-approve", (res, context) => handleV71CanvaPilotResultCustomerApprove(res, context)],
+  // V7.1 Phase C.1.1 (Auftrag Abschnitt E/F) – Agenten-QS, optionales
+  // menschliches Review (nur Premium), Risikofall-Eskalation. Keine Route
+  // für Veröffentlichung, Canva-Zugang, Login, Credentials, Abrechnung,
+  // Credits oder Mandantenwechsel.
+  ["/api/v71/canva/pilot-result/agent-qa", (res, context) => handleV71CanvaPilotResultAgentQa(res, context)],
+  ["/api/v71/canva/pilot-result/human-review", (res, context) => handleV71CanvaPilotResultHumanReview(res, context)],
+  ["/api/v71/canva/pilot-result/escalate", (res, context) => handleV71CanvaPilotResultEscalate(res, context)],
 ]);
 
 const { requestHandler } = createHttpRouter({
@@ -23287,6 +23578,24 @@ const { requestHandler } = createHttpRouter({
         }
         const jobPackageId = decodeURIComponent(context.pathname.slice("/api/v71/canva/job-packages/".length));
         handleV71CanvaJobPackageById(res, jobPackageId, context);
+      },
+    },
+    {
+      // V7.1 Phase C.1 (Auftrag Abschnitt F) – Einzelabruf einer
+      // Pilot-Ergebnisakte sowie ihrer Kundenfeedback-Historie.
+      prefix: "/api/v71/canva/pilot-results/",
+      handler: (res, context) => {
+        if (!isExecutionRequestOriginAllowed(context.req)) {
+          sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert.", ...API_SECURITY_FLAGS });
+          return;
+        }
+        const remainder = decodeURIComponent(context.pathname.slice("/api/v71/canva/pilot-results/".length));
+        if (remainder.endsWith("/feedback")) {
+          const pilotId = remainder.slice(0, -"/feedback".length);
+          handleV71CanvaPilotResultFeedback(res, pilotId, context);
+          return;
+        }
+        handleV71CanvaPilotResultById(res, remainder, context);
       },
     },
   ],

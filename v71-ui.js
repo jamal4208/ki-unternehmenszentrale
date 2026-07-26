@@ -1055,6 +1055,337 @@
     return buttons.join(" ");
   }
 
+  // -------------------------------------------------------------------
+  // V7.1 Phase C.1 / C.1.1 – kanonische Pilot-Ergebnisakte des real
+  // durchgeführten Canva-Pilotlaufs, kontrollierte Kundenfeedback-Schleife
+  // sowie rollenbasiertes, skalierbares Reviewmodell.
+  //
+  // Nutzt ausschließlich die additiven /api/v71/canva/pilot-result(s)*-
+  // Routen. Kein Button für Veröffentlichen/Öffentlich teilen/Einladen/
+  // Canva öffnen als Kunde/Alles freigeben/Credits kaufen/Löschen. Jede
+  // Gate-Funktion unten spiegelt exakt dieselbe Bedingung wie das
+  // zugehörige Backend-Modul (canva-pilot-result-record.js) – reine,
+  // DOM-freie Funktionen für die Testbarkeit.
+  //
+  // Verbindlich (Phase C.1.1): Jamal prüft Eigenprojekte und Risikofälle /
+  // optionale Premium-Reviews – NICHT grundsätzlich jeden Kundenentwurf.
+  // -------------------------------------------------------------------
+
+  const CANVA_PILOT_INTERNAL_REVIEW_LABEL = {
+    NOT_REVIEWED: "noch nicht geprüft",
+    REVIEWED_WITH_NOTES: "intern geprüft (mit Notizen)",
+    REVIEWED_APPROVED: "intern geprüft (freigegeben)",
+  };
+
+  const CANVA_PILOT_CUSTOMER_REVIEW_LABEL = {
+    NOT_READY: "noch nicht bereit für Kundenfeedback",
+    CHANGES_POSSIBLE: "solide, Änderungen weiterhin möglich",
+    READY_FOR_CUSTOMER_REVIEW: "bereit für Kundenfeedback",
+    CUSTOMER_CHANGES_REQUESTED: "Kunde wünscht Änderungen",
+    READY_FOR_REVIEW_AFTER_CHANGES: "nach Änderungen erneut bereit",
+    CUSTOMER_APPROVED: "vom Kunden freigegeben (keine Veröffentlichung)",
+  };
+
+  const CANVA_PILOT_SERVICE_TIER_LABEL = {
+    INTERNAL: "Eigenprojekt",
+    STANDARD: "Standardkunde",
+    PREMIUM: "Premiumkunde",
+    ESCALATED: "Eskaliert",
+  };
+
+  const CANVA_PILOT_REVIEW_MODE_LABEL = {
+    OWNER_REVIEW: "Owner-Review (Jamal)",
+    CUSTOMER_SELF_REVIEW: "Kunden-Selbstprüfung",
+    PREMIUM_INTERNAL_REVIEW: "Premium-interne Prüfung",
+    RISK_ESCALATION: "Risiko-Eskalation",
+  };
+
+  const CANVA_PILOT_QUALITY_REVIEW_LABEL = {
+    NOT_STARTED: "Agenten-QS noch nicht gestartet",
+    AGENT_QA_PENDING: "Agenten-QS ausstehend",
+    AGENT_QA_PASSED: "Agenten-QS bestanden",
+    AGENT_QA_FAILED: "Agenten-QS nicht bestanden",
+    HUMAN_REVIEW_REQUIRED: "menschliche Prüfung erforderlich",
+    HUMAN_REVIEW_COMPLETED: "menschliche Prüfung abgeschlossen",
+    ESCALATED: "eskaliert",
+  };
+
+  function canvaPilotCustomerReviewPillClass(status) {
+    const map = {
+      NOT_READY: "v71-pill v71-pill-neutral",
+      CHANGES_POSSIBLE: "v71-pill v71-pill-recommendation",
+      READY_FOR_CUSTOMER_REVIEW: "v71-pill v71-pill-recommendation",
+      CUSTOMER_CHANGES_REQUESTED: "v71-pill v71-pill-blocked",
+      READY_FOR_REVIEW_AFTER_CHANGES: "v71-pill v71-pill-recommendation",
+      CUSTOMER_APPROVED: "v71-pill v71-pill-direct",
+    };
+    return map[status] || "v71-pill v71-pill-neutral";
+  }
+
+  // Gate-Bedingungen (identisch zu canva-pilot-result-record.js):
+  // Internes Owner-Review (Jamal) nur, wenn der Reviewmodus Owner-Review
+  // verlangt – Standardkunden brauchen keine Jamal-Prüfung.
+  function canvaPilotInternalReviewAvailable(record) {
+    if (record.reviewMode === "RISK_ESCALATION" || record.qualityReviewStatus === "ESCALATED") return false;
+    if (!(record.ownerReviewRequired === true || record.reviewMode === "OWNER_REVIEW" || !record.reviewMode)) {
+      return false;
+    }
+    return ["NOT_READY", "CHANGES_POSSIBLE"].includes(record.customerReviewStatus);
+  }
+
+  function canvaPilotAgentQaAvailable(record) {
+    if (record.reviewMode === "RISK_ESCALATION" || record.qualityReviewStatus === "ESCALATED") return false;
+    return ["NOT_STARTED", "AGENT_QA_PENDING", "AGENT_QA_FAILED"].includes(record.qualityReviewStatus || "NOT_STARTED");
+  }
+
+  function canvaPilotHumanReviewAvailable(record) {
+    return (
+      record.reviewMode === "PREMIUM_INTERNAL_REVIEW" &&
+      record.humanReviewRequired === true &&
+      record.qualityReviewStatus === "HUMAN_REVIEW_REQUIRED"
+    );
+  }
+
+  function canvaPilotEscalateAvailable(record) {
+    return record.qualityReviewStatus !== "ESCALATED" && record.reviewMode !== "RISK_ESCALATION";
+  }
+
+  function canvaPilotFeedbackAvailable(record) {
+    return (
+      Boolean(record.designId) &&
+      Boolean(record.customerId) &&
+      Boolean(record.brandId) &&
+      Boolean(record.campaignId)
+    );
+  }
+
+  function canvaPilotRequestChangesAvailable(record) {
+    if (record.reviewMode === "RISK_ESCALATION" || record.qualityReviewStatus === "ESCALATED") return false;
+    return ["READY_FOR_CUSTOMER_REVIEW", "READY_FOR_REVIEW_AFTER_CHANGES"].includes(record.customerReviewStatus);
+  }
+
+  function canvaPilotMarkReadyAfterChangesAvailable(record) {
+    return record.customerReviewStatus === "CUSTOMER_CHANGES_REQUESTED";
+  }
+
+  function canvaPilotCustomerApproveAvailable(record) {
+    if (record.reviewMode === "RISK_ESCALATION" || record.qualityReviewStatus === "ESCALATED") return false;
+    return ["READY_FOR_CUSTOMER_REVIEW", "READY_FOR_REVIEW_AFTER_CHANGES"].includes(record.customerReviewStatus);
+  }
+
+  function canvaPilotYesNo(value) {
+    return value ? "ja" : "nein";
+  }
+
+  function canvaPilotStatusRow(record) {
+    return `
+      <span class="v71-pill ${record.providerExecutionStatus === "SAVED" ? "v71-pill-direct" : "v71-pill-neutral"}">${
+        record.providerExecutionStatus === "SAVED" ? "Entwurf gespeichert" : escapeHtml(record.providerExecutionStatus)
+      }</span>
+      <span class="v71-pill v71-pill-neutral">${escapeHtml(CANVA_PILOT_INTERNAL_REVIEW_LABEL[record.internalReviewStatus] || record.internalReviewStatus)}</span>
+      <span class="${canvaPilotCustomerReviewPillClass(record.customerReviewStatus)}">${escapeHtml(
+        CANVA_PILOT_CUSTOMER_REVIEW_LABEL[record.customerReviewStatus] || record.customerReviewStatus,
+      )}</span>
+      <span class="v71-pill v71-pill-blocked">Veröffentlichung: nicht freigegeben</span>`;
+  }
+
+  function canvaPilotReviewModelRow(record) {
+    const jamalRequired = Boolean(record.ownerReviewRequired) || record.reviewMode === "OWNER_REVIEW" || record.reviewMode === "RISK_ESCALATION";
+    const humanRequired = Boolean(record.humanReviewRequired) || record.qualityReviewStatus === "HUMAN_REVIEW_REQUIRED";
+    const customerSelf = Boolean(record.customerSelfReviewAllowed) || record.reviewMode === "CUSTOMER_SELF_REVIEW";
+    const escalated = record.reviewMode === "RISK_ESCALATION" || record.qualityReviewStatus === "ESCALATED";
+    return `
+      <span class="v71-pill v71-pill-neutral">Tarif: ${escapeHtml(CANVA_PILOT_SERVICE_TIER_LABEL[record.serviceTier] || record.serviceTier || "–")}</span>
+      <span class="v71-pill v71-pill-neutral">Reviewmodell: ${escapeHtml(CANVA_PILOT_REVIEW_MODE_LABEL[record.reviewMode] || record.reviewMode || "–")}</span>
+      <span class="v71-pill ${record.qualityReviewStatus === "AGENT_QA_PASSED" || record.qualityReviewStatus === "HUMAN_REVIEW_COMPLETED" ? "v71-pill-direct" : record.qualityReviewStatus === "ESCALATED" || record.qualityReviewStatus === "AGENT_QA_FAILED" ? "v71-pill-blocked" : "v71-pill-neutral"}">${escapeHtml(
+        CANVA_PILOT_QUALITY_REVIEW_LABEL[record.qualityReviewStatus] || record.qualityReviewStatus || "Agenten-QS noch nicht gestartet",
+      )}</span>
+      <span class="v71-pill v71-pill-neutral">Jamal-Prüfung erforderlich: ${canvaPilotYesNo(jamalRequired)}</span>
+      <span class="v71-pill v71-pill-neutral">menschliche Prüfung erforderlich: ${canvaPilotYesNo(humanRequired)}</span>
+      <span class="v71-pill v71-pill-neutral">Kunden-Selbstprüfung erlaubt: ${canvaPilotYesNo(customerSelf)}</span>
+      <span class="v71-pill ${escalated ? "v71-pill-blocked" : "v71-pill-neutral"}">Eskalation: ${canvaPilotYesNo(escalated)}</span>`;
+  }
+
+  function canvaPilotFeedbackEntryLine(entry) {
+    const roleLabel = entry.createdByRole === "CUSTOMER" ? "Kunde" : "Jamal (intern)";
+    return `<li><strong>${escapeHtml(roleLabel)}</strong> · ${escapeHtml(entry.feedbackType)} · ${escapeHtml(entry.status)}: ${escapeHtml(entry.feedbackText)}${
+      entry.requestedChanges && entry.requestedChanges.length ? ` (${entry.requestedChanges.map(escapeHtml).join("; ")})` : ""
+    }</li>`;
+  }
+
+  function canvaPilotActionButtons(record) {
+    const buttons = [];
+    if (canvaPilotAgentQaAvailable(record)) {
+      buttons.push(
+        `<button class="secondary-button" type="button" data-canva-pilot-action="agent-qa" data-pilot-id="${escapeHtml(record.pilotId)}">Agenten-QS erfassen</button>`,
+      );
+    }
+    if (canvaPilotInternalReviewAvailable(record)) {
+      buttons.push(
+        `<button class="secondary-button" type="button" data-canva-pilot-action="internal-review" data-pilot-id="${escapeHtml(record.pilotId)}">Owner-Review (Jamal, Eigenprojekt)</button>`,
+      );
+    }
+    if (canvaPilotHumanReviewAvailable(record)) {
+      buttons.push(
+        `<button class="secondary-button" type="button" data-canva-pilot-action="human-review" data-pilot-id="${escapeHtml(record.pilotId)}">Menschliches Review abschließen</button>`,
+      );
+    }
+    if (canvaPilotFeedbackAvailable(record)) {
+      buttons.push(
+        `<button class="secondary-button" type="button" data-canva-pilot-action="customer-feedback" data-pilot-id="${escapeHtml(record.pilotId)}">Kundenfeedback erfassen</button>`,
+      );
+    }
+    if (canvaPilotRequestChangesAvailable(record)) {
+      buttons.push(
+        `<button class="secondary-button" type="button" data-canva-pilot-action="request-changes" data-pilot-id="${escapeHtml(record.pilotId)}">Änderungswunsch anfordern</button>`,
+      );
+    }
+    if (canvaPilotMarkReadyAfterChangesAvailable(record)) {
+      buttons.push(
+        `<button class="secondary-button" type="button" data-canva-pilot-action="mark-ready-after-changes" data-pilot-id="${escapeHtml(record.pilotId)}">Änderung erledigt &amp; erneut geprüft</button>`,
+      );
+    }
+    if (canvaPilotCustomerApproveAvailable(record)) {
+      buttons.push(
+        `<button class="secondary-button" type="button" data-canva-pilot-action="customer-approve" data-pilot-id="${escapeHtml(record.pilotId)}">Kundenfreigabe (Entwurf, keine Veröffentlichung)</button>`,
+      );
+    }
+    if (canvaPilotEscalateAvailable(record)) {
+      buttons.push(
+        `<button class="secondary-button" type="button" data-canva-pilot-action="escalate" data-pilot-id="${escapeHtml(record.pilotId)}">Risikofall eskalieren</button>`,
+      );
+    }
+    // Ausdrücklich KEIN Button für Veröffentlichen/Öffentlich teilen/
+    // Einladen/Canva öffnen als Kunde/Alles freigeben/Credits kaufen/
+    // Löschen (Auftrag Abschnitt G). Keine Formulierung, die behauptet,
+    // Jamal müsse jeden Kundenentwurf prüfen.
+    return buttons.join(" ");
+  }
+
+  function renderCanvaPilotResultCard(record) {
+    return `
+      <li class="v71-card" data-canva-pilot-card="${escapeHtml(record.pilotId)}">
+        <div class="v71-card-head">
+          <strong>${escapeHtml(record.designTitle || "Ohne Titel")}</strong>
+          <span class="v71-pill v71-pill-neutral">Design-ID intern: ${escapeHtml(record.designId || "–")}</span>
+        </div>
+        <div class="v71-tag-row">${canvaPilotStatusRow(record)}</div>
+        <div class="v71-tag-row">${canvaPilotReviewModelRow(record)}</div>
+        <div class="v71-tag-row">
+          <span class="v71-pill v71-pill-neutral">Kunde: ${escapeHtml(record.customerId || "–")}</span>
+          <span class="v71-pill v71-pill-neutral">Marke: ${escapeHtml(record.brandId || "–")}</span>
+          <span class="v71-pill v71-pill-neutral">Kampagne: ${escapeHtml(record.campaignId || "–")}</span>
+          <span class="v71-pill v71-pill-neutral">Seiten: ${escapeHtml(String(record.pageCount ?? "–"))}</span>
+          <span class="v71-pill v71-pill-neutral">Kostenstatus: ${escapeHtml(CANVA_COST_PACKAGE_LABEL[record.costPackageStatus] || record.costPackageStatus)}</span>
+        </div>
+        <details class="v71-details" open>
+          <summary>Interne Bewertung (Eigenprojekt / Owner-Review; solide aber noch nicht 100% final)</summary>
+          <ul class="v71-note-list">
+            ${(record.evidence || []).map((entry) => `<li><strong>${escapeHtml(entry.category)}:</strong> ${escapeHtml(entry.note)}</li>`).join("")}
+          </ul>
+        </details>
+        <details class="v71-details">
+          <summary>Kundenfeedback (${(record.feedbackHistory || []).length})</summary>
+          ${
+            record.feedbackHistory && record.feedbackHistory.length
+              ? `<ul class="v71-note-list">${record.feedbackHistory.map(canvaPilotFeedbackEntryLine).join("")}</ul>`
+              : `<p class="form-note">Noch kein Kundenfeedback erfasst.</p>`
+          }
+        </details>
+        <div class="button-row">${canvaPilotActionButtons(record)}</div>
+        <p class="form-note" data-canva-pilot-status="${escapeHtml(record.pilotId)}" aria-live="polite"></p>
+      </li>`;
+  }
+
+  async function renderCanvaPilotResultsSection() {
+    const result = await fetchJson("/api/v71/canva/pilot-results");
+    const pilotResults = result.ok && Array.isArray(result.json?.pilotResults) ? result.json.pilotResults : [];
+    return `
+      <section class="panel" id="v71-canva-pilot-results-section">
+        <div class="section-head">
+          <div><p class="eyebrow">Realer Pilot</p><h3>Canva-Pilot-Ergebnisakte (${pilotResults.length})</h3></div>
+        </div>
+        ${
+          pilotResults.length
+            ? `<ul class="v71-card-list">${pilotResults.map(renderCanvaPilotResultCard).join("")}</ul>`
+            : `<div class="empty-state">Noch keine Pilot-Ergebnisakte vorhanden.</div>`
+        }
+        <p class="form-note">Kundenfreigabe ist keine Veröffentlichung. Veröffentlichung bleibt in dieser Phase immer eine eigene, spätere, hier nicht verfügbare Freigabe. Standardkunden prüfen nach bestandener Agenten-QS selbst; Jamal prüft Eigenprojekte und Risikofälle – nicht grundsätzlich jeden Kundenentwurf.</p>
+      </section>`;
+  }
+
+  function bindCanvaPilotResultActions(container) {
+    container.querySelectorAll("[data-canva-pilot-action]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const pilotId = button.getAttribute("data-pilot-id");
+        const action = button.getAttribute("data-canva-pilot-action");
+        const statusEl = container.querySelector(`[data-canva-pilot-status="${pilotId}"]`);
+        if (statusEl) statusEl.textContent = "Wird verarbeitet…";
+        try {
+          let result;
+          if (action === "agent-qa") {
+            result = await canvaPostAction("/api/v71/canva/pilot-result/agent-qa", {
+              pilotId,
+              result: "PASS",
+              checklist: {
+                briefingFulfilled: true,
+                mainMessageVisible: true,
+                mandatoryTextsPresent: true,
+                noPlaceholderText: true,
+                readabilitySufficient: true,
+                imageMessageConsistent: true,
+                noProhibitedContent: true,
+                rightsAndPrivacyStatusUnchanged: true,
+                noPublicationTriggered: true,
+              },
+              note: "Agenten-QS bestanden (manuell erfasst).",
+            });
+          } else if (action === "internal-review") {
+            result = await canvaPostAction("/api/v71/canva/pilot-result/internal-review", {
+              pilotId,
+              internalReviewStatus: "REVIEWED_WITH_NOTES",
+            });
+          } else if (action === "human-review") {
+            result = await canvaPostAction("/api/v71/canva/pilot-result/human-review", {
+              pilotId,
+              note: "Menschliches Premium-Review abgeschlossen.",
+            });
+          } else if (action === "customer-feedback") {
+            const feedbackText = window.prompt("Kundenfeedback (kurzer, neutraler Text):", "");
+            if (feedbackText === null) return;
+            result = await canvaPostAction("/api/v71/canva/pilot-result/customer-feedback", {
+              pilotId,
+              feedbackText,
+              feedbackType: "GENERAL_FEEDBACK",
+              createdByRole: "CUSTOMER",
+            });
+          } else if (action === "request-changes") {
+            const note = window.prompt("Welche Änderung wird angefordert? (kurze Notiz)", "");
+            if (note === null) return;
+            result = await canvaPostAction("/api/v71/canva/pilot-result/request-changes", { pilotId, note });
+          } else if (action === "mark-ready-after-changes") {
+            result = await canvaPostAction("/api/v71/canva/pilot-result/mark-ready-after-changes", {
+              pilotId,
+              note: "Änderung intern erneut geprüft.",
+            });
+          } else if (action === "customer-approve") {
+            result = await canvaPostAction("/api/v71/canva/pilot-result/customer-approve", { pilotId });
+          } else if (action === "escalate") {
+            const reason = window.prompt("Eskalationsgrund (Risikofall):", "");
+            if (reason === null) return;
+            result = await canvaPostAction("/api/v71/canva/pilot-result/escalate", { pilotId, reason });
+          }
+          if (statusEl) {
+            statusEl.textContent = result && result.json?.ok ? "Aktion ausgeführt. Keine Veröffentlichung, keine Canva-Aktion." : result?.json?.message || "Aktion nicht möglich.";
+          }
+        } catch (_error) {
+          if (statusEl) statusEl.textContent = "Aktion nicht möglich.";
+        }
+        renderCanvaView();
+      });
+    });
+  }
+
   function renderCanvaPackageCard(pkg) {
     const dims = pkg.dimensions ? `${pkg.dimensions.widthPx}×${pkg.dimensions.heightPx}px (${pkg.dimensions.label || ""})` : "Standardformat";
     return `
@@ -1127,6 +1458,7 @@
     const canvaSelectedCampaignId = campaigns.find((c) => c.campaignId === "test-campaign-fiktives-cafe-pilot")
       ? "test-campaign-fiktives-cafe-pilot"
       : campaigns[0]?.campaignId || "";
+    const canvaPilotResultsSectionHtml = await renderCanvaPilotResultsSection();
 
     container.innerHTML = `
       <div class="v71-layout">
@@ -1217,6 +1549,8 @@
           }
           <p class="form-note">Jede Freigabe (Briefing, Assets/Rechte, externe Übertragung, Kostenrahmen) ist ein eigener, getrennter Schritt. Veröffentlichung bleibt immer eine eigene, spätere Freigabe.</p>
         </section>
+
+        ${canvaPilotResultsSectionHtml}
       </div>`;
 
     byId("v71-canva-project").addEventListener("change", (event) => {
@@ -1309,6 +1643,8 @@
         renderCanvaView();
       });
     });
+
+    bindCanvaPilotResultActions(container);
   }
 
   function initV71Views() {

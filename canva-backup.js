@@ -18,6 +18,13 @@
 
 const canvaStore = require("./canva-store");
 const canvaDesignJobPackage = require("./canva-design-job-package");
+// V7.1 Phase C.1 (Auftrag Abschnitt H) – zusätzlich die kanonische
+// Pilot-Ergebnisakte des real durchgeführten Canva-Pilotlaufs. Ausschließlich
+// bereits durch canva-pilot-result-record.js/canva-pilot-store.js
+// strukturierte, sichere Metadaten – niemals Bilder, Canva-Dateien,
+// Vorschaubilder, Tokens, Credentials, Provider-Komplettantworten, private
+// Canva-URLs, Brand-Kit-Assets oder App-Support-Dateien.
+const canvaPilotStore = require("./canva-pilot-store");
 
 const CANVA_BACKUP_FORMAT_VERSION = "canva-phase-c-backup-1";
 const SUPPORTED_CANVA_BACKUP_FORMAT_VERSIONS = Object.freeze([CANVA_BACKUP_FORMAT_VERSION]);
@@ -31,6 +38,7 @@ const ALLOWED_ROOT_FIELDS = Object.freeze([
   "jobPackages",
   "jobResults",
   "editingTransactions",
+  "pilotResults",
   "summary",
   "safetyNotice",
 ]);
@@ -150,6 +158,56 @@ const EDITING_TRANSACTION_EXPORT_FIELDS = Object.freeze([
   "updatedAt",
 ]);
 
+// V7.1 Phase C.1 (Auftrag Abschnitt H) – strikte Allowlist je Pilot-
+// Ergebnisakte. Zulässig: Pilot-IDs, Design-ID, Titel, Status, interne
+// Bewertungsnotizen (evidence), Kundenfeedback (feedbackHistory),
+// Änderungshistorie (changeRequestHistory), Entscheidungsverlauf
+// (decisionHistory), Mandanten-Fingerprint. Nicht zulässig und daher hier
+// bewusst NICHT gelistet: Bilder, Canva-Dateien, Vorschaubilder, Tokens,
+// Credentials, Provider-Komplettantworten, private Canva-URLs,
+// Brand-Kit-Assets, App-Support-Dateien – das Datenmodell selbst enthält
+// diese Felder ohnehin nie (siehe canva-pilot-result-record.js).
+const PILOT_RESULT_EXPORT_FIELDS = Object.freeze([
+  "schemaVersion",
+  "pilotId",
+  "toolId",
+  "connectorType",
+  "customerId",
+  "brandId",
+  "campaignId",
+  "projectId",
+  "jobPackageId",
+  "providerJobId",
+  "candidateId",
+  "designId",
+  "designTitle",
+  "designType",
+  "pageCount",
+  "costPackageStatus",
+  "providerExecutionStatus",
+  "internalReviewStatus",
+  "customerReviewStatus",
+  "publicationApprovalStatus",
+  // V7.1 Phase C.1.1 – kanonisches, rollenbasiertes Reviewmodell (additiv).
+  "serviceTier",
+  "reviewMode",
+  "ownerReviewRequired",
+  "customerSelfReviewAllowed",
+  "humanReviewRequired",
+  "riskEscalationRequired",
+  "reviewerRole",
+  "reviewedByActorId",
+  "qualityReviewStatus",
+  "createdAt",
+  "updatedAt",
+  "evidence",
+  "feedbackHistory",
+  "changeRequestHistory",
+  "agentQaHistory",
+  "decisionHistory",
+  "immutableTenantFingerprint",
+]);
+
 // Felder, die unter keinen Umständen im Export auftauchen dürfen, selbst
 // wenn sie sich künftig versehentlich in einen Datensatz einschleichen
 // (defensiver Zweitschutz, analog heygen-backup.js).
@@ -215,32 +273,43 @@ function sanitizeEditingTransactionForExport(record) {
   return pickFields(record, EDITING_TRANSACTION_EXPORT_FIELDS);
 }
 
+function sanitizePilotResultForExport(record) {
+  return pickFields(record, PILOT_RESULT_EXPORT_FIELDS);
+}
+
 function exportCanvaBackup(options = {}) {
   const paths = canvaStore.resolveCanvaStorePaths(options);
   const packages = canvaStore.listPackages(paths, options.filter).map(sanitizePackageForExport);
   const results = canvaStore.listResults(paths).map(sanitizeResultForExport);
   const editingTransactions = canvaStore.listEditingTransactions(paths).map(sanitizeEditingTransactionForExport);
+  const pilotStorePaths = canvaPilotStore.resolveCanvaPilotStorePaths(options);
+  const pilotResults = canvaPilotStore.listPilotResultRecords(pilotStorePaths, options.filter).map(sanitizePilotResultForExport);
 
   return {
     backupFormatVersion: CANVA_BACKUP_FORMAT_VERSION,
     exportedAt: new Date(options.now || Date.now()).toISOString(),
     applicationName: APPLICATION_NAME,
-    scope: "V7.1 Phase C – Canva-Jobpaket-Metadaten, Ergebnis-Metadaten und Editing-Transaktionsstatus (kein Rendermaterial).",
+    scope:
+      "V7.1 Phase C/C.1 – Canva-Jobpaket-Metadaten, Ergebnis-Metadaten, Editing-Transaktionsstatus und kanonische " +
+      "Pilot-Ergebnisakte(n) mit Kundenfeedback-Historie (kein Rendermaterial).",
     jobPackages: packages,
     jobResults: results,
     editingTransactions,
+    pilotResults,
     summary: {
       jobPackageCount: packages.length,
       jobResultCount: results.length,
       editingTransactionCount: editingTransactions.length,
+      pilotResultCount: pilotResults.length,
     },
     safetyNotice:
       "Diese Sicherung enthält ausschließlich strukturierte Metadaten. Keine Canva-Credentials, keine Tokens, keine " +
       "vollständigen Canva-Antworten, keine Bilder oder Videos, keine privaten Brand-Kit-Assets, keine privaten " +
-      "Templates, keine temporären Editing-Operation-Payloads, keine Session-Cookies, keine App-Support-Dateien. Ein " +
-      "Restore startet keine Generierung, erzeugt kein Design, startet keine Editing-Transaktion, speichert keine " +
-      "Bearbeitung, veröffentlicht nichts, lädt keine Assets herunter und setzt keine Freigabe neu. Die einzige " +
-      "Schreibwirkung eines Restores ist das Markieren bereits abgelaufener Aufträge als STALE.",
+      "Templates, keine temporären Editing-Operation-Payloads, keine Session-Cookies, keine App-Support-Dateien, " +
+      "keine privaten Canva-URLs. Ein Restore startet keine Generierung, erzeugt kein Design, startet keine " +
+      "Editing-Transaktion, speichert keine Bearbeitung, veröffentlicht nichts, lädt keine Assets herunter, lädt " +
+      "keine Providerdaten nach und setzt keine Freigabe neu. Die einzige Schreibwirkung eines Restores ist das " +
+      "Markieren bereits abgelaufener Aufträge als STALE.",
   };
 }
 
@@ -284,6 +353,11 @@ function validateCanvaBackup(exportData) {
   if (!Array.isArray(exportData.editingTransactions)) {
     return { ok: false, error: "editingTransactions muss ein Array sein." };
   }
+  // pilotResults ist additiv (Phase C.1); ältere Sicherungen aus Phase C
+  // enthalten es noch nicht und werden weiterhin akzeptiert.
+  if (exportData.pilotResults !== undefined && !Array.isArray(exportData.pilotResults)) {
+    return { ok: false, error: "pilotResults muss ein Array sein." };
+  }
   for (const pkg of exportData.jobPackages) {
     if (!isPlainObject(pkg) || typeof pkg.jobPackageId !== "string" || !pkg.jobPackageId) {
       return { ok: false, error: "Beschädigter Jobpaket-Eintrag in der Canva-Sicherung." };
@@ -297,6 +371,11 @@ function validateCanvaBackup(exportData) {
   for (const transaction of exportData.editingTransactions) {
     if (!isPlainObject(transaction) || typeof transaction.editingTransactionId !== "string" || !transaction.editingTransactionId) {
       return { ok: false, error: "Beschädigter Editing-Transaktions-Eintrag in der Canva-Sicherung." };
+    }
+  }
+  for (const pilotResult of exportData.pilotResults || []) {
+    if (!isPlainObject(pilotResult) || typeof pilotResult.pilotId !== "string" || !pilotResult.pilotId) {
+      return { ok: false, error: "Beschädigter Pilot-Ergebnisakte-Eintrag in der Canva-Sicherung." };
     }
   }
   if (containsForbiddenFieldNames(exportData)) {
@@ -317,6 +396,7 @@ function buildRestorePreview(exportData, options = {}) {
     jobPackageCount: exportData.jobPackages.length,
     jobResultCount: exportData.jobResults.length,
     editingTransactionCount: exportData.editingTransactions.length,
+    pilotResultCount: (exportData.pilotResults || []).length,
     staleCandidateCount: staleCandidates.length,
     staleCandidateJobPackageIds: staleCandidates.map((pkg) => pkg.jobPackageId),
     affectedProjectIds: projectIds,
@@ -369,6 +449,7 @@ function applyCanvaBackupRestore(exportData, options = {}) {
   const rejectedJobPackageIds = [];
   const rejectedJobResultJobPackageIds = [];
   const rejectedEditingTransactionIds = [];
+  const rejectedPilotResultIds = [];
 
   const restoredPackages = exportData.jobPackages
     .map((pkg) => {
@@ -413,14 +494,33 @@ function applyCanvaBackupRestore(exportData, options = {}) {
     }
   }).length;
 
+  // V7.1 Phase C.1 (Auftrag Abschnitt H) – Pilot-Ergebnisakten werden
+  // unverändert als Datensatz übernommen (reine Historie inklusive
+  // Feedback-/Änderungs-/Entscheidungsverlauf). Kein Feld dieses Datensatzes
+  // löst eine Canva-Aktion, eine Veröffentlichung oder eine neue
+  // Kosten-/Rechtefreigabe aus; die Mandantenbindung bleibt unveränderlich
+  // (siehe canva-pilot-store.js#assertNoTenantReassignment).
+  const pilotStorePaths = canvaPilotStore.resolveCanvaPilotStorePaths(options);
+  const restoredPilotResultCount = (exportData.pilotResults || []).filter((pilotResult) => {
+    try {
+      canvaPilotStore.savePilotResultRecord(pilotStorePaths, pilotResult);
+      return true;
+    } catch (_error) {
+      rejectedPilotResultIds.push(pilotResult.pilotId);
+      return false;
+    }
+  }).length;
+
   return {
     ok: true,
     restoredJobPackageCount: restoredPackages.length,
     restoredJobResultCount: restoredResultCount,
     restoredEditingTransactionCount,
+    restoredPilotResultCount,
     rejectedJobPackageIds,
     rejectedJobResultJobPackageIds,
     rejectedEditingTransactionIds,
+    rejectedPilotResultIds,
     tenantSeparationPreserved: true,
     staleMarkedCount,
     startedGeneration: false,
@@ -441,6 +541,7 @@ module.exports = {
   PACKAGE_EXPORT_FIELDS,
   RESULT_EXPORT_FIELDS,
   EDITING_TRANSACTION_EXPORT_FIELDS,
+  PILOT_RESULT_EXPORT_FIELDS,
   exportCanvaBackup,
   validateCanvaBackup,
   previewCanvaBackupRestore,

@@ -335,4 +335,182 @@ check("13. Kundenentwurfskorrektur führt keine neue, ungetestete Layoutklasse e
   });
 });
 
+// ---------------------------------------------------------------------------
+// V7.1 Phase C.1 (Auftrag Abschnitt G/I, Pflichttest 15) – Pilot-
+// Ergebnisakte und Kundenfeedback-Schleife im Chef-Modus.
+// ---------------------------------------------------------------------------
+
+check("Pilot-Ergebnisakte-Sektion ist additiv im Canva-Bereich vorhanden", () => {
+  assert.ok(uiSource.includes("renderCanvaPilotResultsSection"));
+  assert.ok(uiSource.includes("/api/v71/canva/pilot-results"));
+});
+
+check("15. Pilot-Ergebnisakte-Bereich enthält keinen Veröffentlichungs-/Social-/Einladungs-/Credits-/Löschen-Button", () => {
+  const buttonsMatch = uiSource.match(/function canvaPilotActionButtons\(record\) \{([\s\S]*?)\n {2}\}/);
+  assert.ok(buttonsMatch, "canvaPilotActionButtons wurde im Quelltext nicht gefunden");
+  const body = buttonsMatch[1];
+  assert.ok(!/data-canva-pilot-action="publish"/.test(body));
+  assert.ok(!/data-canva-pilot-action="share"/.test(body));
+  assert.ok(!/data-canva-pilot-action="invite"/.test(body));
+  assert.ok(!/data-canva-pilot-action="open-as-customer"/.test(body));
+  assert.ok(!/data-canva-pilot-action="approve-all"/.test(body));
+  assert.ok(!/data-canva-pilot-action="buy-credits"/.test(body));
+  assert.ok(!/data-canva-pilot-action="delete"/.test(body));
+  // nur die tatsächlich erzeugten <button>-Texte prüfen, nicht die
+  // erläuternden Quelltextkommentare, die die verbotenen Aktionen benennen.
+  const buttonLabels = [...body.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map((m) => m[1]);
+  buttonLabels.forEach((label) => {
+    assert.ok(!/Veröffentlichen|Öffentlich teilen|Einladen|Alles freigeben|Credits kaufen|Design löschen|Canva öffnen als Kunde/.test(label), `unerwarteter Button-Text: ${label}`);
+  });
+});
+
+check("15b. gesamter Pilot-Ergebnisakte-Quelltextblock enthält keinen Publish-/Share-/Invite-Button", () => {
+  const blockStart = uiSource.indexOf("kanonische Pilot-Ergebnisakte des real");
+  const blockEnd = uiSource.indexOf("function renderCanvaPackageCard(pkg) {");
+  assert.ok(blockStart > -1 && blockEnd > blockStart, "Pilot-Ergebnisakte-Block wurde im Quelltext nicht gefunden");
+  const block = uiSource.slice(blockStart, blockEnd);
+  assert.ok(!/data-canva-pilot-action="publish"/.test(block));
+  assert.ok(!/PUBLISH_DESIGN|SHARE_PUBLICLY|INVITE_CUSTOMER|PURCHASE_CREDITS|DELETE_DESIGN/.test(block));
+});
+
+check("Status der Pilot-Ergebnisakte zeigt Veröffentlichung ausdrücklich als 'nicht freigegeben'", () => {
+  assert.ok(uiSource.includes("Veröffentlichung: nicht freigegeben"));
+  assert.ok(uiSource.includes("Kundenfreigabe ist keine Veröffentlichung"));
+});
+
+check("Kundenfreigabe-Button der Pilotakte weist explizit auf 'keine Veröffentlichung' hin", () => {
+  assert.ok(uiSource.includes("Kundenfreigabe (Entwurf, keine Veröffentlichung)"));
+});
+
+check("Gate-Funktionen der Kundenfeedback-Schleife sind als eigene, testbare Funktionen vorhanden", () => {
+  [
+    "canvaPilotInternalReviewAvailable",
+    "canvaPilotFeedbackAvailable",
+    "canvaPilotRequestChangesAvailable",
+    "canvaPilotMarkReadyAfterChangesAvailable",
+    "canvaPilotCustomerApproveAvailable",
+    "canvaPilotAgentQaAvailable",
+    "canvaPilotHumanReviewAvailable",
+    "canvaPilotEscalateAvailable",
+  ].forEach((fnName) => {
+    assert.ok(uiSource.includes(`function ${fnName}(record)`), `${fnName} fehlt im Quelltext`);
+  });
+});
+
+function extractPilotGateFunction(fnName) {
+  const match = uiSource.match(new RegExp(`function ${fnName}\\(record\\) \\{([\\s\\S]*?)\\n {2}\\}`));
+  assert.ok(match, `${fnName} wurde im Quelltext nicht gefunden`);
+  return new Function("record", match[1]);
+}
+
+check("canvaPilotRequestChangesAvailable ist nur in READY_FOR_CUSTOMER_REVIEW/READY_FOR_REVIEW_AFTER_CHANGES wahr", () => {
+  const fn = extractPilotGateFunction("canvaPilotRequestChangesAvailable");
+  assert.strictEqual(fn({ customerReviewStatus: "NOT_READY" }), false);
+  assert.strictEqual(fn({ customerReviewStatus: "CHANGES_POSSIBLE" }), false);
+  assert.strictEqual(fn({ customerReviewStatus: "READY_FOR_CUSTOMER_REVIEW" }), true);
+  assert.strictEqual(fn({ customerReviewStatus: "CUSTOMER_CHANGES_REQUESTED" }), false);
+  assert.strictEqual(fn({ customerReviewStatus: "READY_FOR_REVIEW_AFTER_CHANGES" }), true);
+  assert.strictEqual(fn({ customerReviewStatus: "CUSTOMER_APPROVED" }), false);
+});
+
+check("canvaPilotCustomerApproveAvailable ist nur in READY_FOR_CUSTOMER_REVIEW/READY_FOR_REVIEW_AFTER_CHANGES wahr", () => {
+  const fn = extractPilotGateFunction("canvaPilotCustomerApproveAvailable");
+  assert.strictEqual(fn({ customerReviewStatus: "CHANGES_POSSIBLE" }), false);
+  assert.strictEqual(fn({ customerReviewStatus: "READY_FOR_CUSTOMER_REVIEW" }), true);
+  assert.strictEqual(fn({ customerReviewStatus: "READY_FOR_REVIEW_AFTER_CHANGES" }), true);
+  assert.strictEqual(fn({ customerReviewStatus: "CUSTOMER_APPROVED" }), false);
+});
+
+check("canvaPilotMarkReadyAfterChangesAvailable ist nur in CUSTOMER_CHANGES_REQUESTED wahr", () => {
+  const fn = extractPilotGateFunction("canvaPilotMarkReadyAfterChangesAvailable");
+  assert.strictEqual(fn({ customerReviewStatus: "READY_FOR_CUSTOMER_REVIEW" }), false);
+  assert.strictEqual(fn({ customerReviewStatus: "CUSTOMER_CHANGES_REQUESTED" }), true);
+  assert.strictEqual(fn({ customerReviewStatus: "READY_FOR_REVIEW_AFTER_CHANGES" }), false);
+});
+
+check("canvaPilotFeedbackAvailable erfordert Design-ID und vollständige Mandantenbindung", () => {
+  const fn = extractPilotGateFunction("canvaPilotFeedbackAvailable");
+  assert.strictEqual(fn({ designId: null, customerId: "a", brandId: "b", campaignId: "c" }), false);
+  assert.strictEqual(fn({ designId: "d", customerId: null, brandId: "b", campaignId: "c" }), false);
+  assert.strictEqual(fn({ designId: "d", customerId: "a", brandId: "b", campaignId: "c" }), true);
+});
+
+// ---------------------------------------------------------------------------
+// V7.1 Phase C.1.1 – Reviewmodell-Anzeige und Gate-Logik.
+// ---------------------------------------------------------------------------
+
+check("C.1.1. UI zeigt Reviewmodell, Tarif, Agenten-QS und Eskalation klar an", () => {
+  assert.ok(uiSource.includes("canvaPilotReviewModelRow"));
+  assert.ok(uiSource.includes("Jamal-Prüfung erforderlich"));
+  assert.ok(uiSource.includes("menschliche Prüfung erforderlich"));
+  assert.ok(uiSource.includes("Kunden-Selbstprüfung erlaubt"));
+  assert.ok(uiSource.includes("Eskalation:"));
+  assert.ok(uiSource.includes("Reviewmodell:"));
+  assert.ok(uiSource.includes("Tarif:"));
+});
+
+check("C.1.1. UI behauptet nicht, dass Jamal jeden Kundenentwurf prüfen muss", () => {
+  assert.ok(!/Jamal muss jeden Kundenentwurf prüfen/.test(uiSource));
+  assert.ok(uiSource.includes("nicht grundsätzlich jeden Kundenentwurf"));
+});
+
+check("C.1.1-1. canvaPilotInternalReviewAvailable ist für Standardkunden (CUSTOMER_SELF_REVIEW) falsch", () => {
+  const fn = extractPilotGateFunction("canvaPilotInternalReviewAvailable");
+  assert.strictEqual(
+    fn({
+      reviewMode: "CUSTOMER_SELF_REVIEW",
+      ownerReviewRequired: false,
+      customerReviewStatus: "NOT_READY",
+      qualityReviewStatus: "NOT_STARTED",
+    }),
+    false,
+  );
+  assert.strictEqual(
+    fn({
+      reviewMode: "OWNER_REVIEW",
+      ownerReviewRequired: true,
+      customerReviewStatus: "CHANGES_POSSIBLE",
+      qualityReviewStatus: "NOT_STARTED",
+    }),
+    true,
+  );
+});
+
+check("C.1.1. canvaPilotAgentQaAvailable ist nur vor bestandener/eskaliertem Status wahr", () => {
+  const fn = extractPilotGateFunction("canvaPilotAgentQaAvailable");
+  assert.strictEqual(fn({ qualityReviewStatus: "NOT_STARTED", reviewMode: "CUSTOMER_SELF_REVIEW" }), true);
+  assert.strictEqual(fn({ qualityReviewStatus: "AGENT_QA_PASSED", reviewMode: "CUSTOMER_SELF_REVIEW" }), false);
+  assert.strictEqual(fn({ qualityReviewStatus: "ESCALATED", reviewMode: "RISK_ESCALATION" }), false);
+});
+
+check("C.1.1-4. canvaPilotHumanReviewAvailable nur bei PREMIUM + HUMAN_REVIEW_REQUIRED", () => {
+  const fn = extractPilotGateFunction("canvaPilotHumanReviewAvailable");
+  assert.strictEqual(
+    fn({
+      reviewMode: "PREMIUM_INTERNAL_REVIEW",
+      humanReviewRequired: true,
+      qualityReviewStatus: "HUMAN_REVIEW_REQUIRED",
+    }),
+    true,
+  );
+  assert.strictEqual(
+    fn({
+      reviewMode: "CUSTOMER_SELF_REVIEW",
+      humanReviewRequired: false,
+      qualityReviewStatus: "AGENT_QA_PASSED",
+    }),
+    false,
+  );
+});
+
+check("C.1.1. neue Pilot-Aktionen agent-qa/human-review/escalate sind verdrahtet, publish nicht", () => {
+  assert.ok(uiSource.includes('data-canva-pilot-action="agent-qa"'));
+  assert.ok(uiSource.includes('data-canva-pilot-action="human-review"'));
+  assert.ok(uiSource.includes('data-canva-pilot-action="escalate"'));
+  assert.ok(!/data-canva-pilot-action="publish"/.test(uiSource));
+  assert.ok(uiSource.includes("/api/v71/canva/pilot-result/agent-qa"));
+  assert.ok(uiSource.includes("/api/v71/canva/pilot-result/human-review"));
+  assert.ok(uiSource.includes("/api/v71/canva/pilot-result/escalate"));
+});
+
 console.log(`canva-ui.test.js: ${passed} Prüfpunkte erfolgreich`);

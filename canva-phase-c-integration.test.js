@@ -43,6 +43,10 @@ const CANVA_PHASE_C_FILES = [
   "canva-connector.js",
   "canva-store.js",
   "canva-backup.js",
+  // V7.1 Phase C.1 – additive Pilot-Ergebnisakte/Kundenfeedback-Schleife,
+  // unterliegt denselben Bestandsschutzprüfungen wie die Phase-C-Dateien.
+  "canva-pilot-result-record.js",
+  "canva-pilot-store.js",
 ];
 const HEYGEN_FILES = ["heygen-job-package.js", "heygen-connector.js", "heygen-job-result.js", "heygen-backup.js", "heygen-store.js"];
 const HEYGEN_AGENCY_FILES = ["agency-tenant-registry.js", "heygen-pilot-review.js", "heygen-result-lifecycle.js", "agency-backup.js"];
@@ -406,6 +410,36 @@ check("Q. lokaler Trockenlauf: neutraler Café-Pilotauftrag durchläuft DRAFT bi
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// V7.1 Phase C.1.1 – Reviewmodell-Skalierung belässt Health/Fixture unberührt.
+// ---------------------------------------------------------------------------
+
+check("C.1.1-15. Health unverändert (Reviewmodell-Module referenzieren Health nicht)", () => {
+  ["canva-pilot-result-record.js", "canva-pilot-store.js"].forEach((file) => {
+    const source = fs.readFileSync(path.join(__dirname, file), "utf8");
+    assert.ok(!source.includes("health-upgrade-kompass"));
+    assert.ok(!/395bf9e0/.test(source));
+  });
+});
+
+check("C.1.1-16. Fixture unverändert (Reviewmodell-Module referenzieren Fixture nicht)", () => {
+  ["canva-pilot-result-record.js", "canva-pilot-store.js"].forEach((file) => {
+    const source = fs.readFileSync(path.join(__dirname, file), "utf8");
+    assert.ok(!source.includes("execution-bridge-demo"));
+    assert.ok(!/e38c1985/.test(source));
+  });
+});
+
+check("C.1.1. Reviewmodell-Enums und Agenten-QS-Funktionen sind exportiert", () => {
+  const pilot = require("./canva-pilot-result-record");
+  assert.ok(pilot.CANVA_PILOT_REVIEW_MODES.includes("CUSTOMER_SELF_REVIEW"));
+  assert.ok(pilot.CANVA_PILOT_SERVICE_TIERS.includes("STANDARD"));
+  assert.ok(pilot.CANVA_PILOT_QUALITY_REVIEW_STATUSES.includes("AGENT_QA_PASSED"));
+  assert.strictEqual(typeof pilot.recordAgentQaResult, "function");
+  assert.strictEqual(typeof pilot.recordHumanReview, "function");
+  assert.strictEqual(typeof pilot.escalate, "function");
 });
 
 console.log(`canva-phase-c-integration.test.js: ${passed} Prüfpunkte erfolgreich`);
