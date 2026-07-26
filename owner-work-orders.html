@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Owner-Verwaltung – Arbeitsaufträge</title>
+<link rel="stylesheet" href="/portal.css" />
+</head>
+<body>
+<div class="portal-shell">
+  <header class="portal-header">
+    <span class="portal-brand">Owner-Verwaltung</span>
+    <button id="logout-button" class="portal-button portal-button--secondary" type="button" style="width:auto;">
+      Abmelden
+    </button>
+  </header>
+
+  <main>
+    <div id="owner-status-message" class="portal-status-message" role="status" aria-live="polite" data-tone=""></div>
+
+    <section class="portal-card portal-card--wide" id="work-order-list-section">
+      <h1 class="portal-title">Arbeitsaufträge – Betriebsübersicht</h1>
+      <p class="portal-lede">
+        Übersicht aller Arbeitsaufträge über alle Mandanten. Die Zentrale prüft und entscheidet Aufträge automatisch;
+        hier greifen Sie ausschließlich in Ausnahmefällen ein (Sicherheit, Missbrauch, rechtliche Sensibilität,
+        außergewöhnliche Kosten, technische Blockade oder explizite Eskalation).
+      </p>
+      <p id="work-order-empty-hint" class="portal-empty-hint" hidden>Es liegen noch keine Arbeitsaufträge vor.</p>
+      <table class="portal-table">
+        <thead>
+          <tr>
+            <th>Mandant</th>
+            <th>Titel</th>
+            <th>Ersteller</th>
+            <th>Status</th>
+            <th>Erstellt am</th>
+          </tr>
+        </thead>
+        <tbody id="work-order-table-body"></tbody>
+      </table>
+    </section>
+
+    <section class="portal-card portal-card--wide portal-section" id="work-order-detail-section" hidden>
+      <button type="button" class="portal-button portal-button--secondary" style="width:auto; margin-bottom:1.25rem;" id="work-order-detail-back">
+        ← Zurück zur Übersicht
+      </button>
+      <h2 class="portal-subtitle" id="work-order-detail-title">Arbeitsauftrag</h2>
+      <p><span class="portal-badge" id="work-order-detail-status"></span></p>
+      <ul class="portal-kv-list">
+        <li><span class="portal-kv-key">Mandant</span><span id="work-order-detail-tenant">–</span></li>
+        <li><span class="portal-kv-key">Ersteller</span><span id="work-order-detail-creator">–</span></li>
+        <li><span class="portal-kv-key">Gewünschtes Ergebnis</span><span id="work-order-detail-result">–</span></li>
+        <li><span class="portal-kv-key">Hintergrund</span><span id="work-order-detail-context">–</span></li>
+        <li><span class="portal-kv-key">Gewünschter Zeitpunkt</span><span id="work-order-detail-deadline">–</span></li>
+        <li><span class="portal-kv-key">Erstellt am</span><span id="work-order-detail-created">–</span></li>
+        <li><span class="portal-kv-key">Bisherige Notiz</span><span id="work-order-detail-note">–</span></li>
+      </ul>
+
+      <div class="portal-section" id="work-order-action-section">
+        <h3 class="portal-subtitle">Ausnahmeaktion</h3>
+        <p class="portal-lede">
+          Keine reguläre Freigabe oder Ablehnung: die Zentrale entscheidet Aufträge automatisch. Nutzen Sie diese
+          Aktionen ausschließlich für Sicherheits-, Missbrauchs-, Rechts-, Kosten- oder Betriebsausnahmen.
+        </p>
+        <form id="work-order-action-form" novalidate>
+          <div class="portal-field">
+            <label for="action-reason">Grund (intern, wird dem Kunden nicht wörtlich angezeigt)</label>
+            <textarea id="action-reason" name="reason" maxlength="4000" required></textarea>
+          </div>
+          <div class="portal-actions" style="margin-top:1rem;">
+            <button class="portal-button" type="submit" data-action="escalate" id="work-order-escalate-button">
+              Eskalieren
+            </button>
+            <button class="portal-button portal-button--secondary" type="submit" data-action="stop" id="work-order-stop-button">
+              Auftrag stoppen
+            </button>
+          </div>
+        </form>
+        <p id="work-order-action-hint" class="portal-empty-hint" hidden>
+          Dieser Auftrag ist abgeschlossen (storniert) und kann nicht mehr bearbeitet werden.
+        </p>
+      </div>
+    </section>
+  </main>
+</div>
+<script src="/owner-work-orders.js"></script>
+</body>
+</html>

@@ -47,12 +47,57 @@ const EVENT_TYPES = Object.freeze([
   "USER_REACTIVATED",
   "USER_SESSIONS_REVOKED",
   "PASSWORD_RESET_PREPARED",
+  // V7.2 Phase B Schritt 1 (Auftrag Abschnitt I) – Arbeitsauftrag anlegen,
+  // prüfen, Status verfolgen (work-order-service.js). Muss exakt der in
+  // auth-db-migrations.js#AUDIT_EVENT_TYPES (Migration 8) erweiterten
+  // CHECK-Aufzählung entsprechen.
+  //
+  // Produktkorrektur (Selbstbedienungs-Fluss): AUTO_READY/
+  // AUTO_NEEDS_CLARIFICATION markieren die automatische Systementscheidung
+  // (kein Owner-Akteur); ESCALATED/CANCELLED markieren die einzigen noch
+  // verbliebenen Owner-Aktionen, jeweils ausschließlich für Ausnahmefälle.
+  "WORK_ORDER_CREATED",
+  "WORK_ORDER_SUBMITTED",
+  "WORK_ORDER_RESUBMITTED",
+  "WORK_ORDER_AUTO_READY",
+  "WORK_ORDER_AUTO_NEEDS_CLARIFICATION",
+  "WORK_ORDER_ESCALATED",
+  "WORK_ORDER_CANCELLED",
+  "WORK_ORDER_TENANT_MISMATCH_BLOCKED",
+  // V7.2 Phase B – Schutz- und Einwilligungsgrundlage (Auftrag Abschnitt D)
+  // – Business-Use-/Safety-Gate (business-use-policy.js). Muss exakt der
+  // in auth-db-migrations.js#AUDIT_EVENT_TYPES (Migration 9) erweiterten
+  // CHECK-Aufzählung entsprechen. BLOCKED_BY_POLICY markiert einen nicht
+  // gespeicherten Auftrag (kein workOrderId in den Metadaten möglich, da
+  // keine Zeile existiert); AUTO_ESCALATED_BY_POLICY markiert die
+  // automatische Direkteinstufung als ESCALATED (kein Owner-Akteur).
+  "WORK_ORDER_BLOCKED_BY_POLICY",
+  "WORK_ORDER_AUTO_ESCALATED_BY_POLICY",
 ]);
 
 const RESULTS = Object.freeze(["OK", "DENIED", "ERROR"]);
 
 // Allowlist der einzig erlaubten Metadatenfelder.
-const METADATA_ALLOWLIST = Object.freeze(["routeName", "roleLabel", "reasonCode"]);
+//
+// V7.2 Phase B Schritt 1 (Auftrag Abschnitt I): "workOrderId" (interne ID,
+// kein Auftragstext) und "statusTransition" (z. B. "SUBMITTED->APPROVED",
+// ein reiner Statuscode, kein Freitext) ergänzt. Der vollständige
+// Auftragstext (Titel, gewünschtes Ergebnis, Hintergrund, Owner-Notiz)
+// bleibt bewusst außerhalb der Allowlist.
+//
+// V7.2 Phase B – Schutz- und Einwilligungsgrundlage: "severity" ergänzt
+// (einer von LOW/MEDIUM/HIGH/CRITICAL, reiner Schweregrad-Code aus
+// business-use-policy.js, kein Freitext) – "reasonCode" existierte bereits
+// und wird jetzt zusätzlich für Business-Use-Policy-Kategorien verwendet
+// (z. B. "ILLEGAL_PURPOSE"), niemals für den erkannten Auftragstext selbst.
+const METADATA_ALLOWLIST = Object.freeze([
+  "routeName",
+  "roleLabel",
+  "reasonCode",
+  "workOrderId",
+  "statusTransition",
+  "severity",
+]);
 
 // Verbotene Inhalte, unabhängig vom Feldnamen (Verteidigung in der Tiefe:
 // selbst innerhalb eines erlaubten Feldes darf kein sensibler Inhalt

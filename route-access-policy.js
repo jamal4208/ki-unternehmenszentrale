@@ -206,6 +206,23 @@ function staticAuthenticatedPortal(path, description) {
 function customerTenantGet(path, description) {
   return buildEntry("GET", exact(path), ACCESS_CLASSES.CUSTOMER_TENANT, { description });
 }
+// V7.2 Phase B Schritt 1 (Auftrag Abschnitt G) – erste Kundenfachroute mit
+// Schreibzugriff (Arbeitsauftrag anlegen). CUSTOMER_TENANT verlangt bereits
+// per CLASS_DEFAULTS tenantRequired:true (Guard prüft Body-/Query-
+// Tenantparameter gegen die Session, siehe auth-route-guard.js).
+function customerTenantPost(path, description) {
+  return buildEntry("POST", exact(path), ACCESS_CLASSES.CUSTOMER_TENANT, { description });
+}
+// Kunden-GET-Prefix mit dynamischem Pfadsegment (".../:id" – Einzelabruf
+// eines Arbeitsauftrags). Bleibt CUSTOMER_TENANT wie jede andere
+// Kundenroute.
+function customerTenantPrefix(path, description) {
+  return buildEntry("GET", prefix(path), ACCESS_CLASSES.CUSTOMER_TENANT, { description });
+}
+// Kunden-POST-Prefix mit dynamischem Pfadsegment (".../:id/resubmit").
+function customerTenantPostPrefix(path, description) {
+  return buildEntry("POST", prefix(path), ACCESS_CLASSES.CUSTOMER_TENANT, { description });
+}
 
 // ---------------------------------------------------------------------------
 // Kanonische Policy-Tabelle. Jede hier gelistete Route MUSS in server.js
@@ -295,6 +312,12 @@ const GET_POLICIES = [
   // V7.2 Phase A Schritt 3 (Auftrag Abschnitt I) – Kundenportal-API.
   customerTenantGet("/api/portal/me", "Kundenportal Konto-/Sitzungsinformation"),
   customerTenantGet("/api/portal/status", "Kundenportal Bereitschaftsstatus"),
+  // V7.2 Phase B Schritt 1 (Auftrag Abschnitt G) – erste echte
+  // Kundenfachfunktion: Arbeitsauftrag anlegen, prüfen, Status verfolgen.
+  // Produktkorrektur: die Owner-Liste ist eine reine Betriebsübersicht,
+  // kein Prüf-Posteingang (der OWNER ist kein Pflichtschritt).
+  customerTenantGet("/api/portal/work-orders", "Kundenportal Arbeitsauftragsliste (eigener Mandant)"),
+  ownerGet("/api/owner/work-orders", "Owner-Betriebsübersicht Arbeitsaufträge (mandantenübergreifend)"),
 ];
 
 const POST_POLICIES = [
@@ -365,6 +388,11 @@ const POST_POLICIES = [
     description: "Einladung annehmen",
     auditOnDeny: true,
   }),
+  // V7.2 Phase B Schritt 1 (Auftrag Abschnitt G) – Arbeitsauftrag anlegen.
+  // Produktkorrektur: die automatische Vollständigkeitsregel entscheidet
+  // innerhalb derselben Anfrage über READY_FOR_PROCESSING/
+  // NEEDS_CLARIFICATION – kein Owner dazwischen.
+  customerTenantPost("/api/portal/work-orders", "Kundenportal Arbeitsauftrag anlegen (automatische Vollständigkeitsprüfung)"),
 ];
 
 const PREFIX_POLICIES = [
@@ -385,6 +413,17 @@ const PREFIX_POLICIES = [
   // ".../:userId/reissue-invitation", ".../:userId/revoke-invitation",
   // ".../:userId/prepare-password-reset".
   ownerPostPrefix("/api/owner/users/", "Owner-Benutzeraktionen"),
+  // V7.2 Phase B Schritt 1 (Auftrag Abschnitt G) – Kunden-Einzelabruf
+  // (GET .../:id), erneute Einreichung (POST .../:id/resubmit) und
+  // Stornierung (POST .../:id/cancel) eines eigenen Arbeitsauftrags.
+  customerTenantPrefix("/api/portal/work-orders/", "Kundenportal Arbeitsauftrag-Einzelabruf"),
+  customerTenantPostPrefix("/api/portal/work-orders/", "Kundenportal Arbeitsauftrag erneut einreichen/stornieren"),
+  // Produktkorrektur: Owner-Einzelabruf (GET .../:id) bleibt reine
+  // Betriebsübersicht; POST-Aktionen sind AUSSCHLIESSLICH die beiden
+  // Ausnahmefälle (.../:id/escalate, .../:id/stop) – kein reguläres
+  // Freigeben/Ablehnen/Rückfrage-Anfordern mehr.
+  ownerPrefix("/api/owner/work-orders/", "Owner-Arbeitsauftrag-Einzelabruf"),
+  ownerPostPrefix("/api/owner/work-orders/", "Owner-Arbeitsauftrag-Ausnahmeaktion (Eskalation/Stopp)"),
 ];
 
 const STATIC_POLICIES = [
@@ -423,6 +462,23 @@ const STATIC_POLICIES = [
   // styles.css bleiben unverändert) – eigenständiges neues Asset.
   staticOwnerOnly("/owner/kunden", "Owner-Kunden-/Benutzerverwaltung"),
   staticOwnerOnly("/owner-admin.js", "Owner-Verwaltungs-UI-Skript"),
+  // V7.2 Phase B Schritt 1 (Auftrag Abschnitt D/L) – neue Kundenseite für
+  // die Auftragserstellung (eigene Seite, wie im Auftrag als Alternative
+  // vorgesehen). Die Auftragsdetailansicht (Auftrag: "/portal/auftrag/:id")
+  // wird dagegen bewusst als "klar abgegrenzter Bereich" auf /portal selbst
+  // umgesetzt (zweite, ebenfalls im Auftrag genannte Alternative) statt als
+  // eigene Route: das bestehende Static-Asset-Routing unterstützt
+  // ausschließlich exakte Pfade, keine dynamischen Pfadsegmente für HTML
+  // (keine Client-Routing-Bibliothek – Auftrag Leitprinzip "keine
+  // Frameworkmigration"). Siehe portal.html/portal-work-order.js.
+  staticAuthenticatedPortal("/portal/auftrag-neu", "Kundenportal neuen Arbeitsauftrag anlegen"),
+  staticAuthenticatedPortal("/portal-work-order.js", "Kundenportal Arbeitsauftrags-UI-Skript"),
+  // V7.2 Phase B Schritt 1 (Auftrag Abschnitt F/L) – neue, eigenständige
+  // Owner-Auftragsseite (kein Umbau von /owner/kunden). Produktkorrektur:
+  // reine Betriebsübersicht mit zwei Ausnahmeaktionen, keine reguläre
+  // fachliche Prüfung.
+  staticOwnerOnly("/owner/auftraege", "Owner-Arbeitsauftrags-Betriebsübersicht"),
+  staticOwnerOnly("/owner-work-orders.js", "Owner-Arbeitsauftrags-UI-Skript"),
 ];
 
 const ALL_POLICIES = Object.freeze([
@@ -521,6 +577,9 @@ module.exports = {
   staticPublic,
   staticAuthenticatedPortal,
   customerTenantGet,
+  customerTenantPost,
+  customerTenantPrefix,
+  customerTenantPostPrefix,
   policyKey,
   validatePolicyTable,
   resolvePolicyForRequest,

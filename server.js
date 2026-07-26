@@ -63,6 +63,7 @@ const authHttpRoutesModule = require("./auth-http-routes");
 // dieser Datei.
 const ownerAdminRoutesModule = require("./owner-admin-routes");
 const customerPortalRoutesModule = require("./customer-portal-routes");
+const workOrderRoutesModule = require("./work-order-routes");
 
 const rootDir = __dirname;
 const staticAssets = new Map([
@@ -97,6 +98,13 @@ const staticAssets = new Map([
   // Owner-Verwaltungsseite (kein Umbau der bestehenden Chef-Oberfläche).
   ["/owner/kunden", "owner-admin.html"],
   ["/owner-admin.js", "owner-admin.js"],
+  // V7.2 Phase B Schritt 1 (Auftrag Abschnitt D/F/L) – Arbeitsauftrag
+  // anlegen, prüfen, Status verfolgen. Die Auftragsdetailansicht ist
+  // bewusst kein eigener Pfad, siehe route-access-policy.js#STATIC_POLICIES.
+  ["/portal/auftrag-neu", "portal-work-order-new.html"],
+  ["/portal-work-order.js", "portal-work-order.js"],
+  ["/owner/auftraege", "owner-work-orders.html"],
+  ["/owner-work-orders.js", "owner-work-orders.js"],
 ]);
 
 loadLocalEnv();
@@ -23564,6 +23572,10 @@ const getRoutes = buildRouteMap([
   // V7.2 Phase A Schritt 3 (Auftrag Abschnitt I) – Kundenportal-API.
   ["/api/portal/me", (res, context) => customerPortalRoutesModule.handleGetPortalMe(res, context, authRouteDeps())],
   ["/api/portal/status", (res, context) => customerPortalRoutesModule.handleGetPortalStatus(res, context, authRouteDeps())],
+  // V7.2 Phase B Schritt 1 (Auftrag Abschnitt G) – Arbeitsauftrag anlegen,
+  // prüfen, Status verfolgen.
+  ["/api/portal/work-orders", (res, context) => workOrderRoutesModule.handlePortalWorkOrdersList(res, context, authRouteDeps())],
+  ["/api/owner/work-orders", (res, context) => workOrderRoutesModule.handleOwnerWorkOrdersList(res, context, authRouteDeps())],
 ]);
 
 const postRoutes = buildRouteMap([
@@ -23632,6 +23644,8 @@ const postRoutes = buildRouteMap([
   ["/api/auth/password-reset/request", (res, context) => authHttpRoutesModule.handleAuthPasswordResetRequest(res, context, authRouteDeps())],
   ["/api/auth/password-reset/confirm", (res, context) => authHttpRoutesModule.handleAuthPasswordResetConfirm(res, context, authRouteDeps())],
   ["/api/auth/invitation/accept", (res, context) => authHttpRoutesModule.handleAuthInvitationAccept(res, context, authRouteDeps())],
+  // V7.2 Phase B Schritt 1 (Auftrag Abschnitt G) – Arbeitsauftrag anlegen.
+  ["/api/portal/work-orders", (res, context) => workOrderRoutesModule.handlePortalWorkOrderCreate(res, context, authRouteDeps())],
 ]);
 
 // V7.2 Phase A Schritt 2 (Auftrag Abschnitt N) – als benannte Konstante
@@ -23707,6 +23721,24 @@ const routePrefixHandlers = [
         ownerAdminRoutesModule.dispatchOwnerTenantsGetPrefix(res, context, authRouteDeps(), remainder);
       },
     },
+    {
+      // V7.2 Phase B Schritt 1 (Auftrag Abschnitt G) – Kunden-Einzelabruf
+      // eines eigenen Arbeitsauftrags (GET .../:id).
+      prefix: "/api/portal/work-orders/",
+      handler: (res, context) => {
+        const remainder = decodeURIComponent(context.pathname.slice("/api/portal/work-orders/".length));
+        workOrderRoutesModule.dispatchPortalWorkOrdersGetPrefix(res, context, authRouteDeps(), remainder);
+      },
+    },
+    {
+      // V7.2 Phase B Schritt 1 (Auftrag Abschnitt F) – Owner-Einzelabruf
+      // eines Arbeitsauftrags (GET .../:id).
+      prefix: "/api/owner/work-orders/",
+      handler: (res, context) => {
+        const remainder = decodeURIComponent(context.pathname.slice("/api/owner/work-orders/".length));
+        workOrderRoutesModule.dispatchOwnerWorkOrdersGetPrefix(res, context, authRouteDeps(), remainder);
+      },
+    },
   ];
 
 // V7.2 Phase A Schritt 3 (Auftrag Abschnitt H) – POST-Prefix-Handler für
@@ -23728,6 +23760,24 @@ const postRoutePrefixHandlers = [
     handler: (res, context) => {
       const remainder = decodeURIComponent(context.pathname.slice("/api/owner/users/".length));
       ownerAdminRoutesModule.dispatchOwnerUsersPostPrefix(res, context, authRouteDeps(), remainder);
+    },
+  },
+  {
+    // V7.2 Phase B Schritt 1 (Auftrag Abschnitt G) – Kunde reicht einen
+    // Auftrag mit Status NEEDS_CLARIFICATION erneut ein (POST .../:id/resubmit).
+    prefix: "/api/portal/work-orders/",
+    handler: (res, context) => {
+      const remainder = decodeURIComponent(context.pathname.slice("/api/portal/work-orders/".length));
+      workOrderRoutesModule.dispatchPortalWorkOrdersPostPrefix(res, context, authRouteDeps(), remainder);
+    },
+  },
+  {
+    // V7.2 Phase B Schritt 1 (Auftrag Abschnitt F) – Owner-Prüfentscheidung
+    // (POST .../:id/request-clarification, .../:id/approve, .../:id/reject).
+    prefix: "/api/owner/work-orders/",
+    handler: (res, context) => {
+      const remainder = decodeURIComponent(context.pathname.slice("/api/owner/work-orders/".length));
+      workOrderRoutesModule.dispatchOwnerWorkOrdersPostPrefix(res, context, authRouteDeps(), remainder);
     },
   },
 ];

@@ -34,9 +34,62 @@
       </ul>
     </section>
 
-    <section class="portal-card portal-section">
-      <h2 class="portal-subtitle">Bereich Arbeitsaufträge</h2>
+    <section class="portal-card portal-section" id="work-order-list-section">
+      <h2 class="portal-subtitle">Arbeitsaufträge</h2>
       <p id="portal-status-text" class="portal-lede">Wird geladen…</p>
+      <a class="portal-button" style="width:auto; text-decoration:none; display:inline-flex; margin-bottom:1.5rem;" href="/portal/auftrag-neu">
+        Neuen Arbeitsauftrag anlegen
+      </a>
+      <h3 class="portal-subtitle">Meine Arbeitsaufträge</h3>
+      <p id="work-order-empty-hint" class="portal-empty-hint" hidden>Sie haben noch keinen Arbeitsauftrag angelegt.</p>
+      <ul class="portal-list" id="work-order-list"></ul>
+    </section>
+
+    <section class="portal-card portal-section" id="work-order-detail-section" hidden>
+      <button type="button" class="portal-button portal-button--secondary" style="width:auto; margin-bottom:1.25rem;" id="work-order-detail-back">
+        ← Zurück zur Liste
+      </button>
+      <h2 class="portal-subtitle" id="work-order-detail-title">Arbeitsauftrag</h2>
+      <p><span class="portal-badge" id="work-order-detail-status"></span></p>
+      <ul class="portal-kv-list">
+        <li><span class="portal-kv-key">Gewünschtes Ergebnis</span><span id="work-order-detail-result">–</span></li>
+        <li><span class="portal-kv-key">Hintergrund</span><span id="work-order-detail-context">–</span></li>
+        <li><span class="portal-kv-key">Gewünschter Zeitpunkt</span><span id="work-order-detail-deadline">–</span></li>
+        <li><span class="portal-kv-key">Angelegt am</span><span id="work-order-detail-created">–</span></li>
+      </ul>
+      <div id="work-order-detail-note" hidden>
+        <h3 class="portal-subtitle">Rückmeldung der Zentrale</h3>
+        <p class="portal-lede" id="work-order-detail-note-text"></p>
+      </div>
+
+      <div class="portal-section" id="work-order-resubmit-section" hidden>
+        <h3 class="portal-subtitle">Auftrag ergänzen und erneut absenden</h3>
+        <form id="work-order-resubmit-form" novalidate>
+          <div class="portal-field">
+            <label for="resubmit-title">Titel</label>
+            <input id="resubmit-title" name="title" type="text" maxlength="200" required />
+          </div>
+          <div class="portal-field">
+            <label for="resubmit-desired-result">Gewünschtes Ergebnis</label>
+            <textarea id="resubmit-desired-result" name="desiredResult" maxlength="4000" required></textarea>
+          </div>
+          <div class="portal-field">
+            <label for="resubmit-context">Hintergrund / wichtige Informationen</label>
+            <textarea id="resubmit-context" name="context" maxlength="4000"></textarea>
+          </div>
+          <div class="portal-field">
+            <label for="resubmit-deadline">Gewünschter Zeitpunkt</label>
+            <input id="resubmit-deadline" name="deadlineText" type="text" maxlength="200" />
+          </div>
+          <button class="portal-button" type="submit" style="width:auto;">Erneut absenden</button>
+        </form>
+      </div>
+
+      <div class="portal-section" id="work-order-cancel-section" hidden>
+        <button type="button" class="portal-button portal-button--secondary" style="width:auto;" id="work-order-cancel-button">
+          Auftrag stornieren
+        </button>
+      </div>
     </section>
   </main>
 </div>

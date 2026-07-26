@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Kundenportal – Neuen Arbeitsauftrag anlegen</title>
+<link rel="stylesheet" href="/portal.css" />
+</head>
+<body>
+<div class="portal-shell">
+  <header class="portal-header">
+    <span class="portal-brand">Kundenportal</span>
+    <button id="logout-button" class="portal-button portal-button--secondary" type="button" style="width:auto;">
+      Abmelden
+    </button>
+  </header>
+
+  <main>
+    <div id="portal-status-message" class="portal-status-message" role="status" aria-live="polite" data-tone=""></div>
+
+    <section class="portal-card">
+      <h1 class="portal-title">Neuen Arbeitsauftrag anlegen</h1>
+      <p class="portal-lede">
+        Beschreiben Sie kurz, was Sie erreichen möchten. Die Zentrale prüft Ihre Angaben automatisch; bei Rückfragen
+        zeigen wir Ihnen das direkt im Portal an.
+      </p>
+      <form id="work-order-form" novalidate>
+        <div class="portal-field">
+          <label for="wo-title">Titel</label>
+          <input id="wo-title" name="title" type="text" maxlength="200" required />
+        </div>
+        <div class="portal-field">
+          <label for="wo-desired-result">Gewünschtes Ergebnis</label>
+          <textarea id="wo-desired-result" name="desiredResult" maxlength="4000" required></textarea>
+        </div>
+        <div class="portal-field">
+          <label for="wo-context">Hintergrund / wichtige Informationen (optional)</label>
+          <textarea id="wo-context" name="context" maxlength="4000"></textarea>
+        </div>
+        <div class="portal-field">
+          <label for="wo-deadline">Gewünschter Zeitpunkt (optional)</label>
+          <input id="wo-deadline" name="deadlineText" type="text" maxlength="200" />
+        </div>
+        <button class="portal-button" type="submit">Arbeitsauftrag absenden</button>
+      </form>
+      <div class="portal-links">
+        <a class="portal-link" href="/portal">Zurück zum Portal</a>
+      </div>
+    </section>
+  </main>
+</div>
+<script src="/portal-work-order.js"></script>
+</body>
+</html>

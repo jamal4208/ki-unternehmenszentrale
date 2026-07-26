@@ -518,6 +518,189 @@ function listAuditEvents(db, filter = {}) {
   return db.prepare(sql).all(...params);
 }
 
+// ---------------------------------------------------------------------------
+// Work-Order-Funktionen (V7.2 Phase B Schritt 1, Auftrag Abschnitt C/H).
+// Jede statusverändernde Funktion prüft den aktuellen Ausgangsstatus als
+// Teil der WHERE-Klausel (atomares "compare-and-set", gleiches Muster wie
+// consumeResetToken oben) – eine zweite, datenbanknahe Verteidigungslinie
+// zusätzlich zur fachlichen Prüfung in work-order-service.js. Für die
+// Kundenfunktionen (resubmitWorkOrder/transitionWorkOrder mit tenantId)
+// wird zusätzlich tenantId in der WHERE-Klausel erzwungen, damit selbst ein
+// Fehler in der aufrufenden Serviceschicht keinen mandantenübergreifenden
+// Schreibzugriff erlauben kann.
+//
+// Produktkorrektur (Selbstbedienungs-Fluss, siehe
+// work-order-service.js#Kopfkommentar): ownerNote/reviewedAt/
+// reviewedByUserId wurden zu statusNote/decidedAt/decidedByUserId, weil der
+// OWNER keine reguläre fachliche Prüfinstanz mehr ist (siehe Migration 8 in
+// auth-db-migrations.js für die Spaltenumbenennung). Die frühere Funktion
+// reviewWorkOrder(expectedStatus) wich einer allgemeineren
+// transitionWorkOrder(fromStatuses) – dieselbe compare-and-set-Technik,
+// aber mit einer Liste erlaubter Ausgangsstatus (z. B. Owner-Eskalation aus
+// SUBMITTED, NEEDS_CLARIFICATION ODER READY_FOR_PROCESSING).
+// ---------------------------------------------------------------------------
+
+function createWorkOrder(db, input = {}) {
+  const now = input.now || nowIso();
+  const record = {
+    id: input.id || crypto.randomUUID(),
+    tenantId: input.tenantId,
+    createdByUserId: input.createdByUserId,
+    title: input.title,
+    desiredResult: input.desiredResult,
+    context: input.context ?? null,
+    deadlineText: input.deadlineText ?? null,
+    status: input.status || "SUBMITTED",
+    statusNote: input.statusNote ?? null,
+    createdAt: now,
+    updatedAt: now,
+    submittedAt: input.submittedAt ?? now,
+    // Die automatische Vollständigkeitsregel (work-order-service.js) trifft
+    // ihre Entscheidung synchron innerhalb derselben Anfrage – decidedAt
+    // markiert diesen Zeitpunkt, decidedByUserId bleibt NULL, weil es sich
+    // um eine Systementscheidung und keine Owner-Handlung handelt.
+    decidedAt: input.decidedAt ?? null,
+    decidedByUserId: null,
+  };
+  db.prepare(
+    `INSERT INTO work_orders
+      (id, tenantId, createdByUserId, title, desiredResult, context, deadlineText, status, statusNote, createdAt, updatedAt, submittedAt, decidedAt, decidedByUserId)
+     VALUES
+      (@id, @tenantId, @createdByUserId, @title, @desiredResult, @context, @deadlineText, @status, @statusNote, @createdAt, @updatedAt, @submittedAt, @decidedAt, @decidedByUserId)`,
+  ).run(record);
+  return getWorkOrderById(db, record.id);
+}
+
+function getWorkOrderById(db, id) {
+  return db.prepare("SELECT * FROM work_orders WHERE id = ?").get(id) || null;
+}
+
+// Nur für die Kundenfunktion gedacht: Aufrufer MUSS zusätzlich prüfen, dass
+// tenantId zur Session passt (siehe work-order-service.js) – diese Funktion
+// selbst filtert bewusst nicht nach Tenant, damit sie auch für die
+// Owner-Ansicht (mandantenübergreifend, aber pro Datensatz mit tenantId im
+// Ergebnis) wiederverwendbar bleibt.
+function listWorkOrdersByTenantId(db, tenantId) {
+  return db.prepare("SELECT * FROM work_orders WHERE tenantId = ? ORDER BY createdAt DESC").all(tenantId);
+}
+
+function listAllWorkOrders(db) {
+  return db.prepare("SELECT * FROM work_orders ORDER BY createdAt DESC").all();
+}
+
+// Kundenseitige erneute Einreichung (NEEDS_CLARIFICATION -> SUBMITTED,
+// Auftrag Abschnitt C/E). tenantId UND der erwartete Ausgangsstatus sind
+// Teil der WHERE-Klausel; info.changes !== 1 bedeutet fremder Tenant,
+// unbekannte ID oder ein zwischenzeitlich bereits geänderter Status
+// (Race Condition) und wird vom Aufrufer als Konflikt/404 behandelt. Der
+// tatsächliche Zielstatus (READY_FOR_PROCESSING oder erneut
+// NEEDS_CLARIFICATION) kommt von der automatischen Vollständigkeitsregel
+// in work-order-service.js und wird hier als input.status durchgereicht –
+// diese Funktion selbst trifft keine fachliche Entscheidung.
+function resubmitWorkOrder(db, id, tenantId, expectedStatus, input = {}) {
+  const ts = input.now || nowIso();
+  const info = db
+    .prepare(
+      `UPDATE work_orders
+       SET title = ?, desiredResult = ?, context = ?, deadlineText = ?, status = ?, statusNote = ?, submittedAt = ?, decidedAt = ?, decidedByUserId = NULL, updatedAt = ?
+       WHERE id = ? AND tenantId = ? AND status = ?`,
+    )
+    .run(
+      input.title,
+      input.desiredResult,
+      input.context ?? null,
+      input.deadlineText ?? null,
+      input.status,
+      input.statusNote ?? null,
+      ts,
+      ts,
+      ts,
+      id,
+      tenantId,
+      expectedStatus,
+    );
+  if (info.changes !== 1) return null;
+  return getWorkOrderById(db, id);
+}
+
+// Allgemeiner Statusübergang für automatische Systementscheidungen
+// (SUBMITTED -> READY_FOR_PROCESSING|NEEDS_CLARIFICATION, kein Akteur) UND
+// für die beiden verbliebenen Owner-Ausnahmeaktionen (-> ESCALATED,
+// -> CANCELLED). fromStatuses ist eine Liste erlaubter Ausgangsstatus;
+// info.changes !== 1 bedeutet unbekannte ID oder einen bereits
+// abweichenden/terminalen Status (Race Condition), vom Aufrufer als
+// Konflikt/404 behandelt. tenantId ist optional und wird nur von
+// Kundenaktionen (Kunden-Cancel) zusätzlich erzwungen.
+function transitionWorkOrder(db, id, options = {}) {
+  const { tenantId = null, fromStatuses, toStatus, statusNote = null, decidedByUserId = null, now } = options;
+  const ts = now || nowIso();
+  const statuses = Array.isArray(fromStatuses) ? fromStatuses : [fromStatuses];
+  if (statuses.length === 0) return null;
+  const placeholders = statuses.map(() => "?").join(", ");
+  const params = [toStatus, statusNote, ts, decidedByUserId, ts, id];
+  let sql = `UPDATE work_orders
+       SET status = ?, statusNote = ?, decidedAt = ?, decidedByUserId = ?, updatedAt = ?
+       WHERE id = ? AND status IN (${placeholders})`;
+  params.push(...statuses);
+  if (tenantId) {
+    sql += " AND tenantId = ?";
+    params.push(tenantId);
+  }
+  const info = db.prepare(sql).run(...params);
+  if (info.changes !== 1) return null;
+  return getWorkOrderById(db, id);
+}
+
+// ---------------------------------------------------------------------------
+// Verstoß-/Eskalationsprotokoll (V7.2 Phase B – Schutz- und
+// Einwilligungsgrundlage, Migration 9, siehe SAFETY_ENFORCEMENT_MODEL.md).
+// policy_violations ist append-only (SQLite-Trigger, gleiches Muster wie
+// auth_audit_events) – dieses Modul exportiert bewusst keine Update-/
+// Delete-Funktion dafür. Speichert NIEMALS den vollständigen Auftragstext,
+// nur reasonCode (Kategorie)/severity/actionTaken.
+// ---------------------------------------------------------------------------
+
+function recordPolicyViolation(db, input = {}) {
+  const record = {
+    id: input.id || crypto.randomUUID(),
+    tenantId: input.tenantId,
+    userId: input.userId,
+    workOrderId: input.workOrderId ?? null,
+    reasonCode: input.reasonCode,
+    severity: input.severity,
+    actionTaken: input.actionTaken,
+    createdAt: input.now || nowIso(),
+  };
+  db.prepare(
+    `INSERT INTO policy_violations
+      (id, tenantId, userId, workOrderId, reasonCode, severity, actionTaken, createdAt)
+     VALUES
+      (@id, @tenantId, @userId, @workOrderId, @reasonCode, @severity, @actionTaken, @createdAt)`,
+  ).run(record);
+  return record;
+}
+
+function listPolicyViolationsForTenant(db, tenantId) {
+  return db.prepare("SELECT * FROM policy_violations WHERE tenantId = ? ORDER BY createdAt DESC").all(tenantId);
+}
+
+function listPolicyViolationsForUser(db, userId) {
+  return db.prepare("SELECT * FROM policy_violations WHERE userId = ? ORDER BY createdAt DESC").all(userId);
+}
+
+// Reine Zählung – die "technische Grundlage für eskalierende Maßnahmen"
+// (Auftrag Abschnitt D). Löst in diesem Schritt selbst KEINE zusätzliche
+// automatische Aktion aus (siehe SAFETY_ENFORCEMENT_MODEL.md, Abschnitt 5).
+function countPolicyViolationsForUser(db, userId) {
+  const row = db.prepare("SELECT COUNT(*) AS total FROM policy_violations WHERE userId = ?").get(userId);
+  return row ? row.total : 0;
+}
+
+function countPolicyViolationsForTenant(db, tenantId) {
+  const row = db.prepare("SELECT COUNT(*) AS total FROM policy_violations WHERE tenantId = ?").get(tenantId);
+  return row ? row.total : 0;
+}
+
 module.exports = {
   AuthDatabaseStartupError,
   resolveAuthDbPaths,
@@ -564,4 +747,17 @@ module.exports = {
   insertAuditEvent,
   getAuditEventById,
   listAuditEvents,
+  // Work-Orders
+  createWorkOrder,
+  getWorkOrderById,
+  listWorkOrdersByTenantId,
+  listAllWorkOrders,
+  resubmitWorkOrder,
+  transitionWorkOrder,
+  // Policy-Verstöße
+  recordPolicyViolation,
+  listPolicyViolationsForTenant,
+  listPolicyViolationsForUser,
+  countPolicyViolationsForUser,
+  countPolicyViolationsForTenant,
 };

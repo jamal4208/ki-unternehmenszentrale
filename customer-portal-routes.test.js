@@ -279,9 +279,11 @@ async function run() {
   });
 
   // -------------------------------------------------------------------
-  // 8. /api/portal/status: statischer, ehrlicher Bereitschaftsstatus
-  //    (Auftrag Ziel 7: keine Fachaufträge, keine Veröffentlichung, kein
-  //    Billing in Phase A Schritt 3).
+  // 8. /api/portal/status: statischer, ehrlicher Bereitschaftsstatus.
+  //    V7.2 Phase B Schritt 1 (Auftrag Abschnitt D/O) schaltet erstmals
+  //    Arbeitsaufträge frei (anlegen, prüfen, Status verfolgen);
+  //    Veröffentlichung und Billing bleiben weiterhin bewusst deaktiviert
+  //    (Auftrag Ziel 10).
   // -------------------------------------------------------------------
 
   const statusResult = record(
@@ -291,7 +293,7 @@ async function run() {
     assert.strictEqual(statusResult.statusCode, 200);
     assert.strictEqual(statusResult.json.ok, true);
     assert.strictEqual(statusResult.json.portalReady, true);
-    assert.strictEqual(statusResult.json.workOrdersEnabled, false);
+    assert.strictEqual(statusResult.json.workOrdersEnabled, true);
     assert.strictEqual(statusResult.json.publicationEnabled, false);
     assert.strictEqual(statusResult.json.billingEnabled, false);
     assert.strictEqual(typeof statusResult.json.statusMessage, "string");

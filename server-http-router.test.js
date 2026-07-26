@@ -343,16 +343,16 @@ async function runTests() {
   const serverSource = fs.readFileSync(path.join(__dirname, "server.js"), "utf8");
   const getRouteBlockMatch = serverSource.match(/const getRoutes = buildRouteMap\(\[([\s\S]*?)\n\]\);/);
   const routeCount = getRouteBlockMatch ? (getRouteBlockMatch[1].match(/^\s+\["\/api\//gm) || []).length : 0;
-  check("bestehende 68 GET-Routen bleiben registriert (Phase C: +2 GET Execution-Status/-Ergebnis, Phase D: +1 GET Executor-Registry, Phase E: +1 GET Freeze-Status, V7.1 Phase A: +5 GET Dokumente/Tools/Plugin-Gateway/Tool-Routing/Backup-Export, V7.1 Phase B: +3 GET HeyGen-Status/Jobpakete/Backup-Export, V7.1 Phase B.1: +5 GET Agentur-Mandantenbasis/Pilot-Review/Backup-Export, V7.1 Phase C: +3 GET Canva-Status/Jobpakete/Backup-Export, V7.1 Phase C.1: +1 GET Pilot-Ergebnisakten-Liste, V7.2 Phase A Schritt 2: +1 GET Auth-Sessionstatus, V7.2 Phase A Schritt 3: +3 GET Owner-Mandantenliste/Kundenportal-Konto/-Status)", () =>
-    assert.strictEqual(routeCount, 68),
+  check("bestehende 70 GET-Routen bleiben registriert (Phase C: +2 GET Execution-Status/-Ergebnis, Phase D: +1 GET Executor-Registry, Phase E: +1 GET Freeze-Status, V7.1 Phase A: +5 GET Dokumente/Tools/Plugin-Gateway/Tool-Routing/Backup-Export, V7.1 Phase B: +3 GET HeyGen-Status/Jobpakete/Backup-Export, V7.1 Phase B.1: +5 GET Agentur-Mandantenbasis/Pilot-Review/Backup-Export, V7.1 Phase C: +3 GET Canva-Status/Jobpakete/Backup-Export, V7.1 Phase C.1: +1 GET Pilot-Ergebnisakten-Liste, V7.2 Phase A Schritt 2: +1 GET Auth-Sessionstatus, V7.2 Phase A Schritt 3: +3 GET Owner-Mandantenliste/Kundenportal-Konto/-Status, V7.2 Phase B Schritt 1: +2 GET Kundenportal-/Owner-Arbeitsauftragsliste)", () =>
+    assert.strictEqual(routeCount, 70),
   );
 
   const postRouteBlockMatch = serverSource.match(/const postRoutes = buildRouteMap\(\[([\s\S]*?)\]\);/);
   const postRouteCount = postRouteBlockMatch
     ? (postRouteBlockMatch[1].match(/^\s+\["\/api\//gm) || []).length
     : 0;
-  check("genau 51 additive POST-Routen sind registriert (Execution Bridge + V7.1 Phase A Dokumente/Backup + V7.1 Phase B HeyGen-Connector-Pilot + V7.1 Phase B.1 Kundenentwurf/Kostenpaket/Ergebnisrückführung/Agentur-Backup + V7.1 Phase C Canva-Connector-Pilot + V7.1 Phase C.1: +5 POST interne Prüfung/Kundenfeedback/Änderungsanforderung/Änderung erledigt/Kundenfreigabe der Pilot-Ergebnisakte + V7.1 Phase C.1.1: +3 POST Agenten-QS/menschliches Review/Eskalation + V7.2 Phase A Schritt 2: +5 POST Auth-Login/Logout/Reset-Anfrage/Reset-Bestätigung/Einladung)", () =>
-    assert.strictEqual(postRouteCount, 51),
+  check("genau 52 additive POST-Routen sind registriert (Execution Bridge + V7.1 Phase A Dokumente/Backup + V7.1 Phase B HeyGen-Connector-Pilot + V7.1 Phase B.1 Kundenentwurf/Kostenpaket/Ergebnisrückführung/Agentur-Backup + V7.1 Phase C Canva-Connector-Pilot + V7.1 Phase C.1: +5 POST interne Prüfung/Kundenfeedback/Änderungsanforderung/Änderung erledigt/Kundenfreigabe der Pilot-Ergebnisakte + V7.1 Phase C.1.1: +3 POST Agenten-QS/menschliches Review/Eskalation + V7.2 Phase A Schritt 2: +5 POST Auth-Login/Logout/Reset-Anfrage/Reset-Bestätigung/Einladung + V7.2 Phase B Schritt 1: +1 POST Arbeitsauftrag anlegen)", () =>
+    assert.strictEqual(postRouteCount, 52),
   );
 
   const serverStatusGet = await invokeJson(requestHandler, "GET", "/api/server-status");

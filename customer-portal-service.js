@@ -39,15 +39,18 @@ function getMe(db, identity) {
 }
 
 // GET /api/portal/status – Auftrag Abschnitt I: statischer, ehrlicher
-// Bereitschaftsstatus. In Phase A Schritt 3 sind Fachaufträge, Veröffent-
-// lichung und Billing bewusst noch nicht verfügbar (Auftrag Ziel 7).
+// Bereitschaftsstatus. V7.2 Phase B Schritt 1 (Auftrag Abschnitt D/O)
+// schaltet erstmals Arbeitsaufträge frei (anlegen, prüfen, Status
+// verfolgen) – Veröffentlichung und Billing bleiben weiterhin bewusst
+// nicht verfügbar (Auftrag Ziel 10: "kein Agentenlauf, kein Canva, kein
+// HeyGen, keine Veröffentlichung").
 function getStatus() {
   return {
     portalReady: true,
-    workOrdersEnabled: false,
+    workOrdersEnabled: true,
     publicationEnabled: false,
     billingEnabled: false,
-    statusMessage: "Ihr Kundenbereich ist eingerichtet. Aktuell sind noch keine Arbeitsaufträge freigeschaltet.",
+    statusMessage: "Sie können jetzt Arbeitsaufträge anlegen und deren Status verfolgen.",
   };
 }
 
