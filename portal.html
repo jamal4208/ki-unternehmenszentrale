@@ -62,10 +62,10 @@
         <p class="portal-lede" id="work-order-detail-note-text"></p>
       </div>
 
-      <!-- V7.2 Phase C Schritt 1 (Auftrag Abschnitt L): Ergebnisdarstellung
-           bei Status RESULT_READY. Bewusst ohne Freigabe-/Änderungsfunktion
-           und ohne Veröffentlichungs-/Billing-/Providerhinweis – diese
-           folgen laut Hinweistext erst in einem späteren Schritt. -->
+      <!-- V7.2 Phase C Schritt 1+2 (Auftrag Abschnitt L/M): Ergebnisdarstellung
+           bei Status RESULT_READY/CHANGES_REQUESTED/CUSTOMER_APPROVED, seit
+           Schritt 2 inklusive Änderungswunsch, Freigabe und Versionsansicht.
+           Weiterhin ohne Veröffentlichungs-/Billing-/Providerhinweis. -->
       <div class="portal-section" id="work-order-result-section" hidden aria-live="polite">
         <h3 class="portal-subtitle">Ergebnis</h3>
         <ul class="portal-kv-list">
@@ -86,6 +86,51 @@
         </div>
         <p class="portal-empty-hint" id="work-order-result-disclaimer">–</p>
         <p class="portal-lede" id="work-order-result-next-step">–</p>
+      </div>
+
+      <!-- V7.2 Phase C Schritt 2 (Auftrag Abschnitt E/M): Änderungswunsch
+           stellen und Ergebnis freigeben – ausschließlich sichtbar/nutzbar
+           bei RESULT_READY (siehe portal-ui.js#renderWorkOrderDetail). Zwei
+           getrennte, eindeutige Hauptaktionen statt einer mehrdeutigen. -->
+      <div class="portal-section" id="work-order-change-request-section" hidden>
+        <h3 class="portal-subtitle">Änderung anfordern</h3>
+        <p class="portal-lede">Passt das Ergebnis noch nicht? Beschreiben Sie, was geändert werden soll.</p>
+        <form id="work-order-change-request-form" novalidate>
+          <div class="portal-field">
+            <label for="change-request-text">Was soll geändert werden?</label>
+            <textarea id="change-request-text" name="requestText" maxlength="2000" required></textarea>
+          </div>
+          <div class="portal-field">
+            <label for="change-request-preserve">Was soll unbedingt erhalten bleiben? (optional)</label>
+            <textarea id="change-request-preserve" name="preserveText" maxlength="1000"></textarea>
+          </div>
+          <div class="portal-field">
+            <label for="change-request-important">Was ist Ihnen besonders wichtig? (optional)</label>
+            <textarea id="change-request-important" name="importantNote" maxlength="500"></textarea>
+          </div>
+          <button class="portal-button" type="submit" style="width:auto;">Änderung anfordern</button>
+        </form>
+      </div>
+
+      <div class="portal-section" id="work-order-approve-section" hidden>
+        <h3 class="portal-subtitle">Ergebnis freigeben</h3>
+        <p class="portal-lede">Wenn das Ergebnis Ihren Erwartungen entspricht, können Sie es hier freigeben.</p>
+        <form id="work-order-approve-form" novalidate>
+          <div class="portal-field">
+            <label for="approve-note">Notiz zur Freigabe (optional)</label>
+            <textarea id="approve-note" name="approvalNote" maxlength="1000"></textarea>
+          </div>
+          <button class="portal-button" type="submit" style="width:auto;">Ergebnis freigeben</button>
+        </form>
+      </div>
+
+      <!-- V7.2 Phase C Schritt 2 (Auftrag Abschnitt H): read-only
+           Versionsansicht, sobald mindestens eine Ergebnisversion existiert
+           (also unabhängig vom aktuellen Auftragsstatus). -->
+      <div class="portal-section" id="work-order-versions-section" hidden aria-live="polite">
+        <h3 class="portal-subtitle">Frühere Ergebnisversionen</h3>
+        <p class="portal-empty-hint" id="work-order-versions-empty-hint" hidden>Es gibt noch keine weiteren Ergebnisversionen.</p>
+        <ul class="portal-list" id="work-order-versions-list"></ul>
       </div>
 
       <div class="portal-section" id="work-order-resubmit-section" hidden>

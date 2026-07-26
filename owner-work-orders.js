@@ -91,6 +91,16 @@
     QUALITY: "Qualitätsprüfung",
   };
 
+  // V7.2 Phase C Schritt 2 (Auftrag Abschnitt N): dieselbe Übersetzungslogik
+  // wie RUN_STATUS_LABELS oben – work-order-change-service.js liefert
+  // bewusst die rohen, stabilen Enum-Werte.
+  var CHANGE_REQUEST_STATUS_LABELS = {
+    SUBMITTED: "Eingereicht",
+    IN_PROGRESS: "Wird bearbeitet",
+    COMPLETED: "Abgeschlossen",
+    CANCELLED: "Abgebrochen",
+  };
+
   function el(tag, props, children) {
     var node = document.createElement(tag);
     if (props) {
@@ -178,6 +188,77 @@
     // (rein technischer Start, keine fachliche Prüfung durch den Owner).
     document.getElementById("work-order-run-start-block").hidden = workOrder.status !== "READY_FOR_PROCESSING";
     loadWorkOrderRuns(workOrder.id);
+    loadWorkOrderChangeRequests(workOrder.id);
+    loadWorkOrderResultVersions(workOrder.id);
+  }
+
+  // ---------------------------------------------------------------------
+  // Änderungswünsche und Ergebnisversionen/Kundenfreigabe (V7.2 Phase C
+  // Schritt 2, Auftrag Abschnitt N). Ausschließlich Lesen, keine Aktion –
+  // es gibt in diesem Abschnitt bewusst keinen Button/kein Formular.
+  // ---------------------------------------------------------------------
+
+  function renderWorkOrderChangeRequests(changeRequests) {
+    var list = document.getElementById("work-order-change-requests-list");
+    var emptyHint = document.getElementById("work-order-change-requests-empty-hint");
+    list.innerHTML = "";
+    if (!changeRequests || !changeRequests.length) {
+      emptyHint.hidden = false;
+      return;
+    }
+    emptyHint.hidden = true;
+    changeRequests.forEach(function (changeRequest) {
+      var statusLabel = CHANGE_REQUEST_STATUS_LABELS[changeRequest.status] || changeRequest.status;
+      var statusBadge = el("span", { class: "portal-badge", "data-status": changeRequest.status, text: statusLabel }, []);
+      var item = el("li", {}, [
+        el("div", {}, [
+          statusBadge,
+          el("span", { text: " – gestellt am " + formatDate(changeRequest.createdAt) }, []),
+        ]),
+        el("div", { class: "portal-hint", text: changeRequest.requestText }, []),
+      ]);
+      list.appendChild(item);
+    });
+  }
+
+  function loadWorkOrderChangeRequests(workOrderId) {
+    fetchJson("/api/owner/work-orders/" + encodeURIComponent(workOrderId) + "/change-requests").then(function (result) {
+      if (result.statusCode === 200 && result.data && result.data.ok) {
+        renderWorkOrderChangeRequests(result.data.changeRequests);
+        return;
+      }
+      renderWorkOrderChangeRequests([]);
+    });
+  }
+
+  function renderWorkOrderResultVersions(versions) {
+    var list = document.getElementById("work-order-versions-list");
+    var emptyHint = document.getElementById("work-order-versions-empty-hint");
+    list.innerHTML = "";
+    if (!versions || !versions.length) {
+      emptyHint.hidden = false;
+      return;
+    }
+    emptyHint.hidden = true;
+    versions.forEach(function (version) {
+      var approvalText = version.isApproved
+        ? "freigegeben am " + formatDate(version.approvedAt) + " von " + (version.approvedByDisplayName || "Unbekannt")
+        : "noch nicht freigegeben";
+      var item = el("li", {}, [
+        el("span", { text: "Version " + version.versionNumber + " (" + formatDate(version.createdAt) + ") – " + approvalText }, []),
+      ]);
+      list.appendChild(item);
+    });
+  }
+
+  function loadWorkOrderResultVersions(workOrderId) {
+    fetchJson("/api/owner/work-orders/" + encodeURIComponent(workOrderId) + "/result-versions").then(function (result) {
+      if (result.statusCode === 200 && result.data && result.data.ok) {
+        renderWorkOrderResultVersions(result.data.versions);
+        return;
+      }
+      renderWorkOrderResultVersions([]);
+    });
   }
 
   // ---------------------------------------------------------------------

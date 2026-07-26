@@ -77,6 +77,35 @@
         <ul class="portal-kv-list" id="work-order-run-list"></ul>
       </div>
 
+      <!-- V7.2 Phase C Schritt 2 (Auftrag Abschnitt N): rein lesende
+           Betriebsübersicht über Änderungswünsche und Ergebnisversionen/
+           Kundenfreigaben. Der OWNER kann hier weder freigeben noch
+           ablehnen noch im Namen des Kunden eine Änderung anfordern – es
+           gibt bewusst kein Formular/keinen Button in diesem Abschnitt. -->
+      <div class="portal-section" id="work-order-change-requests-section">
+        <h3 class="portal-subtitle">Änderungswünsche (Kunde)</h3>
+        <p class="portal-lede">
+          Rein lesende Übersicht. Ausschließlich der Kunde kann einen Änderungswunsch stellen; der Owner kann hier
+          nichts anfordern, ablehnen oder bearbeiten.
+        </p>
+        <p id="work-order-change-requests-empty-hint" class="portal-empty-hint" hidden>
+          Für diesen Auftrag liegt noch kein Änderungswunsch vor.
+        </p>
+        <ul class="portal-kv-list" id="work-order-change-requests-list"></ul>
+      </div>
+
+      <div class="portal-section" id="work-order-versions-section">
+        <h3 class="portal-subtitle">Ergebnisversionen und Kundenfreigabe</h3>
+        <p class="portal-lede">
+          Rein lesende Übersicht. Ausschließlich der Kunde kann ein Ergebnis freigeben; der Owner kann hier weder
+          freigeben noch ablehnen.
+        </p>
+        <p id="work-order-versions-empty-hint" class="portal-empty-hint" hidden>
+          Für diesen Auftrag liegt noch keine Ergebnisversion vor.
+        </p>
+        <ul class="portal-kv-list" id="work-order-versions-list"></ul>
+      </div>
+
       <div class="portal-section" id="work-order-action-section">
         <h3 class="portal-subtitle">Ausnahmeaktion</h3>
         <p class="portal-lede">

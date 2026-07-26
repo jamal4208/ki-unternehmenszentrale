@@ -265,12 +265,18 @@ const CUSTOMER_VISIBLE_STATUS_NOTE_STATUSES = Object.freeze(["NEEDS_CLARIFICATIO
 // die Meldung bleibt weiterhin wahr: "in diesem Schritt" beschreibt den
 // Moment, in dem der Auftrag gerade READY_FOR_PROCESSING wird, nicht eine
 // dauerhafte Aussage über den gesamten Produktlebenszyklus).
+// V7.2 Phase C Schritt 2 (Auftrag Abschnitt M) aktualisiert den
+// RESULT_READY-Text (Änderung/Freigabe sind jetzt tatsächlich möglich,
+// nicht mehr "im nächsten Schritt") und ergänzt CHANGES_REQUESTED/
+// CUSTOMER_APPROVED, OHNE READY_FOR_PROCESSING/IN_PROGRESS/ESCALATED/
+// CANCELLED zu verändern.
 const CUSTOMER_STATUS_MESSAGES = Object.freeze({
   READY_FOR_PROCESSING:
     "Der Auftrag wurde automatisch geprüft und ist bereit zur Bearbeitung. Die Bearbeitung durch Agenten ist in diesem Schritt noch nicht gestartet.",
   IN_PROGRESS: "Die Unternehmenszentrale bearbeitet Ihren Auftrag.",
-  RESULT_READY:
-    "Für diesen Auftrag liegt ein Ergebnis vor. Sie können das Ergebnis derzeit ansehen. Änderungswünsche und Freigabe folgen im nächsten Schritt.",
+  RESULT_READY: "Für diesen Auftrag liegt ein Ergebnis vor. Sie können das Ergebnis ansehen, eine Änderung anfordern oder es freigeben.",
+  CHANGES_REQUESTED: "Für dieses Ergebnis wurde ein Änderungswunsch gestellt. Die Zentrale erstellt eine überarbeitete Ergebnisversion.",
+  CUSTOMER_APPROVED: "Sie haben das Ergebnis dieses Auftrags freigegeben.",
   ESCALATED: "Dieser Auftrag wird derzeit gesondert von der Zentrale geprüft.",
   CANCELLED: "Dieser Auftrag wurde gestoppt und wird nicht weiter bearbeitet.",
 });

@@ -220,15 +220,38 @@
 
     document.getElementById("work-order-cancel-section").hidden = !workOrder.cancellable;
 
-    // V7.2 Phase C Schritt 1 (Auftrag Abschnitt L): Ergebnis nachladen,
-    // sobald ein Ergebnis vorliegt. Kein Freigabe-/Änderungsformular.
+    // V7.2 Phase C Schritt 1+2 (Auftrag Abschnitt L/M/H): Ergebnis und
+    // Versionsansicht nachladen, sobald mindestens eine Ergebnisversion
+    // existiert (RESULT_READY/CHANGES_REQUESTED/CUSTOMER_APPROVED).
+    // Änderungswunsch/Freigabe sind ausschließlich bei RESULT_READY
+    // sichtbar (dieselbe Statusregel wie work-order-change-service.js/
+    // work-order-approval-service.js serverseitig erzwingen).
     var resultSection = document.getElementById("work-order-result-section");
-    if (workOrder.status === "RESULT_READY") {
+    var changeRequestSection = document.getElementById("work-order-change-request-section");
+    var approveSection = document.getElementById("work-order-approve-section");
+    var versionsSection = document.getElementById("work-order-versions-section");
+    if (RESULT_VISIBLE_STATUSES.indexOf(workOrder.status) !== -1) {
       loadWorkOrderResult(workOrder.id);
+      loadWorkOrderVersions(workOrder.id);
     } else {
       resultSection.hidden = true;
+      versionsSection.hidden = true;
+    }
+    if (workOrder.status === "RESULT_READY") {
+      changeRequestSection.hidden = false;
+      approveSection.hidden = false;
+      document.getElementById("work-order-change-request-form").reset();
+      document.getElementById("work-order-approve-form").reset();
+    } else {
+      changeRequestSection.hidden = true;
+      approveSection.hidden = true;
     }
   }
+
+  // V7.2 Phase C Schritt 2 (Auftrag Abschnitt H): dieselbe Statusliste wie
+  // work-order-result-service.js#disclaimerForStatus – ein Ergebnis bleibt
+  // nach einem Änderungswunsch/einer Freigabe weiterhin abrufbar.
+  var RESULT_VISIBLE_STATUSES = ["RESULT_READY", "CHANGES_REQUESTED", "CUSTOMER_APPROVED"];
 
   function renderWorkOrderResult(result) {
     var resultSection = document.getElementById("work-order-result-section");
@@ -271,6 +294,52 @@
         return;
       }
       document.getElementById("work-order-result-section").hidden = true;
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Versionsansicht (V7.2 Phase C Schritt 2, Auftrag Abschnitt H): rein
+  // lesend, keine Aktion je Version. Jede Version bleibt unveränderlich.
+  // ---------------------------------------------------------------------
+
+  function renderWorkOrderVersions(data) {
+    var section = document.getElementById("work-order-versions-section");
+    var list = document.getElementById("work-order-versions-list");
+    var emptyHint = document.getElementById("work-order-versions-empty-hint");
+    list.innerHTML = "";
+    var versions = (data && data.versions) || [];
+    if (versions.length === 0) {
+      section.hidden = true;
+      return;
+    }
+    section.hidden = false;
+    emptyHint.hidden = true;
+    versions.forEach(function (version) {
+      var qualityBadge = el(
+        "span",
+        { class: "portal-badge", "data-status": version.qualityStatus, text: version.qualityStatusLabel },
+        [],
+      );
+      var metaChildren = [qualityBadge, el("span", { text: formatDate(version.createdAt) }, [])];
+      if (version.isApproved) {
+        metaChildren.push(el("span", { text: "Von Ihnen freigegeben" }, []));
+      }
+      var item = el("li", { class: "portal-version-item" }, [
+        el("div", { class: "portal-list-item-title", text: "Version " + version.versionNumber + ": " + version.title }, []),
+        el("div", { class: "portal-list-item-meta" }, metaChildren),
+        el("p", { class: "portal-lede", text: version.summary }, []),
+      ]);
+      list.appendChild(item);
+    });
+  }
+
+  function loadWorkOrderVersions(workOrderId) {
+    fetchJson("/api/portal/work-orders/" + encodeURIComponent(workOrderId) + "/result-versions").then(function (result) {
+      if (result.statusCode === 200 && result.data && result.data.ok) {
+        renderWorkOrderVersions(result.data);
+        return;
+      }
+      document.getElementById("work-order-versions-section").hidden = true;
     });
   }
 
@@ -326,6 +395,72 @@
     });
   }
 
+  // ---------------------------------------------------------------------
+  // Änderungswunsch und Freigabe (V7.2 Phase C Schritt 2, Auftrag
+  // Abschnitt E/G). Beide Aktionen sind ausschließlich bei RESULT_READY
+  // sichtbar (siehe renderWorkOrderDetail) – nach erfolgreichem Absenden
+  // wird der komplette Auftrag neu geladen, damit Status, Ergebnis und
+  // Versionsliste konsistent den tatsächlichen Serverzustand zeigen (der
+  // Revisionslauf läuft synchron innerhalb derselben Anfrage ab).
+  // ---------------------------------------------------------------------
+
+  function setupChangeRequestForm() {
+    var form = document.getElementById("work-order-change-request-form");
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      if (!state.selectedWorkOrderId) return;
+      setStatus("", "");
+      var requestText = form.requestText.value.trim();
+      if (!requestText) {
+        setStatus("Bitte beschreiben Sie den gewünschten Änderungswunsch.", "error");
+        return;
+      }
+      var submitButton = form.querySelector('button[type="submit"]');
+      submitButton.disabled = true;
+      postAction("/api/portal/work-orders/" + encodeURIComponent(state.selectedWorkOrderId) + "/change-request", {
+        requestText: requestText,
+        preserveText: form.preserveText.value.trim() || null,
+        importantNote: form.importantNote.value.trim() || null,
+      })
+        .then(function (result) {
+          if (result.statusCode === 200 && result.data && result.data.ok) {
+            setStatus("Änderungswunsch wurde übernommen und bearbeitet.", "success");
+            showWorkOrderDetail(state.selectedWorkOrderId);
+            return;
+          }
+          setStatus((result.data && result.data.message) || "Änderungswunsch konnte nicht angenommen werden.", "error");
+        })
+        .then(function () {
+          submitButton.disabled = false;
+        });
+    });
+  }
+
+  function setupApproveForm() {
+    var form = document.getElementById("work-order-approve-form");
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      if (!state.selectedWorkOrderId) return;
+      setStatus("", "");
+      var submitButton = form.querySelector('button[type="submit"]');
+      submitButton.disabled = true;
+      postAction("/api/portal/work-orders/" + encodeURIComponent(state.selectedWorkOrderId) + "/approve", {
+        approvalNote: form.approvalNote.value.trim() || null,
+      })
+        .then(function (result) {
+          if (result.statusCode === 200 && result.data && result.data.ok) {
+            setStatus("Ergebnis wurde freigegeben.", "success");
+            showWorkOrderDetail(state.selectedWorkOrderId);
+            return;
+          }
+          setStatus((result.data && result.data.message) || "Freigabe nicht möglich.", "error");
+        })
+        .then(function () {
+          submitButton.disabled = false;
+        });
+    });
+  }
+
   function setupCancelButton() {
     document.getElementById("work-order-cancel-button").addEventListener("click", function () {
       if (!state.selectedWorkOrderId) return;
@@ -364,6 +499,8 @@
     setupLogout();
     setupWorkOrderDetailBack();
     setupResubmitForm();
+    setupChangeRequestForm();
+    setupApproveForm();
     setupCancelButton();
     loadMe();
     loadStatus();

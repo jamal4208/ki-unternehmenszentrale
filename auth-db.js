@@ -875,6 +875,145 @@ function getLatestWorkOrderResultForWorkOrder(db, workOrderId) {
   );
 }
 
+// V7.2 Phase C Schritt 2 (Auftrag Abschnitt H) – Versionsliste für die
+// Kunden-/Owner-Versionsansicht, absteigend nach Version (neueste zuerst,
+// gleiche Reihenfolge wie listWorkOrderRunsForWorkOrder).
+function listWorkOrderResultsForWorkOrder(db, workOrderId) {
+  return db
+    .prepare("SELECT * FROM work_order_results WHERE workOrderId = ? ORDER BY versionNumber DESC")
+    .all(workOrderId);
+}
+
+// ---------------------------------------------------------------------------
+// Änderungswünsche (V7.2 Phase C Schritt 2, Auftrag Abschnitt C/D/J). Jede
+// statusverändernde Funktion prüft den aktuellen Ausgangsstatus als Teil der
+// WHERE-Klausel (identisches atomares Compare-and-Set-Muster wie
+// transitionWorkOrder/transitionWorkOrderRun oben) – eine zweite,
+// datenbanknahe Verteidigungslinie zusätzlich zur fachlichen Prüfung in
+// work-order-change-service.js. Der partielle UNIQUE-Index aus Migration 11
+// (höchstens ein aktiver Änderungswunsch je Auftrag) ist eine dritte,
+// datenbankinterne Verteidigungslinie gegen einen zweiten parallelen
+// Revisionslauf.
+// ---------------------------------------------------------------------------
+
+const ACTIVE_WORK_ORDER_CHANGE_REQUEST_STATUSES = Object.freeze(["SUBMITTED", "IN_PROGRESS"]);
+
+function createWorkOrderChangeRequest(db, input = {}) {
+  const now = input.now || nowIso();
+  const record = {
+    id: input.id || crypto.randomUUID(),
+    workOrderId: input.workOrderId,
+    tenantId: input.tenantId,
+    requestedByUserId: input.requestedByUserId,
+    basedOnResultId: input.basedOnResultId,
+    requestText: input.requestText,
+    preserveText: input.preserveText ?? null,
+    importantNote: input.importantNote ?? null,
+    status: input.status || "SUBMITTED",
+    runId: input.runId ?? null,
+    resultingResultId: input.resultingResultId ?? null,
+    createdAt: now,
+    acceptedAt: input.acceptedAt ?? null,
+    completedAt: input.completedAt ?? null,
+    cancelledAt: input.cancelledAt ?? null,
+  };
+  db.prepare(
+    `INSERT INTO work_order_change_requests
+      (id, workOrderId, tenantId, requestedByUserId, basedOnResultId, requestText, preserveText, importantNote, status, runId, resultingResultId, createdAt, acceptedAt, completedAt, cancelledAt)
+     VALUES
+      (@id, @workOrderId, @tenantId, @requestedByUserId, @basedOnResultId, @requestText, @preserveText, @importantNote, @status, @runId, @resultingResultId, @createdAt, @acceptedAt, @completedAt, @cancelledAt)`,
+  ).run(record);
+  return getWorkOrderChangeRequestById(db, record.id);
+}
+
+function getWorkOrderChangeRequestById(db, id) {
+  return db.prepare("SELECT * FROM work_order_change_requests WHERE id = ?").get(id) || null;
+}
+
+function getActiveWorkOrderChangeRequestForWorkOrder(db, workOrderId) {
+  const placeholders = ACTIVE_WORK_ORDER_CHANGE_REQUEST_STATUSES.map(() => "?").join(", ");
+  return (
+    db
+      .prepare(
+        `SELECT * FROM work_order_change_requests WHERE workOrderId = ? AND status IN (${placeholders}) ORDER BY createdAt DESC LIMIT 1`,
+      )
+      .get(workOrderId, ...ACTIVE_WORK_ORDER_CHANGE_REQUEST_STATUSES) || null
+  );
+}
+
+function listWorkOrderChangeRequestsForWorkOrder(db, workOrderId) {
+  return db
+    .prepare("SELECT * FROM work_order_change_requests WHERE workOrderId = ? ORDER BY createdAt DESC")
+    .all(workOrderId);
+}
+
+// Allgemeiner Statusübergang für einen Änderungswunsch (SUBMITTED ->
+// IN_PROGRESS -> COMPLETED|CANCELLED). fromStatuses ist eine Liste erlaubter
+// Ausgangsstatus; info.changes !== 1 bedeutet unbekannte ID oder einen
+// bereits abweichenden Status (Race Condition), vom Aufrufer als
+// kontrollierter Fehlerzustand behandelt.
+function transitionWorkOrderChangeRequest(db, id, options = {}) {
+  const { fromStatuses, toStatus, runId, resultingResultId, acceptedAt, completedAt, cancelledAt, now } = options;
+  const statuses = Array.isArray(fromStatuses) ? fromStatuses : [fromStatuses];
+  if (statuses.length === 0) return null;
+  const placeholders = statuses.map(() => "?").join(", ");
+  const existing = getWorkOrderChangeRequestById(db, id);
+  const params = [
+    toStatus,
+    runId !== undefined ? runId : existing ? existing.runId : null,
+    resultingResultId !== undefined ? resultingResultId : existing ? existing.resultingResultId : null,
+    acceptedAt !== undefined ? acceptedAt : existing ? existing.acceptedAt : null,
+    completedAt !== undefined ? completedAt : existing ? existing.completedAt : null,
+    cancelledAt !== undefined ? cancelledAt : existing ? existing.cancelledAt : null,
+    id,
+  ];
+  void now;
+  const sql = `UPDATE work_order_change_requests
+       SET status = ?, runId = ?, resultingResultId = ?, acceptedAt = ?, completedAt = ?, cancelledAt = ?
+       WHERE id = ? AND status IN (${placeholders})`;
+  const info = db.prepare(sql).run(...params, ...statuses);
+  if (info.changes !== 1) return null;
+  return getWorkOrderChangeRequestById(db, id);
+}
+
+// ---------------------------------------------------------------------------
+// Kundenfreigaben (V7.2 Phase C Schritt 2, Auftrag Abschnitt G/J).
+// Append-only/unveränderlich (SQLite-Trigger, siehe auth-db-migrations.js):
+// dieses Modul exportiert bewusst keine Update-/Delete-Funktion dafür. Der
+// UNIQUE-Index auf resultId (Migration 11) verhindert eine doppelte
+// Freigabe derselben Ergebnisversion bereits auf Datenbankebene.
+// ---------------------------------------------------------------------------
+
+function createWorkOrderCustomerApproval(db, input = {}) {
+  const record = {
+    id: input.id || crypto.randomUUID(),
+    workOrderId: input.workOrderId,
+    tenantId: input.tenantId,
+    resultId: input.resultId,
+    approvedByUserId: input.approvedByUserId,
+    approvalVersion: input.approvalVersion,
+    approvalNote: input.approvalNote ?? null,
+    approvedAt: input.now || nowIso(),
+  };
+  db.prepare(
+    `INSERT INTO work_order_customer_approvals
+      (id, workOrderId, tenantId, resultId, approvedByUserId, approvalVersion, approvalNote, approvedAt)
+     VALUES
+      (@id, @workOrderId, @tenantId, @resultId, @approvedByUserId, @approvalVersion, @approvalNote, @approvedAt)`,
+  ).run(record);
+  return record;
+}
+
+function getWorkOrderCustomerApprovalByResultId(db, resultId) {
+  return db.prepare("SELECT * FROM work_order_customer_approvals WHERE resultId = ?").get(resultId) || null;
+}
+
+function listWorkOrderCustomerApprovalsForWorkOrder(db, workOrderId) {
+  return db
+    .prepare("SELECT * FROM work_order_customer_approvals WHERE workOrderId = ? ORDER BY approvedAt DESC")
+    .all(workOrderId);
+}
+
 module.exports = {
   AuthDatabaseStartupError,
   resolveAuthDbPaths,
@@ -947,4 +1086,15 @@ module.exports = {
   getWorkOrderResultById,
   getWorkOrderResultByRunId,
   getLatestWorkOrderResultForWorkOrder,
+  listWorkOrderResultsForWorkOrder,
+  // Änderungswünsche
+  createWorkOrderChangeRequest,
+  getWorkOrderChangeRequestById,
+  getActiveWorkOrderChangeRequestForWorkOrder,
+  listWorkOrderChangeRequestsForWorkOrder,
+  transitionWorkOrderChangeRequest,
+  // Kundenfreigaben
+  createWorkOrderCustomerApproval,
+  getWorkOrderCustomerApprovalByResultId,
+  listWorkOrderCustomerApprovalsForWorkOrder,
 };

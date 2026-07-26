@@ -397,9 +397,33 @@ button.portal-link {
   color: var(--portal-danger);
 }
 
+/* V7.2 Phase C Schritt 2 (Auftrag Abschnitt M) – zusätzliche, rein
+   additive Statusfarben für CHANGES_REQUESTED/CUSTOMER_APPROVED. Keine
+   Änderung an den bestehenden Regeln oben. */
+.portal-badge[data-status="CHANGES_REQUESTED"] {
+  background: #fbf1e0;
+  color: #8a5a13;
+}
+
+.portal-badge[data-status="CUSTOMER_APPROVED"] {
+  background: var(--portal-success-bg);
+  color: var(--portal-success);
+}
+
 .portal-result-body {
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* V7.2 Phase C Schritt 2 (Auftrag Abschnitt H) – Versionsansicht: eigene,
+   nicht klickbare Kartenoptik (bewusst kein .portal-list-item, da keine
+   Version eine Aktion auslöst). */
+.portal-version-item {
+  border: 1px solid var(--portal-border);
+  border-radius: 8px;
+  background: var(--portal-surface);
+  padding: 0.85rem 1rem;
+  margin-bottom: 0.65rem;
 }
 
 .portal-empty-hint {

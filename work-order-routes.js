@@ -31,6 +31,11 @@ const workOrderService = require("./work-order-service");
 // Moduls ausgeliefert – dadurch bleiben GET-Prefix-/POST-Prefix-Routenzahlen
 // unverändert (keine neue Route in server.js nötig).
 const workOrderExecutionRoutes = require("./work-order-execution-routes");
+// V7.2 Phase C Schritt 2 (Auftrag Abschnitt E/G/H/I): Änderungswünsche,
+// Kundenfreigabe und Versionsansicht – gleiches Prinzip wie
+// workOrderExecutionRoutes, ebenfalls ausschließlich über die bereits
+// bestehenden Prefix-Dispatcher dieses Moduls ausgeliefert.
+const workOrderChangeRoutes = require("./work-order-change-routes");
 
 // ---------------------------------------------------------------------------
 // Kleine, lokale JSON-Body-Hilfen (bewusst eine eigene, kleine Kopie statt
@@ -263,6 +268,17 @@ function dispatchPortalWorkOrdersGetPrefix(res, context, deps, remainder) {
     workOrderExecutionRoutes.handlePortalWorkOrderRunStatus(res, context, deps, parts[0]);
     return;
   }
+  // V7.2 Phase C Schritt 2 (Auftrag Abschnitt H): .../:id/result-versions
+  // und .../:id/change-requests, geprüft VOR der einfachen
+  // Ein-Segment-Detailroute (identisches Muster wie result/run-status oben).
+  if (parts.length === 2 && parts[0] && parts[1] === "result-versions") {
+    workOrderChangeRoutes.handlePortalWorkOrderResultVersions(res, context, deps, parts[0]);
+    return;
+  }
+  if (parts.length === 2 && parts[0] && parts[1] === "change-requests") {
+    workOrderChangeRoutes.handlePortalWorkOrderChangeRequestList(res, context, deps, parts[0]);
+    return;
+  }
   if (!remainder || remainder.includes("/")) {
     sendJson(res, 404, genericErrorPayload("Nicht gefunden."));
     return;
@@ -281,6 +297,17 @@ function dispatchPortalWorkOrdersPostPrefix(res, context, deps, remainder) {
     handlePortalWorkOrderCancel(res, context, deps, parts[0]);
     return;
   }
+  // V7.2 Phase C Schritt 2 (Auftrag Abschnitt E/G): Änderungswunsch stellen
+  // und Ergebnis freigeben – ausschließlich der Kunde (siehe
+  // auth-route-guard.js#CUSTOMER_TENANT-Klassifizierung dieses Prefixes).
+  if (parts.length === 2 && parts[0] && parts[1] === "change-request") {
+    workOrderChangeRoutes.handlePortalWorkOrderChangeRequest(res, context, deps, parts[0]);
+    return;
+  }
+  if (parts.length === 2 && parts[0] && parts[1] === "approve") {
+    workOrderChangeRoutes.handlePortalWorkOrderApprove(res, context, deps, parts[0]);
+    return;
+  }
   sendJson(res, 404, genericErrorPayload("Nicht gefunden."));
 }
 
@@ -295,6 +322,18 @@ function dispatchOwnerWorkOrdersGetPrefix(res, context, deps, remainder) {
   }
   if (parts.length === 3 && parts[0] && parts[1] === "runs" && parts[2]) {
     workOrderExecutionRoutes.handleOwnerWorkOrderRunDetail(res, context, deps, parts[0], parts[2]);
+    return;
+  }
+  // V7.2 Phase C Schritt 2 (Auftrag Abschnitt N): read-only Betriebssicht
+  // auf Änderungswünsche und Ergebnisversionen/Freigaben – der OWNER kann
+  // hierüber ausschließlich lesen, keine der beiden Routen erlaubt eine
+  // Aktion (kein entsprechender POST-Handler vorhanden).
+  if (parts.length === 2 && parts[0] && parts[1] === "change-requests") {
+    workOrderChangeRoutes.handleOwnerWorkOrderChangeRequests(res, context, deps, parts[0]);
+    return;
+  }
+  if (parts.length === 2 && parts[0] && parts[1] === "result-versions") {
+    workOrderChangeRoutes.handleOwnerWorkOrderResultVersions(res, context, deps, parts[0]);
     return;
   }
   if (!remainder || remainder.includes("/")) {

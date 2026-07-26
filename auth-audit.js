@@ -87,6 +87,22 @@ const EVENT_TYPES = Object.freeze([
   "WORK_ORDER_AGENT_SELECTED",
   "WORK_ORDER_EXECUTION_BLOCKED_BY_POLICY",
   "WORK_ORDER_EXECUTION_ESCALATED_BY_POLICY",
+  // V7.2 Phase C Schritt 2 (Auftrag Abschnitt L) – Kundenänderungsrunde,
+  // Versionierung und Kundenfreigabe (work-order-change-service.js/
+  // work-order-approval-service.js). Muss exakt der in
+  // auth-db-migrations.js#AUDIT_EVENT_TYPES (Migration 11) erweiterten
+  // CHECK-Aufzählung entsprechen. Ausschließlich der KUNDE löst
+  // CHANGES_REQUESTED/RESULT_APPROVED_BY_CUSTOMER aus; der OWNER erscheint
+  // in keinem dieser neun Ereignisse als fachlich Entscheidender.
+  "WORK_ORDER_CHANGES_REQUESTED",
+  "WORK_ORDER_CHANGE_REQUEST_STARTED",
+  "WORK_ORDER_CHANGE_REQUEST_COMPLETED",
+  "WORK_ORDER_CHANGE_REQUEST_FAILED",
+  "WORK_ORDER_CHANGE_REQUEST_CANCELLED",
+  "WORK_ORDER_RESULT_VERSION_CREATED",
+  "WORK_ORDER_RESULT_APPROVED_BY_CUSTOMER",
+  "WORK_ORDER_CHANGE_BLOCKED_BY_POLICY",
+  "WORK_ORDER_CHANGE_ESCALATED_BY_POLICY",
 ]);
 
 const RESULTS = Object.freeze(["OK", "DENIED", "ERROR"]);
@@ -109,6 +125,12 @@ const RESULTS = Object.freeze(["OK", "DENIED", "ERROR"]);
 // agent-registry.js – kein Freitext) und "failureCode" (reiner
 // Fehlercode, kein Stacktrace/keine Fehlermeldung) ergänzt. Weiterhin kein
 // vollständiger Auftragstext, kein Ergebnistext, kein Systemprompt.
+//
+// V7.2 Phase C Schritt 2 (Auftrag Abschnitt L): "resultId" (interne
+// Ergebnisversions-ID), "resultVersion" (reine Versionsnummer, kein
+// Ergebnistext) und "changeRequestId" (interne Änderungswunsch-ID)
+// ergänzt. Weiterhin niemals der Änderungswunschtext selbst, niemals
+// "was erhalten bleiben soll"/"was wichtig ist" im Klartext.
 const METADATA_ALLOWLIST = Object.freeze([
   "routeName",
   "roleLabel",
@@ -119,6 +141,9 @@ const METADATA_ALLOWLIST = Object.freeze([
   "runId",
   "agentKey",
   "failureCode",
+  "resultId",
+  "resultVersion",
+  "changeRequestId",
 ]);
 
 // Verbotene Inhalte, unabhängig vom Feldnamen (Verteidigung in der Tiefe:

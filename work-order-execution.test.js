@@ -423,11 +423,16 @@ async function run() {
   });
 
   // -------------------------------------------------------------------
-  // 26-30. Keine Owner-Freigabe, kein Kunden-CUSTOMER_APPROVED, keine
-  //        Veröffentlichung, kein Provideraufruf, kein Billing.
+  // 26-30. Keine Owner-Freigabe (auch nach Einführung der Kundenfreigabe
+  //        in Schritt 2 bleibt "approve" für den OWNER für immer
+  //        gesperrt – ausschließlich der Kunde darf freigeben, siehe
+  //        work-order-approval-service.js), keine Veröffentlichung, kein
+  //        Provideraufruf, kein Billing. Die eigentliche
+  //        Kundenfreigabe-Funktionalität wird ausführlich in
+  //        work-order-change.test.js geprüft, nicht hier.
   // -------------------------------------------------------------------
 
-  await check("keine Owner-Route setzt eine fachliche Freigabe (kein approve/release)", async () => {
+  await check("keine Owner-Route setzt eine fachliche Freigabe (kein approve/release), auch nicht nach Einführung der Kundenfreigabe in Schritt 2", async () => {
     for (const action of ["approve", "release", "publish"]) {
       const result = await invoke({
         method: "POST",
@@ -438,14 +443,15 @@ async function run() {
       assert.strictEqual(result.statusCode, 404);
     }
   });
-  await check("keine Kundenroute setzt CUSTOMER_APPROVED", async () => {
+  await check("die Kundenroute approve existiert seit Schritt 2 und setzt CUSTOMER_APPROVED (ausführlich getestet in work-order-change.test.js)", async () => {
     const result = await invoke({
       method: "POST",
       url: `/api/portal/work-orders/${orderReady.id}/approve`,
       headers: authedJsonHeaders(cafeAdminSession),
       bodyObj: {},
     });
-    assert.strictEqual(result.statusCode, 404);
+    assert.strictEqual(result.statusCode, 200);
+    assert.strictEqual(result.json.workOrder.status, "CUSTOMER_APPROVED");
   });
   await check("keine Provider-/Billing-/Veröffentlichungsroute existiert", async () => {
     for (const action of ["provider", "billing", "publish"]) {
