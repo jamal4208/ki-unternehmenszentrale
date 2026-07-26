@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Kundenportal – Anmeldung</title>
+<link rel="stylesheet" href="/portal.css" />
+</head>
+<body>
+<div class="portal-shell">
+  <header class="portal-header">
+    <span class="portal-brand">Kundenportal</span>
+  </header>
+
+  <main id="portal-auth-main">
+    <div id="portal-auth-status" class="portal-status-message" role="status" aria-live="polite" data-tone=""></div>
+
+    <!-- Anmeldung: /portal/login -->
+    <section class="portal-card" data-view="login" hidden>
+      <h1 class="portal-title">Willkommen zurück</h1>
+      <p class="portal-lede">Melden Sie sich mit Ihren Zugangsdaten an.</p>
+      <form id="login-form" novalidate>
+        <div class="portal-field">
+          <label for="login-email">E-Mail-Adresse</label>
+          <input id="login-email" name="email" type="email" autocomplete="username" required />
+        </div>
+        <div class="portal-field">
+          <label for="login-password">Passwort</label>
+          <input id="login-password" name="password" type="password" autocomplete="current-password" required />
+        </div>
+        <button class="portal-button" type="submit">Anmelden</button>
+      </form>
+      <div class="portal-links">
+        <a class="portal-link" href="/portal/passwort-vergessen">Passwort vergessen</a>
+      </div>
+    </section>
+
+    <!-- Einladung annehmen: /portal/einladung -->
+    <section class="portal-card" data-view="invite" hidden>
+      <h1 class="portal-title">Konto aktivieren</h1>
+      <p class="portal-lede">Sie wurden für den Kundenbereich eingeladen. Legen Sie ein persönliches Passwort fest.</p>
+      <form id="invite-form" novalidate>
+        <div class="portal-field">
+          <label for="invite-password">Neues Passwort</label>
+          <input id="invite-password" name="newPassword" type="password" autocomplete="new-password" required minlength="12" />
+          <p class="portal-hint">Mindestens 12 Zeichen. Nicht identisch mit Ihrer E-Mail-Adresse oder dem Mandantennamen.</p>
+        </div>
+        <div class="portal-field">
+          <label for="invite-password-confirm">Passwort bestätigen</label>
+          <input id="invite-password-confirm" name="newPasswordConfirm" type="password" autocomplete="new-password" required minlength="12" />
+        </div>
+        <button class="portal-button" type="submit">Konto aktivieren</button>
+      </form>
+    </section>
+
+    <!-- Passwort vergessen: /portal/passwort-vergessen -->
+    <section class="portal-card" data-view="forgot" hidden>
+      <h1 class="portal-title">Passwort vergessen</h1>
+      <p class="portal-lede">Geben Sie Ihre E-Mail-Adresse ein. Falls für dieses Konto ein Rücksetzvorgang möglich ist, wird er vorbereitet.</p>
+      <form id="forgot-form" novalidate>
+        <div class="portal-field">
+          <label for="forgot-email">E-Mail-Adresse</label>
+          <input id="forgot-email" name="email" type="email" autocomplete="username" required />
+        </div>
+        <button class="portal-button" type="submit">Rücksetzvorgang anfordern</button>
+      </form>
+      <div class="portal-links">
+        <a class="portal-link" href="/portal/login">Zurück zur Anmeldung</a>
+      </div>
+    </section>
+
+    <!-- Neues Passwort setzen: /portal/passwort-neu -->
+    <section class="portal-card" data-view="reset" hidden>
+      <h1 class="portal-title">Neues Passwort festlegen</h1>
+      <p class="portal-lede">Bitte legen Sie Ihr neues Passwort fest.</p>
+      <form id="reset-form" novalidate>
+        <div class="portal-field">
+          <label for="reset-password">Neues Passwort</label>
+          <input id="reset-password" name="newPassword" type="password" autocomplete="new-password" required minlength="12" />
+          <p class="portal-hint">Mindestens 12 Zeichen. Nicht identisch mit Ihrer E-Mail-Adresse oder dem Mandantennamen.</p>
+        </div>
+        <div class="portal-field">
+          <label for="reset-password-confirm">Passwort bestätigen</label>
+          <input id="reset-password-confirm" name="newPasswordConfirm" type="password" autocomplete="new-password" required minlength="12" />
+        </div>
+        <button class="portal-button" type="submit">Passwort speichern</button>
+      </form>
+    </section>
+  </main>
+</div>
+<script src="/portal-auth.js"></script>
+</body>
+</html>

@@ -26,6 +26,16 @@ const ACCESS_CLASSES = Object.freeze({
   DISABLED_IN_PROD: "DISABLED_IN_PROD",
   STATIC_PUBLIC: "STATIC_PUBLIC",
   STATIC_OWNER_ONLY: "STATIC_OWNER_ONLY",
+  // V7.2 Phase A Schritt 3 (Auftrag Abschnitt M) – "Kundenportal:
+  // STATIC_OWNER_ONLY ist nicht passend; verwende eine explizite
+  // authentifizierte Portalpolicy". Erlaubt OWNER/CUSTOMER_ADMIN/
+  // CUSTOMER_USER (jede reale, aktive Session), aber ausdrücklich NICHT
+  // SUPPORT (kein Portalzugriff ohne späteren aktiven Grant, siehe Auftrag
+  // Abschnitt D) und keinen Dev-Bypass (nicht in
+  // auth-route-guard.js#CHEF_BYPASS_ELIGIBLE_CLASSES enthalten – ein
+  // Kundenportal-Aufruf ohne echte Session bleibt in Dev wie in Prod
+  // gleichermaßen gesperrt).
+  STATIC_AUTHENTICATED_PORTAL: "STATIC_AUTHENTICATED_PORTAL",
 });
 
 // Sichere Fehlerstrategie je Klasse (Auftrag Abschnitt K/L):
@@ -120,6 +130,14 @@ const CLASS_DEFAULTS = Object.freeze({
     auditOnDeny: false,
     errorStrategy: ERROR_STRATEGIES.HIDDEN_404,
   },
+  [ACCESS_CLASSES.STATIC_AUTHENTICATED_PORTAL]: {
+    allowedRoles: ["OWNER", "CUSTOMER_ADMIN", "CUSTOMER_USER"],
+    authRequired: true,
+    tenantRequired: false,
+    enabledInProd: true,
+    auditOnDeny: false,
+    errorStrategy: ERROR_STRATEGIES.HIDDEN_404,
+  },
 });
 
 function buildEntry(method, matcher, accessClass, overrides = {}) {
@@ -163,6 +181,13 @@ function ownerPost(path, description) {
 function ownerPrefix(path, description) {
   return buildEntry("GET", prefix(path), ACCESS_CLASSES.OWNER_ONLY, { description });
 }
+// V7.2 Phase A Schritt 3 (Auftrag Abschnitt H) – Owner-Aktionsrouten mit
+// dynamischem Pfadsegment (z. B. ":userId/suspend"), verdrahtet über einen
+// POST-Prefix-Handler (siehe server-http-router.js#postRoutePrefixHandlers,
+// server.js). Bleibt OWNER_ONLY wie jede andere Owner-Route.
+function ownerPostPrefix(path, description) {
+  return buildEntry("POST", prefix(path), ACCESS_CLASSES.OWNER_ONLY, { description });
+}
 function disabledInProdGet(path, description) {
   return buildEntry("GET", exact(path), ACCESS_CLASSES.DISABLED_IN_PROD, { description });
 }
@@ -171,6 +196,15 @@ function disabledInProdPost(path, description) {
 }
 function staticOwnerOnly(path, description) {
   return buildEntry("GET", staticAsset(path), ACCESS_CLASSES.STATIC_OWNER_ONLY, { description });
+}
+function staticPublic(path, description) {
+  return buildEntry("GET", staticAsset(path), ACCESS_CLASSES.STATIC_PUBLIC, { description });
+}
+function staticAuthenticatedPortal(path, description) {
+  return buildEntry("GET", staticAsset(path), ACCESS_CLASSES.STATIC_AUTHENTICATED_PORTAL, { description });
+}
+function customerTenantGet(path, description) {
+  return buildEntry("GET", exact(path), ACCESS_CLASSES.CUSTOMER_TENANT, { description });
 }
 
 // ---------------------------------------------------------------------------
@@ -256,6 +290,11 @@ const GET_POLICIES = [
   buildEntry("GET", exact("/api/auth/session"), ACCESS_CLASSES.PUBLIC_AUTH, {
     description: "Sessionstatus (öffentlich abrufbar, liefert nie Geheimnisse)",
   }),
+  // V7.2 Phase A Schritt 3 (Auftrag Abschnitt H) – Owner-Mandantenliste.
+  ownerGet("/api/owner/tenants", "Owner-Mandantenliste"),
+  // V7.2 Phase A Schritt 3 (Auftrag Abschnitt I) – Kundenportal-API.
+  customerTenantGet("/api/portal/me", "Kundenportal Konto-/Sitzungsinformation"),
+  customerTenantGet("/api/portal/status", "Kundenportal Bereitschaftsstatus"),
 ];
 
 const POST_POLICIES = [
@@ -334,6 +373,18 @@ const PREFIX_POLICIES = [
   ownerPrefix("/api/v71/heygen/job-packages/", "HeyGen-Jobpaket-Einzelabruf"),
   ownerPrefix("/api/v71/canva/job-packages/", "Canva-Jobpaket-Einzelabruf"),
   ownerPrefix("/api/v71/canva/pilot-results/", "Canva-Pilot-Ergebnis-Einzelabruf/-feedback"),
+  // V7.2 Phase A Schritt 3 (Auftrag Abschnitt H) – Owner-Mandanten-
+  // Einzelabruf (GET .../:customerId) UND Benutzerliste je Mandant
+  // (GET .../:customerId/users), beide über denselben GET-Prefix-Handler.
+  ownerPrefix("/api/owner/tenants/", "Owner-Mandant-Einzelabruf/Benutzerliste"),
+  // POST-Prefix-Routen mit dynamischem Pfadsegment (Auftrag Abschnitt H):
+  // ".../:customerId/activate", ".../:customerId/suspend",
+  // ".../:customerId/users/invite".
+  ownerPostPrefix("/api/owner/tenants/", "Owner-Mandantenaktionen (aktivieren/suspendieren/einladen)"),
+  // ".../:userId/suspend", ".../:userId/reactivate", ".../:userId/revoke-sessions",
+  // ".../:userId/reissue-invitation", ".../:userId/revoke-invitation",
+  // ".../:userId/prepare-password-reset".
+  ownerPostPrefix("/api/owner/users/", "Owner-Benutzeraktionen"),
 ];
 
 const STATIC_POLICIES = [
@@ -350,6 +401,28 @@ const STATIC_POLICIES = [
   staticOwnerOnly("/app.js", "Chef-UI-Hauptskript"),
   staticOwnerOnly("/styles.css", "Chef-UI-Stylesheet"),
   staticOwnerOnly("/v71-ui.js", "Chef-UI-Skript V7.1"),
+  // V7.2 Phase A Schritt 3 (Auftrag Abschnitt D/E/F/M) – öffentliche
+  // Portal-Einstiege (Login, Einladung, Passwort vergessen/neu teilen sich
+  // bewusst dieselbe Auth-Shell-Datei portal-login.html; portal-auth.js
+  // erkennt anhand von location.pathname, welcher Abschnitt sichtbar ist –
+  // keine zweite, parallele HTML-Datei pro Unterseite).
+  staticPublic("/portal/login", "Portal-Anmeldeseite"),
+  staticPublic("/portal/einladung", "Portal-Einladung annehmen"),
+  staticPublic("/portal/passwort-vergessen", "Portal Passwort-Reset anfordern"),
+  staticPublic("/portal/passwort-neu", "Portal Passwort-Reset bestätigen"),
+  staticPublic("/portal-auth.js", "Portal-Auth-Skript (Login/Einladung/Reset, öffentlich)"),
+  staticPublic("/portal.css", "Portal-Stylesheet (von öffentlichen und internen Portalseiten geladen)"),
+  // V7.2 Phase A Schritt 3 (Auftrag Abschnitt D/M) – Kundenportal-Startseite:
+  // explizit authentifiziert, aber KEIN Chef-Zugriff über STATIC_OWNER_ONLY
+  // (siehe ACCESS_CLASSES.STATIC_AUTHENTICATED_PORTAL).
+  staticAuthenticatedPortal("/portal", "Kundenportal-Startseite"),
+  staticAuthenticatedPortal("/portal-ui.js", "Kundenportal-UI-Skript"),
+  // V7.2 Phase A Schritt 3 (Auftrag Abschnitt G/M) – neue, klar abgegrenzte
+  // Owner-Verwaltungsseite; STATIC_OWNER_ONLY wie von Abschnitt M verlangt.
+  // Kein Umbau der bestehenden Chef-Oberfläche (index.html/app.js/
+  // styles.css bleiben unverändert) – eigenständiges neues Asset.
+  staticOwnerOnly("/owner/kunden", "Owner-Kunden-/Benutzerverwaltung"),
+  staticOwnerOnly("/owner-admin.js", "Owner-Verwaltungs-UI-Skript"),
 ];
 
 const ALL_POLICIES = Object.freeze([
@@ -438,6 +511,16 @@ module.exports = {
   exact,
   prefix,
   staticAsset,
+  ownerGet,
+  ownerPost,
+  ownerPrefix,
+  ownerPostPrefix,
+  disabledInProdGet,
+  disabledInProdPost,
+  staticOwnerOnly,
+  staticPublic,
+  staticAuthenticatedPortal,
+  customerTenantGet,
   policyKey,
   validatePolicyTable,
   resolvePolicyForRequest,

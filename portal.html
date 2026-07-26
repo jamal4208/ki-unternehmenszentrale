@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Kundenportal</title>
+<link rel="stylesheet" href="/portal.css" />
+</head>
+<body>
+<div class="portal-shell">
+  <header class="portal-header">
+    <span class="portal-brand">Kundenportal</span>
+    <button id="logout-button" class="portal-button portal-button--secondary" type="button" style="width:auto;">
+      Abmelden
+    </button>
+  </header>
+
+  <main>
+    <div id="portal-status-message" class="portal-status-message" role="status" aria-live="polite" data-tone=""></div>
+
+    <section class="portal-card">
+      <h1 class="portal-title">Willkommen<span id="portal-greeting-name"></span></h1>
+      <p class="portal-lede" id="portal-tenant-line"></p>
+
+      <h2 class="portal-subtitle">Ihr Konto</h2>
+      <ul class="portal-kv-list">
+        <li><span class="portal-kv-key">Name</span><span id="kv-display-name">–</span></li>
+        <li><span class="portal-kv-key">E-Mail-Adresse</span><span id="kv-email">–</span></li>
+        <li><span class="portal-kv-key">Rolle</span><span id="kv-role">–</span></li>
+        <li><span class="portal-kv-key">Mandant</span><span id="kv-tenant">–</span></li>
+        <li><span class="portal-kv-key">Kontostatus</span><span id="kv-account-status">–</span></li>
+        <li><span class="portal-kv-key">Letzte Anmeldung</span><span id="kv-last-login">–</span></li>
+      </ul>
+    </section>
+
+    <section class="portal-card portal-section">
+      <h2 class="portal-subtitle">Bereich Arbeitsaufträge</h2>
+      <p id="portal-status-text" class="portal-lede">Wird geladen…</p>
+    </section>
+  </main>
+</div>
+<script src="/portal-ui.js"></script>
+</body>
+</html>

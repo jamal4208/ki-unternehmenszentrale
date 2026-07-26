@@ -32,6 +32,46 @@ const AUDIT_EVENT_TYPES = Object.freeze([
   "SUPPORT_ACCESS",
   "TENANT_MISMATCH_BLOCKED",
   "ROUTE_DENIED",
+  // V7.2 Phase A Schritt 3 (Auftrag Abschnitt N) – Owner-Kunden-/
+  // Benutzerverwaltung. Ergänzt in Migration 7 (widen_audit_event_types),
+  // NICHT rückwirkend in dieser ursprünglichen Migration-5-Liste, damit
+  // Migration 5 unverändert bleibt (Auftrag Abschnitt J: "bestehende
+  // Migrationen nicht nachträglich umschreiben"). Diese Konstante hier ist
+  // die aktuell gültige Gesamtmenge (siehe MIGRATIONS[6].sql für die
+  // tatsächliche CHECK-Erweiterung).
+  "TENANT_ACTIVATED",
+  "TENANT_SUSPENDED",
+  "USER_INVITED",
+  "INVITATION_REISSUED",
+  "INVITATION_REVOKED",
+  "USER_SUSPENDED",
+  "USER_REACTIVATED",
+  "USER_SESSIONS_REVOKED",
+  "PASSWORD_RESET_PREPARED",
+]);
+
+// Historischer Stand exakt zum Zeitpunkt der Migration 5 (Auftrag Abschnitt
+// J: "bestehende Migrationen nicht nachträglich umschreiben") – wird
+// ausschließlich von MIGRATIONS[4] (create_auth_audit_events) referenziert,
+// niemals von neuem Code. Migration 7 verwendet die aktuelle
+// AUDIT_EVENT_TYPES-Konstante oben.
+const AUDIT_EVENT_TYPES_AT_MIGRATION_5 = Object.freeze([
+  "LOGIN_SUCCESS",
+  "LOGIN_FAILED",
+  "LOGOUT",
+  "SESSION_EXPIRED",
+  "SESSION_REVOKED",
+  "PASSWORD_CHANGED",
+  "RESET_REQUESTED",
+  "RESET_USED",
+  "USER_CREATED",
+  "USER_STATUS_CHANGED",
+  "ROLE_CHANGED",
+  "SUPPORT_GRANTED",
+  "SUPPORT_REVOKED",
+  "SUPPORT_ACCESS",
+  "TENANT_MISMATCH_BLOCKED",
+  "ROUTE_DENIED",
 ]);
 const AUDIT_RESULT_VALUES = Object.freeze(["OK", "DENIED", "ERROR"]);
 
@@ -126,7 +166,7 @@ const MIGRATIONS = Object.freeze([
         eventId TEXT PRIMARY KEY,
         actorUserId TEXT,
         tenantId TEXT,
-        eventType TEXT NOT NULL CHECK (eventType IN (${sqlEnum(AUDIT_EVENT_TYPES)})),
+        eventType TEXT NOT NULL CHECK (eventType IN (${sqlEnum(AUDIT_EVENT_TYPES_AT_MIGRATION_5)})),
         result TEXT NOT NULL CHECK (result IN (${sqlEnum(AUDIT_RESULT_VALUES)})),
         timestamp TEXT NOT NULL,
         metadata TEXT
@@ -153,6 +193,52 @@ const MIGRATIONS = Object.freeze([
       CREATE INDEX idx_sessions_userId ON sessions(userId);
       CREATE INDEX idx_sessions_expiresAt ON sessions(expiresAt);
       CREATE INDEX idx_password_reset_tokens_userId ON password_reset_tokens(userId);
+      CREATE INDEX idx_auth_audit_events_timestamp ON auth_audit_events(timestamp);
+      CREATE INDEX idx_auth_audit_events_tenantId ON auth_audit_events(tenantId);
+    `,
+  }),
+  // V7.2 Phase A Schritt 3 (Auftrag Abschnitt J/N) – erweitert ausschließlich
+  // die CHECK-Aufzählung von auth_audit_events.eventType um die neun neuen
+  // Owner-Kunden-/Benutzerverwaltungs-Ereignisse. SQLite kennt kein
+  // "ALTER TABLE ... ALTER COLUMN ... CHECK": die einzige verlustfreie,
+  // dokumentierte Vorgehensweise ist Tabellen-Neuaufbau (neue Tabelle mit
+  // erweitertem CHECK anlegen, Daten 1:1 kopieren, alte Tabelle löschen,
+  // neue Tabelle umbenennen, Trigger und Indizes neu anlegen – sie werden
+  // beim DROP der alten Tabelle automatisch mitgelöscht). Keine Zeile geht
+  // dabei verloren (reines INSERT...SELECT ohne Filter); keine bestehende
+  // Migration (1–6) wird verändert.
+  Object.freeze({
+    version: 7,
+    name: "widen_audit_event_types",
+    sql: `
+      CREATE TABLE auth_audit_events_v2 (
+        eventId TEXT PRIMARY KEY,
+        actorUserId TEXT,
+        tenantId TEXT,
+        eventType TEXT NOT NULL CHECK (eventType IN (${sqlEnum(AUDIT_EVENT_TYPES)})),
+        result TEXT NOT NULL CHECK (result IN (${sqlEnum(AUDIT_RESULT_VALUES)})),
+        timestamp TEXT NOT NULL,
+        metadata TEXT
+      );
+
+      INSERT INTO auth_audit_events_v2 (eventId, actorUserId, tenantId, eventType, result, timestamp, metadata)
+      SELECT eventId, actorUserId, tenantId, eventType, result, timestamp, metadata FROM auth_audit_events;
+
+      DROP TABLE auth_audit_events;
+      ALTER TABLE auth_audit_events_v2 RENAME TO auth_audit_events;
+
+      CREATE TRIGGER trg_auth_audit_events_no_update
+      BEFORE UPDATE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: UPDATE ist nicht erlaubt.');
+      END;
+
+      CREATE TRIGGER trg_auth_audit_events_no_delete
+      BEFORE DELETE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: DELETE ist nicht erlaubt.');
+      END;
+
       CREATE INDEX idx_auth_audit_events_timestamp ON auth_audit_events(timestamp);
       CREATE INDEX idx_auth_audit_events_tenantId ON auth_audit_events(tenantId);
     `,

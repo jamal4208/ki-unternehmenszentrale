@@ -129,6 +129,16 @@ function createHttpRouter(options) {
   const routePrefixHandlers = Array.isArray(options.routePrefixHandlers)
     ? options.routePrefixHandlers
     : [];
+  // V7.2 Phase A Schritt 3 (Auftrag Abschnitt H) – additive, rein optionale
+  // Erweiterung um POST-Prefix-Handler (z. B. für Owner-Aktionsrouten mit
+  // dynamischem Pfadsegment wie "/api/owner/users/:userId/suspend"). Bleibt
+  // vollständig no-op (identisch zum bisherigen Verhalten: reine 405-Antwort
+  // für jeden nicht exakt registrierten POST-Pfad), solange kein Aufrufer
+  // postRoutePrefixHandlers übergibt – bestehende Aufrufer (insbesondere
+  // server-http-router.test.js#createTestRouter) sind davon unberührt.
+  const postRoutePrefixHandlers = Array.isArray(options.postRoutePrefixHandlers)
+    ? options.postRoutePrefixHandlers
+    : [];
   const onInternalError =
     typeof options.onInternalError === "function"
       ? options.onInternalError
@@ -252,11 +262,24 @@ function createHttpRouter(options) {
         return;
       }
       const postHandler = postRoutes.get(pathname);
-      if (!postHandler) {
-        options.sendJson(res, 405, options.methodNotAllowedPayload);
+      if (postHandler) {
+        dispatchApiHandler("POST", pathname, requestUrl, req, res, { requestUrl, pathname, req }, postHandler);
         return;
       }
-      dispatchApiHandler("POST", pathname, requestUrl, req, res, { requestUrl, pathname, req }, postHandler);
+
+      for (const prefixHandler of postRoutePrefixHandlers) {
+        if (
+          prefixHandler &&
+          typeof prefixHandler.prefix === "string" &&
+          pathname.startsWith(prefixHandler.prefix) &&
+          typeof prefixHandler.handler === "function"
+        ) {
+          dispatchApiHandler("POST", pathname, requestUrl, req, res, { requestUrl, pathname, req }, prefixHandler.handler);
+          return;
+        }
+      }
+
+      options.sendJson(res, 405, options.methodNotAllowedPayload);
       return;
     }
 
@@ -310,6 +333,9 @@ function createHttpRouter(options) {
     },
     getRegisteredStaticAssetCount() {
       return options.staticAssets.size;
+    },
+    getRegisteredPostRoutePrefixHandlerCount() {
+      return postRoutePrefixHandlers.length;
     },
   };
 }

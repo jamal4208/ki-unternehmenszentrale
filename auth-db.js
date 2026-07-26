@@ -296,6 +296,14 @@ function touchLastLogin(db, id, now) {
   return getUserById(db, id);
 }
 
+// V7.2 Phase A Schritt 3 (Auftrag Abschnitt G/H) – Benutzerliste je Mandant
+// für die Owner-Verwaltung ("Benutzerliste je Mandant"). Filtert
+// ausschließlich auf die interne tenants.id (niemals auf die kanonische
+// customerId direkt), identisch zur Mandantenbindung in users.tenantId.
+function listUsersByTenantId(db, tenantId) {
+  return db.prepare("SELECT * FROM users WHERE tenantId = ? ORDER BY createdAt ASC").all(tenantId);
+}
+
 // ---------------------------------------------------------------------------
 // Tenant-Projektionsfunktionen. agency-tenant-registry.js bleibt die
 // kanonische Mandantenwahrheit (siehe auth-tenant-link.js); diese Tabelle
@@ -340,6 +348,21 @@ function listTenantProjections(db) {
 function updateTenantDisplayName(db, customerId, displayName, now) {
   const ts = now || nowIso();
   db.prepare("UPDATE tenants SET displayName = ?, updatedAt = ? WHERE customerId = ?").run(displayName, ts, customerId);
+  return getTenantProjectionByCustomerId(db, customerId);
+}
+
+// V7.2 Phase A Schritt 3 (Auftrag Abschnitt G/H) – explizite Owner-Aktion
+// ("Aktivierung eines Mandanten ist eine explizite Owner-Aktion"). Getrennt
+// von updateTenantDisplayName, weil diese Funktion NUR den vom Owner
+// gesteuerten Betriebsstatus setzt (ACTIVE/SUSPENDED/CLOSED), niemals den
+// Anzeigenamen. Der Aufrufer (owner-admin-service.js) validiert vorher, dass
+// customerId ein kanonischer Registry-Mandant ist (agency-tenant-registry.js
+// bleibt die alleinige Wahrheitsquelle) und dass status ein gültiger
+// TENANT_STATUS_VALUES-Wert ist – die SQLite-CHECK-Constraint der Tabelle
+// bleibt zusätzlich als zweite Verteidigungslinie bestehen.
+function updateTenantStatus(db, customerId, status, now) {
+  const ts = now || nowIso();
+  db.prepare("UPDATE tenants SET status = ?, updatedAt = ? WHERE customerId = ?").run(status, ts, customerId);
   return getTenantProjectionByCustomerId(db, customerId);
 }
 
@@ -429,6 +452,36 @@ function consumeResetToken(db, tokenHash, now) {
   return { ok: true, changes: info.changes, token: getResetTokenByHash(db, tokenHash) };
 }
 
+// V7.2 Phase A Schritt 3 (Auftrag Abschnitt G/H) – Owner-Verwaltung von
+// Einladungs-/Reset-Vorgängen OHNE jemals einen Rohtoken zu lesen oder
+// zurückzugeben (die Datenbank speichert ausschließlich den Hash, siehe
+// Moduldokumentation oben). findLatestPendingTokenForUser dient
+// ausschließlich dazu, einen booleschen "Einladungsstatus" abzuleiten
+// (Auftrag Abschnitt G: "Einladungsstatus" in der Benutzerliste).
+function findLatestPendingTokenForUser(db, userId, purpose, now) {
+  const ts = now || nowIso();
+  return (
+    db
+      .prepare(
+        "SELECT * FROM password_reset_tokens WHERE userId = ? AND purpose = ? AND usedAt IS NULL AND expiresAt > ? ORDER BY createdAt DESC LIMIT 1",
+      )
+      .get(userId, purpose, ts) || null
+  );
+}
+
+// Entwertet jeden noch offenen (nicht eingelösten) Token eines Nutzers für
+// einen bestimmten Zweck, ohne den Rohwert je gesehen zu haben – fachlich
+// identisch zu "Einladung widerrufen"/"alten Token beim Reissue entwerten".
+// Markiert per usedAt (kein DELETE – password_reset_tokens bleibt vollständig
+// nachvollziehbar, ohne dass ein entwerteter Token je wieder einlösbar wäre).
+function revokePendingTokensForUser(db, userId, purpose, now) {
+  const ts = now || nowIso();
+  const info = db
+    .prepare("UPDATE password_reset_tokens SET usedAt = ? WHERE userId = ? AND purpose = ? AND usedAt IS NULL")
+    .run(ts, userId, purpose);
+  return info.changes;
+}
+
 // ---------------------------------------------------------------------------
 // Auditfunktionen. Append-only: kein UPDATE, kein DELETE über diese
 // öffentliche Schnittstelle (zusätzlich auf Datenbankebene per Trigger
@@ -490,6 +543,8 @@ module.exports = {
   getTenantProjectionById,
   listTenantProjections,
   updateTenantDisplayName,
+  updateTenantStatus,
+  listUsersByTenantId,
   // Sessions
   insertSession,
   getSessionById,
@@ -503,6 +558,8 @@ module.exports = {
   createResetToken,
   getResetTokenByHash,
   consumeResetToken,
+  findLatestPendingTokenForUser,
+  revokePendingTokensForUser,
   // Audit
   insertAuditEvent,
   getAuditEventById,

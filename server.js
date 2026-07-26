@@ -57,6 +57,12 @@ const authRateLimitModule = require("./auth-rate-limit");
 const authRouteGuardModule = require("./auth-route-guard");
 const authHttpModule = require("./auth-http");
 const authHttpRoutesModule = require("./auth-http-routes");
+// V7.2 Phase A Schritt 3 (Auftrag Abschnitt C/H/I) – Owner-Kunden-/
+// Benutzerverwaltung und Kundenportal-API. Gleiches Muster wie
+// auth-http-routes.js: kleine, separate Module statt weiterem Wachstum
+// dieser Datei.
+const ownerAdminRoutesModule = require("./owner-admin-routes");
+const customerPortalRoutesModule = require("./customer-portal-routes");
 
 const rootDir = __dirname;
 const staticAssets = new Map([
@@ -73,6 +79,24 @@ const staticAssets = new Map([
   ["/app.js", "app.js"],
   ["/styles.css", "styles.css"],
   ["/v71-ui.js", "v71-ui.js"],
+  // V7.2 Phase A Schritt 3 (Auftrag Abschnitt D/E/F) – öffentliche
+  // Portal-Einstiege. Login, Einladung annehmen sowie Passwort
+  // vergessen/neu teilen sich bewusst dieselbe Auth-Shell-Datei
+  // portal-login.html (portal-auth.js unterscheidet anhand von
+  // location.pathname) – keine vier separaten HTML-Dateien.
+  ["/portal/login", "portal-login.html"],
+  ["/portal/einladung", "portal-login.html"],
+  ["/portal/passwort-vergessen", "portal-login.html"],
+  ["/portal/passwort-neu", "portal-login.html"],
+  ["/portal-auth.js", "portal-auth.js"],
+  ["/portal.css", "portal.css"],
+  // V7.2 Phase A Schritt 3 (Auftrag Abschnitt D) – Kundenportal-Startseite.
+  ["/portal", "portal.html"],
+  ["/portal-ui.js", "portal-ui.js"],
+  // V7.2 Phase A Schritt 3 (Auftrag Abschnitt G) – neue, eigenständige
+  // Owner-Verwaltungsseite (kein Umbau der bestehenden Chef-Oberfläche).
+  ["/owner/kunden", "owner-admin.html"],
+  ["/owner-admin.js", "owner-admin.js"],
 ]);
 
 loadLocalEnv();
@@ -23535,6 +23559,11 @@ const getRoutes = buildRouteMap([
   // V7.2 Phase A Schritt 2 (Auftrag Abschnitt H) – Sessionstatus (öffentlich,
   // liefert nie Geheimnisse; siehe route-access-policy.js#PUBLIC_AUTH).
   ["/api/auth/session", (res, context) => authHttpRoutesModule.handleAuthSessionStatus(res, context, authRouteDeps())],
+  // V7.2 Phase A Schritt 3 (Auftrag Abschnitt H) – Owner-Mandantenliste.
+  ["/api/owner/tenants", (res, context) => ownerAdminRoutesModule.handleOwnerTenantsList(res, context, authRouteDeps())],
+  // V7.2 Phase A Schritt 3 (Auftrag Abschnitt I) – Kundenportal-API.
+  ["/api/portal/me", (res, context) => customerPortalRoutesModule.handleGetPortalMe(res, context, authRouteDeps())],
+  ["/api/portal/status", (res, context) => customerPortalRoutesModule.handleGetPortalStatus(res, context, authRouteDeps())],
 ]);
 
 const postRoutes = buildRouteMap([
@@ -23669,12 +23698,45 @@ const routePrefixHandlers = [
         handleV71CanvaPilotResultById(res, remainder, context);
       },
     },
+    {
+      // V7.2 Phase A Schritt 3 (Auftrag Abschnitt H) – Owner-Mandant-
+      // Einzelabruf (.../:customerId) und Benutzerliste (.../:customerId/users).
+      prefix: "/api/owner/tenants/",
+      handler: (res, context) => {
+        const remainder = decodeURIComponent(context.pathname.slice("/api/owner/tenants/".length));
+        ownerAdminRoutesModule.dispatchOwnerTenantsGetPrefix(res, context, authRouteDeps(), remainder);
+      },
+    },
   ];
+
+// V7.2 Phase A Schritt 3 (Auftrag Abschnitt H) – POST-Prefix-Handler für
+// Owner-Aktionsrouten mit dynamischem Pfadsegment (siehe
+// server-http-router.js#postRoutePrefixHandlers). Getrennt von
+// routePrefixHandlers (GET), weil server-http-router.js POST- und
+// GET-Prefixe bewusst als zwei unabhängige, jeweils methodenreine Listen
+// führt (keine versehentliche Method-Verwechslung).
+const postRoutePrefixHandlers = [
+  {
+    prefix: "/api/owner/tenants/",
+    handler: (res, context) => {
+      const remainder = decodeURIComponent(context.pathname.slice("/api/owner/tenants/".length));
+      ownerAdminRoutesModule.dispatchOwnerTenantsPostPrefix(res, context, authRouteDeps(), remainder);
+    },
+  },
+  {
+    prefix: "/api/owner/users/",
+    handler: (res, context) => {
+      const remainder = decodeURIComponent(context.pathname.slice("/api/owner/users/".length));
+      ownerAdminRoutesModule.dispatchOwnerUsersPostPrefix(res, context, authRouteDeps(), remainder);
+    },
+  },
+];
 
 const { requestHandler } = createHttpRouter({
   getRoutes,
   postRoutes,
   routePrefixHandlers,
+  postRoutePrefixHandlers,
   staticAssets,
   rootDir,
   sendJson,
@@ -23727,5 +23789,6 @@ module.exports = {
   getRoutes,
   postRoutes,
   routePrefixHandlers,
+  postRoutePrefixHandlers,
   staticAssets,
 };

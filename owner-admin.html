@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Owner-Verwaltung – Kunden</title>
+<link rel="stylesheet" href="/portal.css" />
+</head>
+<body>
+<div class="portal-shell">
+  <header class="portal-header">
+    <span class="portal-brand">Owner-Verwaltung</span>
+    <button id="logout-button" class="portal-button portal-button--secondary" type="button" style="width:auto;">
+      Abmelden
+    </button>
+  </header>
+
+  <main>
+    <div id="owner-status-message" class="portal-status-message" role="status" aria-live="polite" data-tone=""></div>
+    <div id="owner-token-box" hidden></div>
+
+    <section class="portal-card portal-card--wide">
+      <h1 class="portal-title">Mandanten</h1>
+      <p class="portal-lede">Übersicht aller Kunden-Mandanten. Auswahl öffnet die Benutzerverwaltung.</p>
+      <table class="portal-table">
+        <thead>
+          <tr>
+            <th>Mandant</th>
+            <th>Status</th>
+            <th>Nutzer</th>
+            <th>Aktive Sitzungen</th>
+            <th>Aktionen</th>
+          </tr>
+        </thead>
+        <tbody id="tenant-table-body"></tbody>
+      </table>
+    </section>
+
+    <section class="portal-card portal-card--wide portal-section" id="tenant-detail-section" hidden>
+      <h2 class="portal-subtitle" id="tenant-detail-title">Mandant</h2>
+
+      <h3 class="portal-subtitle">Benutzer</h3>
+      <table class="portal-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>E-Mail-Adresse</th>
+            <th>Rolle</th>
+            <th>Status</th>
+            <th>Einladung</th>
+            <th>Aktive Sitzungen</th>
+            <th>Aktionen</th>
+          </tr>
+        </thead>
+        <tbody id="user-table-body"></tbody>
+      </table>
+
+      <div class="portal-section">
+        <h3 class="portal-subtitle">Neuen Benutzer einladen</h3>
+        <form id="invite-form" novalidate>
+          <div class="portal-form-grid portal-form-grid--invite">
+            <div class="portal-field" style="margin-bottom:0;">
+              <label for="invite-display-name">Anzeigename</label>
+              <input id="invite-display-name" name="displayName" type="text" required />
+            </div>
+            <div class="portal-field" style="margin-bottom:0;">
+              <label for="invite-email">E-Mail-Adresse</label>
+              <input id="invite-email" name="email" type="email" required />
+            </div>
+          </div>
+          <div class="portal-field">
+            <label for="invite-role">Rolle</label>
+            <select id="invite-role" name="role" required>
+              <option value="CUSTOMER_ADMIN">Kunde (Admin)</option>
+              <option value="CUSTOMER_USER">Kunde (Mitarbeiter)</option>
+            </select>
+          </div>
+          <button class="portal-button" type="submit" style="width:auto;">Einladen</button>
+        </form>
+      </div>
+    </section>
+  </main>
+</div>
+<script src="/owner-admin.js"></script>
+</body>
+</html>

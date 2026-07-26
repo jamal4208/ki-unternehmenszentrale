@@ -149,9 +149,24 @@ async function run() {
     }
   });
 
-  await check("jeder tatsächlich registrierte Prefix-Handler ist klassifiziert", () => {
+  await check("jeder tatsächlich registrierte GET-Prefix-Handler ist klassifiziert", () => {
     for (const entry of server.routePrefixHandlers) {
       assert.ok(policyPrefixPaths.has(entry.prefix), `Prefix ${entry.prefix} hat keine Policy`);
+    }
+  });
+
+  // V7.2 Phase A Schritt 3 (Auftrag Abschnitt H/M) – seit
+  // server-http-router.js#postRoutePrefixHandlers gibt es zusätzlich zu den
+  // GET-Prefixen auch POST-Prefixe (Owner-Aktionsrouten mit dynamischem
+  // Pfadsegment). Beide Richtungen (Route→Policy und Policy→Route) werden
+  // getrennt nach Methode geprüft, weil GET_POLICIES/PREFIX_POLICIES Einträge
+  // beider Methoden mischen können.
+  await check("jeder tatsächlich registrierte POST-Prefix-Handler ist klassifiziert", () => {
+    const policyPostPrefixPaths = new Set(
+      routeAccessPolicy.PREFIX_POLICIES.filter((entry) => entry.method === "POST").map((entry) => entry.path),
+    );
+    for (const entry of server.postRoutePrefixHandlers) {
+      assert.ok(policyPostPrefixPaths.has(entry.prefix), `POST-Prefix ${entry.prefix} hat keine Policy`);
     }
   });
 
@@ -206,10 +221,15 @@ async function run() {
     }
   });
 
-  await check("keine verwaiste Prefix-Policy", () => {
-    const serverPrefixes = new Set(server.routePrefixHandlers.map((entry) => entry.prefix));
+  await check("keine verwaiste Prefix-Policy (GET und POST getrennt geprüft)", () => {
+    const serverGetPrefixes = new Set(server.routePrefixHandlers.map((entry) => entry.prefix));
+    const serverPostPrefixes = new Set(server.postRoutePrefixHandlers.map((entry) => entry.prefix));
     for (const entry of routeAccessPolicy.PREFIX_POLICIES) {
-      assert.ok(serverPrefixes.has(entry.path), `Policy für Prefix ${entry.path} hat keinen registrierten Handler`);
+      const serverPrefixes = entry.method === "POST" ? serverPostPrefixes : serverGetPrefixes;
+      assert.ok(
+        serverPrefixes.has(entry.path),
+        `Policy für ${entry.method}-Prefix ${entry.path} hat keinen registrierten Handler`,
+      );
     }
   });
 
@@ -220,15 +240,29 @@ async function run() {
     }
   });
 
-  await check("Routenzahlen in Policy und Server sind identisch (65/51/5/13)", () => {
-    assert.strictEqual(server.getRoutes.size, 65);
-    assert.strictEqual(routeAccessPolicy.GET_POLICIES.length, 65);
+  // V7.2 Phase A Schritt 3 (Auftrag Abschnitt H/I/M) – Zuwachs gegenüber der
+  // Schritt-2-Baseline (65/51/5/0/13): drei neue GET-Routen
+  // (/api/owner/tenants, /api/portal/me, /api/portal/status), ein neuer
+  // GET-Prefix (/api/owner/tenants/), zwei neue POST-Prefixe
+  // (/api/owner/tenants/, /api/owner/users/) und zehn neue statische
+  // Portal-/Owner-Assets.
+  await check("Routenzahlen in Policy und Server sind identisch (68/51/6/2/23)", () => {
+    assert.strictEqual(server.getRoutes.size, 68);
+    assert.strictEqual(routeAccessPolicy.GET_POLICIES.length, 68);
     assert.strictEqual(server.postRoutes.size, 51);
     assert.strictEqual(routeAccessPolicy.POST_POLICIES.length, 51);
-    assert.strictEqual(server.routePrefixHandlers.length, 5);
-    assert.strictEqual(routeAccessPolicy.PREFIX_POLICIES.length, 5);
-    assert.strictEqual(server.staticAssets.size, 13);
-    assert.strictEqual(routeAccessPolicy.STATIC_POLICIES.length, 13);
+    assert.strictEqual(server.routePrefixHandlers.length, 6);
+    assert.strictEqual(
+      routeAccessPolicy.PREFIX_POLICIES.filter((entry) => entry.method === "GET").length,
+      6,
+    );
+    assert.strictEqual(server.postRoutePrefixHandlers.length, 2);
+    assert.strictEqual(
+      routeAccessPolicy.PREFIX_POLICIES.filter((entry) => entry.method === "POST").length,
+      2,
+    );
+    assert.strictEqual(server.staticAssets.size, 23);
+    assert.strictEqual(routeAccessPolicy.STATIC_POLICIES.length, 23);
   });
 
   // -------------------------------------------------------------------
@@ -601,15 +635,66 @@ async function run() {
   });
 
   // -------------------------------------------------------------------
-  // 20. Portal-Assets existieren noch nicht und werden nicht behauptet.
+  // 20. V7.2 Phase A Schritt 3 (Auftrag Abschnitt D/G/M) – Portal-/Owner-
+  // Verwaltungsassets sind jetzt bewusst registriert und korrekt
+  // klassifiziert (Schritt 2 hatte hier ausdrücklich noch keine Portal-UI).
   // -------------------------------------------------------------------
 
-  await check("kein Portal-Asset ist registriert oder klassifiziert (portal.html/portal-ui.js/portal.css)", () => {
-    const forbidden = ["/portal.html", "/portal-ui.js", "/portal.css", "/portal"];
-    forbidden.forEach((assetPath) => {
-      assert.strictEqual(server.staticAssets.has(assetPath), false);
-      assert.strictEqual(routeAccessPolicy.resolvePolicyForRequest("GET", assetPath), null);
+  await check("öffentliche Portal-Einstiegsseiten sind registriert und STATIC_PUBLIC", () => {
+    const publicPortalPaths = [
+      "/portal/login",
+      "/portal/einladung",
+      "/portal/passwort-vergessen",
+      "/portal/passwort-neu",
+      "/portal-auth.js",
+      "/portal.css",
+    ];
+    publicPortalPaths.forEach((assetPath) => {
+      assert.strictEqual(server.staticAssets.has(assetPath), true, `${assetPath} nicht registriert`);
+      const entry = routeAccessPolicy.resolvePolicyForRequest("GET", assetPath);
+      assert.ok(entry, `${assetPath} nicht klassifiziert`);
+      assert.strictEqual(entry.accessClass, ACCESS_CLASSES.STATIC_PUBLIC);
     });
+  });
+
+  await check("Kundenportal-Startseite/-Skript sind registriert und STATIC_AUTHENTICATED_PORTAL", () => {
+    ["/portal", "/portal-ui.js"].forEach((assetPath) => {
+      assert.strictEqual(server.staticAssets.has(assetPath), true, `${assetPath} nicht registriert`);
+      const entry = routeAccessPolicy.resolvePolicyForRequest("GET", assetPath);
+      assert.ok(entry, `${assetPath} nicht klassifiziert`);
+      assert.strictEqual(entry.accessClass, ACCESS_CLASSES.STATIC_AUTHENTICATED_PORTAL);
+    });
+  });
+
+  await check("Owner-Verwaltungsseite/-Skript sind registriert und STATIC_OWNER_ONLY", () => {
+    ["/owner/kunden", "/owner-admin.js"].forEach((assetPath) => {
+      assert.strictEqual(server.staticAssets.has(assetPath), true, `${assetPath} nicht registriert`);
+      const entry = routeAccessPolicy.resolvePolicyForRequest("GET", assetPath);
+      assert.ok(entry, `${assetPath} nicht klassifiziert`);
+      assert.strictEqual(entry.accessClass, ACCESS_CLASSES.STATIC_OWNER_ONLY);
+    });
+  });
+
+  await check("Kundenrolle erreicht /portal, aber nicht /owner/kunden (404)", async () => {
+    const tenant = makeTenant("route-policy-test-portal-customer");
+    const customer = makeUser({ role: "CUSTOMER_ADMIN", tenantId: tenant.id, email: "kunde-portal-asset@example.test" });
+    const cookie = loginCookiesFor(customer);
+    const portalResult = await invoke({ method: "GET", url: "/portal", headers: { cookie } });
+    assert.strictEqual(portalResult.statusCode, 200);
+    const ownerResult = await invoke({ method: "GET", url: "/owner/kunden", headers: { cookie } });
+    assert.strictEqual(ownerResult.statusCode, 404);
+  });
+
+  await check("ohne Session ist /portal blockiert, auch auf Loopback (kein Dev-Bypass für Kundenportal)", async () => {
+    const result = await invoke({ method: "GET", url: "/portal", headers: { host: "127.0.0.1" } });
+    assert.strictEqual(result.statusCode, 404);
+  });
+
+  await check("SUPPORT-Rolle erreicht /portal nicht (kein automatischer Kundenportalzugriff)", async () => {
+    const support = makeUser({ role: "SUPPORT", tenantId: null, email: "support-portal-asset@example.test" });
+    const cookie = loginCookiesFor(support);
+    const result = await invoke({ method: "GET", url: "/portal", headers: { cookie } });
+    assert.strictEqual(result.statusCode, 404);
   });
 
   // -------------------------------------------------------------------

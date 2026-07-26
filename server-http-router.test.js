@@ -215,6 +215,47 @@ async function runTests() {
   const del = await invokeJson(router.requestHandler, "DELETE", "/api/test");
   check("DELETE liefert 405", () => assert.strictEqual(del.statusCode, 405));
 
+  // -------------------------------------------------------------------
+  // V7.2 Phase A Schritt 3 (Auftrag Abschnitt H) – POST-Prefix-Handler
+  // (server-http-router.js#postRoutePrefixHandlers). Rein additiv: ein
+  // Router ohne diese Option verhält sich unverändert (siehe obige
+  // POST-405-Prüfungen mit dem Standard-Testrouter ohne diese Option).
+  // -------------------------------------------------------------------
+
+  const prefixPostRouter = createTestRouter({
+    postRoutePrefixHandlers: [
+      {
+        prefix: "/api/owner-test/",
+        handler: (res, context) => {
+          sendJson(res, 200, { ok: true, remainder: context.pathname.slice("/api/owner-test/".length) });
+        },
+      },
+    ],
+  });
+
+  check("createHttpRouter ohne postRoutePrefixHandlers registriert einen leeren Standardwert", () => {
+    assert.strictEqual(router.getRegisteredPostRoutePrefixHandlerCount(), 0);
+  });
+
+  check("createHttpRouter zählt übergebene postRoutePrefixHandlers korrekt", () => {
+    assert.strictEqual(prefixPostRouter.getRegisteredPostRoutePrefixHandlerCount(), 1);
+  });
+
+  const matchedPrefixPost = await invokeJson(
+    prefixPostRouter.requestHandler,
+    "POST",
+    "/api/owner-test/kunde-x/aktivieren",
+  );
+  check("ein passender POST-Prefix-Handler wird ausgeführt", () => {
+    assert.strictEqual(matchedPrefixPost.statusCode, 200);
+    assert.strictEqual(matchedPrefixPost.json.remainder, "kunde-x/aktivieren");
+  });
+
+  const unmatchedPrefixPost = await invokeJson(prefixPostRouter.requestHandler, "POST", "/api/anderer-pfad");
+  check("ein nicht passender POST-Pfad bleibt trotz konfigurierter Prefixe 405", () => {
+    assert.strictEqual(unmatchedPrefixPost.statusCode, 405);
+  });
+
   const html = await invoke(router.requestHandler, "GET", "/");
   check("bekannte statische Datei wird ausgeliefert", () => {
     assert.strictEqual(html.statusCode, 200);
@@ -302,8 +343,8 @@ async function runTests() {
   const serverSource = fs.readFileSync(path.join(__dirname, "server.js"), "utf8");
   const getRouteBlockMatch = serverSource.match(/const getRoutes = buildRouteMap\(\[([\s\S]*?)\n\]\);/);
   const routeCount = getRouteBlockMatch ? (getRouteBlockMatch[1].match(/^\s+\["\/api\//gm) || []).length : 0;
-  check("bestehende 65 GET-Routen bleiben registriert (Phase C: +2 GET Execution-Status/-Ergebnis, Phase D: +1 GET Executor-Registry, Phase E: +1 GET Freeze-Status, V7.1 Phase A: +5 GET Dokumente/Tools/Plugin-Gateway/Tool-Routing/Backup-Export, V7.1 Phase B: +3 GET HeyGen-Status/Jobpakete/Backup-Export, V7.1 Phase B.1: +5 GET Agentur-Mandantenbasis/Pilot-Review/Backup-Export, V7.1 Phase C: +3 GET Canva-Status/Jobpakete/Backup-Export, V7.1 Phase C.1: +1 GET Pilot-Ergebnisakten-Liste, V7.2 Phase A Schritt 2: +1 GET Auth-Sessionstatus)", () =>
-    assert.strictEqual(routeCount, 65),
+  check("bestehende 68 GET-Routen bleiben registriert (Phase C: +2 GET Execution-Status/-Ergebnis, Phase D: +1 GET Executor-Registry, Phase E: +1 GET Freeze-Status, V7.1 Phase A: +5 GET Dokumente/Tools/Plugin-Gateway/Tool-Routing/Backup-Export, V7.1 Phase B: +3 GET HeyGen-Status/Jobpakete/Backup-Export, V7.1 Phase B.1: +5 GET Agentur-Mandantenbasis/Pilot-Review/Backup-Export, V7.1 Phase C: +3 GET Canva-Status/Jobpakete/Backup-Export, V7.1 Phase C.1: +1 GET Pilot-Ergebnisakten-Liste, V7.2 Phase A Schritt 2: +1 GET Auth-Sessionstatus, V7.2 Phase A Schritt 3: +3 GET Owner-Mandantenliste/Kundenportal-Konto/-Status)", () =>
+    assert.strictEqual(routeCount, 68),
   );
 
   const postRouteBlockMatch = serverSource.match(/const postRoutes = buildRouteMap\(\[([\s\S]*?)\]\);/);
@@ -751,8 +792,8 @@ async function runTests() {
     /* best effort cleanup */
   }
 
-  assert.strictEqual(passed, 69);
-  console.log("server-http-router.test.js: 69 Prüfpunkte erfolgreich");
+  assert.strictEqual(passed, 73);
+  console.log("server-http-router.test.js: 73 Prüfpunkte erfolgreich");
 }
 
 runTests().catch((error) => {

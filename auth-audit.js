@@ -34,6 +34,19 @@ const EVENT_TYPES = Object.freeze([
   "SUPPORT_ACCESS",
   "TENANT_MISMATCH_BLOCKED",
   "ROUTE_DENIED",
+  // V7.2 Phase A Schritt 3 (Auftrag Abschnitt N) – Owner-Kunden-/
+  // Benutzerverwaltung (owner-admin-service.js). Muss exakt der in
+  // auth-db-migrations.js#AUDIT_EVENT_TYPES (Migration 7) erweiterten
+  // CHECK-Aufzählung entsprechen.
+  "TENANT_ACTIVATED",
+  "TENANT_SUSPENDED",
+  "USER_INVITED",
+  "INVITATION_REISSUED",
+  "INVITATION_REVOKED",
+  "USER_SUSPENDED",
+  "USER_REACTIVATED",
+  "USER_SESSIONS_REVOKED",
+  "PASSWORD_RESET_PREPARED",
 ]);
 
 const RESULTS = Object.freeze(["OK", "DENIED", "ERROR"]);
