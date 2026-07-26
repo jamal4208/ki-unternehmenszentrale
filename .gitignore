@@ -4,3 +4,11 @@
 node_modules/
 .DS_Store
 *.log
+
+# V7.2 Phase A Schritt 1 – Auth-Datenbank (better-sqlite3) darf niemals
+# versioniert werden; sie liegt ohnehin außerhalb des Repositories unter
+# ${KUZ_DATA_DIR}/auth/auth.sqlite bzw. ~/Library/Application Support/...
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+data/
