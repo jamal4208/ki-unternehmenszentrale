@@ -139,10 +139,72 @@ function createHttpRouter(options) {
           });
         };
 
-  function serveStatic(reqPath, res) {
+  // V7.2 Phase A Schritt 2 (Auftrag Abschnitt J) – optionales Auth-Gate.
+  // Bleibt vollständig no-op (identisch zum bisherigen Verhalten), solange
+  // kein evaluateAccess übergeben wird – bestehende Aufrufer von
+  // createHttpRouter (z. B. server-http-router.test.js#createTestRouter)
+  // sind davon unberührt. server.js übergibt hier
+  // auth-route-guard.js#evaluateRouteAccess.
+  const evaluateAccess = typeof options.evaluateAccess === "function" ? options.evaluateAccess : null;
+
+  // Denial-Antworten für API-Pfade (JSON) vs. statische Pfade (Klartext,
+  // damit eine verweigerte Chef-Datei nicht von einer tatsächlich
+  // unbekannten Datei unterscheidbar ist – siehe Auftrag Abschnitt K/E).
+  function sendApiDenied(res, decision) {
+    const statusCode = (decision && decision.statusCode) || 404;
+    const message = (decision && decision.message) || "Nicht gefunden.";
+    options.sendJson(res, statusCode, { ok: false, message });
+  }
+
+  function sendStaticDenied(res, decision) {
+    if (decision && decision.statusCode === 500) {
+      options.sendText(res, 500, "Internal error");
+      return;
+    }
+    options.sendText(res, 404, "Not found");
+  }
+
+  function evaluate(method, pathname, requestUrl, req, res) {
+    if (!evaluateAccess) return { allow: true, identity: null };
+    return evaluateAccess({ method, pathname, requestUrl, req, res });
+  }
+
+  function dispatchApiHandler(method, pathname, requestUrl, req, res, context, handler) {
+    let decision;
+    try {
+      decision = evaluate(method, pathname, requestUrl, req, res);
+    } catch (_error) {
+      onInternalError(res, options.sendJson);
+      return;
+    }
+    if (!decision || !decision.allow) {
+      sendApiDenied(res, decision);
+      return;
+    }
+    context.identity = decision.identity || null;
+    try {
+      handler(res, context);
+    } catch (_error) {
+      onInternalError(res, options.sendJson);
+    }
+  }
+
+  function serveStatic(reqPath, res, req) {
     const normalizedPath = normalizeRequestPathname(reqPath);
     if (!normalizedPath) {
       options.sendText(res, 404, "Not found");
+      return;
+    }
+
+    let decision;
+    try {
+      decision = evaluate("GET", normalizedPath, null, req, res);
+    } catch (_error) {
+      options.sendText(res, 500, "Internal error");
+      return;
+    }
+    if (!decision || !decision.allow) {
+      sendStaticDenied(res, decision);
       return;
     }
 
@@ -169,6 +231,7 @@ function createHttpRouter(options) {
       res.writeHead(200, {
         "Content-Type": getMimeType(fileName),
         "Cache-Control": "no-store",
+        ...(options.securityHeaders || {}),
       });
       res.end(content);
     });
@@ -180,7 +243,9 @@ function createHttpRouter(options) {
 
     // POST bleibt für jeden Pfad außer den explizit registrierten POST-Routen
     // exakt wie zuvor (405) gesperrt. Nur die kleine, additive Menge an
-    // POST-Routen (z. B. Execution Bridge, Phase C) wird hier bedient.
+    // POST-Routen (z. B. Execution Bridge, Phase C, Auth) wird hier bedient –
+    // jeweils erst nach erfolgreichem Auth-Gate (Auftrag Abschnitt J: "kein
+    // Handler darf vor erfolgreichem Gate Daten laden oder schreiben").
     if (req.method === "POST") {
       if (!pathname) {
         options.sendText(res, 404, "Not found");
@@ -191,11 +256,7 @@ function createHttpRouter(options) {
         options.sendJson(res, 405, options.methodNotAllowedPayload);
         return;
       }
-      try {
-        postHandler(res, { requestUrl, pathname, req });
-      } catch (_error) {
-        onInternalError(res, options.sendJson);
-      }
+      dispatchApiHandler("POST", pathname, requestUrl, req, res, { requestUrl, pathname, req }, postHandler);
       return;
     }
 
@@ -211,11 +272,7 @@ function createHttpRouter(options) {
 
     const routeHandler = options.getRoutes.get(pathname);
     if (routeHandler) {
-      try {
-        routeHandler(res, { requestUrl, pathname, req });
-      } catch (_error) {
-        onInternalError(res, options.sendJson);
-      }
+      dispatchApiHandler("GET", pathname, requestUrl, req, res, { requestUrl, pathname, req }, routeHandler);
       return;
     }
 
@@ -234,16 +291,12 @@ function createHttpRouter(options) {
         pathname.startsWith(prefixHandler.prefix) &&
         typeof prefixHandler.handler === "function"
       ) {
-        try {
-          prefixHandler.handler(res, { requestUrl, pathname, req });
-        } catch (_error) {
-          onInternalError(res, options.sendJson);
-        }
+        dispatchApiHandler("GET", pathname, requestUrl, req, res, { requestUrl, pathname, req }, prefixHandler.handler);
         return;
       }
     }
 
-    serveStatic(pathname, res);
+    serveStatic(pathname, res, req);
   }
 
   return {

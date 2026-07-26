@@ -46,6 +46,17 @@ const canvaBackupModule = require("./canva-backup");
 // Canva-Aktion.
 const canvaPilotResultRecordModule = require("./canva-pilot-result-record");
 const canvaPilotStoreModule = require("./canva-pilot-store");
+// V7.2 Phase A Schritt 2 (Auftrag Abschnitt C/D/F/G/H) – serverseitige
+// Authentifizierungs-/Autorisierungsgrenze. auth-db.js wird HIER bewusst
+// nicht auf Modulebene geöffnet (siehe ensureAuthDbReady weiter unten): ein
+// reines require("./server") (z. B. v71-integration.test.js) darf keine
+// Datenbankdatei anlegen – erst der erste tatsächliche Request über
+// requestHandler öffnet sie (lazy, danach memoisiert).
+const authDbModule = require("./auth-db");
+const authRateLimitModule = require("./auth-rate-limit");
+const authRouteGuardModule = require("./auth-route-guard");
+const authHttpModule = require("./auth-http");
+const authHttpRoutesModule = require("./auth-http-routes");
 
 const rootDir = __dirname;
 const staticAssets = new Map([
@@ -106,6 +117,7 @@ function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
+    ...authHttpModule.SECURITY_HEADERS,
   });
   res.end(body);
 }
@@ -114,8 +126,56 @@ function sendText(res, statusCode, message) {
   res.writeHead(statusCode, {
     "Content-Type": "text/plain; charset=utf-8",
     "Cache-Control": "no-store",
+    ...authHttpModule.SECURITY_HEADERS,
   });
   res.end(message);
+}
+
+// ---------------------------------------------------------------------------
+// V7.2 Phase A Schritt 2 – Auth-Datenbank, Ratenlimiter, Route-Gate.
+//
+// ensureAuthDbReady() öffnet die Authentifizierungsdatenbank fail-closed
+// (Prozessabbruch bei Fehler, siehe auth-db.js#runStartupSelfCheckOrExit)
+// beim ERSTEN tatsächlichen Bedarf – entweder eigenhändig beim echten
+// Serverstart (weiter unten, vor server.listen) oder lazy beim ersten über
+// requestHandler laufenden Request (z. B. in Testdateien, die server.js nur
+// requiren und selbst HTTP-Aufrufe simulieren). Ein reines require("./server")
+// ohne jeden Request bleibt vollständig ohne Datenbankzugriff.
+// ---------------------------------------------------------------------------
+
+let authDbHandle = null;
+function ensureAuthDbReady() {
+  if (authDbHandle) return authDbHandle.db;
+  authDbHandle = authDbModule.runStartupSelfCheckOrExit();
+  return authDbHandle ? authDbHandle.db : null;
+}
+
+const authRateLimiters = authRateLimitModule.createAuthRateLimiters();
+
+function authRouteDeps() {
+  const modeInfo = authRouteGuardModule.resolveOperatingMode(process.env);
+  return {
+    getDb: ensureAuthDbReady,
+    mode: modeInfo.mode,
+    publicOrigin: modeInfo.publicOrigin,
+    rateLimiters: authRateLimiters,
+    sendJson,
+  };
+}
+
+// Wird als options.evaluateAccess an createHttpRouter übergeben (Auftrag
+// Abschnitt J): läuft vor JEDEM Handler (GET/POST/Prefix/statisches Asset).
+function evaluateAccess({ method, pathname, requestUrl, req }) {
+  const db = ensureAuthDbReady();
+  return authRouteGuardModule.evaluateRouteAccess({
+    method,
+    pathname,
+    req,
+    requestUrl,
+    db,
+    now: new Date().toISOString(),
+    env: process.env,
+  });
 }
 
 function handleProjects(res) {
@@ -23472,6 +23532,9 @@ const getRoutes = buildRouteMap([
   // Kundenfeedback-Ansicht (siehe zusätzlich Prefix-Handler unten für
   // pilotId-Einzelabruf).
   ["/api/v71/canva/pilot-results", (res, context) => handleV71CanvaPilotResultsList(res, context)],
+  // V7.2 Phase A Schritt 2 (Auftrag Abschnitt H) – Sessionstatus (öffentlich,
+  // liefert nie Geheimnisse; siehe route-access-policy.js#PUBLIC_AUTH).
+  ["/api/auth/session", (res, context) => authHttpRoutesModule.handleAuthSessionStatus(res, context, authRouteDeps())],
 ]);
 
 const postRoutes = buildRouteMap([
@@ -23534,19 +23597,27 @@ const postRoutes = buildRouteMap([
   ["/api/v71/canva/pilot-result/agent-qa", (res, context) => handleV71CanvaPilotResultAgentQa(res, context)],
   ["/api/v71/canva/pilot-result/human-review", (res, context) => handleV71CanvaPilotResultHumanReview(res, context)],
   ["/api/v71/canva/pilot-result/escalate", (res, context) => handleV71CanvaPilotResultEscalate(res, context)],
+  // V7.2 Phase A Schritt 2 (Auftrag Abschnitt H) – öffentliche Auth-Routen.
+  ["/api/auth/login", (res, context) => authHttpRoutesModule.handleAuthLogin(res, context, authRouteDeps())],
+  ["/api/auth/logout", (res, context) => authHttpRoutesModule.handleAuthLogout(res, context, authRouteDeps())],
+  ["/api/auth/password-reset/request", (res, context) => authHttpRoutesModule.handleAuthPasswordResetRequest(res, context, authRouteDeps())],
+  ["/api/auth/password-reset/confirm", (res, context) => authHttpRoutesModule.handleAuthPasswordResetConfirm(res, context, authRouteDeps())],
+  ["/api/auth/invitation/accept", (res, context) => authHttpRoutesModule.handleAuthInvitationAccept(res, context, authRouteDeps())],
 ]);
 
-const { requestHandler } = createHttpRouter({
-  getRoutes,
-  postRoutes,
-  routePrefixHandlers: [
-    {
-      prefix: "/api/projects/",
-      handler: (res, context) => {
-        const projectId = decodeURIComponent(context.pathname.slice("/api/projects/".length));
-        handleUnknownProject(res, projectId);
-      },
+// V7.2 Phase A Schritt 2 (Auftrag Abschnitt N) – als benannte Konstante
+// extrahiert (statt Inline-Array-Literal), damit route-access-policy.test.js
+// dieselbe, tatsächlich registrierte Prefix-Handler-Liste referenzieren kann
+// (keine verwaiste/keine unklassifizierte Policy, siehe Modul-Exporte unten).
+// Reines Refactoring ohne Verhaltensänderung – identischer Aufbau wie zuvor.
+const routePrefixHandlers = [
+  {
+    prefix: "/api/projects/",
+    handler: (res, context) => {
+      const projectId = decodeURIComponent(context.pathname.slice("/api/projects/".length));
+      handleUnknownProject(res, projectId);
     },
+  },
     {
       prefix: "/api/v71/documents/",
       handler: (res, context) => {
@@ -23598,11 +23669,18 @@ const { requestHandler } = createHttpRouter({
         handleV71CanvaPilotResultById(res, remainder, context);
       },
     },
-  ],
+  ];
+
+const { requestHandler } = createHttpRouter({
+  getRoutes,
+  postRoutes,
+  routePrefixHandlers,
   staticAssets,
   rootDir,
   sendJson,
   sendText,
+  evaluateAccess,
+  securityHeaders: authHttpModule.SECURITY_HEADERS,
   methodNotAllowedPayload: {
     ok: false,
     message: "Nur sichere GET-Endpunkte sind vorbereitet.",
@@ -23611,6 +23689,24 @@ const { requestHandler } = createHttpRouter({
 });
 
 if (require.main === module) {
+  // V7.2 Phase A Schritt 2 (Auftrag Abschnitt C) – Betriebsmodus verbindlich
+  // vor jedem echten Serverstart prüfen. Ein fehlkonfigurierter
+  // Produktivmodus (fehlendes/ungültiges KUZ_PUBLIC_ORIGIN) bricht den Start
+  // sofort ab; es gibt keinen stillen Rückfall auf den Entwicklungsmodus.
+  const modeInfo = authRouteGuardModule.resolveOperatingMode(process.env);
+  if (!modeInfo.ok) {
+    console.error(`Serverstart abgebrochen: ${modeInfo.errorReason}`);
+    process.exit(1);
+  }
+  if (modeInfo.mode === "dev") {
+    console.warn(authRouteGuardModule.DEV_MODE_WARNING);
+  }
+  // Fail-closed: öffnet die Auth-Datenbank, wendet Migrationen an und
+  // gleicht Mandanten gegen die Registry ab (siehe auth-db.js). Bei jedem
+  // Fehler bricht der Prozess kontrolliert mit Code 1 ab (kein stiller
+  // Fallback, siehe auth-db.js#reportStartupFailureAndExit).
+  ensureAuthDbReady();
+
   const server = http.createServer(requestHandler);
   server.listen(port, "127.0.0.1", () => {
     console.log(`KI-Unternehmenszentrale local pilot server running on http://127.0.0.1:${port}`);
@@ -23623,4 +23719,13 @@ module.exports = {
   // Widerspruchsfreiheit zur neuen Plugin-Wahrheitsquelle ohne Quelltext-
   // Parsing geprüft werden kann. Keine Verhaltensänderung.
   PRODUCTIVE_PLUGIN_REGISTRY,
+  // V7.2 Phase A Schritt 2 (Auftrag Abschnitt N) – rein lesend für
+  // route-access-policy.test.js: ermöglicht den direkten Abgleich "jede
+  // registrierte Route hat eine Policy" / "keine verwaiste Policy" gegen die
+  // TATSÄCHLICH registrierten Routen, ohne server.js per Regex zu parsen.
+  // Keine Verhaltensänderung an requestHandler selbst.
+  getRoutes,
+  postRoutes,
+  routePrefixHandlers,
+  staticAssets,
 };

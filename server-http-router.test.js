@@ -302,16 +302,16 @@ async function runTests() {
   const serverSource = fs.readFileSync(path.join(__dirname, "server.js"), "utf8");
   const getRouteBlockMatch = serverSource.match(/const getRoutes = buildRouteMap\(\[([\s\S]*?)\n\]\);/);
   const routeCount = getRouteBlockMatch ? (getRouteBlockMatch[1].match(/^\s+\["\/api\//gm) || []).length : 0;
-  check("bestehende 64 GET-Routen bleiben registriert (Phase C: +2 GET Execution-Status/-Ergebnis, Phase D: +1 GET Executor-Registry, Phase E: +1 GET Freeze-Status, V7.1 Phase A: +5 GET Dokumente/Tools/Plugin-Gateway/Tool-Routing/Backup-Export, V7.1 Phase B: +3 GET HeyGen-Status/Jobpakete/Backup-Export, V7.1 Phase B.1: +5 GET Agentur-Mandantenbasis/Pilot-Review/Backup-Export, V7.1 Phase C: +3 GET Canva-Status/Jobpakete/Backup-Export, V7.1 Phase C.1: +1 GET Pilot-Ergebnisakten-Liste)", () =>
-    assert.strictEqual(routeCount, 64),
+  check("bestehende 65 GET-Routen bleiben registriert (Phase C: +2 GET Execution-Status/-Ergebnis, Phase D: +1 GET Executor-Registry, Phase E: +1 GET Freeze-Status, V7.1 Phase A: +5 GET Dokumente/Tools/Plugin-Gateway/Tool-Routing/Backup-Export, V7.1 Phase B: +3 GET HeyGen-Status/Jobpakete/Backup-Export, V7.1 Phase B.1: +5 GET Agentur-Mandantenbasis/Pilot-Review/Backup-Export, V7.1 Phase C: +3 GET Canva-Status/Jobpakete/Backup-Export, V7.1 Phase C.1: +1 GET Pilot-Ergebnisakten-Liste, V7.2 Phase A Schritt 2: +1 GET Auth-Sessionstatus)", () =>
+    assert.strictEqual(routeCount, 65),
   );
 
   const postRouteBlockMatch = serverSource.match(/const postRoutes = buildRouteMap\(\[([\s\S]*?)\]\);/);
   const postRouteCount = postRouteBlockMatch
     ? (postRouteBlockMatch[1].match(/^\s+\["\/api\//gm) || []).length
     : 0;
-  check("genau 46 additive POST-Routen sind registriert (Execution Bridge + V7.1 Phase A Dokumente/Backup + V7.1 Phase B HeyGen-Connector-Pilot + V7.1 Phase B.1 Kundenentwurf/Kostenpaket/Ergebnisrückführung/Agentur-Backup + V7.1 Phase C Canva-Connector-Pilot + V7.1 Phase C.1: +5 POST interne Prüfung/Kundenfeedback/Änderungsanforderung/Änderung erledigt/Kundenfreigabe der Pilot-Ergebnisakte + V7.1 Phase C.1.1: +3 POST Agenten-QS/menschliches Review/Eskalation)", () =>
-    assert.strictEqual(postRouteCount, 46),
+  check("genau 51 additive POST-Routen sind registriert (Execution Bridge + V7.1 Phase A Dokumente/Backup + V7.1 Phase B HeyGen-Connector-Pilot + V7.1 Phase B.1 Kundenentwurf/Kostenpaket/Ergebnisrückführung/Agentur-Backup + V7.1 Phase C Canva-Connector-Pilot + V7.1 Phase C.1: +5 POST interne Prüfung/Kundenfeedback/Änderungsanforderung/Änderung erledigt/Kundenfreigabe der Pilot-Ergebnisakte + V7.1 Phase C.1.1: +3 POST Agenten-QS/menschliches Review/Eskalation + V7.2 Phase A Schritt 2: +5 POST Auth-Login/Logout/Reset-Anfrage/Reset-Bestätigung/Einladung)", () =>
+    assert.strictEqual(postRouteCount, 51),
   );
 
   const serverStatusGet = await invokeJson(requestHandler, "GET", "/api/server-status");
@@ -486,8 +486,18 @@ async function runTests() {
     { runId: "r-host" },
     { host: "evil.example.com" },
   );
-  check("POST /api/execution/prepare mit fremdem Host liefert 403", () =>
-    assert.strictEqual(prepareBadHost.statusCode, 403),
+  // V7.2 Phase A Schritt 2: Das neue, vor jedem Handler laufende Auth-Gate
+  // (Auftrag Abschnitt J) lehnt einen nicht-Loopback-Host für diese
+  // OWNER_ONLY/DISABLED_IN_PROD-Route bereits VOR dem bisherigen
+  // handler-internen isExecutionRequestOriginAllowed-Check ab – mit einer
+  // generischen 404-Antwort statt 403, damit die Existenz der Chef-/
+  // Execution-Route gegenüber einem fremden Host nicht bestätigt wird
+  // (Auftrag Abschnitt E/K: "unklassifizierte/']fremde Route bleibt
+  // geschlossen", HIDDEN_404). Der handler-interne 403-Pfad bleibt für
+  // Anfragen von Loopback mit fremdem Origin weiterhin aktiv (siehe Test
+  // "mit fremdem Origin liefert 403" oben).
+  check("POST /api/execution/prepare mit fremdem Host liefert 404 (Auth-Gate greift vor dem Handler)", () =>
+    assert.strictEqual(prepareBadHost.statusCode, 404),
   );
 
   const oversizedBody = "x".repeat(33 * 1024);
