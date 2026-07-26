@@ -701,6 +701,180 @@ function countPolicyViolationsForTenant(db, tenantId) {
   return row ? row.total : 0;
 }
 
+// ---------------------------------------------------------------------------
+// Work-Order-Läufe (V7.2 Phase C Schritt 1, Auftrag Abschnitt F/I). Jede
+// statusverändernde Funktion prüft den aktuellen Ausgangsstatus als Teil der
+// WHERE-Klausel (identisches atomares Compare-and-Set-Muster wie
+// transitionWorkOrder oben) – eine zweite, datenbanknahe Verteidigungslinie
+// zusätzlich zur fachlichen Prüfung in work-order-execution-service.js.
+//
+// Idempotenz-/Parallelitätsschutz (Auftrag Abschnitt I): getActive... und
+// createWorkOrderRun werden vom Aufrufer IMMER gemeinsam innerhalb
+// derselben withAuthTransaction()-Transaktion verwendet, damit "prüfen, ob
+// bereits ein aktiver Lauf existiert" und "neuen Lauf anlegen" atomar
+// bleiben (better-sqlite3-Transaktionen sind synchron, kein Interleaving
+// möglich, solange kein await dazwischenliegt).
+// ---------------------------------------------------------------------------
+
+const ACTIVE_WORK_ORDER_RUN_STATUSES = Object.freeze(["PREPARED", "IN_PROGRESS"]);
+
+function getActiveWorkOrderRunForWorkOrder(db, workOrderId) {
+  const placeholders = ACTIVE_WORK_ORDER_RUN_STATUSES.map(() => "?").join(", ");
+  return (
+    db
+      .prepare(
+        `SELECT * FROM work_order_runs WHERE workOrderId = ? AND status IN (${placeholders}) ORDER BY runNumber DESC LIMIT 1`,
+      )
+      .get(workOrderId, ...ACTIVE_WORK_ORDER_RUN_STATUSES) || null
+  );
+}
+
+function nextWorkOrderRunNumber(db, workOrderId) {
+  const row = db
+    .prepare("SELECT COALESCE(MAX(runNumber), 0) AS maxRunNumber FROM work_order_runs WHERE workOrderId = ?")
+    .get(workOrderId);
+  return (row ? row.maxRunNumber : 0) + 1;
+}
+
+function createWorkOrderRun(db, input = {}) {
+  const now = input.now || nowIso();
+  const record = {
+    id: input.id || crypto.randomUUID(),
+    workOrderId: input.workOrderId,
+    tenantId: input.tenantId,
+    runNumber: nextWorkOrderRunNumber(db, input.workOrderId),
+    status: input.status || "PREPARED",
+    orchestratorVersion: input.orchestratorVersion,
+    failureCode: input.failureCode ?? null,
+    startedAt: input.startedAt ?? null,
+    completedAt: input.completedAt ?? null,
+    failedAt: input.failedAt ?? null,
+    createdAt: now,
+  };
+  db.prepare(
+    `INSERT INTO work_order_runs
+      (id, workOrderId, tenantId, runNumber, status, orchestratorVersion, failureCode, startedAt, completedAt, failedAt, createdAt)
+     VALUES
+      (@id, @workOrderId, @tenantId, @runNumber, @status, @orchestratorVersion, @failureCode, @startedAt, @completedAt, @failedAt, @createdAt)`,
+  ).run(record);
+  return getWorkOrderRunById(db, record.id);
+}
+
+function getWorkOrderRunById(db, id) {
+  return db.prepare("SELECT * FROM work_order_runs WHERE id = ?").get(id) || null;
+}
+
+function listWorkOrderRunsForWorkOrder(db, workOrderId) {
+  return db.prepare("SELECT * FROM work_order_runs WHERE workOrderId = ? ORDER BY runNumber DESC").all(workOrderId);
+}
+
+// Allgemeiner Statusübergang für einen Lauf (PREPARED -> IN_PROGRESS,
+// IN_PROGRESS -> NEEDS_CLARIFICATION|COMPLETED|FAILED|CANCELLED).
+// fromStatuses ist eine Liste erlaubter Ausgangsstatus; info.changes !== 1
+// bedeutet unbekannte ID oder einen bereits abweichenden Status (Race
+// Condition), vom Aufrufer als kontrollierter Fehlerzustand behandelt.
+function transitionWorkOrderRun(db, id, options = {}) {
+  const { fromStatuses, toStatus, startedAt, completedAt, failedAt, failureCode, now } = options;
+  const statuses = Array.isArray(fromStatuses) ? fromStatuses : [fromStatuses];
+  if (statuses.length === 0) return null;
+  const placeholders = statuses.map(() => "?").join(", ");
+  const existing = getWorkOrderRunById(db, id);
+  const params = [
+    toStatus,
+    startedAt !== undefined ? startedAt : existing ? existing.startedAt : null,
+    completedAt !== undefined ? completedAt : existing ? existing.completedAt : null,
+    failedAt !== undefined ? failedAt : existing ? existing.failedAt : null,
+    failureCode !== undefined ? failureCode : existing ? existing.failureCode : null,
+    id,
+  ];
+  const sql = `UPDATE work_order_runs
+       SET status = ?, startedAt = ?, completedAt = ?, failedAt = ?, failureCode = ?
+       WHERE id = ? AND status IN (${placeholders})`;
+  const info = db.prepare(sql).run(...params, ...statuses);
+  if (info.changes !== 1) return null;
+  return getWorkOrderRunById(db, id);
+}
+
+function createWorkOrderRunAgent(db, input = {}) {
+  const record = {
+    id: input.id || crypto.randomUUID(),
+    runId: input.runId,
+    agentKey: input.agentKey,
+    agentRole: input.agentRole,
+    sequenceNumber: input.sequenceNumber,
+    selectionReason: input.selectionReason,
+    status: input.status || "PLANNED",
+    startedAt: input.startedAt ?? null,
+    completedAt: input.completedAt ?? null,
+  };
+  db.prepare(
+    `INSERT INTO work_order_run_agents
+      (id, runId, agentKey, agentRole, sequenceNumber, selectionReason, status, startedAt, completedAt)
+     VALUES
+      (@id, @runId, @agentKey, @agentRole, @sequenceNumber, @selectionReason, @status, @startedAt, @completedAt)`,
+  ).run(record);
+  return record;
+}
+
+function listWorkOrderRunAgents(db, runId) {
+  return db.prepare("SELECT * FROM work_order_run_agents WHERE runId = ? ORDER BY sequenceNumber ASC").all(runId);
+}
+
+// ---------------------------------------------------------------------------
+// Work-Order-Ergebnisse (V7.2 Phase C Schritt 1, Auftrag Abschnitt F/K).
+// Append-only/unveränderlich (SQLite-Trigger, siehe auth-db-migrations.js):
+// dieses Modul exportiert bewusst keine Update-/Delete-Funktion dafür. Eine
+// spätere Revision erzeugt IMMER eine neue Version, niemals ein Überschreiben.
+// ---------------------------------------------------------------------------
+
+function nextWorkOrderResultVersionNumber(db, workOrderId) {
+  const row = db
+    .prepare("SELECT COALESCE(MAX(versionNumber), 0) AS maxVersion FROM work_order_results WHERE workOrderId = ?")
+    .get(workOrderId);
+  return (row ? row.maxVersion : 0) + 1;
+}
+
+function createWorkOrderResult(db, input = {}) {
+  const now = input.now || nowIso();
+  const record = {
+    id: input.id || crypto.randomUUID(),
+    workOrderId: input.workOrderId,
+    runId: input.runId,
+    tenantId: input.tenantId,
+    versionNumber: nextWorkOrderResultVersionNumber(db, input.workOrderId),
+    resultTitle: input.resultTitle,
+    resultSummary: input.resultSummary,
+    resultBody: input.resultBody,
+    qualityStatus: input.qualityStatus,
+    qualityNote: input.qualityNote ?? null,
+    openPoints: input.openPoints ?? null,
+    createdAt: now,
+  };
+  db.prepare(
+    `INSERT INTO work_order_results
+      (id, workOrderId, runId, tenantId, versionNumber, resultTitle, resultSummary, resultBody, qualityStatus, qualityNote, openPoints, createdAt)
+     VALUES
+      (@id, @workOrderId, @runId, @tenantId, @versionNumber, @resultTitle, @resultSummary, @resultBody, @qualityStatus, @qualityNote, @openPoints, @createdAt)`,
+  ).run(record);
+  return getWorkOrderResultById(db, record.id);
+}
+
+function getWorkOrderResultById(db, id) {
+  return db.prepare("SELECT * FROM work_order_results WHERE id = ?").get(id) || null;
+}
+
+function getWorkOrderResultByRunId(db, runId) {
+  return db.prepare("SELECT * FROM work_order_results WHERE runId = ?").get(runId) || null;
+}
+
+function getLatestWorkOrderResultForWorkOrder(db, workOrderId) {
+  return (
+    db
+      .prepare("SELECT * FROM work_order_results WHERE workOrderId = ? ORDER BY versionNumber DESC LIMIT 1")
+      .get(workOrderId) || null
+  );
+}
+
 module.exports = {
   AuthDatabaseStartupError,
   resolveAuthDbPaths,
@@ -760,4 +934,17 @@ module.exports = {
   listPolicyViolationsForUser,
   countPolicyViolationsForUser,
   countPolicyViolationsForTenant,
+  // Work-Order-Läufe
+  getActiveWorkOrderRunForWorkOrder,
+  createWorkOrderRun,
+  getWorkOrderRunById,
+  listWorkOrderRunsForWorkOrder,
+  transitionWorkOrderRun,
+  createWorkOrderRunAgent,
+  listWorkOrderRunAgents,
+  // Work-Order-Ergebnisse
+  createWorkOrderResult,
+  getWorkOrderResultById,
+  getWorkOrderResultByRunId,
+  getLatestWorkOrderResultForWorkOrder,
 };

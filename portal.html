@@ -62,6 +62,32 @@
         <p class="portal-lede" id="work-order-detail-note-text"></p>
       </div>
 
+      <!-- V7.2 Phase C Schritt 1 (Auftrag Abschnitt L): Ergebnisdarstellung
+           bei Status RESULT_READY. Bewusst ohne Freigabe-/Änderungsfunktion
+           und ohne Veröffentlichungs-/Billing-/Providerhinweis – diese
+           folgen laut Hinweistext erst in einem späteren Schritt. -->
+      <div class="portal-section" id="work-order-result-section" hidden aria-live="polite">
+        <h3 class="portal-subtitle">Ergebnis</h3>
+        <ul class="portal-kv-list">
+          <li><span class="portal-kv-key">Ergebnisversion</span><span id="work-order-result-version">–</span></li>
+          <li><span class="portal-kv-key">Qualitätsstatus</span><span id="work-order-result-quality" class="portal-badge"></span></li>
+        </ul>
+        <h4 class="portal-subtitle">Zusammenfassung</h4>
+        <p class="portal-lede" id="work-order-result-summary">–</p>
+        <h4 class="portal-subtitle">Vollständiges Ergebnis</h4>
+        <p class="portal-result-body" id="work-order-result-body">–</p>
+        <div id="work-order-result-quality-note-block" hidden>
+          <h4 class="portal-subtitle">Hinweis zur Qualitätsprüfung</h4>
+          <p class="portal-lede" id="work-order-result-quality-note">–</p>
+        </div>
+        <div id="work-order-result-open-points-block" hidden>
+          <h4 class="portal-subtitle">Offene Punkte</h4>
+          <ul id="work-order-result-open-points"></ul>
+        </div>
+        <p class="portal-empty-hint" id="work-order-result-disclaimer">–</p>
+        <p class="portal-lede" id="work-order-result-next-step">–</p>
+      </div>
+
       <div class="portal-section" id="work-order-resubmit-section" hidden>
         <h3 class="portal-subtitle">Auftrag ergänzen und erneut absenden</h3>
         <form id="work-order-resubmit-form" novalidate>

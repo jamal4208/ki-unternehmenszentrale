@@ -73,6 +73,20 @@ const EVENT_TYPES = Object.freeze([
   // automatische Direkteinstufung als ESCALATED (kein Owner-Akteur).
   "WORK_ORDER_BLOCKED_BY_POLICY",
   "WORK_ORDER_AUTO_ESCALATED_BY_POLICY",
+  // V7.2 Phase C Schritt 1 (Auftrag Abschnitt N) – kontrollierte Übergabe
+  // eines READY_FOR_PROCESSING-Auftrags an die interne Agentenzentrale
+  // (work-order-execution-service.js). Muss exakt der in
+  // auth-db-migrations.js#AUDIT_EVENT_TYPES (Migration 10) erweiterten
+  // CHECK-Aufzählung entsprechen.
+  "WORK_ORDER_RUN_PREPARED",
+  "WORK_ORDER_RUN_STARTED",
+  "WORK_ORDER_RUN_COMPLETED",
+  "WORK_ORDER_RUN_FAILED",
+  "WORK_ORDER_RUN_CANCELLED",
+  "WORK_ORDER_RESULT_CREATED",
+  "WORK_ORDER_AGENT_SELECTED",
+  "WORK_ORDER_EXECUTION_BLOCKED_BY_POLICY",
+  "WORK_ORDER_EXECUTION_ESCALATED_BY_POLICY",
 ]);
 
 const RESULTS = Object.freeze(["OK", "DENIED", "ERROR"]);
@@ -90,6 +104,11 @@ const RESULTS = Object.freeze(["OK", "DENIED", "ERROR"]);
 // business-use-policy.js, kein Freitext) – "reasonCode" existierte bereits
 // und wird jetzt zusätzlich für Business-Use-Policy-Kategorien verwendet
 // (z. B. "ILLEGAL_PURPOSE"), niemals für den erkannten Auftragstext selbst.
+// V7.2 Phase C Schritt 1 (Auftrag Abschnitt N): "runId" (interne Lauf-ID),
+// "agentKey" (technische ID aus dem kanonischen 25-Agenten-Register, siehe
+// agent-registry.js – kein Freitext) und "failureCode" (reiner
+// Fehlercode, kein Stacktrace/keine Fehlermeldung) ergänzt. Weiterhin kein
+// vollständiger Auftragstext, kein Ergebnistext, kein Systemprompt.
 const METADATA_ALLOWLIST = Object.freeze([
   "routeName",
   "roleLabel",
@@ -97,6 +116,9 @@ const METADATA_ALLOWLIST = Object.freeze([
   "workOrderId",
   "statusTransition",
   "severity",
+  "runId",
+  "agentKey",
+  "failureCode",
 ]);
 
 // Verbotene Inhalte, unabhängig vom Feldnamen (Verteidigung in der Tiefe:

@@ -219,6 +219,59 @@
     }
 
     document.getElementById("work-order-cancel-section").hidden = !workOrder.cancellable;
+
+    // V7.2 Phase C Schritt 1 (Auftrag Abschnitt L): Ergebnis nachladen,
+    // sobald ein Ergebnis vorliegt. Kein Freigabe-/Änderungsformular.
+    var resultSection = document.getElementById("work-order-result-section");
+    if (workOrder.status === "RESULT_READY") {
+      loadWorkOrderResult(workOrder.id);
+    } else {
+      resultSection.hidden = true;
+    }
+  }
+
+  function renderWorkOrderResult(result) {
+    var resultSection = document.getElementById("work-order-result-section");
+    document.getElementById("work-order-result-version").textContent = String(result.versionNumber);
+    var qualityBadge = document.getElementById("work-order-result-quality");
+    qualityBadge.textContent = result.qualityStatusLabel;
+    qualityBadge.setAttribute("data-status", result.qualityStatus);
+    document.getElementById("work-order-result-summary").textContent = result.summary;
+    document.getElementById("work-order-result-body").textContent = result.body;
+
+    var noteBlock = document.getElementById("work-order-result-quality-note-block");
+    if (result.qualityNote) {
+      noteBlock.hidden = false;
+      document.getElementById("work-order-result-quality-note").textContent = result.qualityNote;
+    } else {
+      noteBlock.hidden = true;
+    }
+
+    var openPointsBlock = document.getElementById("work-order-result-open-points-block");
+    var openPointsList = document.getElementById("work-order-result-open-points");
+    openPointsList.innerHTML = "";
+    if (result.openPoints && result.openPoints.length > 0) {
+      openPointsBlock.hidden = false;
+      result.openPoints.forEach(function (point) {
+        openPointsList.appendChild(el("li", { text: point }, []));
+      });
+    } else {
+      openPointsBlock.hidden = true;
+    }
+
+    document.getElementById("work-order-result-disclaimer").textContent = result.disclaimer;
+    document.getElementById("work-order-result-next-step").textContent = result.nextStepNote;
+    resultSection.hidden = false;
+  }
+
+  function loadWorkOrderResult(workOrderId) {
+    fetchJson("/api/portal/work-orders/" + encodeURIComponent(workOrderId) + "/result").then(function (result) {
+      if (result.statusCode === 200 && result.data && result.data.ok) {
+        renderWorkOrderResult(result.data.result);
+        return;
+      }
+      document.getElementById("work-order-result-section").hidden = true;
+    });
   }
 
   function showWorkOrderDetail(workOrderId) {

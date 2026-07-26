@@ -75,6 +75,21 @@ const AUDIT_EVENT_TYPES = Object.freeze([
   // gleiches Vorgehen wie bei Migration 8 gegenüber Migration 7.
   "WORK_ORDER_BLOCKED_BY_POLICY",
   "WORK_ORDER_AUTO_ESCALATED_BY_POLICY",
+  // V7.2 Phase C Schritt 1 (Auftrag Abschnitt N) – kontrollierte Übergabe
+  // eines READY_FOR_PROCESSING-Auftrags an die interne Agentenzentrale
+  // (work-order-execution-service.js). Ergänzt in Migration 10
+  // (create_work_order_runs_and_widen_audit_event_types_v4), NICHT
+  // rückwirkend in AUDIT_EVENT_TYPES_AT_MIGRATION_9 (siehe dort) – gleiches
+  // Vorgehen wie bei Migration 9 gegenüber Migration 8.
+  "WORK_ORDER_RUN_PREPARED",
+  "WORK_ORDER_RUN_STARTED",
+  "WORK_ORDER_RUN_COMPLETED",
+  "WORK_ORDER_RUN_FAILED",
+  "WORK_ORDER_RUN_CANCELLED",
+  "WORK_ORDER_RESULT_CREATED",
+  "WORK_ORDER_AGENT_SELECTED",
+  "WORK_ORDER_EXECUTION_BLOCKED_BY_POLICY",
+  "WORK_ORDER_EXECUTION_ESCALATED_BY_POLICY",
 ]);
 
 // Historischer Stand exakt zum Zeitpunkt der Migration 5 (Auftrag Abschnitt
@@ -186,6 +201,52 @@ const AUDIT_EVENT_TYPES_AT_MIGRATION_8 = Object.freeze([
   "WORK_ORDER_TENANT_MISMATCH_BLOCKED",
 ]);
 
+// Historischer Stand exakt zum Zeitpunkt der Migration 9 (gleiches Prinzip
+// wie AUDIT_EVENT_TYPES_AT_MIGRATION_8 oben) – wird ausschließlich von
+// MIGRATIONS[8] (create_policy_violations_and_widen_audit_event_types_v3)
+// referenziert. V7.2 Phase C Schritt 1 fügt neun weitere Ereignistypen hinzu
+// (siehe AUDIT_EVENT_TYPES oben); Migration 9 selbst bleibt dadurch
+// unverändert – ihre CHECK-Erweiterung ist und bleibt exakt diese 35 Werte.
+// Die weitere Erweiterung auf die aktuelle Gesamtmenge erfolgt in
+// Migration 10 (create_work_order_runs_and_widen_audit_event_types_v4).
+const AUDIT_EVENT_TYPES_AT_MIGRATION_9 = Object.freeze([
+  "LOGIN_SUCCESS",
+  "LOGIN_FAILED",
+  "LOGOUT",
+  "SESSION_EXPIRED",
+  "SESSION_REVOKED",
+  "PASSWORD_CHANGED",
+  "RESET_REQUESTED",
+  "RESET_USED",
+  "USER_CREATED",
+  "USER_STATUS_CHANGED",
+  "ROLE_CHANGED",
+  "SUPPORT_GRANTED",
+  "SUPPORT_REVOKED",
+  "SUPPORT_ACCESS",
+  "TENANT_MISMATCH_BLOCKED",
+  "ROUTE_DENIED",
+  "TENANT_ACTIVATED",
+  "TENANT_SUSPENDED",
+  "USER_INVITED",
+  "INVITATION_REISSUED",
+  "INVITATION_REVOKED",
+  "USER_SUSPENDED",
+  "USER_REACTIVATED",
+  "USER_SESSIONS_REVOKED",
+  "PASSWORD_RESET_PREPARED",
+  "WORK_ORDER_CREATED",
+  "WORK_ORDER_SUBMITTED",
+  "WORK_ORDER_RESUBMITTED",
+  "WORK_ORDER_AUTO_READY",
+  "WORK_ORDER_AUTO_NEEDS_CLARIFICATION",
+  "WORK_ORDER_ESCALATED",
+  "WORK_ORDER_CANCELLED",
+  "WORK_ORDER_TENANT_MISMATCH_BLOCKED",
+  "WORK_ORDER_BLOCKED_BY_POLICY",
+  "WORK_ORDER_AUTO_ESCALATED_BY_POLICY",
+]);
+
 const AUDIT_RESULT_VALUES = Object.freeze(["OK", "DENIED", "ERROR"]);
 
 // V7.2 Phase B – Schutz- und Einwilligungsgrundlage (Auftrag Abschnitt D) –
@@ -225,6 +286,36 @@ const WORK_ORDER_STATUS_VALUES = Object.freeze([
   "CHANGES_REQUESTED",
   "CUSTOMER_APPROVED",
 ]);
+
+// V7.2 Phase C Schritt 1 (Auftrag Abschnitt F) – Laufmodell für die
+// kontrollierte Übergabe eines READY_FOR_PROCESSING-Auftrags an die interne
+// Agentenzentrale (work-order-execution-service.js/
+// work-order-agent-orchestrator.js). NEEDS_CLARIFICATION ist hier ein
+// LAUF-Endzustand (der Lauf selbst konnte keine echte fachliche Lücke lösen
+// und wurde technisch sauber beendet) – unabhängig vom gleichnamigen
+// WORK-ORDER-Status, der von work-order-service.js separat verwaltet wird.
+const WORK_ORDER_RUN_STATUS_VALUES = Object.freeze([
+  "PREPARED",
+  "IN_PROGRESS",
+  "NEEDS_CLARIFICATION",
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+]);
+
+// Rollen, die ein Agent innerhalb genau eines Laufs einnehmen kann (Auftrag
+// Abschnitt D/E): genau ein Projektmanager, ein bis drei Fachagenten, genau
+// ein Qualitätsagent (die Obergrenzen selbst erzwingt
+// work-order-agent-orchestrator.js, nicht diese CHECK-Aufzählung).
+const WORK_ORDER_RUN_AGENT_ROLE_VALUES = Object.freeze(["PROJECT_MANAGER", "SPECIALIST", "QUALITY"]);
+const WORK_ORDER_RUN_AGENT_STATUS_VALUES = Object.freeze(["PLANNED", "COMPLETED"]);
+
+// Qualitätsstatus eines gespeicherten Ergebnisses (Auftrag Abschnitt K).
+// Eine Rückfrage statt Ergebnis wird NICHT als Ergebnis mit diesem Status
+// gespeichert, sondern beendet den Lauf bereits vorher als
+// NEEDS_CLARIFICATION (siehe work-order-execution-service.js) – es gibt
+// bewusst kein "Ergebnis mit Status Rückfrage nötig".
+const WORK_ORDER_RESULT_QUALITY_STATUS_VALUES = Object.freeze(["PASSED", "PASSED_WITH_NOTES"]);
 
 function sqlEnum(values) {
   return values.map((value) => `'${value}'`).join(",");
@@ -579,6 +670,130 @@ const MIGRATIONS = Object.freeze([
       CREATE INDEX idx_auth_audit_events_tenantId ON auth_audit_events(tenantId);
     `,
   }),
+  // V7.2 Phase C Schritt 1 (Auftrag Abschnitt F) – kontrollierte Übergabe
+  // eines READY_FOR_PROCESSING-Auftrags an die interne Agentenzentrale.
+  // Additive Migration, KEINE Änderung an Migration 1–9. Drei neue Teile,
+  // gleiche Technik wie Migration 8/9: (a) work_order_runs (genau ein
+  // technischer Lauf pro Versuch, fortlaufende runNumber je Auftrag), (b)
+  // work_order_run_agents (die für den jeweiligen Lauf ausgewählten
+  // Agenten, siehe work-order-agent-orchestrator.js), (c) work_order_results
+  // (unveränderliche, versionierte Ergebnisse – append-only wie
+  // auth_audit_events/policy_violations), (d) erneute CHECK-Erweiterung von
+  // auth_audit_events um die neun neuen Ereignistypen (SQLite kennt
+  // weiterhin kein "ALTER TABLE ... ALTER COLUMN ... CHECK").
+  //
+  // Bewusst KEINE Änderung an work_orders.status: IN_PROGRESS/RESULT_READY
+  // sind bereits seit Migration 8 Teil der CHECK-Aufzählung ("sauber
+  // vorbereiten") und werden ab dieser Migration erstmals tatsächlich von
+  // work-order-execution-service.js geschrieben.
+  Object.freeze({
+    version: 10,
+    name: "create_work_order_runs_and_widen_audit_event_types_v4",
+    sql: `
+      CREATE TABLE work_order_runs (
+        id TEXT PRIMARY KEY,
+        workOrderId TEXT NOT NULL,
+        tenantId TEXT NOT NULL,
+        runNumber INTEGER NOT NULL CHECK (runNumber >= 1),
+        status TEXT NOT NULL CHECK (status IN (${sqlEnum(WORK_ORDER_RUN_STATUS_VALUES)})),
+        orchestratorVersion TEXT NOT NULL CHECK (length(orchestratorVersion) BETWEEN 1 AND 100),
+        failureCode TEXT CHECK (failureCode IS NULL OR length(failureCode) <= 100),
+        startedAt TEXT,
+        completedAt TEXT,
+        failedAt TEXT,
+        createdAt TEXT NOT NULL,
+        FOREIGN KEY (workOrderId) REFERENCES work_orders(id) ON DELETE RESTRICT,
+        FOREIGN KEY (tenantId) REFERENCES tenants(id) ON DELETE RESTRICT,
+        UNIQUE (workOrderId, runNumber)
+      );
+
+      CREATE INDEX idx_work_order_runs_workOrderId ON work_order_runs(workOrderId);
+      CREATE INDEX idx_work_order_runs_tenantId ON work_order_runs(tenantId);
+      CREATE INDEX idx_work_order_runs_status ON work_order_runs(status);
+
+      CREATE TABLE work_order_run_agents (
+        id TEXT PRIMARY KEY,
+        runId TEXT NOT NULL,
+        agentKey TEXT NOT NULL CHECK (length(agentKey) BETWEEN 1 AND 100),
+        agentRole TEXT NOT NULL CHECK (agentRole IN (${sqlEnum(WORK_ORDER_RUN_AGENT_ROLE_VALUES)})),
+        sequenceNumber INTEGER NOT NULL CHECK (sequenceNumber >= 1),
+        selectionReason TEXT NOT NULL CHECK (length(selectionReason) BETWEEN 1 AND 500),
+        status TEXT NOT NULL CHECK (status IN (${sqlEnum(WORK_ORDER_RUN_AGENT_STATUS_VALUES)})),
+        startedAt TEXT,
+        completedAt TEXT,
+        FOREIGN KEY (runId) REFERENCES work_order_runs(id) ON DELETE RESTRICT,
+        UNIQUE (runId, sequenceNumber)
+      );
+
+      CREATE INDEX idx_work_order_run_agents_runId ON work_order_run_agents(runId);
+
+      CREATE TABLE work_order_results (
+        id TEXT PRIMARY KEY,
+        workOrderId TEXT NOT NULL,
+        runId TEXT NOT NULL,
+        tenantId TEXT NOT NULL,
+        versionNumber INTEGER NOT NULL CHECK (versionNumber >= 1),
+        resultTitle TEXT NOT NULL CHECK (length(resultTitle) BETWEEN 1 AND 200),
+        resultSummary TEXT NOT NULL CHECK (length(resultSummary) BETWEEN 1 AND 1000),
+        resultBody TEXT NOT NULL CHECK (length(resultBody) BETWEEN 1 AND 8000),
+        qualityStatus TEXT NOT NULL CHECK (qualityStatus IN (${sqlEnum(WORK_ORDER_RESULT_QUALITY_STATUS_VALUES)})),
+        qualityNote TEXT CHECK (qualityNote IS NULL OR length(qualityNote) <= 2000),
+        openPoints TEXT CHECK (openPoints IS NULL OR length(openPoints) <= 2000),
+        createdAt TEXT NOT NULL,
+        FOREIGN KEY (workOrderId) REFERENCES work_orders(id) ON DELETE RESTRICT,
+        FOREIGN KEY (runId) REFERENCES work_order_runs(id) ON DELETE RESTRICT,
+        FOREIGN KEY (tenantId) REFERENCES tenants(id) ON DELETE RESTRICT,
+        UNIQUE (workOrderId, versionNumber),
+        UNIQUE (runId)
+      );
+
+      CREATE INDEX idx_work_order_results_workOrderId ON work_order_results(workOrderId);
+      CREATE INDEX idx_work_order_results_tenantId ON work_order_results(tenantId);
+
+      CREATE TRIGGER trg_work_order_results_no_update
+      BEFORE UPDATE ON work_order_results
+      BEGIN
+        SELECT RAISE(ABORT, 'work_order_results ist append-only/unveränderlich: UPDATE ist nicht erlaubt.');
+      END;
+
+      CREATE TRIGGER trg_work_order_results_no_delete
+      BEFORE DELETE ON work_order_results
+      BEGIN
+        SELECT RAISE(ABORT, 'work_order_results ist append-only/unveränderlich: DELETE ist nicht erlaubt.');
+      END;
+
+      CREATE TABLE auth_audit_events_v5 (
+        eventId TEXT PRIMARY KEY,
+        actorUserId TEXT,
+        tenantId TEXT,
+        eventType TEXT NOT NULL CHECK (eventType IN (${sqlEnum(AUDIT_EVENT_TYPES)})),
+        result TEXT NOT NULL CHECK (result IN (${sqlEnum(AUDIT_RESULT_VALUES)})),
+        timestamp TEXT NOT NULL,
+        metadata TEXT
+      );
+
+      INSERT INTO auth_audit_events_v5 (eventId, actorUserId, tenantId, eventType, result, timestamp, metadata)
+      SELECT eventId, actorUserId, tenantId, eventType, result, timestamp, metadata FROM auth_audit_events;
+
+      DROP TABLE auth_audit_events;
+      ALTER TABLE auth_audit_events_v5 RENAME TO auth_audit_events;
+
+      CREATE TRIGGER trg_auth_audit_events_no_update
+      BEFORE UPDATE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: UPDATE ist nicht erlaubt.');
+      END;
+
+      CREATE TRIGGER trg_auth_audit_events_no_delete
+      BEFORE DELETE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: DELETE ist nicht erlaubt.');
+      END;
+
+      CREATE INDEX idx_auth_audit_events_timestamp ON auth_audit_events(timestamp);
+      CREATE INDEX idx_auth_audit_events_tenantId ON auth_audit_events(tenantId);
+    `,
+  }),
 ]);
 
 function ensureMigrationsTable(db) {
@@ -629,6 +844,10 @@ module.exports = {
   WORK_ORDER_STATUS_VALUES,
   POLICY_VIOLATION_SEVERITY_VALUES,
   POLICY_VIOLATION_ACTION_VALUES,
+  WORK_ORDER_RUN_STATUS_VALUES,
+  WORK_ORDER_RUN_AGENT_ROLE_VALUES,
+  WORK_ORDER_RUN_AGENT_STATUS_VALUES,
+  WORK_ORDER_RESULT_QUALITY_STATUS_VALUES,
   MIGRATIONS,
   ensureMigrationsTable,
   getAppliedVersions,

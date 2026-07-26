@@ -73,6 +73,24 @@
     }
   }
 
+  // V7.2 Phase C Schritt 1 (Auftrag Abschnitt M): rein clientseitige
+  // Anzeigeübersetzung für den technischen Laufstatus/die Agentenrolle –
+  // work-order-execution-service.js liefert bewusst die rohen, stabilen
+  // Enum-Werte (Auftrag Abschnitt M: "technischer Laufstatus").
+  var RUN_STATUS_LABELS = {
+    PREPARED: "Vorbereitet",
+    IN_PROGRESS: "Läuft",
+    NEEDS_CLARIFICATION: "Rückfrage nötig",
+    COMPLETED: "Abgeschlossen",
+    FAILED: "Fehlgeschlagen",
+    CANCELLED: "Abgebrochen",
+  };
+  var RUN_AGENT_ROLE_LABELS = {
+    PROJECT_MANAGER: "Projektleitung",
+    SPECIALIST: "Fachagent",
+    QUALITY: "Qualitätsprüfung",
+  };
+
   function el(tag, props, children) {
     var node = document.createElement(tag);
     if (props) {
@@ -154,6 +172,87 @@
       form.hidden = true;
       hint.hidden = false;
     }
+
+    // V7.2 Phase C Schritt 1 (Auftrag Abschnitt H/M): der Startbutton ist
+    // ausschließlich sichtbar, solange der Auftrag READY_FOR_PROCESSING ist
+    // (rein technischer Start, keine fachliche Prüfung durch den Owner).
+    document.getElementById("work-order-run-start-block").hidden = workOrder.status !== "READY_FOR_PROCESSING";
+    loadWorkOrderRuns(workOrder.id);
+  }
+
+  // ---------------------------------------------------------------------
+  // Technischer Laufstatus (V7.2 Phase C Schritt 1, Auftrag Abschnitt M).
+  // Rein lesend plus Startaktion – keine fachliche Freigabe, keine
+  // Ergebnisbearbeitung.
+  // ---------------------------------------------------------------------
+
+  function renderRunAgentList(agents) {
+    var list = el("ul", {}, []);
+    (agents || []).forEach(function (agent) {
+      var roleLabel = RUN_AGENT_ROLE_LABELS[agent.agentRole] || agent.agentRole;
+      list.appendChild(
+        el(
+          "li",
+          {},
+          [
+            el("span", { text: agent.sequenceNumber + ". " + roleLabel + " (" + agent.agentKey + ")" }, []),
+            el("br", {}, []),
+            el("span", { text: agent.selectionReason }, []),
+          ],
+        ),
+      );
+    });
+    return list;
+  }
+
+  function renderWorkOrderRuns(runs) {
+    var list = document.getElementById("work-order-run-list");
+    var emptyHint = document.getElementById("work-order-run-empty-hint");
+    list.innerHTML = "";
+    if (!runs || !runs.length) {
+      emptyHint.hidden = false;
+      return;
+    }
+    emptyHint.hidden = true;
+    runs.forEach(function (run) {
+      var statusLabel = RUN_STATUS_LABELS[run.status] || run.status;
+      var statusBadge = el("span", { class: "portal-badge", "data-status": run.status, text: statusLabel }, []);
+      var qualityText = run.qualityStatus ? run.qualityStatus : "–";
+      var summary = el("div", {}, [
+        el("span", { text: "Lauf " + run.runNumber + " – " }, []),
+        statusBadge,
+        el("span", { text: " – Start: " + formatDate(run.startedAt) + " – Ende: " + formatDate(run.completedAt) }, []),
+        el("span", { text: " – Fehlercode: " + (run.failureCode || "–") }, []),
+        el("span", { text: " – Qualitätsstatus: " + qualityText }, []),
+      ]);
+      var item = el("li", {}, [summary, renderRunAgentList(run.agents)]);
+      list.appendChild(item);
+    });
+  }
+
+  function loadWorkOrderRuns(workOrderId) {
+    fetchJson("/api/owner/work-orders/" + encodeURIComponent(workOrderId) + "/runs").then(function (result) {
+      if (result.statusCode === 200 && result.data && result.data.ok) {
+        renderWorkOrderRuns(result.data.runs);
+        return;
+      }
+      renderWorkOrderRuns([]);
+    });
+  }
+
+  function setupRunStartButton() {
+    document.getElementById("work-order-run-start-button").addEventListener("click", function () {
+      if (!state.selectedWorkOrderId) return;
+      setStatus("", "");
+      postAction("/api/owner/work-orders/" + encodeURIComponent(state.selectedWorkOrderId) + "/run", {}).then(function (result) {
+        if (result.statusCode === 200 && result.data && result.data.ok) {
+          setStatus("Technischer Agentenlauf gestartet.", "success");
+          showWorkOrderDetail(state.selectedWorkOrderId);
+          return;
+        }
+        setStatus((result.data && result.data.message) || "Lauf konnte nicht gestartet werden.", "error");
+      });
+    });
   }
 
   function showWorkOrderDetail(workOrderId) {
@@ -230,6 +329,7 @@
     setupLogout();
     setupDetailBack();
     setupActionForm();
+    setupRunStartButton();
     loadWorkOrderList();
   }
 

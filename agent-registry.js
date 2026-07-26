@@ -43,6 +43,15 @@
     "Wissens-/Archiv-Agent": "documentation-agent",
     "Plugin-/Tool-Agent": "integration-agent",
     "QA-/QS-Agent": "quality-test-agent",
+    // V7.2 Phase C Schritt 1 (Auftrag Abschnitt E) – zusätzliche, additive
+    // Aliase für die deterministische Fachagenten-/Qualitätsagentenauswahl
+    // in work-order-agent-orchestrator.js. Keine neuen Agenten: beide
+    // Namen zeigen auf bereits vorhandene Einträge im kanonischen
+    // 25-Agenten-Register oben. "QA-Agent" ergänzt die bereits bestehende
+    // Schreibweise "QA-/QS-Agent" (AGENTS.md nennt beide Varianten für
+    // denselben Agenten).
+    "Content-Agent": "communication-agent",
+    "QA-Agent": "quality-test-agent",
   });
 
   function getAgentById(agentId) {

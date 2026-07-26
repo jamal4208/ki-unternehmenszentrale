@@ -372,6 +372,36 @@ button.portal-link {
   color: #8a5a13;
 }
 
+/* V7.2 Phase C Schritt 1 (Auftrag Abschnitt L/M) – zusätzliche, rein
+   additive Statusfarben für IN_PROGRESS/RESULT_READY/COMPLETED sowie den
+   Qualitätsstatus. Keine Änderung an den bestehenden Regeln oben. */
+.portal-badge[data-status="IN_PROGRESS"] {
+  background: #e6f0fb;
+  color: #1d4d8a;
+}
+
+.portal-badge[data-status="RESULT_READY"],
+.portal-badge[data-status="COMPLETED"],
+.portal-badge[data-status="PASSED"] {
+  background: var(--portal-success-bg);
+  color: var(--portal-success);
+}
+
+.portal-badge[data-status="PASSED_WITH_NOTES"] {
+  background: #fbf1e0;
+  color: #8a5a13;
+}
+
+.portal-badge[data-status="FAILED"] {
+  background: var(--portal-danger-bg);
+  color: var(--portal-danger);
+}
+
+.portal-result-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .portal-empty-hint {
   color: var(--portal-text-muted);
   font-size: 0.92rem;

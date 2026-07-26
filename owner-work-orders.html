@@ -57,6 +57,26 @@
         <li><span class="portal-kv-key">Bisherige Notiz</span><span id="work-order-detail-note">–</span></li>
       </ul>
 
+      <!-- V7.2 Phase C Schritt 1 (Auftrag Abschnitt M): rein technische
+           Laufübersicht (Run-Nummer, Status, Zeiten, Fehlercode,
+           Qualitätsstatus, ausgewählte Agenten) plus der einzigen
+           vorgesehenen Startaktion. Keine fachliche Freigabe, keine
+           Ergebnisbearbeitung, keine Kundenentscheidung. -->
+      <div class="portal-section" id="work-order-run-section">
+        <h3 class="portal-subtitle">Technischer Laufstatus</h3>
+        <p class="portal-lede">
+          Startet ausschließlich einen technischen internen Agentenlauf. Keine fachliche Freigabe, keine
+          Ergebnisbearbeitung – die fachliche Entscheidung bleibt beim Kunden.
+        </p>
+        <div id="work-order-run-start-block" hidden>
+          <button type="button" class="portal-button" id="work-order-run-start-button">
+            Technischen Agentenlauf starten
+          </button>
+        </div>
+        <p id="work-order-run-empty-hint" class="portal-empty-hint" hidden>Für diesen Auftrag liegt noch kein Lauf vor.</p>
+        <ul class="portal-kv-list" id="work-order-run-list"></ul>
+      </div>
+
       <div class="portal-section" id="work-order-action-section">
         <h3 class="portal-subtitle">Ausnahmeaktion</h3>
         <p class="portal-lede">

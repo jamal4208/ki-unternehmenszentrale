@@ -259,9 +259,18 @@ function evaluateAutomaticDecision(fields) {
 
 const CUSTOMER_VISIBLE_STATUS_NOTE_STATUSES = Object.freeze(["NEEDS_CLARIFICATION"]);
 
+// V7.2 Phase C Schritt 1 (Auftrag Abschnitt L) ergänzt IN_PROGRESS/
+// RESULT_READY, OHNE die bestehende READY_FOR_PROCESSING-Meldung zu
+// verändern (work-order-ui.test.js prüft deren genauen Wortlaut fest –
+// die Meldung bleibt weiterhin wahr: "in diesem Schritt" beschreibt den
+// Moment, in dem der Auftrag gerade READY_FOR_PROCESSING wird, nicht eine
+// dauerhafte Aussage über den gesamten Produktlebenszyklus).
 const CUSTOMER_STATUS_MESSAGES = Object.freeze({
   READY_FOR_PROCESSING:
     "Der Auftrag wurde automatisch geprüft und ist bereit zur Bearbeitung. Die Bearbeitung durch Agenten ist in diesem Schritt noch nicht gestartet.",
+  IN_PROGRESS: "Die Unternehmenszentrale bearbeitet Ihren Auftrag.",
+  RESULT_READY:
+    "Für diesen Auftrag liegt ein Ergebnis vor. Sie können das Ergebnis derzeit ansehen. Änderungswünsche und Freigabe folgen im nächsten Schritt.",
   ESCALATED: "Dieser Auftrag wird derzeit gesondert von der Zentrale geprüft.",
   CANCELLED: "Dieser Auftrag wurde gestoppt und wird nicht weiter bearbeitet.",
 });

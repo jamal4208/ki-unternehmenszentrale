@@ -24,6 +24,13 @@
 const WORK_ORDER_API_MAX_BODY_BYTES = 40 * 1024;
 
 const workOrderService = require("./work-order-service");
+// V7.2 Phase C Schritt 1 (Auftrag Abschnitt H): die neuen Ergebnis-/
+// Lauf-Routen leben in einem eigenen Modul (work-order-execution-routes.js,
+// klare Servicegrenze zu work-order-execution-service.js), werden aber
+// bewusst über dieselben, bereits registrierten Prefix-Dispatcher dieses
+// Moduls ausgeliefert – dadurch bleiben GET-Prefix-/POST-Prefix-Routenzahlen
+// unverändert (keine neue Route in server.js nötig).
+const workOrderExecutionRoutes = require("./work-order-execution-routes");
 
 // ---------------------------------------------------------------------------
 // Kleine, lokale JSON-Body-Hilfen (bewusst eine eigene, kleine Kopie statt
@@ -245,6 +252,17 @@ async function handleOwnerWorkOrderAction(res, context, deps, workOrderId, actio
 
 function dispatchPortalWorkOrdersGetPrefix(res, context, deps, remainder) {
   const { sendJson } = deps;
+  const parts = typeof remainder === "string" ? remainder.split("/") : [];
+  // V7.2 Phase C Schritt 1 (Auftrag Abschnitt H): .../:id/result und
+  // .../:id/run-status, geprüft VOR der einfachen Ein-Segment-Detailroute.
+  if (parts.length === 2 && parts[0] && parts[1] === "result") {
+    workOrderExecutionRoutes.handlePortalWorkOrderResult(res, context, deps, parts[0]);
+    return;
+  }
+  if (parts.length === 2 && parts[0] && parts[1] === "run-status") {
+    workOrderExecutionRoutes.handlePortalWorkOrderRunStatus(res, context, deps, parts[0]);
+    return;
+  }
   if (!remainder || remainder.includes("/")) {
     sendJson(res, 404, genericErrorPayload("Nicht gefunden."));
     return;
@@ -268,6 +286,17 @@ function dispatchPortalWorkOrdersPostPrefix(res, context, deps, remainder) {
 
 function dispatchOwnerWorkOrdersGetPrefix(res, context, deps, remainder) {
   const { sendJson } = deps;
+  const parts = typeof remainder === "string" ? remainder.split("/") : [];
+  // V7.2 Phase C Schritt 1 (Auftrag Abschnitt H): .../:id/runs und
+  // .../:id/runs/:runId, geprüft VOR der einfachen Ein-Segment-Detailroute.
+  if (parts.length === 2 && parts[0] && parts[1] === "runs") {
+    workOrderExecutionRoutes.handleOwnerWorkOrderRuns(res, context, deps, parts[0]);
+    return;
+  }
+  if (parts.length === 3 && parts[0] && parts[1] === "runs" && parts[2]) {
+    workOrderExecutionRoutes.handleOwnerWorkOrderRunDetail(res, context, deps, parts[0], parts[2]);
+    return;
+  }
   if (!remainder || remainder.includes("/")) {
     sendJson(res, 404, genericErrorPayload("Nicht gefunden."));
     return;
@@ -284,6 +313,13 @@ function dispatchOwnerWorkOrdersPostPrefix(res, context, deps, remainder) {
   const parts = typeof remainder === "string" ? remainder.split("/") : [];
   if (parts.length === 2 && parts[0] && OWNER_EXCEPTION_ACTIONS.includes(parts[1])) {
     handleOwnerWorkOrderAction(res, context, deps, parts[0], parts[1]);
+    return;
+  }
+  // V7.2 Phase C Schritt 1 (Auftrag Abschnitt H): .../:id/run – rein
+  // technischer Laufstart, KEINE fachliche Freigabe (siehe
+  // work-order-execution-routes.js#handleOwnerWorkOrderRunStart).
+  if (parts.length === 2 && parts[0] && parts[1] === "run") {
+    workOrderExecutionRoutes.handleOwnerWorkOrderRunStart(res, context, deps, parts[0]);
     return;
   }
   sendJson(res, 404, genericErrorPayload("Nicht gefunden."));
