@@ -1,6 +1,10 @@
 # PROJECT MASTER
 
-## V7.4 Schritt 1 – Kontrollierte externe Werkzeugnutzung: Canva als erster Produktionskorridor – Offline-/Stub-Grundlage (lokal umgesetzt, ungesichert – Commit/Push stehen aus; **kein echter Canva-Handoff in diesem Schritt**)
+## V7.4 – Canva-Produktionskorridor abgeschlossen: Offline-/Stub-Grundlage committed und authentifizierter externer Canva-Abnahmelauf dokumentiert
+
+Der Offline-/Stub-Produktionskorridor (Schritt 1, siehe unten) ist committed und gepusht (`f2b0909498a8fe2e552529980586ad68ea9ba722`). Da aus dieser Cursor-Umgebung kein authentifizierter Canva-Zugriff verfügbar ist, wurde der reale Abnahmelauf **außerhalb von Cursor** über Jamals eigene, bereits verbundene ChatGPT-Canva-Integration durchgeführt: mehrere Vorschau-/Generierungsrunden, genau **ein** dauerhaft übernommenes finales Design (Canva-Design-ID `DAHQkWMxdPo`, Titel „AI Enterprise Headquarters in Twilight"), keine Veröffentlichung, kein Social-Media-Posting, kein Billing. Vollständige Dokumentation inkl. der ehrlich offengelegten Abweichung von der ursprünglich geplanten „genau ein Provideraufruf"-Grenze: `CANVA_AUTHENTICATED_RUN_ACCEPTANCE.md`. Das Design ist eine Arbeitsgrundlage, kein finales Corporate Design; der direkte technische Übergang vom lokalen Jamal-Work-Item zum externen Canva-Konto bleibt **nicht automatisiert**.
+
+## V7.4 Schritt 1 – Kontrollierte externe Werkzeugnutzung: Canva als erster Produktionskorridor – Offline-/Stub-Grundlage (committed und gepusht `f2b0909`; **kein echter Canva-Handoff in diesem Schritt** – siehe authentifizierter Abnahmelauf oben)
 
 Erster Schritt der kontrollierten externen Werkzeugnutzung: ein interner Jamal-Arbeitswunsch (Status `RESULT_READY`/`DONE`) kann jetzt kontrolliert in einen Canva-Produktionsauftrag übersetzt werden. Verbindlicher Produktionskorridor (Auftrag Abschnitt C): **ausschließlich** Jamals interner Arbeitsmodus/Plattform-Owner, kontrollierte interne Testproduktion – **noch nicht** für Kunden-Self-Service, `CUSTOMER_ADMIN`, `CUSTOMER_USER`, `SUPPORT`, automatische Produktion oder automatische Veröffentlichung. Produktregel: der externe Werkzeugaufruf ist eine Produktionshandlung, **keine** Veröffentlichung.
 

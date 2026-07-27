@@ -1,6 +1,10 @@
 # MIGRATION PLAN
 
-## V7.4 Schritt 1 – Kontrollierte externe Werkzeugnutzung: Canva als erster Produktionskorridor – Offline-/Stub-Grundlage (lokal umgesetzt, ungesichert – Commit/Push stehen aus; **kein echter Canva-Handoff in diesem Schritt**)
+## V7.4 – Nachtrag: authentifizierter Canva-Abnahmelauf ohne neue Migration
+
+Nach dem Commit/Push von Schritt 1 (unten, Migration 13) wurde ein authentifizierter Canva-Abnahmelauf außerhalb von Cursor durchgeführt (siehe `CANVA_AUTHENTICATED_RUN_ACCEPTANCE.md`). Dieser Nachtrag ist **keine neue Migration** und **keine Codeänderung** – das reale Ergebnis (Canva-Design-ID `DAHQkWMxdPo`) wurde manuell dokumentiert, nicht automatisiert in `jamal_canva_productions` zurückgeschrieben. Migration 13 bleibt unverändert die letzte Migration.
+
+## V7.4 Schritt 1 – Kontrollierte externe Werkzeugnutzung: Canva als erster Produktionskorridor – Offline-/Stub-Grundlage (committed und gepusht `f2b0909`; **kein echter Canva-Handoff in diesem Schritt** – siehe Nachtrag oben)
 
 Vorheriger Ausgang: HEAD/`origin/main` `1fc142d27f2469703ae544a3862b0b872cf43a2c` (Working Tree sauber, 71 GET/52 POST/8 GET-Präfixe/5 POST-Präfixe/28 statische Assets, **73 Testdateien, 2026 automatisierte Prüfpunkte grün**). Dieser Schritt ist additiv; Migrationen 1–12 byteidentisch unverändert.
 
