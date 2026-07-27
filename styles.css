@@ -9273,4 +9273,134 @@ details.local-agent-assignment-details > summary {
     flex-direction: column;
     align-items: stretch;
   }
+
+  .jamal-canva-facts,
+  .jamal-canva-briefing-summary {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------------------------------------------------------------------
+   V7.4 – Kontrollierte externe Werkzeugnutzung, Canva-Produktionskorridor
+   (Auftrag Abschnitt L): eigener, additiver Bereich innerhalb derselben
+   Hauptarbeitskarte. Bewusste Wiederverwendung bestehender Tokens/Klassen
+   (.jamal-work-primary-row/.jamal-work-secondary-row/.jamal-work-status/
+   .jamal-work-form) statt einer zweiten, parallelen Kartenoptik.
+   --------------------------------------------------------------------- */
+
+.jamal-canva-card {
+  display: grid;
+  gap: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--line);
+}
+
+#jamal-canva-output {
+  display: grid;
+  gap: 14px;
+}
+
+.jamal-canva-hint {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: var(--radius-card);
+  background: var(--card-bg-muted);
+  border: 1px solid var(--card-border-soft);
+  color: var(--ink);
+  font-size: var(--text-sm);
+}
+
+.jamal-canva-hint[data-tone="attention"] {
+  background: var(--badge-warn-bg);
+  color: var(--badge-warn-fg);
+  border-color: rgba(161, 98, 7, 0.28);
+}
+
+.jamal-canva-hint[data-tone="blocked"] {
+  background: var(--badge-blocked-bg);
+  color: var(--badge-blocked-fg);
+}
+
+.jamal-canva-hint[data-tone="progress"] {
+  background: var(--badge-info-bg);
+  color: var(--badge-info-fg);
+}
+
+.jamal-canva-facts,
+.jamal-canva-briefing-summary {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 18px;
+  font-size: var(--text-sm);
+}
+
+.jamal-canva-facts dt,
+.jamal-canva-briefing-summary dt {
+  font-weight: var(--font-medium);
+  color: var(--muted);
+}
+
+.jamal-canva-facts dd,
+.jamal-canva-briefing-summary dd {
+  margin: 0;
+  color: var(--ink);
+}
+
+.jamal-canva-rights,
+.jamal-canva-confirm,
+.jamal-canva-result {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--card-bg);
+  display: grid;
+  gap: 10px;
+}
+
+.jamal-canva-rights-notes,
+.jamal-canva-quality-notes {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.jamal-canva-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-xs, 12px);
+}
+
+.jamal-canva-error {
+  margin: 0;
+  color: var(--red);
+  font-size: var(--text-sm);
+}
+
+.jamal-canva-diagnostics {
+  flex: 0 0 auto;
+}
+
+.jamal-canva-diagnostics summary {
+  cursor: pointer;
+  font-size: var(--text-xs, 12px);
+  color: var(--muted);
+  font-weight: var(--font-medium);
+}
+
+.jamal-canva-diagnostics[open] summary {
+  color: var(--ink);
+}
+
+.jamal-canva-diagnostics-output {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--card-border-soft);
+  border-radius: var(--radius);
+  background: var(--card-bg-muted);
+  font-size: var(--text-xs, 12px);
+  color: var(--muted);
+  display: grid;
+  gap: 4px;
 }

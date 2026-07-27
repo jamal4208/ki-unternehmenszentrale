@@ -322,6 +322,10 @@ const GET_POLICIES = [
   // Arbeitskarte "Heute arbeiten" – ausschließlich für Jamal (OWNER_ONLY),
   // kein Kunden-/Mandantenbezug.
   ownerGet("/api/jamal-work-mode/state", "Jamal-Arbeitsmodus Zustand (Heute arbeiten)"),
+  // V7.4 – Kontrollierte externe Werkzeugnutzung, Canva-Produktionskorridor
+  // (Auftrag Abschnitt C/M): ausschließlich OWNER_ONLY, kein Kundenzugriff
+  // auf Jamals Canva-Konto (siehe jamal-canva-routes.js#Kopfkommentar).
+  ownerGet("/api/jamal-work-mode/canva-state", "Jamal-Arbeitsmodus Canva-Produktionsstatus"),
 ];
 
 const POST_POLICIES = [
@@ -494,6 +498,11 @@ const STATIC_POLICIES = [
   // additives Chef-UI-Skript, gleiches Muster wie v71-ui.js (kein Umbau von
   // app.js selbst).
   staticOwnerOnly("/jamal-work-mode-ui.js", "Chef-UI-Skript Jamal-Arbeitsmodus"),
+  // V7.4 – Kontrollierte externe Werkzeugnutzung, Canva-Produktionskorridor
+  // (Auftrag Abschnitt L/M): eigenständiges, additives Chef-UI-Skript
+  // statt einer Erweiterung von jamal-work-mode-ui.js (siehe
+  // jamal-work-mode-ui.test.js#"kein Provider (Canva/HeyGen)").
+  staticOwnerOnly("/jamal-canva-ui.js", "Chef-UI-Skript Jamal-Canva-Produktionskorridor"),
 ];
 
 const ALL_POLICIES = Object.freeze([

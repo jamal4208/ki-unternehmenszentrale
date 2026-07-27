@@ -1146,6 +1146,112 @@ function listJamalWorkResultsForWorkItem(db, workItemId) {
   return db.prepare("SELECT * FROM jamal_work_results WHERE workItemId = ? ORDER BY versionNumber ASC").all(workItemId);
 }
 
+// ---------------------------------------------------------------------------
+// V7.4 – Kontrollierte externe Werkzeugnutzung, Canva-Produktionskorridor
+// (Migration 13, siehe auth-db-migrations.js). Ausschließlich
+// jamal-canva-production-service.js ruft diese Funktionen auf. "Upsert"
+// aktualisiert genau EINE Briefingrevision (dieselbe id, z. B. während sie
+// noch DRAFT/READY_FOR_APPROVAL/BLOCKED ist); eine neue Revision
+// (requestRevision) erhält immer eine neue id und damit eine neue Zeile –
+// bestehende Revisionszeilen werden dabei nie überschrieben (Auftrag
+// Abschnitt K: "alter Designstand bleibt nachvollziehbar"). Keine
+// Zugangstokens, keine Provider-Secrets: diese Tabelle speichert
+// ausschließlich bereits von jamal-canva-production-service.js sicher
+// geprüfte Felder.
+// ---------------------------------------------------------------------------
+
+function upsertJamalCanvaProduction(db, input = {}) {
+  const record = {
+    id: input.id,
+    workItemId: input.workItemId,
+    revisionNumber: input.revisionNumber,
+    status: input.status,
+    suitabilityDecision: input.suitabilityDecision ?? null,
+    suitabilityJson: input.suitabilityJson ?? null,
+    briefingJson: input.briefingJson ?? null,
+    rightsStatus: input.rightsStatus ?? null,
+    rightsJson: input.rightsJson ?? null,
+    reviewMode: input.reviewMode || "OWNER_REVIEW",
+    changeRequestText: input.changeRequestText ?? null,
+    approvedAt: input.approvedAt ?? null,
+    approvedByUserId: input.approvedByUserId ?? null,
+    handoffStartedAt: input.handoffStartedAt ?? null,
+    canvaJobId: input.canvaJobId ?? null,
+    canvaDesignId: input.canvaDesignId ?? null,
+    designTitle: input.designTitle ?? null,
+    editLink: input.editLink ?? null,
+    viewLink: input.viewLink ?? null,
+    providerStatus: input.providerStatus ?? null,
+    errorCode: input.errorCode ?? null,
+    resultReceivedAt: input.resultReceivedAt ?? null,
+    qualityStatus: input.qualityStatus ?? null,
+    qualityNotesJson: input.qualityNotesJson ?? null,
+    cancelledAt: input.cancelledAt ?? null,
+    cancelReason: input.cancelReason ?? null,
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
+  };
+  db.prepare(
+    `INSERT INTO jamal_canva_productions
+      (id, workItemId, revisionNumber, status, suitabilityDecision, suitabilityJson, briefingJson, rightsStatus,
+       rightsJson, reviewMode, changeRequestText, approvedAt, approvedByUserId, handoffStartedAt, canvaJobId,
+       canvaDesignId, designTitle, editLink, viewLink, providerStatus, errorCode, resultReceivedAt, qualityStatus,
+       qualityNotesJson, cancelledAt, cancelReason, createdAt, updatedAt)
+     VALUES
+      (@id, @workItemId, @revisionNumber, @status, @suitabilityDecision, @suitabilityJson, @briefingJson, @rightsStatus,
+       @rightsJson, @reviewMode, @changeRequestText, @approvedAt, @approvedByUserId, @handoffStartedAt, @canvaJobId,
+       @canvaDesignId, @designTitle, @editLink, @viewLink, @providerStatus, @errorCode, @resultReceivedAt, @qualityStatus,
+       @qualityNotesJson, @cancelledAt, @cancelReason, @createdAt, @updatedAt)
+     ON CONFLICT(id) DO UPDATE SET
+       status = excluded.status,
+       suitabilityDecision = excluded.suitabilityDecision,
+       suitabilityJson = excluded.suitabilityJson,
+       briefingJson = excluded.briefingJson,
+       rightsStatus = excluded.rightsStatus,
+       rightsJson = excluded.rightsJson,
+       reviewMode = excluded.reviewMode,
+       changeRequestText = excluded.changeRequestText,
+       approvedAt = excluded.approvedAt,
+       approvedByUserId = excluded.approvedByUserId,
+       handoffStartedAt = excluded.handoffStartedAt,
+       canvaJobId = excluded.canvaJobId,
+       canvaDesignId = excluded.canvaDesignId,
+       designTitle = excluded.designTitle,
+       editLink = excluded.editLink,
+       viewLink = excluded.viewLink,
+       providerStatus = excluded.providerStatus,
+       errorCode = excluded.errorCode,
+       resultReceivedAt = excluded.resultReceivedAt,
+       qualityStatus = excluded.qualityStatus,
+       qualityNotesJson = excluded.qualityNotesJson,
+       cancelledAt = excluded.cancelledAt,
+       cancelReason = excluded.cancelReason,
+       updatedAt = excluded.updatedAt`,
+  ).run(record);
+  return getJamalCanvaProductionById(db, record.id);
+}
+
+function getJamalCanvaProductionById(db, id) {
+  return db.prepare("SELECT * FROM jamal_canva_productions WHERE id = ?").get(id) || null;
+}
+
+// "Aktuell" = die zuletzt angelegte Revision für diesen Arbeitswunsch
+// (höchste revisionNumber; rowid als zweites Sortierkriterium schützt
+// gegen den seltenen Fall identischer createdAt-Werte).
+function getLatestJamalCanvaProductionForWorkItem(db, workItemId) {
+  return (
+    db
+      .prepare("SELECT * FROM jamal_canva_productions WHERE workItemId = ? ORDER BY revisionNumber DESC, rowid DESC LIMIT 1")
+      .get(workItemId) || null
+  );
+}
+
+function listJamalCanvaProductionsForWorkItem(db, workItemId) {
+  return db
+    .prepare("SELECT * FROM jamal_canva_productions WHERE workItemId = ? ORDER BY revisionNumber ASC")
+    .all(workItemId);
+}
+
 module.exports = {
   AuthDatabaseStartupError,
   resolveAuthDbPaths,
@@ -1236,4 +1342,9 @@ module.exports = {
   appendJamalWorkResult,
   getJamalWorkResultById,
   listJamalWorkResultsForWorkItem,
+  // Jamal-Arbeitsmodus – Canva-Produktionskorridor (V7.4)
+  upsertJamalCanvaProduction,
+  getJamalCanvaProductionById,
+  getLatestJamalCanvaProductionForWorkItem,
+  listJamalCanvaProductionsForWorkItem,
 };

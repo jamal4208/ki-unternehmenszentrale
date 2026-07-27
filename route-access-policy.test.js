@@ -240,15 +240,17 @@ async function run() {
     }
   });
 
-  // V7.3 – Jamal-Arbeitsmodus (Auftrag Abschnitt C/M) – Zuwachs gegenüber
-  // der V7.2-Phase-C-Schritt-2-Baseline (70/52/8/4/27): eine neue GET-Route
-  // (/api/jamal-work-mode/state), keine neue POST-Route, keine neue
-  // GET-Prefix-Route, ein neuer POST-Prefix (/api/jamal-work-mode/ – eine
-  // Aktion je Anfrage über .../:action statt vieler Einzelrouten) und ein
-  // neues statisches Chef-UI-Skript (jamal-work-mode-ui.js).
-  await check("Routenzahlen in Policy und Server sind identisch (71/52/8/5/28)", () => {
-    assert.strictEqual(server.getRoutes.size, 71);
-    assert.strictEqual(routeAccessPolicy.GET_POLICIES.length, 71);
+  // V7.4 – Kontrollierte externe Werkzeugnutzung, Canva-Produktionskorridor
+  // (Auftrag Abschnitt M) – Zuwachs gegenüber der V7.3-Baseline
+  // (71/52/8/5/28): eine neue GET-Route (/api/jamal-work-mode/canva-state),
+  // keine neue POST-Route (alle "canva-*"-Aktionen laufen über den bereits
+  // bestehenden POST-Prefix /api/jamal-work-mode/ – eine Aktion je Anfrage
+  // über .../:action, siehe jamal-canva-routes.js#Kopfkommentar), keine
+  // neue GET-/POST-Prefix-Route und ein neues statisches Chef-UI-Skript
+  // (jamal-canva-ui.js).
+  await check("Routenzahlen in Policy und Server sind identisch (72/52/8/5/29)", () => {
+    assert.strictEqual(server.getRoutes.size, 72);
+    assert.strictEqual(routeAccessPolicy.GET_POLICIES.length, 72);
     assert.strictEqual(server.postRoutes.size, 52);
     assert.strictEqual(routeAccessPolicy.POST_POLICIES.length, 52);
     assert.strictEqual(server.routePrefixHandlers.length, 8);
@@ -261,8 +263,8 @@ async function run() {
       routeAccessPolicy.PREFIX_POLICIES.filter((entry) => entry.method === "POST").length,
       5,
     );
-    assert.strictEqual(server.staticAssets.size, 28);
-    assert.strictEqual(routeAccessPolicy.STATIC_POLICIES.length, 28);
+    assert.strictEqual(server.staticAssets.size, 29);
+    assert.strictEqual(routeAccessPolicy.STATIC_POLICIES.length, 29);
   });
 
   // -------------------------------------------------------------------

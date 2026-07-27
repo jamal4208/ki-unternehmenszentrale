@@ -117,6 +117,21 @@
               <summary>Technische Details</summary>
               <div id="jamal-work-diagnostics-output" aria-live="polite">Keine technischen Details verfügbar.</div>
             </details>
+            <!--
+              V7.4 – Kontrollierte externe Werkzeugnutzung, Canva-
+              Produktionskorridor (Auftrag Abschnitt L/M): eigenständiger,
+              zusätzlicher Bereich innerhalb derselben Hauptarbeitskarte,
+              vollständig von jamal-canva-ui.js gerendert. jamal-work-mode-ui.js
+              selbst bleibt unverändert ohne jeden Canva-Bezug (siehe
+              jamal-work-mode-ui.test.js#"kein Provider").
+            -->
+            <div class="jamal-canva-card" id="jamal-canva-card">
+              <div id="jamal-canva-output" aria-live="polite"></div>
+              <details class="jamal-canva-diagnostics">
+                <summary>Technische Details</summary>
+                <div id="jamal-canva-diagnostics-output" aria-live="polite">Keine technischen Details verfügbar.</div>
+              </details>
+            </div>
           </section>
 
           <!--
@@ -1405,5 +1420,6 @@
     <script src="app.js"></script>
     <script src="v71-ui.js"></script>
     <script src="jamal-work-mode-ui.js"></script>
+    <script src="jamal-canva-ui.js"></script>
   </body>
 </html>

@@ -75,6 +75,11 @@ const workOrderRoutesModule = require("./work-order-routes");
 // npm-Abhängigkeit.
 const jamalWorkMode = require("./jamal-work-mode");
 const jamalWorkModeStoreModule = require("./jamal-work-mode-store");
+// V7.4 – Kontrollierte externe Werkzeugnutzung, Canva-Produktionskorridor
+// (Auftrag Abschnitt H/M): eigenständiges, additives Routenmodul (gleiches
+// Muster wie work-order-routes.js). Bewusst NICHT von jamal-work-mode.js/
+// jamal-work-mode-ui.js referenziert (siehe jamal-canva-routes.js#Kopfkommentar).
+const jamalCanvaRoutesModule = require("./jamal-canva-routes");
 
 const rootDir = __dirname;
 const staticAssets = new Map([
@@ -91,6 +96,11 @@ const staticAssets = new Map([
   // V7.3 – Jamal-Arbeitsmodus (Auftrag Abschnitt C/M): eigenständiges,
   // additives Chef-UI-Skript (gleiches Muster wie v71-ui.js).
   ["/jamal-work-mode-ui.js", "jamal-work-mode-ui.js"],
+  // V7.4 – Kontrollierte externe Werkzeugnutzung, Canva-Produktionskorridor
+  // (Auftrag Abschnitt L/O): bewusst ein eigenes, additives Chef-UI-Skript
+  // statt einer Erweiterung von jamal-work-mode-ui.js (siehe
+  // jamal-work-mode-ui.test.js#"kein Provider (Canva/HeyGen)").
+  ["/jamal-canva-ui.js", "jamal-canva-ui.js"],
   ["/app.js", "app.js"],
   ["/styles.css", "styles.css"],
   ["/v71-ui.js", "v71-ui.js"],
@@ -23541,6 +23551,15 @@ function handleJamalWorkModeState(res) {
   sendJson(res, 200, { ok: true, ...view, ...API_SECURITY_FLAGS });
 }
 
+// V7.4 – Kontrollierte externe Werkzeugnutzung, Canva-Produktionskorridor
+// (Auftrag Abschnitt L/M): eigene, zusätzliche GET-Route – bewusst NICHT
+// Teil von handleJamalWorkModeState/jamalWorkMode.getSafeView (siehe
+// jamal-canva-routes.js#Kopfkommentar und
+// jamal-work-mode-e2e.test.js#"kein Schritt ... Provideraktion").
+function handleJamalCanvaState(res) {
+  jamalCanvaRoutesModule.handleCanvaState(res, { getDb: ensureAuthDbReady, sendJson });
+}
+
 // Auftrag Abschnitt C/F: "Arbeitslauf starten" und "Änderung anfordern"
 // sind je EINE Hauptaktion für Jamal, auch wenn intern zwei Fachschritte
 // (Start + Abschluss bzw. Änderung anfordern + Änderung abschließen)
@@ -23592,6 +23611,16 @@ async function dispatchJamalWorkModeActionPostPrefix(res, context, remainder) {
     return;
   }
   const actionName = typeof remainder === "string" ? remainder : "";
+  // V7.4 – Kontrollierte externe Werkzeugnutzung, Canva-Produktionskorridor
+  // (Auftrag Abschnitt H/M): eigene Canva-Aktionen laufen über dasselbe,
+  // bereits registrierte OWNER_ONLY-Prefix (kein neuer POST-Prefix nötig),
+  // werden aber vollständig getrennt in jamal-canva-routes.js/
+  // jamal-canva-production-service.js verarbeitet – niemals über
+  // jamalWorkMode.getSafeView (siehe dortiger Kopfkommentar).
+  if (!actionName.includes("/") && jamalCanvaRoutesModule.isCanvaAction(actionName)) {
+    await jamalCanvaRoutesModule.dispatchCanvaAction(res, context, { getDb: ensureAuthDbReady, sendJson }, actionName);
+    return;
+  }
   const action = !actionName.includes("/") ? JAMAL_WORK_MODE_ACTIONS[actionName] : undefined;
   if (!action) {
     sendJson(res, 404, jamalWorkModeErrorPayload("Nicht gefunden."));
@@ -23704,6 +23733,7 @@ const getRoutes = buildRouteMap([
   // V7.3 – Jamal-Arbeitsmodus (Auftrag Abschnitt C) – Zustand der einzigen
   // zentralen Arbeitskarte "Heute arbeiten".
   ["/api/jamal-work-mode/state", (res) => handleJamalWorkModeState(res)],
+  ["/api/jamal-work-mode/canva-state", (res) => handleJamalCanvaState(res)],
 ]);
 
 const postRoutes = buildRouteMap([

@@ -437,6 +437,74 @@ const JAMAL_WORK_ITEM_DECISION_VALUES = Object.freeze(["PASST", "GESTOPPT"]);
 // erste Fertigstellung oder Änderungsrunde).
 const JAMAL_WORK_RESULT_TRIGGER_VALUES = Object.freeze(["INITIAL", "CHANGE_REQUEST"]);
 
+// V7.4 – Kontrollierte externe Werkzeugnutzung, Canva-Produktionskorridor
+// (Auftrag Abschnitt G) – eigener, unabhängiger Wertebereich für
+// jamal-canva-production-service.js (gleiches Prinzip wie
+// JAMAL_WORK_ITEM_STATUS_VALUES oben: dieses Migrationsmodul importiert
+// keine Fachlogikmodule, jamal-canva-production-service.js kennt umgekehrt
+// KEIN better-sqlite3).
+const JAMAL_CANVA_PRODUCTION_STATUS_VALUES = Object.freeze([
+  "DRAFT",
+  "READY_FOR_APPROVAL",
+  "APPROVED_FOR_HANDOFF",
+  "HANDOFF_STARTED",
+  "WAITING_FOR_CANVA",
+  "RESULT_RECEIVED",
+  "NEEDS_REVISION",
+  "ACCEPTED_INTERNAL",
+  "FAILED",
+  "CANCELLED",
+  "BLOCKED",
+]);
+
+// jamal-canva-briefing.js#evaluateCanvaSuitability.
+const JAMAL_CANVA_SUITABILITY_DECISION_VALUES = Object.freeze([
+  "CANVA_RECOMMENDED",
+  "CANVA_OPTIONAL",
+  "CANVA_NOT_SUITABLE",
+  "CANVA_BLOCKED_BY_POLICY",
+]);
+
+// jamal-canva-briefing.js#evaluateRightsAndConsent.
+const JAMAL_CANVA_RIGHTS_STATUS_VALUES = Object.freeze(["CLEAR", "UNCLEAR", "BLOCKED"]);
+
+// jamal-canva-production-service.js interne Qualitätsprüfung (Auftrag
+// Abschnitt J) – bewusst ein eigener, vom Kundenportal unabhängiger
+// Wertebereich (dort gibt es zusätzlich REVISION_REQUIRED/BLOCKED nicht in
+// WORK_ORDER_RESULT_QUALITY_STATUS_VALUES, da Kundenaufträge diese beiden
+// Zustände bislang nicht kennen).
+const JAMAL_CANVA_QUALITY_STATUS_VALUES = Object.freeze([
+  "PASSED",
+  "PASSED_WITH_NOTES",
+  "REVISION_REQUIRED",
+  "BLOCKED",
+]);
+
+// V7.4 (Auftrag Abschnitt N) – genau die zehn neuen Canva-Ereignistypen,
+// zusätzlich zur vollständigen, bereits bestehenden AUDIT_EVENT_TYPES-Menge
+// oben. WICHTIG: dies ist bewusst eine EIGENSTÄNDIGE, ADDITIVE Konstante
+// und KEINE Änderung der bestehenden `AUDIT_EVENT_TYPES`-Konstante selbst
+// (Migration 11 referenziert `AUDIT_EVENT_TYPES` weiterhin direkt und
+// unverändert – "Migrationen 1–12 unverändert", siehe Auftrag Abschnitt G).
+// Migration 13 unten verwendet ausschließlich diese neue Konstante für ihre
+// eigene, weitere vollständige Neuerstellung von auth_audit_events (gleiches
+// etablierte Muster wie Migration 7/8/9/10/11 gegenüber ihren jeweiligen
+// Vorgängern). auth-audit.js#EVENT_TYPES muss exakt dieser Aufzählung
+// entsprechen.
+const AUDIT_EVENT_TYPES_AT_MIGRATION_13 = Object.freeze([
+  ...AUDIT_EVENT_TYPES,
+  "CANVA_BRIEFING_PREPARED",
+  "CANVA_HANDOFF_APPROVED",
+  "CANVA_HANDOFF_STARTED",
+  "CANVA_HANDOFF_FAILED",
+  "CANVA_RESULT_RECEIVED",
+  "CANVA_RESULT_REVIEWED",
+  "CANVA_REVISION_REQUESTED",
+  "CANVA_RESULT_ACCEPTED_INTERNAL",
+  "CANVA_HANDOFF_BLOCKED_BY_POLICY",
+  "CANVA_HANDOFF_BLOCKED_BY_RIGHTS",
+]);
+
 function sqlEnum(values) {
   return values.map((value) => `'${value}'`).join(",");
 }
@@ -1149,6 +1217,97 @@ const MIGRATIONS = Object.freeze([
       END;
     `,
   }),
+  // V7.4 – Kontrollierte externe Werkzeugnutzung, Canva-Produktionskorridor
+  // (Auftrag Abschnitt G/N). Rein additiv gegenüber Migration 12:
+  //   1. eine neue Tabelle jamal_canva_productions (eine Zeile je
+  //      Briefingrevision; alte Revisionen bleiben unverändert erhalten,
+  //      siehe UNIQUE(workItemId, revisionNumber) – kein stilles
+  //      Überschreiben einer bereits bestehenden Revision).
+  //   2. eine erneute vollständige Neuerstellung von auth_audit_events mit
+  //      der um genau zehn Canva-Ereignistypen erweiterten CHECK-Aufzählung
+  //      (AUDIT_EVENT_TYPES_AT_MIGRATION_13, siehe Kommentar oben) – exakt
+  //      dasselbe etablierte Muster wie Migration 7/8/9/10/11.
+  // Migrationen 1–12 bleiben dabei byteidentisch unverändert.
+  //
+  // Bewusst KEIN Feld für Zugangsschlüssel oder Providergeheimhaltungsdaten,
+  // KEINE Veröffentlichungstabelle (Auftrag Abschnitt G):
+  // jamal_canva_productions speichert ausschließlich interne Referenzen,
+  // Status, Briefinginhalt (kein interner KI-Anweisungstext, keine
+  // Gedankenkette – dasselbe Prinzip wie jamal_work_items), Rechte-/
+  // Consent-Status und sicher validierte Design-Links (siehe
+  // canva-design-result.js#validateResultReferenceUrl, wiederverwendet von
+  // jamal-canva-production-service.js).
+  Object.freeze({
+    version: 13,
+    name: "create_jamal_canva_productions_and_widen_audit_event_types_v6",
+    sql: `
+      CREATE TABLE jamal_canva_productions (
+        id TEXT PRIMARY KEY,
+        workItemId TEXT NOT NULL,
+        revisionNumber INTEGER NOT NULL CHECK (revisionNumber >= 1),
+        status TEXT NOT NULL CHECK (status IN (${sqlEnum(JAMAL_CANVA_PRODUCTION_STATUS_VALUES)})),
+        suitabilityDecision TEXT CHECK (suitabilityDecision IS NULL OR suitabilityDecision IN (${sqlEnum(JAMAL_CANVA_SUITABILITY_DECISION_VALUES)})),
+        suitabilityJson TEXT,
+        briefingJson TEXT,
+        rightsStatus TEXT CHECK (rightsStatus IS NULL OR rightsStatus IN (${sqlEnum(JAMAL_CANVA_RIGHTS_STATUS_VALUES)})),
+        rightsJson TEXT,
+        reviewMode TEXT NOT NULL DEFAULT 'OWNER_REVIEW',
+        changeRequestText TEXT,
+        approvedAt TEXT,
+        approvedByUserId TEXT,
+        handoffStartedAt TEXT,
+        canvaJobId TEXT,
+        canvaDesignId TEXT,
+        designTitle TEXT,
+        editLink TEXT,
+        viewLink TEXT,
+        providerStatus TEXT,
+        errorCode TEXT,
+        resultReceivedAt TEXT,
+        qualityStatus TEXT CHECK (qualityStatus IS NULL OR qualityStatus IN (${sqlEnum(JAMAL_CANVA_QUALITY_STATUS_VALUES)})),
+        qualityNotesJson TEXT,
+        cancelledAt TEXT,
+        cancelReason TEXT,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        FOREIGN KEY (workItemId) REFERENCES jamal_work_items(id) ON DELETE RESTRICT,
+        UNIQUE (workItemId, revisionNumber)
+      );
+
+      CREATE INDEX idx_jamal_canva_productions_workItemId ON jamal_canva_productions(workItemId);
+      CREATE INDEX idx_jamal_canva_productions_status ON jamal_canva_productions(status);
+
+      CREATE TABLE auth_audit_events_v7 (
+        eventId TEXT PRIMARY KEY,
+        actorUserId TEXT,
+        tenantId TEXT,
+        eventType TEXT NOT NULL CHECK (eventType IN (${sqlEnum(AUDIT_EVENT_TYPES_AT_MIGRATION_13)})),
+        result TEXT NOT NULL CHECK (result IN (${sqlEnum(AUDIT_RESULT_VALUES)})),
+        timestamp TEXT NOT NULL,
+        metadata TEXT
+      );
+
+      INSERT INTO auth_audit_events_v7 (eventId, actorUserId, tenantId, eventType, result, timestamp, metadata)
+      SELECT eventId, actorUserId, tenantId, eventType, result, timestamp, metadata FROM auth_audit_events;
+
+      DROP TABLE auth_audit_events;
+      ALTER TABLE auth_audit_events_v7 RENAME TO auth_audit_events;
+
+      CREATE TRIGGER trg_auth_audit_events_no_update
+      BEFORE UPDATE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: UPDATE ist nicht erlaubt.');
+      END;
+
+      CREATE TRIGGER trg_auth_audit_events_no_delete
+      BEFORE DELETE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: DELETE ist nicht erlaubt.');
+      END;
+
+      CREATE INDEX idx_auth_audit_events_timestamp ON auth_audit_events(timestamp);
+    `,
+  }),
 ]);
 
 function ensureMigrationsTable(db) {
@@ -1208,6 +1367,10 @@ module.exports = {
   JAMAL_WORK_ITEM_PROJECT_SOURCE_VALUES,
   JAMAL_WORK_ITEM_DECISION_VALUES,
   JAMAL_WORK_RESULT_TRIGGER_VALUES,
+  JAMAL_CANVA_PRODUCTION_STATUS_VALUES,
+  JAMAL_CANVA_SUITABILITY_DECISION_VALUES,
+  JAMAL_CANVA_RIGHTS_STATUS_VALUES,
+  JAMAL_CANVA_QUALITY_STATUS_VALUES,
   MIGRATIONS,
   ensureMigrationsTable,
   getAppliedVersions,

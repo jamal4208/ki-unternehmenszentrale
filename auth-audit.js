@@ -103,6 +103,22 @@ const EVENT_TYPES = Object.freeze([
   "WORK_ORDER_RESULT_APPROVED_BY_CUSTOMER",
   "WORK_ORDER_CHANGE_BLOCKED_BY_POLICY",
   "WORK_ORDER_CHANGE_ESCALATED_BY_POLICY",
+  // V7.4 – Kontrollierte externe Werkzeugnutzung, Canva-Produktionskorridor
+  // (Auftrag Abschnitt N) – jamal-canva-production-service.js. Muss exakt
+  // der in auth-db-migrations.js#AUDIT_EVENT_TYPES_AT_MIGRATION_13
+  // erweiterten CHECK-Aufzählung (Migration 13) entsprechen. Ausschließlich
+  // Jamal selbst (OWNER) löst diese zehn Ereignisse aus – kein
+  // Kundenmandant, kein automatischer Owner-Ersatz.
+  "CANVA_BRIEFING_PREPARED",
+  "CANVA_HANDOFF_APPROVED",
+  "CANVA_HANDOFF_STARTED",
+  "CANVA_HANDOFF_FAILED",
+  "CANVA_RESULT_RECEIVED",
+  "CANVA_RESULT_REVIEWED",
+  "CANVA_REVISION_REQUESTED",
+  "CANVA_RESULT_ACCEPTED_INTERNAL",
+  "CANVA_HANDOFF_BLOCKED_BY_POLICY",
+  "CANVA_HANDOFF_BLOCKED_BY_RIGHTS",
 ]);
 
 const RESULTS = Object.freeze(["OK", "DENIED", "ERROR"]);
@@ -131,6 +147,17 @@ const RESULTS = Object.freeze(["OK", "DENIED", "ERROR"]);
 // Ergebnistext) und "changeRequestId" (interne Änderungswunsch-ID)
 // ergänzt. Weiterhin niemals der Änderungswunschtext selbst, niemals
 // "was erhalten bleiben soll"/"was wichtig ist" im Klartext.
+//
+// V7.4 – Kontrollierte externe Werkzeugnutzung, Canva-Produktionskorridor
+// (Auftrag Abschnitt N): "workItemId" (interne Jamal-Arbeitswunsch-ID),
+// "canvaJobId"/"canvaDesignId" (interne bzw. Canva-Design-Referenz, keine
+// Zugangsdaten), "format" (reiner Formattext wie "Instagram-Beitrag"),
+// "revisionNumber" (reine Zahl) und "rightsCode" (reiner Rechte-/
+// Consent-Status wie "BLOCKED"/"UNCLEAR") ergänzt. "reasonCode" und
+// "failureCode" existierten bereits und werden zusätzlich für die
+// Canva-Policy-/Providerfehlercodes verwendet. Weiterhin niemals der
+// Briefingtext, das Canva-Ergebnis vollständig, ein Zugangstoken oder eine
+// vollständige Provider-Rohantwort.
 const METADATA_ALLOWLIST = Object.freeze([
   "routeName",
   "roleLabel",
@@ -144,6 +171,12 @@ const METADATA_ALLOWLIST = Object.freeze([
   "resultId",
   "resultVersion",
   "changeRequestId",
+  "workItemId",
+  "canvaJobId",
+  "canvaDesignId",
+  "format",
+  "revisionNumber",
+  "rightsCode",
 ]);
 
 // Verbotene Inhalte, unabhängig vom Feldnamen (Verteidigung in der Tiefe:
