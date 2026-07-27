@@ -86,6 +86,13 @@ const jamalCanvaRoutesModule = require("./jamal-canva-routes");
 // Fachlogik lebt in agent-organization-service.js/
 // agent-hr-coaching-service.js/technology-radar-service.js.
 const agentLeadershipRoutesModule = require("./agent-leadership-routes");
+// V7.6.1 – Apple-first/Google-controlled Office-, Google-Workspace- und
+// Finance-Korridor vollständig offline vorbereiten (Auftrag Abschnitt S):
+// eigenständiges, additives Routenmodul (gleiches Muster wie
+// agent-leadership-routes.js). Reine Fachlogik lebt in
+// external-identity-service.js/google-workspace-capability-service.js/
+// office-work-service.js/finance-handoff-service.js.
+const officeFinanceRoutesModule = require("./office-finance-routes");
 
 const rootDir = __dirname;
 const staticAssets = new Map([
@@ -112,6 +119,11 @@ const staticAssets = new Map([
   // additives Chef-UI-Skript für die neue Ansicht "Agenten führen" (gleiches
   // Muster wie v71-ui.js/jamal-work-mode-ui.js).
   ["/agent-leadership-ui.js", "agent-leadership-ui.js"],
+  // V7.6.1 – Apple-first/Google-controlled Office-, Google-Workspace- und
+  // Finance-Korridor vollständig offline vorbereiten (Auftrag Abschnitt U):
+  // eigenständiges, additives Chef-UI-Skript für die neue Ansicht "Office &
+  // Finanzen" (gleiches Muster wie agent-leadership-ui.js).
+  ["/office-finance-ui.js", "office-finance-ui.js"],
   ["/app.js", "app.js"],
   ["/styles.css", "styles.css"],
   ["/v71-ui.js", "v71-ui.js"],
@@ -23610,6 +23622,72 @@ function handleAgentLeadershipReliabilitySignals(res, context) {
   agentLeadershipRoutesModule.handleReliabilitySignals(res, { getDb: ensureAuthDbReady, sendJson }, agentId);
 }
 
+// V7.6.1 – Apple-first/Google-controlled Office-, Google-Workspace- und
+// Finance-Korridor vollständig offline vorbereiten (Auftrag Abschnitt S):
+// acht schmale, lesende OWNER_ONLY-Endpunkte für die neue Ansicht "Office &
+// Finanzen". Reine Fachlogik lebt in external-identity-service.js/
+// google-workspace-capability-service.js/office-work-service.js/
+// finance-handoff-service.js (siehe office-finance-routes.js#Kopfkommentar).
+function handleOfficeFinanceSummary(res) {
+  officeFinanceRoutesModule.handleSummary(res, { getDb: ensureAuthDbReady, sendJson });
+}
+
+function handleOfficeFinanceSystemMap(res) {
+  officeFinanceRoutesModule.handleSystemMap(res, { getDb: ensureAuthDbReady, sendJson });
+}
+
+function handleOfficeFinanceIdentities(res) {
+  officeFinanceRoutesModule.handleIdentities(res, { getDb: ensureAuthDbReady, sendJson });
+}
+
+function handleOfficeFinanceCapabilities(res, context) {
+  const category = safeQueryParam(context.requestUrl, "category");
+  officeFinanceRoutesModule.handleCapabilities(res, { getDb: ensureAuthDbReady, sendJson }, category);
+}
+
+function handleOfficeFinanceApprovalMatrix(res) {
+  officeFinanceRoutesModule.handleApprovalMatrix(res, { getDb: ensureAuthDbReady, sendJson });
+}
+
+function handleOfficeFinanceWorkItems(res, context) {
+  const category = safeQueryParam(context.requestUrl, "category");
+  officeFinanceRoutesModule.handleWorkItems(res, { getDb: ensureAuthDbReady, sendJson }, category);
+}
+
+function handleOfficeFinanceHandoffs(res, context) {
+  const type = safeQueryParam(context.requestUrl, "type");
+  officeFinanceRoutesModule.handleFinanceHandoffs(res, { getDb: ensureAuthDbReady, sendJson }, type);
+}
+
+function handleOfficeFinanceAuthenticationStatus(res) {
+  officeFinanceRoutesModule.handleAuthenticationStatus(res, { getDb: ensureAuthDbReady, sendJson });
+}
+
+function handleOfficeFinanceActivationChecklists(res) {
+  officeFinanceRoutesModule.handleActivationChecklists(res, { getDb: ensureAuthDbReady, sendJson });
+}
+
+// Ein einziges neues POST-Prefix für alle schreibenden Office-/Finance-
+// Aktionen (gleiches Muster wie dispatchAgentLeadershipActionPostPrefix),
+// keine zusätzliche Route ohne Not.
+async function dispatchOfficeFinanceActionPostPrefix(res, context, remainder) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert." });
+    return;
+  }
+  const actionName = typeof remainder === "string" ? remainder : "";
+  if (actionName.includes("/") || !officeFinanceRoutesModule.isOfficeFinanceAction(actionName)) {
+    sendJson(res, 404, { ok: false, message: "Nicht gefunden." });
+    return;
+  }
+  await officeFinanceRoutesModule.dispatchOfficeFinanceAction(
+    res,
+    context,
+    { getDb: ensureAuthDbReady, sendJson },
+    actionName,
+  );
+}
+
 // V7.5 (Auftrag Abschnitt I/J) – ein einziges neues POST-Prefix für alle
 // schreibenden Führungsaktionen (gleiches Muster wie
 // dispatchJamalWorkModeActionPostPrefix), keine zusätzliche Route ohne Not.
@@ -23815,6 +23893,18 @@ const getRoutes = buildRouteMap([
   ["/api/agent-leadership/agent-technology-fit", (res, context) => handleAgentLeadershipAgentTechnologyFit(res, context)],
   ["/api/agent-leadership/company-principles", (res) => handleAgentLeadershipCompanyPrinciples(res)],
   ["/api/agent-leadership/reliability-signals", (res, context) => handleAgentLeadershipReliabilitySignals(res, context)],
+  // V7.6.1 – Apple-first/Google-controlled Office-, Google-Workspace- und
+  // Finance-Korridor vollständig offline vorbereiten (Auftrag Abschnitt S)
+  // – Ansicht "Office & Finanzen".
+  ["/api/office-finance/summary", (res) => handleOfficeFinanceSummary(res)],
+  ["/api/office-finance/system-map", (res) => handleOfficeFinanceSystemMap(res)],
+  ["/api/office-finance/identities", (res) => handleOfficeFinanceIdentities(res)],
+  ["/api/office-finance/capabilities", (res, context) => handleOfficeFinanceCapabilities(res, context)],
+  ["/api/office-finance/approval-matrix", (res) => handleOfficeFinanceApprovalMatrix(res)],
+  ["/api/office-finance/work-items", (res, context) => handleOfficeFinanceWorkItems(res, context)],
+  ["/api/office-finance/finance-handoffs", (res, context) => handleOfficeFinanceHandoffs(res, context)],
+  ["/api/office-finance/authentication-status", (res) => handleOfficeFinanceAuthenticationStatus(res)],
+  ["/api/office-finance/activation-checklists", (res) => handleOfficeFinanceActivationChecklists(res)],
 ]);
 
 const postRoutes = buildRouteMap([
@@ -24036,6 +24126,18 @@ const postRoutePrefixHandlers = [
     handler: (res, context) => {
       const remainder = decodeURIComponent(context.pathname.slice("/api/agent-leadership/".length));
       dispatchAgentLeadershipActionPostPrefix(res, context, remainder);
+    },
+  },
+  {
+    // V7.6.1 – Apple-first/Google-controlled Office-, Google-Workspace- und
+    // Finance-Korridor vollständig offline vorbereiten (Auftrag Abschnitt
+    // S) – eine Aktion je Anfrage (POST .../:action, siehe
+    // OFFICE_FINANCE_ACTIONS). Keine Ausführungsroute für eine echte
+    // Provideraktion, keine Login-/OAuth-/Callbackroute.
+    prefix: "/api/office-finance/",
+    handler: (res, context) => {
+      const remainder = decodeURIComponent(context.pathname.slice("/api/office-finance/".length));
+      dispatchOfficeFinanceActionPostPrefix(res, context, remainder);
     },
   },
 ];

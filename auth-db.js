@@ -1587,6 +1587,201 @@ function updateAgentReliabilitySignalReview(db, input = {}) {
   return getAgentReliabilitySignalById(db, input.id);
 }
 
+// ---------------------------------------------------------------------------
+// V7.6.1 – Apple-first/Google-controlled Office-, Google-Workspace- und
+// Finance-Korridor (Migration 15). Reine Persistenzfunktionen, keine
+// Fachlogik (lebt in external-identity-service.js/office-work-service.js/
+// finance-handoff-service.js). Kein Passwort-, Token-, Recovery-Code- oder
+// OAuth-Feld; kein Aufruf hier führt jemals eine echte Provideraktion aus.
+// ---------------------------------------------------------------------------
+
+function insertExternalIdentity(db, input = {}) {
+  const record = {
+    id: input.id,
+    emailAddress: input.emailAddress,
+    displayName: input.displayName,
+    identityType: input.identityType,
+    provider: input.provider,
+    intendedPurpose: input.intendedPurpose,
+    owner: input.owner,
+    loginAllowed: input.loginAllowed ? 1 : 0,
+    agentDirectLoginAllowed: 0,
+    inboxAvailable: input.inboxAvailable ? 1 : 0,
+    calendarAvailable: input.calendarAvailable ? 1 : 0,
+    driveAvailable: input.driveAvailable ? 1 : 0,
+    contactsAvailable: input.contactsAvailable ? 1 : 0,
+    writePermissionState: input.writePermissionState,
+    authenticationState: input.authenticationState,
+    recoveryState: input.recoveryState,
+    twoFactorState: input.twoFactorState,
+    status: input.status,
+    notes: input.notes ?? null,
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
+  };
+  db.prepare(
+    `INSERT INTO external_identities
+      (id, emailAddress, displayName, identityType, provider, intendedPurpose, owner, loginAllowed,
+       agentDirectLoginAllowed, inboxAvailable, calendarAvailable, driveAvailable, contactsAvailable,
+       writePermissionState, authenticationState, recoveryState, twoFactorState, status, notes, createdAt, updatedAt)
+     VALUES
+      (@id, @emailAddress, @displayName, @identityType, @provider, @intendedPurpose, @owner, @loginAllowed,
+       @agentDirectLoginAllowed, @inboxAvailable, @calendarAvailable, @driveAvailable, @contactsAvailable,
+       @writePermissionState, @authenticationState, @recoveryState, @twoFactorState, @status, @notes, @createdAt, @updatedAt)`,
+  ).run(record);
+  return getExternalIdentityById(db, record.id);
+}
+
+function getExternalIdentityById(db, id) {
+  return db.prepare("SELECT * FROM external_identities WHERE id = ?").get(id) || null;
+}
+
+function getExternalIdentityByEmail(db, emailAddress) {
+  return db.prepare("SELECT * FROM external_identities WHERE emailAddress = ?").get(emailAddress) || null;
+}
+
+function listExternalIdentities(db) {
+  return db.prepare("SELECT * FROM external_identities ORDER BY identityType ASC, emailAddress ASC").all();
+}
+
+function updateExternalIdentityReview(db, input = {}) {
+  db.prepare(
+    `UPDATE external_identities SET status = @status, notes = @notes, updatedAt = @updatedAt WHERE id = @id`,
+  ).run({
+    id: input.id,
+    status: input.status,
+    notes: input.notes ?? null,
+    updatedAt: input.updatedAt,
+  });
+  return getExternalIdentityById(db, input.id);
+}
+
+function insertOfficeWorkItem(db, input = {}) {
+  const record = {
+    id: input.id,
+    title: input.title,
+    requestedOutcome: input.requestedOutcome,
+    category: input.category,
+    targetIdentityId: input.targetIdentityId ?? null,
+    ownerAgentId: input.ownerAgentId,
+    contributorAgentIdsJson: input.contributorAgentIdsJson,
+    requestedCapabilityId: input.requestedCapabilityId ?? null,
+    permissionLevelRequired: input.permissionLevelRequired,
+    dataSensitivity: input.dataSensitivity,
+    externalEffect: input.externalEffect,
+    draftPayloadJson: input.draftPayloadJson ?? null,
+    safeSummary: input.safeSummary,
+    approvalStatus: input.approvalStatus || "DRAFT",
+    executionStatus: input.executionStatus || "NOT_STARTED",
+    providerReference: null,
+    resultSummary: null,
+    errorCode: null,
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
+  };
+  db.prepare(
+    `INSERT INTO office_work_items
+      (id, title, requestedOutcome, category, targetIdentityId, ownerAgentId, contributorAgentIdsJson,
+       requestedCapabilityId, permissionLevelRequired, dataSensitivity, externalEffect, draftPayloadJson,
+       safeSummary, approvalStatus, executionStatus, providerReference, resultSummary, errorCode, createdAt, updatedAt)
+     VALUES
+      (@id, @title, @requestedOutcome, @category, @targetIdentityId, @ownerAgentId, @contributorAgentIdsJson,
+       @requestedCapabilityId, @permissionLevelRequired, @dataSensitivity, @externalEffect, @draftPayloadJson,
+       @safeSummary, @approvalStatus, @executionStatus, @providerReference, @resultSummary, @errorCode, @createdAt, @updatedAt)`,
+  ).run(record);
+  return getOfficeWorkItemById(db, record.id);
+}
+
+function getOfficeWorkItemById(db, id) {
+  return db.prepare("SELECT * FROM office_work_items WHERE id = ?").get(id) || null;
+}
+
+function listOfficeWorkItems(db, filter = {}) {
+  if (filter.category) {
+    return db.prepare("SELECT * FROM office_work_items WHERE category = ? ORDER BY createdAt DESC").all(filter.category);
+  }
+  return db.prepare("SELECT * FROM office_work_items ORDER BY createdAt DESC").all();
+}
+
+// Aktualisiert ausschließlich die Prüf-/Fortschrittsfelder eines bestehenden
+// Office-Auftrags (approvalStatus/executionStatus/resultSummary/errorCode) –
+// die bei Anlage erzeugten Inhaltsfelder (title, draftPayloadJson, ...)
+// bleiben unverändert (gleiches Prinzip wie updateAgentHrDailyProposalReview).
+function updateOfficeWorkItemStatus(db, input = {}) {
+  db.prepare(
+    `UPDATE office_work_items
+       SET approvalStatus = @approvalStatus, executionStatus = @executionStatus,
+           resultSummary = @resultSummary, errorCode = @errorCode, updatedAt = @updatedAt
+     WHERE id = @id`,
+  ).run({
+    id: input.id,
+    approvalStatus: input.approvalStatus,
+    executionStatus: input.executionStatus,
+    resultSummary: input.resultSummary ?? null,
+    errorCode: input.errorCode ?? null,
+    updatedAt: input.updatedAt,
+  });
+  return getOfficeWorkItemById(db, input.id);
+}
+
+function insertFinanceHandoff(db, input = {}) {
+  const record = {
+    id: input.id,
+    title: input.title,
+    type: input.type,
+    period: input.period ?? null,
+    companyIdentity: input.companyIdentity ?? null,
+    sourceDescription: input.sourceDescription,
+    amount: input.amount ?? null,
+    currency: input.currency ?? null,
+    taxRelevance: input.taxRelevance || "UNKNOWN",
+    sensitivity: input.sensitivity,
+    proposedCategory: input.proposedCategory ?? null,
+    confidence: input.confidence,
+    missingInformation: input.missingInformation ?? null,
+    requiredSpecialist: input.requiredSpecialist ?? null,
+    jamalDecision: null,
+    approvalStatus: input.approvalStatus || "DRAFT",
+    executionBlocked: 1,
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
+  };
+  db.prepare(
+    `INSERT INTO finance_handoffs
+      (id, title, type, period, companyIdentity, sourceDescription, amount, currency, taxRelevance, sensitivity,
+       proposedCategory, confidence, missingInformation, requiredSpecialist, jamalDecision, approvalStatus,
+       executionBlocked, createdAt, updatedAt)
+     VALUES
+      (@id, @title, @type, @period, @companyIdentity, @sourceDescription, @amount, @currency, @taxRelevance, @sensitivity,
+       @proposedCategory, @confidence, @missingInformation, @requiredSpecialist, @jamalDecision, @approvalStatus,
+       @executionBlocked, @createdAt, @updatedAt)`,
+  ).run(record);
+  return getFinanceHandoffById(db, record.id);
+}
+
+function getFinanceHandoffById(db, id) {
+  return db.prepare("SELECT * FROM finance_handoffs WHERE id = ?").get(id) || null;
+}
+
+function listFinanceHandoffs(db, filter = {}) {
+  if (filter.type) {
+    return db.prepare("SELECT * FROM finance_handoffs WHERE type = ? ORDER BY createdAt DESC").all(filter.type);
+  }
+  return db.prepare("SELECT * FROM finance_handoffs ORDER BY createdAt DESC").all();
+}
+
+function updateFinanceHandoffReview(db, input = {}) {
+  db.prepare(
+    `UPDATE finance_handoffs SET approvalStatus = @approvalStatus, jamalDecision = @jamalDecision, updatedAt = @updatedAt WHERE id = @id`,
+  ).run({
+    id: input.id,
+    approvalStatus: input.approvalStatus,
+    jamalDecision: input.jamalDecision ?? null,
+    updatedAt: input.updatedAt,
+  });
+  return getFinanceHandoffById(db, input.id);
+}
+
 module.exports = {
   AuthDatabaseStartupError,
   resolveAuthDbPaths,
@@ -1704,4 +1899,18 @@ module.exports = {
   getAgentReliabilitySignalById,
   listAgentReliabilitySignals,
   updateAgentReliabilitySignalReview,
+  // V7.6.1 – Apple-first/Google-controlled Office-/Finance-Korridor
+  insertExternalIdentity,
+  getExternalIdentityById,
+  getExternalIdentityByEmail,
+  listExternalIdentities,
+  updateExternalIdentityReview,
+  insertOfficeWorkItem,
+  getOfficeWorkItemById,
+  listOfficeWorkItems,
+  updateOfficeWorkItemStatus,
+  insertFinanceHandoff,
+  getFinanceHandoffById,
+  listFinanceHandoffs,
+  updateFinanceHandoffReview,
 };

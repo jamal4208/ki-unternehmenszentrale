@@ -714,6 +714,192 @@ const AUDIT_EVENT_TYPES_AT_MIGRATION_14 = Object.freeze([
   "FORESIGHT_SCENARIO_REVIEWED",
 ]);
 
+// ---------------------------------------------------------------------------
+// V7.6.1 – Apple-first/Google-controlled Office-, Google-Workspace- und
+// Finance-Korridor vollständig offline vorbereiten (Auftrag Abschnitt D/F/
+// I/N/R). Additive Migration 15, Migrationen 1–14 bleiben unverändert.
+//
+// Drei neue Tabellen, bewusst NICHT mehr (Auftrag Abschnitt R nennt
+// "external_action_approvals" als MÖGLICHE, nicht als verpflichtende
+// Tabelle): office_work_items besitzt bereits approvalStatus/
+// executionStatus – eine vierte, separate Freigabetabelle würde denselben
+// Entscheidungszustand ein zweites Mal speichern und könnte veralten
+// (gleiches Leitprinzip wie bei agent-organization-service.js: "keine
+// zweite Wahrheit"). Aus demselben Grund gibt es KEINE eigene
+// "provider_capabilities"-Tabelle: die 33 Google-Workspace-Fähigkeiten
+// (google-workspace-capability-service.js) sind statische, unveränderliche
+// Referenzdaten ohne jeden mutierbaren Zustand – genau wie
+// company-principles.js, das ebenfalls ohne eigene Tabelle bleibt.
+//
+//   1. external_identities – lokales Identitäts-/Kontenmodell (Auftrag
+//      Abschnitt D), gesät mit genau drei Startidentitäten
+//      (jamal@jacogbr.de/office@jacogbr.de/info@jacogbr.de, siehe
+//      external-identity-service.js). KEIN Passwort-, Token-, Recovery-Code-
+//      oder OAuth-Feld.
+//   2. office_work_items – persistente lokale Office-Aufträge (Auftrag
+//      Abschnitt I), maximal bis executionStatus='WAITING_FOR_AUTHENTICATION'
+//      (per CHECK-Aufzählung UND zusätzlich per Anwendungslogik in
+//      office-work-service.js gesperrt – kein "READY_FOR_PROVIDER" o. ä. in
+//      V7.6.1 erreichbar).
+//   3. finance_handoffs – Finance-/Controlling-Handoff-Korridor (Auftrag
+//      Abschnitt N/O). executionBlocked ist per CHECK-Constraint hart auf 1
+//      fixiert (CHECK (executionBlocked = 1)) – kann über KEINEN Codepfad
+//      technisch auf 0 gesetzt werden, auch nicht versehentlich.
+//
+// Sowie eine erneute vollständige Neuerstellung von auth_audit_events mit
+// der um genau neun Ereignistypen erweiterten CHECK-Aufzählung
+// (AUDIT_EVENT_TYPES_AT_MIGRATION_15) – exakt dasselbe etablierte Muster
+// wie Migration 7/8/9/10/11/13/14.
+// ---------------------------------------------------------------------------
+
+// external-identity-service.js#IDENTITY_TYPE_VALUES.
+const EXTERNAL_IDENTITY_TYPE_VALUES = Object.freeze([
+  "OWNER_PERSONAL",
+  "COMPANY_OFFICE",
+  "PUBLIC_INBOX",
+  "DEPARTMENT_ALIAS",
+  "SERVICE_IDENTITY",
+]);
+
+// external-identity-service.js#PROVIDER_VALUES – bewusst derselbe
+// Wertebereichsname wie in google-workspace-capability-service.js
+// verwendet (beide beantworten "welcher Anbieter"), aber getrennte
+// Konstanten, weil eine Fähigkeit ausschließlich GOOGLE_WORKSPACE sein kann
+// während eine Identität zusätzlich APPLE/OTHER sein darf.
+const EXTERNAL_IDENTITY_PROVIDER_VALUES = Object.freeze(["GOOGLE_WORKSPACE", "APPLE", "OTHER"]);
+
+// Gemeinsamer 8-Stufen-Berechtigungswertebereich (Auftrag Abschnitt F) –
+// sowohl für external_identities.writePermissionState als auch für
+// office_work_items.permissionLevelRequired verwendet, weil beide
+// fachlich dieselbe Frage beantworten ("welche Berechtigungsstufe gilt
+// hier?"). google-workspace-capability-service.js#recommendedInitialState
+// verwendet denselben Wertebereich, bleibt dort aber rein statisch
+// (keine eigene Tabelle, siehe Kopfkommentar oben).
+const PROVIDER_PERMISSION_LEVEL_VALUES = Object.freeze([
+  "DISCONNECTED",
+  "AUTHENTICATED_NO_ACCESS",
+  "READ_METADATA",
+  "READ_CONTENT",
+  "PREPARE_DRAFT",
+  "JAMAL_APPROVED_WRITE",
+  "LIMITED_AUTOMATED_WRITE",
+  "BLOCKED",
+]);
+
+const EXTERNAL_IDENTITY_AUTHENTICATION_STATE_VALUES = Object.freeze([
+  "NOT_AUTHENTICATED",
+  "PENDING_SETUP",
+  "AUTHENTICATED",
+  "AUTHENTICATION_FAILED",
+]);
+const EXTERNAL_IDENTITY_RECOVERY_STATE_VALUES = Object.freeze(["UNKNOWN", "NOT_CONFIGURED", "CONFIGURED", "NEEDS_REVIEW"]);
+const EXTERNAL_IDENTITY_TWO_FACTOR_STATE_VALUES = Object.freeze(["UNKNOWN", "DISABLED", "ENABLED", "NEEDS_REVIEW"]);
+
+// "ACCOUNT_PREPARED_EXTERNALLY_OR_PENDING_CONFIRMATION" (Auftrag: exakter
+// Statuswortlaut, falls office@jacogbr.de lokal nicht nachweisbar
+// eingerichtet ist – keine Annahme als Tatsache dokumentieren).
+// V7.6.1 – Identitätsmodell abschließend geklärt (Nachtrag vor dem Commit):
+// "USER_ACCOUNT_OR_ALIAS_UNCONFIRMED" deckt Adressen ab, bei denen lokal
+// nicht feststellbar ist, ob ein vollwertiges Konto oder lediglich ein
+// Alias/eine Weiterleitung vorliegt (z. B. "info@jacogbr.de") – bewusst
+// keine Tatsachenbehauptung in beide Richtungen, keine externe
+// Verifikation, keine zweite Identitätsarchitektur nötig.
+const EXTERNAL_IDENTITY_STATUS_VALUES = Object.freeze([
+  "ACTIVE",
+  "PLANNED",
+  "ACCOUNT_PREPARED_EXTERNALLY_OR_PENDING_CONFIRMATION",
+  "USER_ACCOUNT_OR_ALIAS_UNCONFIRMED",
+  "INACTIVE",
+]);
+
+// office-work-service.js#OFFICE_CATEGORY_VALUES.
+const OFFICE_WORK_ITEM_CATEGORY_VALUES = Object.freeze(["EMAIL", "CALENDAR", "DOCUMENT", "CONTACT", "GENERAL_OFFICE"]);
+
+// office-work-service.js#EXTERNAL_EFFECT_VALUES – kategorisiert NUR die Art
+// einer möglichen künftigen Außenwirkung, löst selbst keine Aktion aus.
+const OFFICE_EXTERNAL_EFFECT_VALUES = Object.freeze([
+  "NONE",
+  "DIRECT_EXTERNAL_COMMUNICATION",
+  "EXTERNAL_VISIBILITY_TO_INVITEES",
+  "EXTERNAL_VISIBILITY_TO_RECIPIENTS",
+  "DATA_LOSS_RISK",
+]);
+
+// office-work-service.js#APPROVAL_STATUS_VALUES – Jamals Entscheidungspfad
+// (getrennt von executionStatus unten, das den technischen Fortschritt
+// abbildet).
+const OFFICE_WORK_ITEM_APPROVAL_STATUS_VALUES = Object.freeze([
+  "DRAFT",
+  "READY_FOR_REVIEW",
+  "APPROVED_FOR_EXTERNAL_ACTION",
+  "REJECTED",
+  "CANCELLED",
+]);
+
+// office-work-service.js#EXECUTION_STATUS_VALUES – Auftrag Abschnitt I:
+// "maximal bis WAITING_FOR_AUTHENTICATION" für V7.6.1. Die vollständige,
+// bereits für später vorgesehene Aufzählung steht dennoch hier (Auftrag:
+// "Statusmodell"), die Anwendungslogik in office-work-service.js verhindert
+// zusätzlich jeden Übergang über WAITING_FOR_AUTHENTICATION hinaus.
+const OFFICE_WORK_ITEM_EXECUTION_STATUS_VALUES = Object.freeze([
+  "NOT_STARTED",
+  "WAITING_FOR_AUTHENTICATION",
+  "READY_FOR_PROVIDER",
+  "EXECUTION_BLOCKED",
+  "EXECUTED",
+  "FAILED",
+  "CANCELLED",
+]);
+
+const DATA_SENSITIVITY_VALUES = Object.freeze(["LOW", "MEDIUM", "HIGH"]);
+
+// finance-handoff-service.js#FINANCE_HANDOFF_TYPE_VALUES (Auftrag Abschnitt O).
+const FINANCE_HANDOFF_TYPE_VALUES = Object.freeze([
+  "RECEIPT_REVIEW",
+  "INVOICE_DRAFT",
+  "PAYMENT_PROPOSAL",
+  "COST_CLASSIFICATION",
+  "ADVISOR_HANDOFF",
+  "MONTHLY_OVERVIEW",
+  "LIQUIDITY_NOTE",
+]);
+
+const FINANCE_TAX_RELEVANCE_VALUES = Object.freeze(["UNKNOWN", "RELEVANT", "NOT_RELEVANT"]);
+const FINANCE_CONFIDENCE_VALUES = Object.freeze(["LOW", "MEDIUM", "HIGH"]);
+
+// finance-handoff-service.js#APPROVAL_STATUS_VALUES – bildet Auftrag
+// Abschnitt N "Finance-Status" (CAPABILITY_GAP/PREPARATION_ONLY/
+// SPECIALIST_REVIEW_REQUIRED/JAMAL_APPROVAL_REQUIRED) UND den zusätzlichen
+// Prüf-/Entscheidungsablauf je Handoff in einem einzigen Wertebereich ab.
+// "CAPABILITY_GAP" selbst ist bewusst KEIN Zeilenstatus (das bleibt eine
+// Eigenschaft der gesamten Finance-/Controlling-Gruppe, siehe
+// agent-organization-service.js#CAPABILITY_GAP – keine zweite Wahrheit).
+const FINANCE_HANDOFF_APPROVAL_STATUS_VALUES = Object.freeze([
+  "DRAFT",
+  "REVIEWED",
+  "SPECIALIST_REVIEW_REQUIRED",
+  "JAMAL_APPROVAL_REQUIRED",
+  "JAMAL_DECIDED",
+  "CANCELLED",
+]);
+
+// V7.6.1 (Auftrag Abschnitt T): genau neun zusätzliche Ereignistypen,
+// zusätzlich zur vollständigen, bereits bestehenden
+// AUDIT_EVENT_TYPES_AT_MIGRATION_14-Menge oben. auth-audit.js#EVENT_TYPES
+// muss exakt dieser Aufzählung entsprechen.
+const AUDIT_EVENT_TYPES_AT_MIGRATION_15 = Object.freeze([
+  ...AUDIT_EVENT_TYPES_AT_MIGRATION_14,
+  "EXTERNAL_IDENTITY_REVIEWED",
+  "PROVIDER_CAPABILITY_REVIEWED",
+  "OFFICE_WORK_ITEM_CREATED",
+  "OFFICE_WORK_ITEM_REVIEWED",
+  "OFFICE_EXTERNAL_ACTION_APPROVED",
+  "OFFICE_AUTHENTICATION_REQUIRED",
+  "FINANCE_HANDOFF_CREATED",
+  "FINANCE_HANDOFF_REVIEWED",
+  "FINANCE_SPECIALIST_REQUIRED",
+]);
+
 function sqlEnum(values) {
   return values.map((value) => `'${value}'`).join(",");
 }
@@ -1755,6 +1941,139 @@ const MIGRATIONS = Object.freeze([
       CREATE INDEX idx_auth_audit_events_timestamp ON auth_audit_events(timestamp);
     `,
   }),
+  // V7.6.1 – Apple-first/Google-controlled Office-, Google-Workspace- und
+  // Finance-Korridor vollständig offline vorbereiten (Auftrag Abschnitt D/I/
+  // N/R). Rein additiv gegenüber Migration 14: drei neue Tabellen (siehe
+  // ausführlichen Kopfkommentar oben bei EXTERNAL_IDENTITY_TYPE_VALUES) plus
+  // die erneute Audit-Ereignistyp-Erweiterung. Migrationen 1–14 bleiben
+  // dabei byteidentisch unverändert.
+  Object.freeze({
+    version: 15,
+    name: "create_office_finance_tables_and_widen_audit_event_types_v9",
+    sql: `
+      CREATE TABLE external_identities (
+        id TEXT PRIMARY KEY,
+        emailAddress TEXT NOT NULL UNIQUE CHECK (length(emailAddress) BETWEEN 3 AND 200),
+        displayName TEXT NOT NULL CHECK (length(displayName) BETWEEN 1 AND 200),
+        identityType TEXT NOT NULL CHECK (identityType IN (${sqlEnum(EXTERNAL_IDENTITY_TYPE_VALUES)})),
+        provider TEXT NOT NULL CHECK (provider IN (${sqlEnum(EXTERNAL_IDENTITY_PROVIDER_VALUES)})),
+        intendedPurpose TEXT NOT NULL CHECK (length(intendedPurpose) BETWEEN 1 AND 300),
+        owner TEXT NOT NULL CHECK (length(owner) BETWEEN 1 AND 200),
+        loginAllowed INTEGER NOT NULL CHECK (loginAllowed IN (0,1)),
+        -- Auftrag Abschnitt D ("kein Agent erhält eigene Zugangsdaten") – per
+        -- CHECK-Constraint hart auf 0 fixiert, kann über keinen Codepfad auf 1
+        -- gesetzt werden.
+        agentDirectLoginAllowed INTEGER NOT NULL DEFAULT 0 CHECK (agentDirectLoginAllowed = 0),
+        inboxAvailable INTEGER NOT NULL CHECK (inboxAvailable IN (0,1)),
+        calendarAvailable INTEGER NOT NULL CHECK (calendarAvailable IN (0,1)),
+        driveAvailable INTEGER NOT NULL CHECK (driveAvailable IN (0,1)),
+        contactsAvailable INTEGER NOT NULL CHECK (contactsAvailable IN (0,1)),
+        writePermissionState TEXT NOT NULL CHECK (writePermissionState IN (${sqlEnum(PROVIDER_PERMISSION_LEVEL_VALUES)})),
+        authenticationState TEXT NOT NULL CHECK (authenticationState IN (${sqlEnum(EXTERNAL_IDENTITY_AUTHENTICATION_STATE_VALUES)})),
+        recoveryState TEXT NOT NULL CHECK (recoveryState IN (${sqlEnum(EXTERNAL_IDENTITY_RECOVERY_STATE_VALUES)})),
+        twoFactorState TEXT NOT NULL CHECK (twoFactorState IN (${sqlEnum(EXTERNAL_IDENTITY_TWO_FACTOR_STATE_VALUES)})),
+        status TEXT NOT NULL CHECK (status IN (${sqlEnum(EXTERNAL_IDENTITY_STATUS_VALUES)})),
+        notes TEXT CHECK (notes IS NULL OR length(notes) <= 500),
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      );
+
+      CREATE INDEX idx_external_identities_identityType ON external_identities(identityType);
+
+      CREATE TABLE office_work_items (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 200),
+        requestedOutcome TEXT NOT NULL CHECK (length(requestedOutcome) BETWEEN 1 AND 500),
+        category TEXT NOT NULL CHECK (category IN (${sqlEnum(OFFICE_WORK_ITEM_CATEGORY_VALUES)})),
+        targetIdentityId TEXT,
+        ownerAgentId TEXT NOT NULL,
+        contributorAgentIdsJson TEXT NOT NULL,
+        requestedCapabilityId TEXT,
+        permissionLevelRequired TEXT NOT NULL CHECK (permissionLevelRequired IN (${sqlEnum(PROVIDER_PERMISSION_LEVEL_VALUES)})),
+        dataSensitivity TEXT NOT NULL CHECK (dataSensitivity IN (${sqlEnum(DATA_SENSITIVITY_VALUES)})),
+        externalEffect TEXT NOT NULL CHECK (externalEffect IN (${sqlEnum(OFFICE_EXTERNAL_EFFECT_VALUES)})),
+        draftPayloadJson TEXT CHECK (draftPayloadJson IS NULL OR length(draftPayloadJson) <= 4000),
+        safeSummary TEXT NOT NULL CHECK (length(safeSummary) BETWEEN 1 AND 500),
+        approvalStatus TEXT NOT NULL DEFAULT 'DRAFT' CHECK (approvalStatus IN (${sqlEnum(OFFICE_WORK_ITEM_APPROVAL_STATUS_VALUES)})),
+        -- Auftrag Abschnitt I ("maximal bis WAITING_FOR_AUTHENTICATION für
+        -- V7.6.1") – die CHECK-Aufzählung selbst lässt zwar die vollständige,
+        -- für später vorgesehene Statuskette zu (Auftrag: "Statusmodell"
+        -- vollständig verankern), office-work-service.js verhindert
+        -- zusätzlich programmatisch jeden Übergang über
+        -- WAITING_FOR_AUTHENTICATION hinaus (kein READY_FOR_PROVIDER o. ä.
+        -- über die aktuelle API erreichbar).
+        executionStatus TEXT NOT NULL DEFAULT 'NOT_STARTED' CHECK (executionStatus IN (${sqlEnum(OFFICE_WORK_ITEM_EXECUTION_STATUS_VALUES)})),
+        providerReference TEXT,
+        resultSummary TEXT CHECK (resultSummary IS NULL OR length(resultSummary) <= 500),
+        errorCode TEXT,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        FOREIGN KEY (targetIdentityId) REFERENCES external_identities(id) ON DELETE SET NULL
+      );
+
+      CREATE INDEX idx_office_work_items_category ON office_work_items(category);
+      CREATE INDEX idx_office_work_items_approvalStatus ON office_work_items(approvalStatus);
+      CREATE INDEX idx_office_work_items_targetIdentityId ON office_work_items(targetIdentityId);
+
+      CREATE TABLE finance_handoffs (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 200),
+        type TEXT NOT NULL CHECK (type IN (${sqlEnum(FINANCE_HANDOFF_TYPE_VALUES)})),
+        period TEXT CHECK (period IS NULL OR length(period) <= 50),
+        companyIdentity TEXT CHECK (companyIdentity IS NULL OR length(companyIdentity) <= 200),
+        sourceDescription TEXT NOT NULL CHECK (length(sourceDescription) BETWEEN 1 AND 500),
+        amount REAL,
+        currency TEXT CHECK (currency IS NULL OR length(currency) <= 10),
+        taxRelevance TEXT NOT NULL DEFAULT 'UNKNOWN' CHECK (taxRelevance IN (${sqlEnum(FINANCE_TAX_RELEVANCE_VALUES)})),
+        sensitivity TEXT NOT NULL CHECK (sensitivity IN (${sqlEnum(DATA_SENSITIVITY_VALUES)})),
+        proposedCategory TEXT CHECK (proposedCategory IS NULL OR length(proposedCategory) <= 200),
+        confidence TEXT NOT NULL CHECK (confidence IN (${sqlEnum(FINANCE_CONFIDENCE_VALUES)})),
+        missingInformation TEXT CHECK (missingInformation IS NULL OR length(missingInformation) <= 500),
+        requiredSpecialist TEXT CHECK (requiredSpecialist IS NULL OR length(requiredSpecialist) <= 200),
+        jamalDecision TEXT CHECK (jamalDecision IS NULL OR length(jamalDecision) <= 500),
+        approvalStatus TEXT NOT NULL DEFAULT 'DRAFT' CHECK (approvalStatus IN (${sqlEnum(FINANCE_HANDOFF_APPROVAL_STATUS_VALUES)})),
+        -- Auftrag Abschnitt N/O ("keine echte Buchung/Zahlung/Rechnungsversand")
+        -- – per CHECK-Constraint hart auf 1 fixiert, kann über keinen
+        -- Codepfad technisch auf 0 gesetzt werden.
+        executionBlocked INTEGER NOT NULL DEFAULT 1 CHECK (executionBlocked = 1),
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      );
+
+      CREATE INDEX idx_finance_handoffs_type ON finance_handoffs(type);
+      CREATE INDEX idx_finance_handoffs_approvalStatus ON finance_handoffs(approvalStatus);
+
+      CREATE TABLE auth_audit_events_v9 (
+        eventId TEXT PRIMARY KEY,
+        actorUserId TEXT,
+        tenantId TEXT,
+        eventType TEXT NOT NULL CHECK (eventType IN (${sqlEnum(AUDIT_EVENT_TYPES_AT_MIGRATION_15)})),
+        result TEXT NOT NULL CHECK (result IN (${sqlEnum(AUDIT_RESULT_VALUES)})),
+        timestamp TEXT NOT NULL,
+        metadata TEXT
+      );
+
+      INSERT INTO auth_audit_events_v9 (eventId, actorUserId, tenantId, eventType, result, timestamp, metadata)
+      SELECT eventId, actorUserId, tenantId, eventType, result, timestamp, metadata FROM auth_audit_events;
+
+      DROP TABLE auth_audit_events;
+      ALTER TABLE auth_audit_events_v9 RENAME TO auth_audit_events;
+
+      CREATE TRIGGER trg_auth_audit_events_no_update
+      BEFORE UPDATE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: UPDATE ist nicht erlaubt.');
+      END;
+
+      CREATE TRIGGER trg_auth_audit_events_no_delete
+      BEFORE DELETE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: DELETE ist nicht erlaubt.');
+      END;
+
+      CREATE INDEX idx_auth_audit_events_timestamp ON auth_audit_events(timestamp);
+    `,
+  }),
 ]);
 
 function ensureMigrationsTable(db) {
@@ -1835,6 +2154,24 @@ module.exports = {
   TECHNOLOGY_RADAR_SIGNAL_TYPE_VALUES,
   TECHNOLOGY_RADAR_TIME_HORIZON_VALUES,
   TECHNOLOGY_RADAR_UNCERTAINTY_LEVEL_VALUES,
+  // V7.6.1 – Apple-first/Google-controlled Office-/Finance-Korridor
+  EXTERNAL_IDENTITY_TYPE_VALUES,
+  EXTERNAL_IDENTITY_PROVIDER_VALUES,
+  PROVIDER_PERMISSION_LEVEL_VALUES,
+  EXTERNAL_IDENTITY_AUTHENTICATION_STATE_VALUES,
+  EXTERNAL_IDENTITY_RECOVERY_STATE_VALUES,
+  EXTERNAL_IDENTITY_TWO_FACTOR_STATE_VALUES,
+  EXTERNAL_IDENTITY_STATUS_VALUES,
+  OFFICE_WORK_ITEM_CATEGORY_VALUES,
+  OFFICE_EXTERNAL_EFFECT_VALUES,
+  OFFICE_WORK_ITEM_APPROVAL_STATUS_VALUES,
+  OFFICE_WORK_ITEM_EXECUTION_STATUS_VALUES,
+  DATA_SENSITIVITY_VALUES,
+  FINANCE_HANDOFF_TYPE_VALUES,
+  FINANCE_TAX_RELEVANCE_VALUES,
+  FINANCE_CONFIDENCE_VALUES,
+  FINANCE_HANDOFF_APPROVAL_STATUS_VALUES,
+  AUDIT_EVENT_TYPES_AT_MIGRATION_15,
   MIGRATIONS,
   ensureMigrationsTable,
   getAppliedVersions,

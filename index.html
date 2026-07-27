@@ -77,6 +77,11 @@
             <span class="nav-icon" aria-hidden="true">13</span>
             Agenten führen
           </button>
+          <p class="nav-section-label">V7.6.1 · neu · offline vorbereitet</p>
+          <button class="nav-item" type="button" data-view="office-finance">
+            <span class="nav-icon" aria-hidden="true">14</span>
+            Office &amp; Finanzen
+          </button>
         </nav>
 
         <div class="principle-box">
@@ -1455,6 +1460,68 @@
             <div id="agent-leadership-fit-output" class="v71-output" aria-live="polite">Lade Agent-Technology-Fit…</div>
           </div>
         </section>
+
+        <!--
+          V7.6.1 – Apple-first/Google-controlled Office-, Google-Workspace-
+          und Finance-Korridor vollständig offline vorbereiten (Auftrag
+          Abschnitt U): eigenständige, additive Ansicht "Office & Finanzen".
+          Vollständig von office-finance-ui.js gerendert (gleiches
+          Grundmuster wie agent-leadership-ui.js) – keine echte Google-
+          Verbindung, kein OAuth, keine echte Buchung/Zahlung.
+        -->
+        <section class="view" id="office-finance-view" data-title="Office &amp; Finanzen">
+          <div class="section-toolbar">
+            <div>
+              <p class="eyebrow">V7.6.1 · neu · Apple-first / Google-controlled</p>
+              <h3>Office &amp; Finanzen</h3>
+              <p class="v71-subtitle">
+                Apple bleibt Jamals persönlicher Arbeitsraum. Google Workspace wird der kontrollierte
+                Unternehmensraum – vollständig offline vorbereitet, keine echte Verbindung, kein OAuth. Finance bleibt
+                Preparation-only: keine Buchung, keine Zahlung, kein Rechnungsversand.
+              </p>
+            </div>
+            <span class="system-pill system-pill-safe">vollständig offline · keine externe Aktion</span>
+          </div>
+          <div id="office-finance-summary-output" class="v71-output" aria-live="polite">Lade Kompaktübersicht…</div>
+          <nav class="office-finance-tabs" id="office-finance-tabs" aria-label="Bereiche Office &amp; Finanzen">
+            <button type="button" class="office-finance-tab is-active" data-office-finance-tab="system">Systemaufteilung</button>
+            <button type="button" class="office-finance-tab" data-office-finance-tab="identities">Identitäten</button>
+            <button type="button" class="office-finance-tab" data-office-finance-tab="email">E-Mail</button>
+            <button type="button" class="office-finance-tab" data-office-finance-tab="calendar">Kalender</button>
+            <button type="button" class="office-finance-tab" data-office-finance-tab="documents">Dokumente</button>
+            <button type="button" class="office-finance-tab" data-office-finance-tab="contacts">Kontakte</button>
+            <button type="button" class="office-finance-tab" data-office-finance-tab="finance">Finanzen</button>
+            <button type="button" class="office-finance-tab" data-office-finance-tab="approvals">Freigaben</button>
+            <button type="button" class="office-finance-tab" data-office-finance-tab="connections">Verbindungen</button>
+          </nav>
+          <div class="office-finance-panel is-active" id="office-finance-panel-system" data-office-finance-panel="system">
+            <div id="office-finance-system-output" class="v71-output" aria-live="polite">Lade Systemlandkarte…</div>
+          </div>
+          <div class="office-finance-panel" id="office-finance-panel-identities" data-office-finance-panel="identities">
+            <div id="office-finance-identities-output" class="v71-output" aria-live="polite">Lade Identitäten…</div>
+          </div>
+          <div class="office-finance-panel" id="office-finance-panel-email" data-office-finance-panel="email">
+            <div id="office-finance-email-output" class="v71-output" aria-live="polite">Lade E-Mail-Korridor…</div>
+          </div>
+          <div class="office-finance-panel" id="office-finance-panel-calendar" data-office-finance-panel="calendar">
+            <div id="office-finance-calendar-output" class="v71-output" aria-live="polite">Lade Kalender-Korridor…</div>
+          </div>
+          <div class="office-finance-panel" id="office-finance-panel-documents" data-office-finance-panel="documents">
+            <div id="office-finance-documents-output" class="v71-output" aria-live="polite">Lade Dokumenten-Korridor…</div>
+          </div>
+          <div class="office-finance-panel" id="office-finance-panel-contacts" data-office-finance-panel="contacts">
+            <div id="office-finance-contacts-output" class="v71-output" aria-live="polite">Lade Kontakt-Korridor…</div>
+          </div>
+          <div class="office-finance-panel" id="office-finance-panel-finance" data-office-finance-panel="finance">
+            <div id="office-finance-finance-output" class="v71-output" aria-live="polite">Lade Finance-Handoffs…</div>
+          </div>
+          <div class="office-finance-panel" id="office-finance-panel-approvals" data-office-finance-panel="approvals">
+            <div id="office-finance-approvals-output" class="v71-output" aria-live="polite">Lade Freigabematrix…</div>
+          </div>
+          <div class="office-finance-panel" id="office-finance-panel-connections" data-office-finance-panel="connections">
+            <div id="office-finance-connections-output" class="v71-output" aria-live="polite">Lade Verbindungsstatus…</div>
+          </div>
+        </section>
       </main>
     </div>
 
@@ -1472,5 +1539,6 @@
     <script src="jamal-work-mode-ui.js"></script>
     <script src="jamal-canva-ui.js"></script>
     <script src="agent-leadership-ui.js"></script>
+    <script src="office-finance-ui.js"></script>
   </body>
 </html>

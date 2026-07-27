@@ -148,6 +148,23 @@ const EVENT_TYPES = Object.freeze([
   "RELIABILITY_SIGNAL_RECORDED",
   "RELIABILITY_SIGNAL_REVIEWED",
   "FORESIGHT_SCENARIO_REVIEWED",
+  // V7.6.1 – Apple-first/Google-controlled Office-, Google-Workspace- und
+  // Finance-Korridor vollständig offline vorbereiten (Auftrag Abschnitt T) –
+  // external-identity-service.js/office-work-service.js/
+  // finance-handoff-service.js/office-finance-routes.js. Muss exakt der in
+  // auth-db-migrations.js#AUDIT_EVENT_TYPES_AT_MIGRATION_15 erweiterten
+  // CHECK-Aufzählung (Migration 15) entsprechen. Ausschließlich Jamal selbst
+  // (OWNER) löst diese neun Ereignisse aus; keines führt eine echte externe
+  // Provideraktion aus oder verbindet ein echtes Google-/Bankkonto.
+  "EXTERNAL_IDENTITY_REVIEWED",
+  "PROVIDER_CAPABILITY_REVIEWED",
+  "OFFICE_WORK_ITEM_CREATED",
+  "OFFICE_WORK_ITEM_REVIEWED",
+  "OFFICE_EXTERNAL_ACTION_APPROVED",
+  "OFFICE_AUTHENTICATION_REQUIRED",
+  "FINANCE_HANDOFF_CREATED",
+  "FINANCE_HANDOFF_REVIEWED",
+  "FINANCE_SPECIALIST_REQUIRED",
 ]);
 
 const RESULTS = Object.freeze(["OK", "DENIED", "ERROR"]);
@@ -208,6 +225,18 @@ const RESULTS = Object.freeze(["OK", "DENIED", "ERROR"]);
 // "hrProposalId"/"radarItemId" (bereits vorhanden) werden zusätzlich als
 // optionaler Bezug eines Hochzuverlässigkeitssignals verwendet. Weiterhin
 // niemals der vollständige Beobachtungstext, keine Gedankenkette.
+//
+// V7.6.1 – Apple-first/Google-controlled Office-/Finance-Korridor (Auftrag
+// Abschnitt T): "identityId" (interne external_identities-ID, niemals das
+// vollständige E-Mail-Konto samt Zusatzangaben), "capabilityId" (reiner
+// google-workspace-capability-service.js-Fähigkeits-Code, z. B.
+// "gmail-prepare-draft"), "officeWorkItemId"/"officeCategory" (interne ID
+// bzw. einer der fünf Kategoriewerte), "financeHandoffId"/"financeType"
+// (interne ID bzw. einer der sieben Handoff-Typwerte) und
+// "approvalStatusCode" (reiner Statuscode, z. B. "READY_FOR_REVIEW").
+// Weiterhin niemals ein E-Mail-Inhalt, Dokumentinhalt, Bankinformation,
+// Betrag im Klartext ohne Rundung, Token, Secret oder vollständiger
+// Providerpayload.
 const METADATA_ALLOWLIST = Object.freeze([
   "routeName",
   "roleLabel",
@@ -238,6 +267,13 @@ const METADATA_ALLOWLIST = Object.freeze([
   "signalId",
   "pdcaStage",
   "pdcaDecision",
+  "identityId",
+  "capabilityId",
+  "officeWorkItemId",
+  "officeCategory",
+  "financeHandoffId",
+  "financeType",
+  "approvalStatusCode",
 ]);
 
 // Verbotene Inhalte, unabhängig vom Feldnamen (Verteidigung in der Tiefe:

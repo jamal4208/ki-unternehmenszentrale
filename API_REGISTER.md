@@ -2,7 +2,30 @@
 
 ## Überblick
 
-`server.js` registriert über `server-http-router.js` **77 GET-Routen** und **52 additive POST-Routen** (Execution Bridge seit Phase C gesichert + V7.1 Phase A Dokumente/Backup gesichert `59f985f` + V7.1 Phase B HeyGen-Connector-Pilot gesichert `ff43089` + V7.1 Phase B.1 Mandantenbasis/Ergebnisrückführung gesichert `37e8a28` + V7.1 Phase C Canva-Connector-Pilot gesichert `52b2d02` + V7.1 Phase C.1 Pilot-Ergebnisakte/Kundenfeedback-Schleife und V7.1 Phase C.1.1 skalierbares Reviewmodell gemeinsam gesichert `6621d93` + V7.2 Phase A Schritt 2 Auth-Routen/Route-Gates + V7.2 Phase A Schritt 3 Owner-Verwaltung/Kundenportal-API + V7.2 Phase A Schritt 4 Betriebsabnahme + V7.2 Phase B Schritt 1 Arbeitsauftrags-API + V7.2 Phase C Schritt 1 Agentenlauf-/Ergebnis-Endpunkte + V7.2 Phase C Schritt 2 Änderungswunsch-/Freigabe-/Versions-Endpunkte innerhalb bestehender Präfixe + V7.3 Jamal-Arbeitsmodus-Zustand/-Aktionen + V7.4 Canva-Produktionskorridor-Zustand/-Aktionen gesichert `f2b0909` + V7.5 Agentenleitstand-Routen (lokal umgesetzt, ungesichert)). Andere HTTP-Methoden bleiben 405. GET-Routen bleiben read-only. Die POST-Routen schreiben ausschließlich lokal (App-Support-Metadaten bzw. die Auth-Datenbank bzw. – nach Jamal-Freigabe – ein Fixture-Testrepository); niemals in Health und niemals mit Commit/Push/Deployment.
+`server.js` registriert über `server-http-router.js` **88 GET-Routen** und **52 additive POST-Routen** (Execution Bridge seit Phase C gesichert + V7.1 Phase A Dokumente/Backup gesichert `59f985f` + V7.1 Phase B HeyGen-Connector-Pilot gesichert `ff43089` + V7.1 Phase B.1 Mandantenbasis/Ergebnisrückführung gesichert `37e8a28` + V7.1 Phase C Canva-Connector-Pilot gesichert `52b2d02` + V7.1 Phase C.1 Pilot-Ergebnisakte/Kundenfeedback-Schleife und V7.1 Phase C.1.1 skalierbares Reviewmodell gemeinsam gesichert `6621d93` + V7.2 Phase A Schritt 2 Auth-Routen/Route-Gates + V7.2 Phase A Schritt 3 Owner-Verwaltung/Kundenportal-API + V7.2 Phase A Schritt 4 Betriebsabnahme + V7.2 Phase B Schritt 1 Arbeitsauftrags-API + V7.2 Phase C Schritt 1 Agentenlauf-/Ergebnis-Endpunkte + V7.2 Phase C Schritt 2 Änderungswunsch-/Freigabe-/Versions-Endpunkte innerhalb bestehender Präfixe + V7.3 Jamal-Arbeitsmodus-Zustand/-Aktionen + V7.4 Canva-Produktionskorridor-Zustand/-Aktionen gesichert `f2b0909` + V7.5 Agentenleitstand-/Unternehmensleitlinien-Routen gesichert `6ffa3f8` + V7.6.1 Office-/Finance-Routen (lokal umgesetzt, ungesichert)). Andere HTTP-Methoden bleiben 405. GET-Routen bleiben read-only. Die POST-Routen schreiben ausschließlich lokal (App-Support-Metadaten bzw. die Auth-Datenbank bzw. – nach Jamal-Freigabe – ein Fixture-Testrepository); niemals in Health und niemals mit Commit/Push/Deployment.
+
+## V7.6.1 – Apple-first/Google-controlled Office-, Google-Workspace- und Finance-Korridor (lokal umgesetzt, ungesichert – Commit/Push stehen aus)
+
+Neun neue GET-Routen auf oberster Ebene plus ein neuer POST-Präfix (alle `OWNER_ONLY`, kein Kunden-/Supportzugriff): **88 GET, 52 POST, 8 GET-Präfixe, 7 POST-Präfixe, 31 statische Assets** (+9 GET/+1 POST-Präfix/+1 statisches Asset gegenüber dem V7.5-Ausgangsstand 79/52/8/6/30).
+
+| Methode | Pfad | Zweck |
+|---|---|---|
+| GET | `/api/office-finance/summary` | Kopfkarte lesen: Apple-first/Google-controlled-Status, Google-Kontenstatus, ausstehende Authentifizierung, höchstens drei wichtige Entscheidungen, Finance-Capability-Gap, heutiger nächster Schritt |
+| GET | `/api/office-finance/system-map` | kompakte Apple-first/Google-controlled-Systemlandkarte lesen (ausführliche Fassung: `APPLE_GOOGLE_OPERATING_MODEL.md`) |
+| GET | `/api/office-finance/identities` | alle externen Identitäten lesen (seedet bei Bedarf idempotent die drei Startidentitäten) |
+| GET | `/api/office-finance/capabilities` | die 33 Google-Workspace-Fähigkeiten lesen, optional per `?category=` gefiltert (`GMAIL`/`CALENDAR`/`DRIVE_DOCS`/`CONTACTS`) |
+| GET | `/api/office-finance/approval-matrix` | vollständige Freigabematrix aller 33 Fähigkeiten lesen (ausführliche Fassung: `GOOGLE_WORKSPACE_APPROVAL_MATRIX.md`) |
+| GET | `/api/office-finance/work-items` | Office-Aufträge lesen, optional per `?category=` gefiltert |
+| GET | `/api/office-finance/finance-handoffs` | Finance-Handoffs lesen, optional per `?type=` gefiltert, inkl. Finance-Capability-Gap-Status |
+| GET | `/api/office-finance/authentication-status` | ausstehende Authentifizierungen (Identitäten und Office-Aufträge im Status `WAITING_FOR_AUTHENTICATION`) lesen |
+| GET | `/api/office-finance/activation-checklists` | Metadaten zu `V7.6_GOOGLE_WORKSPACE_ACTIVATION_CHECKLIST.md`/`V7.6_FINANCE_ACTIVATION_CHECKLIST.md` lesen |
+| POST | `/api/office-finance/review-external-identity` | eine Identität prüfen (Status/Notiz) – ändert niemals Provider/Zugriffsfelder |
+| POST | `/api/office-finance/create-office-work-item` | einen Office-Auftrag lokal anlegen (E-Mail/Kalender/Dokument/Kontakt/Allgemein-Entwurf) – **keine** externe Aktion |
+| POST | `/api/office-finance/review-office-work-item` | einen Office-Auftrag prüfen/freigeben – technisch maximal bis `WAITING_FOR_AUTHENTICATION`, **kein** echter Provideraufruf |
+| POST | `/api/office-finance/create-finance-handoff` | einen Finance-Handoff lokal anlegen – `executionBlocked` immer `true` |
+| POST | `/api/office-finance/review-finance-handoff` | einen Finance-Handoff prüfen (Status/Jamal-Entscheidung) – **keine** Buchung, **keine** Zahlung |
+
+Statisches Asset: `/office-finance-ui.js` (`STATIC_OWNER_ONLY`). Jede Route: identisches Sicherheitsmuster wie die bestehenden Owner-Routen – Origin-/Host-Prüfung, CSRF-Pflicht bei POST (außer im lokalen Dev-Bypass), Bodylimit (8 KiB), Known-fields-Allowlist, generische sichere Fehlermeldungen, `Cache-Control: no-store`, ausschließlich `OWNER_ONLY`. Kein Kunden-/Mandantenbezug, keine Login-/OAuth-/Callback-Route, keine Send-/Create-/Delete-Providerroute. **Nicht enthalten:** Google-Anmeldung, OAuth, Gmail-/Kalender-/Drive-/Kontaktzugriff, Buchung, Zahlung, Rechnungsversand, Commit/Push/Deployment.
 
 ## V7.5 – Agentenorganisation, tägliches HR-Coaching und Technologie-/Plugin-Marktradar (lokal umgesetzt, ungesichert – Commit/Push stehen aus)
 

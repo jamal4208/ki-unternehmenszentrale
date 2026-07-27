@@ -50,6 +50,11 @@
 
 ## 3. Was die Zentrale bewusst noch nicht kann
 
+- Ein Google-Konto anmelden, OAuth starten, einen Browserlogin durchführen oder irgendeine echte Google-Verbindung herstellen (V7.6.1 bereitet ausschließlich lokal/offline vor; jede Fähigkeit bleibt technisch bei `DISCONNECTED`, maximal `PREPARE_DRAFT` lokal erreichbar, echte Freigabeschritte folgen erst separat außerhalb von Cursor, siehe `V7.6_GOOGLE_WORKSPACE_ACTIVATION_CHECKLIST.md`)
+- Gmail lesen, einen E-Mail-Entwurf in Google speichern, eine E-Mail senden/weiterleiten/archivieren/labeln/löschen; Kalendereinträge lesen, erstellen oder ändern; Drive/Dokumente lesen, erstellen, verschieben, teilen oder löschen; echte Kontakte lesen oder importieren (alle vier Office-Korridore erzeugen ausschließlich lokale Entwürfe ohne jede externe Wirkung)
+- Apple-Daten lesen, migrieren oder iCloud verändern (V7.6.1 fasst keine echten Apple-Systeme an)
+- Ein Bankkonto verbinden, Zahlungen auslösen, Lexoffice/Lexware oder ein anderes Finanzsystem verbinden, Rechnungen buchen oder versenden (der neue Finance-Handoff-Korridor bleibt strukturell `executionBlocked`, die Finance-Capability-Gap ist bewusst weiterhin nicht geschlossen – kein 26. Buchhaltungsagent)
+- Einen Office-Auftrag automatisch über `WAITING_FOR_AUTHENTICATION` hinaus in eine echte Provideraktion überführen (technisch harte Obergrenze in `office-work-service.js`, keine Ausnahme)
 - Eine HR-Empfehlung (`RECOMMEND_SMALL_EXPANSION`) automatisch in eine tatsächliche Autonomieänderung überführen; eine spätere Änderung benötigt einen separaten, ausdrücklichen Jamal-Freigabeschritt, der in V7.5 bewusst noch nicht existiert
 - Für den Technologie-/Plugin-Marktradar automatisch im Web recherchieren, ein Werkzeug verbinden oder installieren; V7.5 baut ausschließlich eine lokale Radarstruktur und -bewertung
 - Kunden- oder Supportrollen auf die neue Führungsansicht „Agenten führen" oder die zugehörige API zugreifen lassen (ausschließlich OWNER)

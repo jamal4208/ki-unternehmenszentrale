@@ -252,14 +252,17 @@ async function run() {
   // Chef-UI-Skript (agent-leadership-ui.js).
   //
   // Unternehmensleitlinien V1.0 (Auftrag Abschnitt O) – Zuwachs gegenüber
-  // der V7.5-Baseline (77/52/8/6/30): zwei weitere neue lesende GET-Routen
-  // (/api/agent-leadership/company-principles, .../reliability-signals),
-  // keine neue exakte POST-Route (die vier neuen Führungsaktionen laufen
-  // über den bereits bestehenden POST-Prefix /api/agent-leadership/),
-  // keine neue GET-/POST-Prefix-Route und kein neues statisches Asset.
-  await check("Routenzahlen in Policy und Server sind identisch (79/52/8/6/30)", () => {
-    assert.strictEqual(server.getRoutes.size, 79);
-    assert.strictEqual(routeAccessPolicy.GET_POLICIES.length, 79);
+  // der V7.5-Baseline (79/52/8/6/30): V7.6.1 (Auftrag Abschnitt S) ergänzt
+  // neun neue lesende GET-Routen (/api/office-finance/summary,
+  // .../system-map, .../identities, .../capabilities, .../approval-matrix,
+  // .../work-items, .../finance-handoffs, .../authentication-status,
+  // .../activation-checklists), keine neue exakte POST-Route (alle
+  // schreibenden Office-/Finance-Aktionen laufen über einen neuen
+  // POST-Prefix /api/office-finance/), keine neue GET-Prefix-Route und ein
+  // neues statisches Asset (office-finance-ui.js).
+  await check("Routenzahlen in Policy und Server sind identisch (88/52/8/7/31)", () => {
+    assert.strictEqual(server.getRoutes.size, 88);
+    assert.strictEqual(routeAccessPolicy.GET_POLICIES.length, 88);
     assert.strictEqual(server.postRoutes.size, 52);
     assert.strictEqual(routeAccessPolicy.POST_POLICIES.length, 52);
     assert.strictEqual(server.routePrefixHandlers.length, 8);
@@ -267,13 +270,13 @@ async function run() {
       routeAccessPolicy.PREFIX_POLICIES.filter((entry) => entry.method === "GET").length,
       8,
     );
-    assert.strictEqual(server.postRoutePrefixHandlers.length, 6);
+    assert.strictEqual(server.postRoutePrefixHandlers.length, 7);
     assert.strictEqual(
       routeAccessPolicy.PREFIX_POLICIES.filter((entry) => entry.method === "POST").length,
-      6,
+      7,
     );
-    assert.strictEqual(server.staticAssets.size, 30);
-    assert.strictEqual(routeAccessPolicy.STATIC_POLICIES.length, 30);
+    assert.strictEqual(server.staticAssets.size, 31);
+    assert.strictEqual(routeAccessPolicy.STATIC_POLICIES.length, 31);
   });
 
   // -------------------------------------------------------------------

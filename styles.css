@@ -9534,3 +9534,64 @@ details.local-agent-assignment-details > summary {
 .agent-leadership-capability-gap {
   grid-column: 1 / -1;
 }
+
+/* -------------------------------------------------------------------- */
+/* V7.6.1 – Apple-first/Google-controlled Office-, Google-Workspace- und */
+/* Finance-Korridor vollständig offline vorbereiten (Auftrag Abschnitt   */
+/* U). Bewusst mit denselben bestehenden Klassen wie                    */
+/* .agent-leadership-*/.v71-card/.v71-pill kombiniert, keine Design-     */
+/* Überarbeitung.                                                        */
+/* -------------------------------------------------------------------- */
+
+.office-finance-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.office-finance-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+}
+
+.office-finance-tab {
+  border: 1px solid var(--line);
+  background: var(--surface, #fff);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: var(--text-xs, 12px);
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.office-finance-tab.is-active {
+  background: var(--ink, #1c1c1c);
+  color: #fff;
+  border-color: var(--ink, #1c1c1c);
+}
+
+.office-finance-panel {
+  display: none;
+}
+
+.office-finance-panel.is-active {
+  display: grid;
+  gap: 16px;
+}
+
+.office-finance-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-xs, 12px);
+}
+
+.office-finance-table th,
+.office-finance-table td {
+  border-bottom: 1px solid var(--card-border-soft, var(--line));
+  padding: 6px 8px;
+  text-align: left;
+}

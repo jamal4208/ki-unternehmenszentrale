@@ -69,9 +69,9 @@ withIsolatedDataDir((dataDir) => {
   const migrations = require("./auth-db-migrations");
 
   const opened = authDb.openAuthDatabase({ dataDir });
-  check("Erststart: alle 14 Migrationen werden in aufsteigender Reihenfolge angewendet", () => {
+  check("Erststart: alle 15 Migrationen werden in aufsteigender Reihenfolge angewendet", () => {
     const applied = migrations.getAppliedVersions(opened.db);
-    assert.deepStrictEqual(applied, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+    assert.deepStrictEqual(applied, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
   });
   check("Erststart: die Datenbankdatei existiert unter dem erwarteten isolierten Pfad", () => {
     assert.ok(fs.existsSync(path.join(dataDir, "auth", "auth.sqlite")));
@@ -141,7 +141,7 @@ withIsolatedDataDir((dataDir) => {
 
   const opened = authDb.openAuthDatabase({ dataDir });
   check("Migration 7 bis 14 werden auf einer bestehenden Vor-Schritt-3-Datenbank nachträglich angewendet", () => {
-    assert.deepStrictEqual(migrations.getAppliedVersions(opened.db), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+    assert.deepStrictEqual(migrations.getAppliedVersions(opened.db), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
   });
   check("Migration 7 erhält bestehende Auditdaten vollständig (keine verlorene Zeile)", () => {
     const row = authAudit.listAuditEventsByType(opened.db, "LOGIN_SUCCESS");

@@ -1,5 +1,34 @@
 # MIGRATION PLAN
 
+## V7.6.1 – Apple-first/Google-controlled Office-, Google-Workspace- und Finance-Korridor (Migration 15, additiv, lokal umgesetzt, noch nicht committed/gepusht)
+
+Vorheriger Ausgang: HEAD/`origin/main` `6ffa3f8c212a9417af523327ddb445354b95093c` (Working Tree sauber, 79 GET/52 POST/8 GET-Präfixe/6 POST-Präfixe/30 statische Assets, **80 Testdateien, 2269 automatisierte Prüfpunkte grün**, Migration 14). Dieser Schritt ist rein additiv; Migrationen 1–14 byteidentisch unverändert.
+
+**Neue Migration 15** (drei neue Tabellen plus additive Erweiterung von `auth_audit_events` um neun neue Ereignistypen, gleiches bewährte Recreate-Muster wie bei Migration 14: neue Zwischentabelle mit erweitertem `CHECK` über eine neue, additive Konstante `AUDIT_EVENT_TYPES_AT_MIGRATION_15` – **nicht** die veränderliche `AUDIT_EVENT_TYPES`-Live-Konstante –, vollständige Datenübernahme, Umbenennung, erneute Anlage der append-only-Trigger/Indizes):
+
+| Tabelle | Zweck | Wichtige Felder/Regeln |
+|---|---|---|
+| `external_identities` | lokales Identitäts-/Kontenmodell (`jamal@jacogbr.de`/`office@jacogbr.de`/`info@jacogbr.de`) | `emailAddress` `UNIQUE`, `identityType`/`provider`/`writePermissionState`/`authenticationState`/`recoveryState`/`twoFactorState`/`status` als `CHECK`-Enums, `agentDirectLoginAllowed` per `CHECK (agentDirectLoginAllowed = 0)` hart auf 0 fixiert, **kein** Passwort-/Token-/Recovery-Code-Feld |
+| `office_work_items` | persistente lokale Office-Aufträge (E-Mail/Kalender/Dokument/Kontakt/Allgemein) | `category`/`approvalStatus`/`executionStatus`/`dataSensitivity`/`externalEffect` als `CHECK`-Enums, `executionStatus`-Aufzählung endet technisch bei `WAITING_FOR_AUTHENTICATION` (kein `READY_FOR_PROVIDER`/`EXECUTED` in V7.6.1 erreichbar), `draftPayloadJson` begrenzt auf 4000 Zeichen |
+| `finance_handoffs` | Finance-/Controlling-Handoff-Korridor (Beleg/Rechnung/Zahlung/Kostenstelle/Steuerberaterübergabe/Monatsübersicht/Liquidität) | `type`/`taxRelevance`/`confidence`/`sensitivity`/`approvalStatus` als `CHECK`-Enums, `executionBlocked` per `CHECK (executionBlocked = 1)` hart auf 1 fixiert – kein Codepfad kann diesen Wert auf 0 setzen |
+
+Bewusst **keine** vierte Tabelle `external_action_approvals` (Auftrag Abschnitt R nennt sie als mögliche, nicht verpflichtende Tabelle): `office_work_items` besitzt bereits `approvalStatus`/`executionStatus` – eine zweite, separate Freigabetabelle würde denselben Entscheidungszustand doppelt speichern und veralten können. Ebenso bewusst **keine** eigene Tabelle `provider_capabilities` – die 33 Google-Workspace-Fähigkeiten (`google-workspace-capability-service.js`) sind statische, unveränderliche Referenzdaten ohne mutierbaren Zustand, genau wie `company-principles.js`.
+
+| Bereich | Regel |
+|---|---|
+| external-identity-service.js (neu) | Seed genau drei Startidentitäten (idempotent, verändert nie eine bereits bestehende Zeile), Persistenz über `auth-db.js` (Migration 15), Audit über `auth-audit.js`; kein Netzwerkzugriff |
+| google-workspace-capability-service.js (neu) | rein statisches, eingefrorenes Fähigkeitsmodell ohne eigene Tabelle; `assertNoCapabilityCurrentlyElevated()` verhindert beim Laden jeden aktiv erhöhten Zustand |
+| office-work-service.js (neu) | Office-Agentenmodell (ausschließlich vorhandene `agent-registry.js`-Agenten) und vier deterministische Offline-Korridore; `assertExecutionStatusAllowed` sperrt technisch jeden Versuch über `WAITING_FOR_AUTHENTICATION` hinaus |
+| finance-handoff-service.js (neu) | Handoff-Erfassung/-Prüfung, `executionBlocked` programmatisch zusätzlich zur DB-Constraint fixiert; kein Buchungs-/Zahlungs-/Versandcode |
+| google-workspace-connector.js (neu) | deterministischer Offline-Stub ohne Tokens/OAuth/Netzwerkaufruf; lehnt jede echte, injizierte Providerfunktion ab |
+| office-finance-routes.js (neu) | reines HTTP-Glue-Modul (gleiches Muster wie `agent-leadership-routes.js`): liest den Anfragekörper, prüft je Aktion eine enge Known-Fields-Allowlist, bildet Fehler auf Statuscodes ab |
+| office-finance-ui.js (neu) | eigenständiges Vanilla-Client-Skript, rendert ausschließlich `#office-finance-view`; spricht ausschließlich `/api/office-finance/*` an |
+| auth-db-migrations.js (erweitert, Migration 15) | drei neue Tabellen (siehe oben); additive Erweiterung von `auth_audit_events` um neun neue Ereignistypen; Migrationen 1–14 byteidentisch unverändert |
+| auth-db.js (erweitert) | neue CRUD-Funktionen für Identitäts-/Office-Auftrags-/Finance-Handoff-Datensätze |
+| auth-audit.js (erweitert) | neun neue Ereignistypen: `EXTERNAL_IDENTITY_REVIEWED`, `PROVIDER_CAPABILITY_REVIEWED`, `OFFICE_WORK_ITEM_CREATED`/`REVIEWED`, `OFFICE_EXTERNAL_ACTION_APPROVED`, `OFFICE_AUTHENTICATION_REQUIRED`, `FINANCE_HANDOFF_CREATED`/`REVIEWED`, `FINANCE_SPECIALIST_REQUIRED` |
+
+Ergebnis: **88 GET, 52 POST, 8 GET-Präfixe, 7 POST-Präfixe, 31 statische Assets**, **2384** automatisierte Prüfpunkte in **83** Testdateien grün, `npm audit`: 0 Schwachstellen, `better-sqlite3@13.0.1` unverändert. **Lokal umgesetzt, noch nicht committed, gepusht oder deployt.**
+
 ## V7.5 – Agentenorganisation, tägliches HR-Coaching und Technologie-/Plugin-Marktradar (Migration 14, additiv, lokal umgesetzt, noch nicht committed/gepusht)
 
 Vorheriger Ausgang: HEAD/`origin/main` `c5b4130b8a3f6dbf4f6fb0d6f8b01598e595a43e` (Working Tree sauber, 72 GET/52 POST/8 GET-Präfixe/5 POST-Präfixe/29 statische Assets, **76 Testdateien, 2136 automatisierte Prüfpunkte grün**). Dieser Schritt ist rein additiv; Migrationen 1–13 byteidentisch unverändert.

@@ -340,6 +340,20 @@ const GET_POLICIES = [
   // Hochzuverlässigkeits-Signale, kein Kunden-/Supportzugriff.
   ownerGet("/api/agent-leadership/company-principles", "Agentenführung Unternehmensleitlinien V1.0 (read-only)"),
   ownerGet("/api/agent-leadership/reliability-signals", "Agentenführung Hochzuverlässigkeits-Signale"),
+  // V7.6.1 – Apple-first/Google-controlled Office-, Google-Workspace- und
+  // Finance-Korridor vollständig offline vorbereiten (Auftrag Abschnitt S)
+  // – neun lesende Endpunkte für die Ansicht "Office & Finanzen". Keine
+  // Loginroute, keine OAuthroute, keine Callbackroute (siehe
+  // office-finance-routes.js#Kopfkommentar).
+  ownerGet("/api/office-finance/summary", "Office & Finanzen Kompaktübersicht"),
+  ownerGet("/api/office-finance/system-map", "Office & Finanzen Apple-first/Google-controlled Systemlandkarte"),
+  ownerGet("/api/office-finance/identities", "Office & Finanzen lokales Identitätsmodell"),
+  ownerGet("/api/office-finance/capabilities", "Office & Finanzen Google-Workspace-Fähigkeitsmodell"),
+  ownerGet("/api/office-finance/approval-matrix", "Office & Finanzen Google-Workspace-Freigabematrix"),
+  ownerGet("/api/office-finance/work-items", "Office & Finanzen Office-Aufträge"),
+  ownerGet("/api/office-finance/finance-handoffs", "Office & Finanzen Finance-Handoffs"),
+  ownerGet("/api/office-finance/authentication-status", "Office & Finanzen Authentifizierungsbedarf"),
+  ownerGet("/api/office-finance/activation-checklists", "Office & Finanzen spätere Jamal-Freigabeschritte"),
 ];
 
 const POST_POLICIES = [
@@ -460,6 +474,11 @@ const PREFIX_POLICIES = [
   // bewusst ein einziger neuer Prefix statt vieler neuer Exakt-Routen
   // (gleiche Begründung wie /api/jamal-work-mode/).
   ownerPostPrefix("/api/agent-leadership/", "Agentenführung Aktion (HR-Vorschlag/Radar/Fit prüfen, kein Auto-Autonomiewechsel)"),
+  // V7.6.1 – Apple-first/Google-controlled Office-, Google-Workspace- und
+  // Finance-Korridor vollständig offline vorbereiten (Auftrag Abschnitt S)
+  // – ein Prefix für alle schreibenden Office-/Finance-Aktionen, keine
+  // Ausführungsroute für eine echte Provideraktion.
+  ownerPostPrefix("/api/office-finance/", "Office & Finanzen Aktion (Auftrag/Handoff anlegen und prüfen, keine echte Provideraktion)"),
 ];
 
 const STATIC_POLICIES = [
@@ -528,6 +547,11 @@ const STATIC_POLICIES = [
   // Technologie-/Plugin-Marktradar (Auftrag Abschnitt L/M): eigenständiges,
   // additives Chef-UI-Skript für die neue Ansicht "Agenten führen".
   staticOwnerOnly("/agent-leadership-ui.js", "Chef-UI-Skript Agentenführung (Agenten führen)"),
+  // V7.6.1 – Apple-first/Google-controlled Office-, Google-Workspace- und
+  // Finance-Korridor vollständig offline vorbereiten (Auftrag Abschnitt U):
+  // eigenständiges, additives Chef-UI-Skript für die neue Ansicht "Office &
+  // Finanzen" (gleiches Muster wie agent-leadership-ui.js).
+  staticOwnerOnly("/office-finance-ui.js", "Chef-UI-Skript Office & Finanzen"),
 ];
 
 const ALL_POLICIES = Object.freeze([
