@@ -80,6 +80,12 @@ const jamalWorkModeStoreModule = require("./jamal-work-mode-store");
 // Muster wie work-order-routes.js). Bewusst NICHT von jamal-work-mode.js/
 // jamal-work-mode-ui.js referenziert (siehe jamal-canva-routes.js#Kopfkommentar).
 const jamalCanvaRoutesModule = require("./jamal-canva-routes");
+// V7.5 – Agentenorganisation, tägliches HR-Coaching und
+// Technologie-/Plugin-Marktradar (Auftrag Abschnitt I/J): eigenständiges,
+// additives Routenmodul (gleiches Muster wie jamal-canva-routes.js). Reine
+// Fachlogik lebt in agent-organization-service.js/
+// agent-hr-coaching-service.js/technology-radar-service.js.
+const agentLeadershipRoutesModule = require("./agent-leadership-routes");
 
 const rootDir = __dirname;
 const staticAssets = new Map([
@@ -101,6 +107,11 @@ const staticAssets = new Map([
   // statt einer Erweiterung von jamal-work-mode-ui.js (siehe
   // jamal-work-mode-ui.test.js#"kein Provider (Canva/HeyGen)").
   ["/jamal-canva-ui.js", "jamal-canva-ui.js"],
+  // V7.5 – Agentenorganisation, tägliches HR-Coaching und
+  // Technologie-/Plugin-Marktradar (Auftrag Abschnitt L/O): eigenständiges,
+  // additives Chef-UI-Skript für die neue Ansicht "Agenten führen" (gleiches
+  // Muster wie v71-ui.js/jamal-work-mode-ui.js).
+  ["/agent-leadership-ui.js", "agent-leadership-ui.js"],
   ["/app.js", "app.js"],
   ["/styles.css", "styles.css"],
   ["/v71-ui.js", "v71-ui.js"],
@@ -23560,6 +23571,66 @@ function handleJamalCanvaState(res) {
   jamalCanvaRoutesModule.handleCanvaState(res, { getDb: ensureAuthDbReady, sendJson });
 }
 
+// V7.5 – Agentenorganisation, tägliches HR-Coaching und
+// Technologie-/Plugin-Marktradar (Auftrag Abschnitt J/L): fünf schmale,
+// lesende OWNER_ONLY-Endpunkte für die neue Führungsansicht "Agenten
+// führen". Reine Fachlogik lebt in agent-organization-service.js/
+// agent-hr-coaching-service.js/technology-radar-service.js (siehe
+// agent-leadership-routes.js#Kopfkommentar).
+function handleAgentLeadershipSummary(res) {
+  agentLeadershipRoutesModule.handleLeadershipSummary(res, { getDb: ensureAuthDbReady, sendJson });
+}
+
+function handleAgentLeadershipOrganization(res) {
+  agentLeadershipRoutesModule.handleOrganization(res, { getDb: ensureAuthDbReady, sendJson });
+}
+
+function handleAgentLeadershipHrDailyRun(res) {
+  agentLeadershipRoutesModule.handleHrDailyRun(res, { getDb: ensureAuthDbReady, sendJson });
+}
+
+function handleAgentLeadershipTechnologyRadar(res) {
+  agentLeadershipRoutesModule.handleTechnologyRadar(res, { getDb: ensureAuthDbReady, sendJson });
+}
+
+function handleAgentLeadershipAgentTechnologyFit(res, context) {
+  const agentId = safeQueryParam(context.requestUrl, "agentId");
+  agentLeadershipRoutesModule.handleAgentTechnologyFit(res, { getDb: ensureAuthDbReady, sendJson }, agentId);
+}
+
+// Unternehmensleitlinien V1.0 (Auftrag Abschnitt O) – zwei zusätzliche
+// lesende OWNER_ONLY-Endpunkte, bewusst im selben etablierten Muster wie
+// die fünf V7.5-Endpunkte oben (keine parallele neue Leitlinien-API).
+function handleAgentLeadershipCompanyPrinciples(res) {
+  agentLeadershipRoutesModule.handleCompanyPrinciples(res, { getDb: ensureAuthDbReady, sendJson });
+}
+
+function handleAgentLeadershipReliabilitySignals(res, context) {
+  const agentId = safeQueryParam(context.requestUrl, "agentId");
+  agentLeadershipRoutesModule.handleReliabilitySignals(res, { getDb: ensureAuthDbReady, sendJson }, agentId);
+}
+
+// V7.5 (Auftrag Abschnitt I/J) – ein einziges neues POST-Prefix für alle
+// schreibenden Führungsaktionen (gleiches Muster wie
+// dispatchJamalWorkModeActionPostPrefix), keine zusätzliche Route ohne Not.
+async function dispatchAgentLeadershipActionPostPrefix(res, context, remainder) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert." });
+    return;
+  }
+  const actionName = typeof remainder === "string" ? remainder : "";
+  if (actionName.includes("/") || !agentLeadershipRoutesModule.isAgentLeadershipAction(actionName)) {
+    sendJson(res, 404, { ok: false, message: "Nicht gefunden." });
+    return;
+  }
+  await agentLeadershipRoutesModule.dispatchAgentLeadershipAction(
+    res,
+    context,
+    { getDb: ensureAuthDbReady, sendJson },
+    actionName,
+  );
+}
+
 // Auftrag Abschnitt C/F: "Arbeitslauf starten" und "Änderung anfordern"
 // sind je EINE Hauptaktion für Jamal, auch wenn intern zwei Fachschritte
 // (Start + Abschluss bzw. Änderung anfordern + Änderung abschließen)
@@ -23734,6 +23805,16 @@ const getRoutes = buildRouteMap([
   // zentralen Arbeitskarte "Heute arbeiten".
   ["/api/jamal-work-mode/state", (res) => handleJamalWorkModeState(res)],
   ["/api/jamal-work-mode/canva-state", (res) => handleJamalCanvaState(res)],
+  // V7.5 – Agentenorganisation, tägliches HR-Coaching und
+  // Technologie-/Plugin-Marktradar (Auftrag Abschnitt J/L) – Ansicht
+  // "Agenten führen".
+  ["/api/agent-leadership/summary", (res) => handleAgentLeadershipSummary(res)],
+  ["/api/agent-leadership/organization", (res) => handleAgentLeadershipOrganization(res)],
+  ["/api/agent-leadership/hr-daily-run", (res) => handleAgentLeadershipHrDailyRun(res)],
+  ["/api/agent-leadership/technology-radar", (res) => handleAgentLeadershipTechnologyRadar(res)],
+  ["/api/agent-leadership/agent-technology-fit", (res, context) => handleAgentLeadershipAgentTechnologyFit(res, context)],
+  ["/api/agent-leadership/company-principles", (res) => handleAgentLeadershipCompanyPrinciples(res)],
+  ["/api/agent-leadership/reliability-signals", (res, context) => handleAgentLeadershipReliabilitySignals(res, context)],
 ]);
 
 const postRoutes = buildRouteMap([
@@ -23945,6 +24026,16 @@ const postRoutePrefixHandlers = [
     handler: (res, context) => {
       const remainder = decodeURIComponent(context.pathname.slice("/api/jamal-work-mode/".length));
       dispatchJamalWorkModeActionPostPrefix(res, context, remainder);
+    },
+  },
+  {
+    // V7.5 – Agentenorganisation, tägliches HR-Coaching und
+    // Technologie-/Plugin-Marktradar (Auftrag Abschnitt I/J) – eine Aktion
+    // je Anfrage (POST .../:action, siehe AGENT_LEADERSHIP_ACTIONS).
+    prefix: "/api/agent-leadership/",
+    handler: (res, context) => {
+      const remainder = decodeURIComponent(context.pathname.slice("/api/agent-leadership/".length));
+      dispatchAgentLeadershipActionPostPrefix(res, context, remainder);
     },
   },
 ];

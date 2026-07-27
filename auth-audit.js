@@ -119,6 +119,35 @@ const EVENT_TYPES = Object.freeze([
   "CANVA_RESULT_ACCEPTED_INTERNAL",
   "CANVA_HANDOFF_BLOCKED_BY_POLICY",
   "CANVA_HANDOFF_BLOCKED_BY_RIGHTS",
+  // V7.5 – Agentenorganisation, tägliches HR-Coaching und
+  // Technologie-/Plugin-Marktradar (Auftrag Abschnitt K) –
+  // agent-hr-coaching-service.js/technology-radar-service.js/
+  // agent-leadership-routes.js. Muss exakt der in
+  // auth-db-migrations.js#AUDIT_EVENT_TYPES_AT_MIGRATION_14 erweiterten
+  // CHECK-Aufzählung (Migration 14) entsprechen. Ausschließlich Jamal
+  // selbst (OWNER) löst diese neun Ereignisse aus – kein Kundenmandant,
+  // kein automatischer Owner-Ersatz, keines dieser Ereignisse verändert
+  // selbst eine Autonomiestufe.
+  "AGENT_ORGANIZATION_REVIEWED",
+  "HR_DAILY_RUN_CREATED",
+  "HR_PROPOSAL_REVIEWED",
+  "HR_PROPOSAL_APPROVED",
+  "HR_PROPOSAL_REJECTED",
+  "HR_PROPOSAL_DEFERRED",
+  "TECH_RADAR_ITEM_CREATED",
+  "TECH_RADAR_ITEM_UPDATED",
+  "AGENT_TECH_FIT_REVIEWED",
+  // Unternehmensleitlinien V1.0 als verbindliche Betriebslogik (Auftrag
+  // Abschnitt P) – fünf zusätzliche Ereignistypen, muss exakt der in
+  // auth-db-migrations.js#AUDIT_EVENT_TYPES_AT_MIGRATION_14 erweiterten
+  // CHECK-Aufzählung entsprechen. Ausschließlich Jamal selbst (OWNER) löst
+  // diese aus; keines verändert selbst eine Autonomiestufe oder löst eine
+  // Sanktion aus.
+  "COMPANY_PRINCIPLES_REVIEWED",
+  "HR_PDCA_STAGE_CHANGED",
+  "RELIABILITY_SIGNAL_RECORDED",
+  "RELIABILITY_SIGNAL_REVIEWED",
+  "FORESIGHT_SCENARIO_REVIEWED",
 ]);
 
 const RESULTS = Object.freeze(["OK", "DENIED", "ERROR"]);
@@ -158,6 +187,27 @@ const RESULTS = Object.freeze(["OK", "DENIED", "ERROR"]);
 // Canva-Policy-/Providerfehlercodes verwendet. Weiterhin niemals der
 // Briefingtext, das Canva-Ergebnis vollständig, ein Zugangstoken oder eine
 // vollständige Provider-Rohantwort.
+//
+// V7.5 – Agentenorganisation, tägliches HR-Coaching und
+// Technologie-/Plugin-Marktradar (Auftrag Abschnitt K): "runDate" (reines
+// Kalenderdatum des HR-Laufs), "hrRunId"/"hrProposalId" (interne IDs),
+// "radarItemId"/"fitId" (interne Radar-/Zuordnungs-IDs),
+// "recommendationCode" (einer der HR-/Radar-/Fit-Empfehlungswerte, z. B.
+// "RECOMMEND_SMALL_EXPANSION" oder "WATCH" – niemals Freitext) und
+// "decisionType" (z. B. "APPROVE"/"REJECT"/"DEFER"/"REVIEW"). "agentKey"
+// existierte bereits (V7.2 Phase C Schritt 1) und wird hier zusätzlich für
+// die 25 kanonischen agent-registry.js-IDs verwendet. Weiterhin niemals
+// der vollständige Vorschlagstext, keine Gedankenkette, kein
+// Providerpayload.
+//
+// Unternehmensleitlinien V1.0 (Auftrag Abschnitt P): "principleId" (reine
+// company-principles.js-Regel-ID, z. B. "SAFETY_JAMAL_DECIDES" – niemals der
+// Leitlinientext selbst) und "signalId" (interne Hochzuverlässigkeits-
+// signal-ID). "pdcaStage"/"pdcaDecision" nutzen ausschließlich die bereits
+// bestehenden Wertebereiche aus auth-db-migrations.js (reine Statuscodes).
+// "hrProposalId"/"radarItemId" (bereits vorhanden) werden zusätzlich als
+// optionaler Bezug eines Hochzuverlässigkeitssignals verwendet. Weiterhin
+// niemals der vollständige Beobachtungstext, keine Gedankenkette.
 const METADATA_ALLOWLIST = Object.freeze([
   "routeName",
   "roleLabel",
@@ -177,6 +227,17 @@ const METADATA_ALLOWLIST = Object.freeze([
   "format",
   "revisionNumber",
   "rightsCode",
+  "runDate",
+  "hrRunId",
+  "hrProposalId",
+  "radarItemId",
+  "fitId",
+  "recommendationCode",
+  "decisionType",
+  "principleId",
+  "signalId",
+  "pdcaStage",
+  "pdcaDecision",
 ]);
 
 // Verbotene Inhalte, unabhängig vom Feldnamen (Verteidigung in der Tiefe:

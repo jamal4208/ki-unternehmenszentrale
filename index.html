@@ -72,6 +72,11 @@
             <span class="nav-icon" aria-hidden="true">12</span>
             Canva-Designpilot
           </button>
+          <p class="nav-section-label">V7.5 · neu</p>
+          <button class="nav-item" type="button" data-view="agent-leadership">
+            <span class="nav-icon" aria-hidden="true">13</span>
+            Agenten führen
+          </button>
         </nav>
 
         <div class="principle-box">
@@ -1405,6 +1410,51 @@
           </div>
           <div id="v71-canva-output" class="v71-output" aria-live="polite">Lade Canva-Pilotstatus…</div>
         </section>
+
+        <!--
+          V7.5 – Agentenorganisation, tägliches HR-Coaching und
+          Technologie-/Plugin-Marktradar (Auftrag Abschnitt L): eigenständige,
+          additive Führungsansicht "Agenten führen". Vollständig von
+          agent-leadership-ui.js gerendert (gleiches Grundmuster wie
+          jamal-canva-ui.js/v71-ui.js) – kein Umbau von app.js/index.html
+          selbst über diese neuen Container hinaus.
+        -->
+        <section class="view" id="agent-leadership-view" data-title="Agenten führen">
+          <div class="section-toolbar">
+            <div>
+              <p class="eyebrow">V7.5 · neu · Agentenorganisation, HR-Coaching, Technologie-Radar</p>
+              <h3>Agenten führen</h3>
+              <p class="v71-subtitle">
+                Ein HR-Vorschlag ist keine Autonomieänderung. Eine Genehmigung verändert keine Berechtigung. Eine
+                Radar-Empfehlung installiert nichts und verbindet nichts. Read-only zuerst – Jamal bleibt Entscheider.
+              </p>
+            </div>
+            <span class="system-pill system-pill-safe">keine automatische Autonomie-/Pluginänderung</span>
+          </div>
+          <div id="agent-leadership-summary-output" class="v71-output" aria-live="polite">Lade Führungsübersicht…</div>
+          <nav class="agent-leadership-tabs" id="agent-leadership-tabs" aria-label="Bereiche Agentenführung">
+            <button type="button" class="agent-leadership-tab is-active" data-leadership-tab="organization">Organisation</button>
+            <button type="button" class="agent-leadership-tab" data-leadership-tab="hr">Heute entwickeln</button>
+            <button type="button" class="agent-leadership-tab" data-leadership-tab="autonomy">Autonomie prüfen</button>
+            <button type="button" class="agent-leadership-tab" data-leadership-tab="radar">Technologie-Radar</button>
+            <button type="button" class="agent-leadership-tab" data-leadership-tab="fit">Agenten &amp; Werkzeuge</button>
+          </nav>
+          <div class="agent-leadership-panel is-active" id="agent-leadership-panel-organization" data-leadership-panel="organization">
+            <div id="agent-leadership-organization-output" class="v71-output" aria-live="polite">Lade Organisationsübersicht…</div>
+          </div>
+          <div class="agent-leadership-panel" id="agent-leadership-panel-hr" data-leadership-panel="hr">
+            <div id="agent-leadership-hr-output" class="v71-output" aria-live="polite">Lade heutigen HR-Lauf…</div>
+          </div>
+          <div class="agent-leadership-panel" id="agent-leadership-panel-autonomy" data-leadership-panel="autonomy">
+            <div id="agent-leadership-autonomy-output" class="v71-output" aria-live="polite">Lade Autonomieempfehlungen…</div>
+          </div>
+          <div class="agent-leadership-panel" id="agent-leadership-panel-radar" data-leadership-panel="radar">
+            <div id="agent-leadership-radar-output" class="v71-output" aria-live="polite">Lade Technologie-/Plugin-Marktradar…</div>
+          </div>
+          <div class="agent-leadership-panel" id="agent-leadership-panel-fit" data-leadership-panel="fit">
+            <div id="agent-leadership-fit-output" class="v71-output" aria-live="polite">Lade Agent-Technology-Fit…</div>
+          </div>
+        </section>
       </main>
     </div>
 
@@ -1421,5 +1471,6 @@
     <script src="v71-ui.js"></script>
     <script src="jamal-work-mode-ui.js"></script>
     <script src="jamal-canva-ui.js"></script>
+    <script src="agent-leadership-ui.js"></script>
   </body>
 </html>

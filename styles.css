@@ -9404,3 +9404,133 @@ details.local-agent-assignment-details > summary {
   display: grid;
   gap: 4px;
 }
+
+/* -------------------------------------------------------------------- */
+/* V7.5 – Agentenorganisation, tägliches HR-Coaching und Technologie-/    */
+/* Plugin-Marktradar (Auftrag Abschnitt L). Bewusst additiv, mit den      */
+/* bereits bestehenden Klassen kombiniert (.v71-card/.v71-pill/.v71-form/ */
+/* .primary-button/.secondary-button) statt einer Design-Überarbeitung.  */
+/* -------------------------------------------------------------------- */
+
+.agent-leadership-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.agent-leadership-decision {
+  grid-column: 1 / -1;
+}
+
+.agent-leadership-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+}
+
+.agent-leadership-tab {
+  border: 1px solid var(--line);
+  background: var(--surface, #fff);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: var(--text-xs, 12px);
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.agent-leadership-tab.is-active {
+  background: var(--ink, #1c1c1c);
+  color: #fff;
+  border-color: var(--ink, #1c1c1c);
+}
+
+.agent-leadership-panel {
+  display: none;
+}
+
+.agent-leadership-panel.is-active {
+  display: grid;
+  gap: 16px;
+}
+
+.agent-leadership-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.agent-leadership-filters select {
+  min-height: 34px;
+  padding: 4px 8px;
+  font-size: var(--text-xs, 12px);
+  width: auto;
+}
+
+.agent-leadership-group-details > summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 8px 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.agent-leadership-row {
+  border-top: 1px solid var(--card-border-soft, var(--line));
+  padding: 10px 0;
+  display: grid;
+  gap: 6px;
+}
+
+.agent-leadership-row:first-of-type {
+  border-top: none;
+}
+
+.agent-leadership-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.agent-leadership-note-field {
+  display: grid;
+  gap: 4px;
+  font-size: var(--text-xs, 12px);
+}
+
+.agent-leadership-note-field textarea {
+  min-height: 44px;
+}
+
+.agent-leadership-boundary-note {
+  border: 1px dashed var(--line);
+  border-radius: var(--radius, 10px);
+  padding: 10px 12px;
+  font-size: var(--text-xs, 12px);
+  color: var(--muted);
+  background: var(--card-bg-muted, #f7f6f3);
+}
+
+/* Unternehmensleitlinien V1.0 (Auftrag Abschnitt N) – zurückhaltender
+   Kopfhinweis ("Betriebsregeln, keine Motivationsseite") und Hinweis auf
+   eine erkannte, für heute relevante Capability-Lücke. Bewusst mit den
+   bestehenden .v71-card/.v71-note-Klassen kombiniert, keine neue
+   Design-Überarbeitung. */
+.agent-leadership-principles-header {
+  font-size: var(--text-xs, 12px);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0;
+}
+
+.agent-leadership-capability-gap {
+  grid-column: 1 / -1;
+}

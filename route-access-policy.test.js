@@ -240,17 +240,26 @@ async function run() {
     }
   });
 
-  // V7.4 – Kontrollierte externe Werkzeugnutzung, Canva-Produktionskorridor
-  // (Auftrag Abschnitt M) – Zuwachs gegenüber der V7.3-Baseline
-  // (71/52/8/5/28): eine neue GET-Route (/api/jamal-work-mode/canva-state),
-  // keine neue POST-Route (alle "canva-*"-Aktionen laufen über den bereits
-  // bestehenden POST-Prefix /api/jamal-work-mode/ – eine Aktion je Anfrage
-  // über .../:action, siehe jamal-canva-routes.js#Kopfkommentar), keine
-  // neue GET-/POST-Prefix-Route und ein neues statisches Chef-UI-Skript
-  // (jamal-canva-ui.js).
-  await check("Routenzahlen in Policy und Server sind identisch (72/52/8/5/29)", () => {
-    assert.strictEqual(server.getRoutes.size, 72);
-    assert.strictEqual(routeAccessPolicy.GET_POLICIES.length, 72);
+  // V7.5 – Agentenorganisation, tägliches HR-Coaching und Technologie-/
+  // Plugin-Marktradar (Auftrag Abschnitt J/P) – Zuwachs gegenüber der
+  // V7.4-Baseline (72/52/8/5/29): fünf neue lesende GET-Routen
+  // (/api/agent-leadership/summary, .../organization, .../hr-daily-run,
+  // .../technology-radar, .../agent-technology-fit), keine neue exakte
+  // POST-Route (alle Führungsaktionen laufen über einen einzigen neuen
+  // POST-Prefix /api/agent-leadership/ – eine Aktion je Anfrage über
+  // .../:action, siehe agent-leadership-routes.js#Kopfkommentar), keine
+  // neue GET-Prefix-Route, ein neuer POST-Prefix und ein neues statisches
+  // Chef-UI-Skript (agent-leadership-ui.js).
+  //
+  // Unternehmensleitlinien V1.0 (Auftrag Abschnitt O) – Zuwachs gegenüber
+  // der V7.5-Baseline (77/52/8/6/30): zwei weitere neue lesende GET-Routen
+  // (/api/agent-leadership/company-principles, .../reliability-signals),
+  // keine neue exakte POST-Route (die vier neuen Führungsaktionen laufen
+  // über den bereits bestehenden POST-Prefix /api/agent-leadership/),
+  // keine neue GET-/POST-Prefix-Route und kein neues statisches Asset.
+  await check("Routenzahlen in Policy und Server sind identisch (79/52/8/6/30)", () => {
+    assert.strictEqual(server.getRoutes.size, 79);
+    assert.strictEqual(routeAccessPolicy.GET_POLICIES.length, 79);
     assert.strictEqual(server.postRoutes.size, 52);
     assert.strictEqual(routeAccessPolicy.POST_POLICIES.length, 52);
     assert.strictEqual(server.routePrefixHandlers.length, 8);
@@ -258,13 +267,13 @@ async function run() {
       routeAccessPolicy.PREFIX_POLICIES.filter((entry) => entry.method === "GET").length,
       8,
     );
-    assert.strictEqual(server.postRoutePrefixHandlers.length, 5);
+    assert.strictEqual(server.postRoutePrefixHandlers.length, 6);
     assert.strictEqual(
       routeAccessPolicy.PREFIX_POLICIES.filter((entry) => entry.method === "POST").length,
-      5,
+      6,
     );
-    assert.strictEqual(server.staticAssets.size, 29);
-    assert.strictEqual(routeAccessPolicy.STATIC_POLICIES.length, 29);
+    assert.strictEqual(server.staticAssets.size, 30);
+    assert.strictEqual(routeAccessPolicy.STATIC_POLICIES.length, 30);
   });
 
   // -------------------------------------------------------------------

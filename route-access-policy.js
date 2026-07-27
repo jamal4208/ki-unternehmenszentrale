@@ -326,6 +326,20 @@ const GET_POLICIES = [
   // (Auftrag Abschnitt C/M): ausschließlich OWNER_ONLY, kein Kundenzugriff
   // auf Jamals Canva-Konto (siehe jamal-canva-routes.js#Kopfkommentar).
   ownerGet("/api/jamal-work-mode/canva-state", "Jamal-Arbeitsmodus Canva-Produktionsstatus"),
+  // V7.5 – Agentenorganisation, tägliches HR-Coaching und
+  // Technologie-/Plugin-Marktradar (Auftrag Abschnitt J/M): ausschließlich
+  // OWNER_ONLY, kein Kunden-/Supportzugriff auf Agentenführung, HR-Vorschläge
+  // oder den Technologie-Radar (siehe agent-leadership-routes.js#Kopfkommentar).
+  ownerGet("/api/agent-leadership/summary", "Agentenführung Kompaktübersicht (Ansicht Agenten führen)"),
+  ownerGet("/api/agent-leadership/organization", "Agentenführung Organisationsübersicht (25 Agenten)"),
+  ownerGet("/api/agent-leadership/hr-daily-run", "Agentenführung heutiger HR-Entwicklungslauf"),
+  ownerGet("/api/agent-leadership/technology-radar", "Agentenführung Technologie-/Plugin-Marktradar"),
+  ownerGet("/api/agent-leadership/agent-technology-fit", "Agentenführung Agent-Technology-Fit"),
+  // Unternehmensleitlinien V1.0 (Auftrag Abschnitt O): zwei zusätzliche
+  // lesende OWNER_ONLY-Endpunkte für Leitlinienversion/-regeln und
+  // Hochzuverlässigkeits-Signale, kein Kunden-/Supportzugriff.
+  ownerGet("/api/agent-leadership/company-principles", "Agentenführung Unternehmensleitlinien V1.0 (read-only)"),
+  ownerGet("/api/agent-leadership/reliability-signals", "Agentenführung Hochzuverlässigkeits-Signale"),
 ];
 
 const POST_POLICIES = [
@@ -439,6 +453,13 @@ const PREFIX_POLICIES = [
   // Prefix statt vieler neuer Exakt-Routen (Auftrag Abschnitt M: minimaler
   // Dateiumfang, keine parallele neue Architektur).
   ownerPostPrefix("/api/jamal-work-mode/", "Jamal-Arbeitsmodus Aktion (eine Hauptaktion je Zustand)"),
+  // V7.5 – Agentenorganisation, tägliches HR-Coaching und
+  // Technologie-/Plugin-Marktradar (Auftrag Abschnitt I/J): eine einzige
+  // Aktion je Anfrage über ".../:action" (z. B. create-hr-daily-run,
+  // review-hr-proposal, upsert-radar-item, review-agent-technology-fit) –
+  // bewusst ein einziger neuer Prefix statt vieler neuer Exakt-Routen
+  // (gleiche Begründung wie /api/jamal-work-mode/).
+  ownerPostPrefix("/api/agent-leadership/", "Agentenführung Aktion (HR-Vorschlag/Radar/Fit prüfen, kein Auto-Autonomiewechsel)"),
 ];
 
 const STATIC_POLICIES = [
@@ -503,6 +524,10 @@ const STATIC_POLICIES = [
   // statt einer Erweiterung von jamal-work-mode-ui.js (siehe
   // jamal-work-mode-ui.test.js#"kein Provider (Canva/HeyGen)").
   staticOwnerOnly("/jamal-canva-ui.js", "Chef-UI-Skript Jamal-Canva-Produktionskorridor"),
+  // V7.5 – Agentenorganisation, tägliches HR-Coaching und
+  // Technologie-/Plugin-Marktradar (Auftrag Abschnitt L/M): eigenständiges,
+  // additives Chef-UI-Skript für die neue Ansicht "Agenten führen".
+  staticOwnerOnly("/agent-leadership-ui.js", "Chef-UI-Skript Agentenführung (Agenten führen)"),
 ];
 
 const ALL_POLICIES = Object.freeze([

@@ -424,11 +424,11 @@ async function runTests() {
 
   check("17 Projekte bleiben erhalten", () => assert.strictEqual(PROJECT_REGISTRY.length, 17));
   check("25 Agenten bleiben erhalten", () => assert.strictEqual(AgentRegistry.CANONICAL_AGENT_COUNT, 25));
-  check("72 GET-Routen bleiben erhalten (Phase C: +2 GET Execution-Status/-Ergebnis, Phase D: +1 GET Executor-Registry, Phase E: +1 GET Freeze-Status, V7.1 Phase A: +5 GET Dokumente/Tools/Plugin-Gateway/Tool-Routing/Backup-Export, V7.1 Phase B: +3 GET HeyGen-Status/Jobpakete/Backup-Export, V7.1 Phase B.1: +5 GET Agentur-Mandantenbasis/Pilot-Review/Backup-Export, V7.1 Phase C: +3 GET Canva-Status/Jobpakete/Backup-Export, V7.1 Phase C.1: +1 GET Pilot-Ergebnisakten-Liste, V7.2 Phase A Schritt 2: +1 GET Auth-Sessionstatus, V7.2 Phase A Schritt 3: +3 GET Owner-Mandantenliste/Kundenportal-Konto/Kundenportal-Status, V7.2 Phase B Schritt 1: +2 GET Kundenportal-/Owner-Arbeitsauftragsliste, V7.3 Jamal-Arbeitsmodus: +1 GET Jamal-Arbeitsmodus-Zustand, V7.4 Canva-Produktionskorridor: +1 GET Jamal-Canva-Produktionsstatus)", () => {
+  check("79 GET-Routen bleiben erhalten (Phase C: +2 GET Execution-Status/-Ergebnis, Phase D: +1 GET Executor-Registry, Phase E: +1 GET Freeze-Status, V7.1 Phase A: +5 GET Dokumente/Tools/Plugin-Gateway/Tool-Routing/Backup-Export, V7.1 Phase B: +3 GET HeyGen-Status/Jobpakete/Backup-Export, V7.1 Phase B.1: +5 GET Agentur-Mandantenbasis/Pilot-Review/Backup-Export, V7.1 Phase C: +3 GET Canva-Status/Jobpakete/Backup-Export, V7.1 Phase C.1: +1 GET Pilot-Ergebnisakten-Liste, V7.2 Phase A Schritt 2: +1 GET Auth-Sessionstatus, V7.2 Phase A Schritt 3: +3 GET Owner-Mandantenliste/Kundenportal-Konto/Kundenportal-Status, V7.2 Phase B Schritt 1: +2 GET Kundenportal-/Owner-Arbeitsauftragsliste, V7.3 Jamal-Arbeitsmodus: +1 GET Jamal-Arbeitsmodus-Zustand, V7.4 Canva-Produktionskorridor: +1 GET Jamal-Canva-Produktionsstatus, V7.5 Agentenführung: +5 GET Führungsübersicht/Organisation/HR-Lauf/Technologie-Radar/Agent-Technology-Fit, Unternehmensleitlinien V1.0: +2 GET Leitlinien/Reliability-Signale)", () => {
     const serverSource = fs.readFileSync(path.join(__dirname, "server.js"), "utf8");
     const getRouteBlockMatch = serverSource.match(/const getRoutes = buildRouteMap\(\[([\s\S]*?)\n\]\);/);
     const routeCount = getRouteBlockMatch ? (getRouteBlockMatch[1].match(/^\s+\["\/api\//gm) || []).length : 0;
-    assert.strictEqual(routeCount, 72);
+    assert.strictEqual(routeCount, 79);
   });
   check("POST bleibt 405", () => assert.strictEqual(invoke("POST", "/api/projects").statusCode, 405));
 

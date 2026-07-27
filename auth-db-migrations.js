@@ -505,6 +505,215 @@ const AUDIT_EVENT_TYPES_AT_MIGRATION_13 = Object.freeze([
   "CANVA_HANDOFF_BLOCKED_BY_RIGHTS",
 ]);
 
+// V7.5 – Agentenorganisation, tägliches HR-Coaching und
+// Technologie-/Plugin-Marktradar (Auftrag Abschnitt H) – eigene,
+// unabhängige Wertebereiche für agent-hr-coaching-service.js/
+// technology-radar-service.js (gleiches Prinzip wie
+// JAMAL_WORK_ITEM_STATUS_VALUES/JAMAL_CANVA_PRODUCTION_STATUS_VALUES oben:
+// dieses Migrationsmodul importiert keine Fachlogikmodule, die
+// Fachlogikmodule kennen umgekehrt kein better-sqlite3).
+//
+// agent-hr-coaching-service.js#HR_RECOMMENDATION_VALUES.
+const AGENT_HR_RECOMMENDATION_VALUES = Object.freeze([
+  "KEEP_CURRENT",
+  "TRAIN_FIRST",
+  "RECOMMEND_SMALL_EXPANSION",
+  "REDUCE_SCOPE",
+  "ESCALATE",
+]);
+
+// agent-hr-coaching-service.js#PROPOSAL_STATUS_VALUES. "RECOMMEND_SMALL_
+// EXPANSION" bleibt ausschließlich eine Empfehlung (siehe hrRecommendation
+// oben) – auch der Status APPROVED ändert laut Auftrag Abschnitt D/M
+// niemals automatisch den tatsächlichen Autonomierahmen in
+// agent-registry.js (dort gibt es dafür ohnehin kein Feld, siehe
+// agent-organization-service.js).
+const AGENT_HR_PROPOSAL_STATUS_VALUES = Object.freeze([
+  "PROPOSED",
+  "REVIEWED",
+  "APPROVED",
+  "REJECTED",
+  "DEFERRED",
+]);
+
+// technology-radar-service.js#RADAR_TYPE_VALUES.
+const TECHNOLOGY_RADAR_TYPE_VALUES = Object.freeze([
+  "MODEL",
+  "PLUGIN",
+  "CONNECTOR",
+  "AUTOMATION",
+  "DESIGN_TOOL",
+  "VIDEO_TOOL",
+  "OFFICE_TOOL",
+  "DATA_TOOL",
+  "DEVELOPER_TOOL",
+  "SECURITY_TOOL",
+  "OTHER",
+]);
+
+// technology-radar-service.js#RADAR_RECOMMENDATION_VALUES – gemeinsam
+// genutzt sowohl für einen Radar-Eintrag selbst als auch für eine
+// Agent-Technology-Fit-Zuordnung (agent_technology_fit.recommendation
+// unten): beide beantworten fachlich dieselbe Frage ("was sollte mit
+// diesem Werkzeug/dieser Zuordnung als Nächstes geschehen?"), daher genau
+// EIN Wertebereich statt zweier bedeutungsgleicher Aufzählungen.
+const TECHNOLOGY_RADAR_RECOMMENDATION_VALUES = Object.freeze([
+  "WATCH",
+  "RESEARCH",
+  "TEST_READ_ONLY",
+  "PILOT_WITH_APPROVAL",
+  "NOT_RECOMMENDED",
+  "BLOCKED",
+]);
+
+// technology-radar-service.js#RADAR_STATUS_VALUES – unterscheidet
+// ausschließlich den bereits bekannten Umgangsstatus eines Werkzeugs
+// (Auftrag Abschnitt F), niemals eine tatsächliche technische Verbindung.
+const TECHNOLOGY_RADAR_STATUS_VALUES = Object.freeze([
+  "NOT_REVIEWED",
+  "CANDIDATE",
+  "REVIEWED",
+  "READ_ONLY_TESTED",
+  "PILOT",
+  "CONNECTED",
+]);
+
+// agent-technology-fit – Zuordnungsstatus (technology-radar-service.js#
+// FIT_STATUS_VALUES). Bewusst ein eigener, kleinerer Wertebereich als
+// AGENT_HR_PROPOSAL_STATUS_VALUES, weil eine Fit-Zuordnung keine
+// tägliche wiederkehrende Vorschlagszeile ist.
+const AGENT_TECHNOLOGY_FIT_STATUS_VALUES = Object.freeze([
+  "PROPOSED",
+  "REVIEWED",
+  "APPROVED_FOR_READ_ONLY_TEST",
+  "REJECTED",
+  "DEFERRED",
+]);
+
+// agent-technology-fit – Priorität (technology-radar-service.js#
+// FIT_PRIORITY_VALUES).
+const AGENT_TECHNOLOGY_FIT_PRIORITY_VALUES = Object.freeze(["LOW", "MEDIUM", "HIGH"]);
+
+// ---------------------------------------------------------------------------
+// V7.5 – Unternehmensleitlinien V1.0 als verbindliche Betriebslogik (Auftrag
+// Abschnitt E/G/H/I/J/L). Migration 14 ist zum Zeitpunkt dieser Erweiterung
+// noch nicht committet gewesen (siehe Auftrag Abschnitt O: "Migration 14 darf
+// noch angepasst werden") – deshalb werden die neuen Spalten DIREKT in die
+// unten stehenden CREATE-TABLE-Anweisungen aufgenommen statt eine Migration
+// 15 anzulegen. Migrationen 1–13 bleiben davon unberührt.
+// ---------------------------------------------------------------------------
+
+// agent-hr-coaching-service.js#PDCA_STAGE_VALUES – Auftrag Abschnitt G:
+// "kleinste sinnvolle PDCA-Struktur", kein automatischer Fortschritt, jeder
+// Übergang ausschließlich über agent-hr-coaching-service.js#advanceHrPdcaStage.
+const AGENT_HR_PDCA_STAGE_VALUES = Object.freeze(["PLAN", "DO", "CHECK", "ACT"]);
+
+// agent-hr-coaching-service.js#PDCA_DECISION_VALUES – Abschlussentscheidung
+// beim Übergang CHECK -> ACT (Auftrag Abschnitt G). NULL, solange ACT noch
+// nicht erreicht ist.
+const AGENT_HR_PDCA_DECISION_VALUES = Object.freeze(["KEEP", "ADJUST", "REPEAT", "DISCARD"]);
+
+// agent-hr-coaching-service.js#RELIABILITY_SIGNAL_ON_PROPOSAL_VALUES – Auftrag
+// Abschnitt E Ziffer 10: ein leichtgewichtiger Tagesindikator direkt am
+// Vorschlag (Standard "NONE" – die meisten Tage haben keinerlei Signal,
+// "keine erfundenen Vorfälle"). Bewusst ein eigener, kleinerer Wertebereich
+// als RELIABILITY_SIGNAL_TYPE_VALUES unten (dort ohne "NONE", weil ein
+// tatsächlich angelegter Signal-Datensatz immer ein echtes Signal ist).
+const AGENT_HR_RELIABILITY_SIGNAL_ON_PROPOSAL_VALUES = Object.freeze([
+  "NONE",
+  "UNCERTAINTY",
+  "EARLY_WARNING",
+  "DEVIATION",
+  "NEAR_MISS",
+]);
+
+// Gemeinsamer Nutzenbereich-Wertebereich (Auftrag Abschnitt J) – sowohl für
+// agent_hr_daily_proposals.benefitArea als auch technology_radar_items.
+// benefitArea verwendet, weil beide fachlich dieselbe Frage beantworten
+// ("welchem Unternehmensnutzen dient das hier konkret?").
+const LEADERSHIP_BENEFIT_AREA_VALUES = Object.freeze([
+  "TIME_SAVING",
+  "QUALITY_IMPROVEMENT",
+  "RISK_REDUCTION",
+  "COST_CONTROL",
+  "REVENUE_OPPORTUNITY",
+  "CUSTOMER_VALUE",
+  "EMPLOYEE_RELIEF",
+  "STRATEGIC_READINESS",
+]);
+
+// Gemeinsamer Prioritätswertebereich (Auftrag Abschnitt L) – "weniger
+// beginnen, Wichtiges zuverlässig abschließen": jeder HR-Vorschlag und jeder
+// Radar-/Backlog-Eintrag trägt genau eine dieser vier Stufen. Ein neuer
+// Radar-Kandidat startet immer bei "WATCH" (siehe technology-radar-service.js)
+// und wird niemals automatisch zum aktiven Schwerpunkt.
+const LEADERSHIP_PRIORITY_BUCKET_VALUES = Object.freeze(["NOW", "NEXT", "LATER", "WATCH"]);
+
+// agent-reliability-signal-service.js#RELIABILITY_SIGNAL_TYPE_VALUES (Auftrag
+// Abschnitt H) – die vier vom Auftrag genannten Kategorien zuzüglich
+// "SAFETY_ESCALATION" ("sicherheitsrelevante Eskalation").
+const RELIABILITY_SIGNAL_TYPE_VALUES = Object.freeze([
+  "UNCERTAINTY",
+  "EARLY_WARNING",
+  "DEVIATION",
+  "NEAR_MISS",
+  "SAFETY_ESCALATION",
+]);
+
+// agent-reliability-signal-service.js#RELIABILITY_SIGNAL_STATUS_VALUES –
+// bewusst ohne jede Sanktions-/Autonomiereduktionsbedeutung (Auftrag
+// Abschnitt H: "keine automatische Sanktion, keine automatische
+// Autonomiereduktion").
+const RELIABILITY_SIGNAL_STATUS_VALUES = Object.freeze(["OPEN", "REVIEWED", "MONITORING", "RESOLVED", "ESCALATED"]);
+
+// technology-radar-service.js#RADAR_SIGNAL_TYPE_VALUES (Auftrag Abschnitt I)
+// – kategorisiert NUR, woher eine Zukunftsbeobachtung stammt; behauptet
+// keine konkrete Marktentwicklung.
+const TECHNOLOGY_RADAR_SIGNAL_TYPE_VALUES = Object.freeze([
+  "MARKET_TREND",
+  "INTERNAL_NEED",
+  "CUSTOMER_REQUEST",
+  "COMPETITIVE_SIGNAL",
+  "REGULATORY_SIGNAL",
+  "OTHER",
+]);
+
+// technology-radar-service.js#RADAR_TIME_HORIZON_VALUES (Auftrag Abschnitt I).
+const TECHNOLOGY_RADAR_TIME_HORIZON_VALUES = Object.freeze(["NOW", "1_2_YEARS", "3_5_YEARS", "5_PLUS_YEARS"]);
+
+// technology-radar-service.js#RADAR_UNCERTAINTY_LEVEL_VALUES (Auftrag
+// Abschnitt I).
+const TECHNOLOGY_RADAR_UNCERTAINTY_LEVEL_VALUES = Object.freeze(["LOW", "MEDIUM", "HIGH"]);
+
+// V7.5 (Auftrag Abschnitt K) – genau die neun neuen Agentenführungs-
+// Ereignistypen, zusätzlich zur vollständigen, bereits bestehenden
+// AUDIT_EVENT_TYPES_AT_MIGRATION_13-Menge oben. WICHTIG: eigenständige,
+// additive Konstante – KEINE Änderung von AUDIT_EVENT_TYPES_AT_MIGRATION_13
+// selbst (Migration 13 referenziert diese weiterhin unverändert – "Migrationen
+// 1–13 unverändert", siehe Auftrag Abschnitt H). auth-audit.js#EVENT_TYPES
+// muss exakt dieser Aufzählung entsprechen.
+const AUDIT_EVENT_TYPES_AT_MIGRATION_14 = Object.freeze([
+  ...AUDIT_EVENT_TYPES_AT_MIGRATION_13,
+  "AGENT_ORGANIZATION_REVIEWED",
+  "HR_DAILY_RUN_CREATED",
+  "HR_PROPOSAL_REVIEWED",
+  "HR_PROPOSAL_APPROVED",
+  "HR_PROPOSAL_REJECTED",
+  "HR_PROPOSAL_DEFERRED",
+  "TECH_RADAR_ITEM_CREATED",
+  "TECH_RADAR_ITEM_UPDATED",
+  "AGENT_TECH_FIT_REVIEWED",
+  // Unternehmensleitlinien V1.0 (Auftrag Abschnitt P) – ergänzt, solange
+  // Migration 14 noch nicht committet ist (siehe Kommentar oben bei
+  // AGENT_HR_PDCA_STAGE_VALUES). Fünf zusätzliche Ereignistypen, keine
+  // Änderung/Löschung der bereits bestehenden neun Ereignistypen.
+  "COMPANY_PRINCIPLES_REVIEWED",
+  "HR_PDCA_STAGE_CHANGED",
+  "RELIABILITY_SIGNAL_RECORDED",
+  "RELIABILITY_SIGNAL_REVIEWED",
+  "FORESIGHT_SCENARIO_REVIEWED",
+]);
+
 function sqlEnum(values) {
   return values.map((value) => `'${value}'`).join(",");
 }
@@ -1308,6 +1517,244 @@ const MIGRATIONS = Object.freeze([
       CREATE INDEX idx_auth_audit_events_timestamp ON auth_audit_events(timestamp);
     `,
   }),
+  // V7.5 – Agentenorganisation, tägliches HR-Coaching und
+  // Technologie-/Plugin-Marktradar (Auftrag Abschnitt H/N). Rein additiv
+  // gegenüber Migration 13:
+  //   1. agent_hr_daily_runs (eine Zeile je Kalendertag, runDate UNIQUE
+  //      erzwingt "höchstens ein aktiver Vorschlagssatz pro Kalendertag"
+  //      bereits auf Datenbankebene).
+  //   2. agent_hr_daily_proposals (eine Zeile je Agent und Lauf,
+  //      UNIQUE(runId, agentId) erzwingt "genau ein Vorschlag je Agent und
+  //      Lauf"; die inhaltlichen Vorschlagsfelder werden nach dem Anlegen
+  //      nie mehr verändert – ausschließlich status/jamalNote/reviewedAt
+  //      werden bei einer Prüfung aktualisiert, siehe
+  //      agent-hr-coaching-service.js).
+  //   3. technology_radar_items (ein Eintrag je Technologie/Werkzeug;
+  //      seedToolId verweist optional auf tool-registry.js#TOOL_REGISTRY,
+  //      ohne dessen statischen Katalog zu duplizieren oder zu verändern –
+  //      reine zusätzliche Bewertungsschicht).
+  //   4. agent_technology_fit (kontrollierte Zuordnung Radar-Eintrag <->
+  //      Agent, UNIQUE(agentId, radarItemId) verhindert doppelte
+  //      Zuordnungen für dasselbe Paar).
+  //   5. agent_reliability_signals (Auftrag Abschnitt H, nachträglich vor dem
+  //      ersten Commit ergänzt – "Unternehmensleitlinien V1.0"): lokal
+  //      erfassbare Hochzuverlässigkeitssignale mit optionalem Bezug zu genau
+  //      einem HR-Vorschlag ODER einem Radar-Eintrag. Eigene Tabelle statt
+  //      Wiederverwendung von agent_hr_daily_proposals, weil ein Signal auch
+  //      ohne jeden HR-Vorschlagsbezug entstehen kann (z. B. reiner
+  //      Radar-Bezug) und einen eigenen, von PROPOSED/REVIEWED/... völlig
+  //      unabhängigen Status-/Entscheidungsverlauf besitzt.
+  //   6. agent_hr_daily_proposals/technology_radar_items erhalten zusätzliche,
+  //      rein additive Spalten für die Unternehmensleitlinien V1.0 (Auftrag
+  //      Abschnitt E/I/J/L: observation/businessMeaning/desiredOutcome/
+  //      priorityReason/pdcaStage/pdcaDecision/pdcaStageChangedAt/
+  //      reliabilitySignal/benefitArea/priorityBucket/nextReviewDate bzw.
+  //      signalType/signalDescription/timeHorizon/uncertaintyLevel/
+  //      scenarioConservative/scenarioLikely/scenarioDynamic/
+  //      strategicImpact/todayPreparationStep/benefitArea/priorityBucket).
+  //      Bewusst DIREKT in den untenstehenden CREATE-TABLE-Anweisungen
+  //      ergänzt statt einer Migration 15, weil Migration 14 zu diesem
+  //      Zeitpunkt noch nicht committet war (Auftrag Abschnitt O).
+  //   7. eine erneute vollständige Neuerstellung von auth_audit_events mit
+  //      der um genau neun Ereignistypen erweiterten CHECK-Aufzählung
+  //      (AUDIT_EVENT_TYPES_AT_MIGRATION_14, siehe Kommentar oben) – exakt
+  //      dasselbe etablierte Muster wie Migration 7/8/9/10/11/13.
+  // Migrationen 1–13 bleiben dabei byteidentisch unverändert.
+  //
+  // Bewusst KEINE eigene Tabelle für die Agentenorganisation selbst
+  // (kein "agent_organization_profiles"): die Organisationssicht ist eine
+  // vollständig deterministische Ableitung aus dem bereits bestehenden,
+  // eingefrorenen agent-registry.js (siehe
+  // agent-organization-service.js#buildOrganizationOverview) – eine
+  // zusätzliche Tabelle würde denselben Agentenbestand ein zweites Mal
+  // speichern und könnte veralten ("keine zweite Agentenliste", Auftrag
+  // Leitprinzipien). AGENT_ORGANIZATION_REVIEWED protokolliert lediglich,
+  // DASS Jamal die Organisationsübersicht abgerufen hat, nicht ihren
+  // Inhalt erneut.
+  //
+  // Bewusst KEINE Felder für Zugangsschlüssel, Providergeheimhaltungsdaten
+  // oder eine tatsächliche Autonomieänderung (Auftrag Abschnitt H): weder
+  // agent_hr_daily_proposals noch agent_technology_fit besitzen ein Feld,
+  // das den tatsächlichen Autonomierahmen eines Agenten verändern könnte –
+  // "hrRecommendation"/"recommendation" bleiben ausschließlich Vorschläge
+  // (siehe agent-hr-coaching-service.js/technology-radar-service.js).
+  Object.freeze({
+    version: 14,
+    name: "create_agent_leadership_tables_and_widen_audit_event_types_v8",
+    sql: `
+      CREATE TABLE agent_hr_daily_runs (
+        id TEXT PRIMARY KEY,
+        runDate TEXT NOT NULL UNIQUE,
+        createdAt TEXT NOT NULL
+      );
+
+      CREATE INDEX idx_agent_hr_daily_runs_runDate ON agent_hr_daily_runs(runDate);
+
+      CREATE TABLE agent_hr_daily_proposals (
+        id TEXT PRIMARY KEY,
+        runId TEXT NOT NULL,
+        agentId TEXT NOT NULL,
+        runDate TEXT NOT NULL,
+        improvementSuggestion TEXT NOT NULL CHECK (length(improvementSuggestion) BETWEEN 1 AND 500),
+        trainingGoal TEXT NOT NULL CHECK (length(trainingGoal) BETWEEN 1 AND 500),
+        concreteExercise TEXT NOT NULL CHECK (length(concreteExercise) BETWEEN 1 AND 500),
+        qualityCriterion TEXT NOT NULL CHECK (length(qualityCriterion) BETWEEN 1 AND 500),
+        possibleAutonomyExpansion TEXT NOT NULL CHECK (length(possibleAutonomyExpansion) BETWEEN 1 AND 500),
+        riskBoundary TEXT NOT NULL CHECK (length(riskBoundary) BETWEEN 1 AND 500),
+        requiredJamalDecision TEXT NOT NULL CHECK (length(requiredJamalDecision) BETWEEN 1 AND 500),
+        hrRecommendation TEXT NOT NULL CHECK (hrRecommendation IN (${sqlEnum(AGENT_HR_RECOMMENDATION_VALUES)})),
+        reasoning TEXT NOT NULL CHECK (length(reasoning) BETWEEN 1 AND 500),
+        status TEXT NOT NULL CHECK (status IN (${sqlEnum(AGENT_HR_PROPOSAL_STATUS_VALUES)})),
+        jamalNote TEXT,
+        createdAt TEXT NOT NULL,
+        reviewedAt TEXT,
+        -- Unternehmensleitlinien V1.0 (Auftrag Abschnitt E) – additive
+        -- Spalten. "onePercentStep"/"trainingExercise"/"successMetric"/
+        -- "safetyBoundary"/"ownership" aus Abschnitt E werden bewusst NICHT
+        -- doppelt gespeichert: sie sind identisch mit improvementSuggestion/
+        -- concreteExercise/qualityCriterion/riskBoundary/agentId (siehe
+        -- agent-hr-coaching-service.js#rowToProposalView). "communicationPattern"
+        -- wird ausschließlich zur Lesezeit aus observation/businessMeaning/
+        -- hrRecommendation/requiredJamalDecision zusammengesetzt (Auftrag
+        -- Abschnitt E Ziffer 11) – ebenfalls keine eigene Spalte.
+        observation TEXT NOT NULL CHECK (length(observation) BETWEEN 1 AND 500),
+        businessMeaning TEXT NOT NULL CHECK (length(businessMeaning) BETWEEN 1 AND 500),
+        desiredOutcome TEXT NOT NULL CHECK (length(desiredOutcome) BETWEEN 1 AND 500),
+        priorityReason TEXT NOT NULL CHECK (length(priorityReason) BETWEEN 1 AND 500),
+        benefitArea TEXT NOT NULL CHECK (benefitArea IN (${sqlEnum(LEADERSHIP_BENEFIT_AREA_VALUES)})),
+        priorityBucket TEXT NOT NULL CHECK (priorityBucket IN (${sqlEnum(LEADERSHIP_PRIORITY_BUCKET_VALUES)})),
+        nextReviewDate TEXT NOT NULL,
+        pdcaStage TEXT NOT NULL DEFAULT 'PLAN' CHECK (pdcaStage IN (${sqlEnum(AGENT_HR_PDCA_STAGE_VALUES)})),
+        pdcaDecision TEXT CHECK (pdcaDecision IS NULL OR pdcaDecision IN (${sqlEnum(AGENT_HR_PDCA_DECISION_VALUES)})),
+        pdcaStageChangedAt TEXT,
+        reliabilitySignal TEXT NOT NULL DEFAULT 'NONE' CHECK (reliabilitySignal IN (${sqlEnum(AGENT_HR_RELIABILITY_SIGNAL_ON_PROPOSAL_VALUES)})),
+        FOREIGN KEY (runId) REFERENCES agent_hr_daily_runs(id) ON DELETE RESTRICT,
+        UNIQUE (runId, agentId)
+      );
+
+      CREATE INDEX idx_agent_hr_daily_proposals_runId ON agent_hr_daily_proposals(runId);
+      CREATE INDEX idx_agent_hr_daily_proposals_agentId ON agent_hr_daily_proposals(agentId);
+      CREATE INDEX idx_agent_hr_daily_proposals_status ON agent_hr_daily_proposals(status);
+
+      CREATE TABLE technology_radar_items (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 200),
+        provider TEXT NOT NULL CHECK (length(provider) BETWEEN 1 AND 200),
+        category TEXT NOT NULL CHECK (length(category) BETWEEN 1 AND 200),
+        type TEXT NOT NULL CHECK (type IN (${sqlEnum(TECHNOLOGY_RADAR_TYPE_VALUES)})),
+        shortDescription TEXT NOT NULL CHECK (length(shortDescription) BETWEEN 1 AND 500),
+        possibleAgentsJson TEXT NOT NULL,
+        possibleBusinessBenefit TEXT NOT NULL CHECK (length(possibleBusinessBenefit) BETWEEN 1 AND 500),
+        maturityLevel TEXT NOT NULL,
+        securityRisk TEXT NOT NULL,
+        privacyRisk TEXT NOT NULL,
+        costClass TEXT NOT NULL,
+        integrationEffort TEXT NOT NULL,
+        vendorLockInRisk TEXT NOT NULL,
+        writeAccessRequired INTEGER NOT NULL CHECK (writeAccessRequired IN (0,1)),
+        humanApprovalRequired INTEGER NOT NULL CHECK (humanApprovalRequired IN (0,1)),
+        recommendation TEXT NOT NULL CHECK (recommendation IN (${sqlEnum(TECHNOLOGY_RADAR_RECOMMENDATION_VALUES)})),
+        reasoning TEXT NOT NULL CHECK (length(reasoning) BETWEEN 1 AND 500),
+        lastReviewedAt TEXT,
+        nextReviewAt TEXT,
+        sourceNote TEXT,
+        status TEXT NOT NULL CHECK (status IN (${sqlEnum(TECHNOLOGY_RADAR_STATUS_VALUES)})),
+        seedToolId TEXT,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        -- Unternehmensleitlinien V1.0 (Auftrag Abschnitt I/J/L) – additive
+        -- Zukunfts-/Szenario- und Nutzenspalten. "nextReviewDate" aus
+        -- Abschnitt I ist bewusst identisch mit dem bereits bestehenden
+        -- nextReviewAt (keine doppelte Speicherung derselben Angabe).
+        signalType TEXT NOT NULL DEFAULT 'OTHER' CHECK (signalType IN (${sqlEnum(TECHNOLOGY_RADAR_SIGNAL_TYPE_VALUES)})),
+        signalDescription TEXT NOT NULL CHECK (length(signalDescription) BETWEEN 1 AND 500),
+        timeHorizon TEXT NOT NULL DEFAULT 'NOW' CHECK (timeHorizon IN (${sqlEnum(TECHNOLOGY_RADAR_TIME_HORIZON_VALUES)})),
+        uncertaintyLevel TEXT NOT NULL DEFAULT 'MEDIUM' CHECK (uncertaintyLevel IN (${sqlEnum(TECHNOLOGY_RADAR_UNCERTAINTY_LEVEL_VALUES)})),
+        scenarioConservative TEXT NOT NULL CHECK (length(scenarioConservative) BETWEEN 1 AND 500),
+        scenarioLikely TEXT NOT NULL CHECK (length(scenarioLikely) BETWEEN 1 AND 500),
+        scenarioDynamic TEXT NOT NULL CHECK (length(scenarioDynamic) BETWEEN 1 AND 500),
+        strategicImpact TEXT NOT NULL CHECK (length(strategicImpact) BETWEEN 1 AND 500),
+        todayPreparationStep TEXT NOT NULL CHECK (length(todayPreparationStep) BETWEEN 1 AND 500),
+        benefitArea TEXT NOT NULL CHECK (benefitArea IN (${sqlEnum(LEADERSHIP_BENEFIT_AREA_VALUES)})),
+        priorityBucket TEXT NOT NULL DEFAULT 'WATCH' CHECK (priorityBucket IN (${sqlEnum(LEADERSHIP_PRIORITY_BUCKET_VALUES)})),
+        UNIQUE (seedToolId)
+      );
+
+      CREATE INDEX idx_technology_radar_items_status ON technology_radar_items(status);
+      CREATE INDEX idx_technology_radar_items_type ON technology_radar_items(type);
+
+      CREATE TABLE agent_technology_fit (
+        id TEXT PRIMARY KEY,
+        agentId TEXT NOT NULL,
+        radarItemId TEXT NOT NULL,
+        benefit TEXT NOT NULL CHECK (length(benefit) BETWEEN 1 AND 500),
+        concreteUseCase TEXT NOT NULL CHECK (length(concreteUseCase) BETWEEN 1 AND 500),
+        requiredPermissions TEXT NOT NULL CHECK (length(requiredPermissions) BETWEEN 1 AND 500),
+        securityBoundary TEXT NOT NULL CHECK (length(securityBoundary) BETWEEN 1 AND 500),
+        testPrerequisite TEXT NOT NULL CHECK (length(testPrerequisite) BETWEEN 1 AND 500),
+        recommendation TEXT NOT NULL CHECK (recommendation IN (${sqlEnum(TECHNOLOGY_RADAR_RECOMMENDATION_VALUES)})),
+        priority TEXT NOT NULL CHECK (priority IN (${sqlEnum(AGENT_TECHNOLOGY_FIT_PRIORITY_VALUES)})),
+        status TEXT NOT NULL CHECK (status IN (${sqlEnum(AGENT_TECHNOLOGY_FIT_STATUS_VALUES)})),
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        FOREIGN KEY (radarItemId) REFERENCES technology_radar_items(id) ON DELETE RESTRICT,
+        UNIQUE (agentId, radarItemId)
+      );
+
+      CREATE TABLE agent_reliability_signals (
+        id TEXT PRIMARY KEY,
+        agentId TEXT NOT NULL,
+        relatedHrProposalId TEXT,
+        relatedRadarItemId TEXT,
+        signalType TEXT NOT NULL CHECK (signalType IN (${sqlEnum(RELIABILITY_SIGNAL_TYPE_VALUES)})),
+        observation TEXT NOT NULL CHECK (length(observation) BETWEEN 1 AND 500),
+        possibleImpact TEXT NOT NULL CHECK (length(possibleImpact) BETWEEN 1 AND 500),
+        recommendedReview TEXT NOT NULL CHECK (length(recommendedReview) BETWEEN 1 AND 500),
+        status TEXT NOT NULL CHECK (status IN (${sqlEnum(RELIABILITY_SIGNAL_STATUS_VALUES)})),
+        jamalDecisionNote TEXT,
+        createdAt TEXT NOT NULL,
+        reviewedAt TEXT,
+        FOREIGN KEY (relatedHrProposalId) REFERENCES agent_hr_daily_proposals(id) ON DELETE SET NULL,
+        FOREIGN KEY (relatedRadarItemId) REFERENCES technology_radar_items(id) ON DELETE SET NULL
+      );
+
+      CREATE INDEX idx_agent_reliability_signals_agentId ON agent_reliability_signals(agentId);
+      CREATE INDEX idx_agent_reliability_signals_status ON agent_reliability_signals(status);
+
+      CREATE INDEX idx_agent_technology_fit_agentId ON agent_technology_fit(agentId);
+      CREATE INDEX idx_agent_technology_fit_radarItemId ON agent_technology_fit(radarItemId);
+
+      CREATE TABLE auth_audit_events_v8 (
+        eventId TEXT PRIMARY KEY,
+        actorUserId TEXT,
+        tenantId TEXT,
+        eventType TEXT NOT NULL CHECK (eventType IN (${sqlEnum(AUDIT_EVENT_TYPES_AT_MIGRATION_14)})),
+        result TEXT NOT NULL CHECK (result IN (${sqlEnum(AUDIT_RESULT_VALUES)})),
+        timestamp TEXT NOT NULL,
+        metadata TEXT
+      );
+
+      INSERT INTO auth_audit_events_v8 (eventId, actorUserId, tenantId, eventType, result, timestamp, metadata)
+      SELECT eventId, actorUserId, tenantId, eventType, result, timestamp, metadata FROM auth_audit_events;
+
+      DROP TABLE auth_audit_events;
+      ALTER TABLE auth_audit_events_v8 RENAME TO auth_audit_events;
+
+      CREATE TRIGGER trg_auth_audit_events_no_update
+      BEFORE UPDATE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: UPDATE ist nicht erlaubt.');
+      END;
+
+      CREATE TRIGGER trg_auth_audit_events_no_delete
+      BEFORE DELETE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: DELETE ist nicht erlaubt.');
+      END;
+
+      CREATE INDEX idx_auth_audit_events_timestamp ON auth_audit_events(timestamp);
+    `,
+  }),
 ]);
 
 function ensureMigrationsTable(db) {
@@ -1371,6 +1818,23 @@ module.exports = {
   JAMAL_CANVA_SUITABILITY_DECISION_VALUES,
   JAMAL_CANVA_RIGHTS_STATUS_VALUES,
   JAMAL_CANVA_QUALITY_STATUS_VALUES,
+  AGENT_HR_RECOMMENDATION_VALUES,
+  AGENT_HR_PROPOSAL_STATUS_VALUES,
+  TECHNOLOGY_RADAR_TYPE_VALUES,
+  TECHNOLOGY_RADAR_RECOMMENDATION_VALUES,
+  TECHNOLOGY_RADAR_STATUS_VALUES,
+  AGENT_TECHNOLOGY_FIT_STATUS_VALUES,
+  AGENT_TECHNOLOGY_FIT_PRIORITY_VALUES,
+  AGENT_HR_PDCA_STAGE_VALUES,
+  AGENT_HR_PDCA_DECISION_VALUES,
+  AGENT_HR_RELIABILITY_SIGNAL_ON_PROPOSAL_VALUES,
+  LEADERSHIP_BENEFIT_AREA_VALUES,
+  LEADERSHIP_PRIORITY_BUCKET_VALUES,
+  RELIABILITY_SIGNAL_TYPE_VALUES,
+  RELIABILITY_SIGNAL_STATUS_VALUES,
+  TECHNOLOGY_RADAR_SIGNAL_TYPE_VALUES,
+  TECHNOLOGY_RADAR_TIME_HORIZON_VALUES,
+  TECHNOLOGY_RADAR_UNCERTAINTY_LEVEL_VALUES,
   MIGRATIONS,
   ensureMigrationsTable,
   getAppliedVersions,

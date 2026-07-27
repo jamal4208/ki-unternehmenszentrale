@@ -1,5 +1,61 @@
 # MIGRATION PLAN
 
+## V7.5 – Agentenorganisation, tägliches HR-Coaching und Technologie-/Plugin-Marktradar (Migration 14, additiv, lokal umgesetzt, noch nicht committed/gepusht)
+
+Vorheriger Ausgang: HEAD/`origin/main` `c5b4130b8a3f6dbf4f6fb0d6f8b01598e595a43e` (Working Tree sauber, 72 GET/52 POST/8 GET-Präfixe/5 POST-Präfixe/29 statische Assets, **76 Testdateien, 2136 automatisierte Prüfpunkte grün**). Dieser Schritt ist rein additiv; Migrationen 1–13 byteidentisch unverändert.
+
+**Neue Migration 14** (vier neue Tabellen plus additive Erweiterung von `auth_audit_events` um neun neue Ereignistypen, gleiches bewährte Recreate-Muster wie bei Migration 13: neue Zwischentabelle mit erweitertem `CHECK` über eine neue, additive Konstante `AUDIT_EVENT_TYPES_AT_MIGRATION_14` – **nicht** die veränderliche `AUDIT_EVENT_TYPES`-Live-Konstante –, vollständige Datenübernahme, Umbenennung, erneute Anlage der append-only-Trigger/Indizes):
+
+| Tabelle | Zweck | Wichtige Felder/Regeln |
+|---|---|---|
+| `agent_hr_daily_runs` | ein Lauf je Kalendertag | `runDate` `UNIQUE`, kein zweiter aktiver Lauf am selben Tag |
+| `agent_hr_daily_proposals` | ein Vorschlag je Agent und Lauf | `FOREIGN KEY (runId) REFERENCES agent_hr_daily_runs(id) ON DELETE RESTRICT`, `status`/`hrRecommendation` als `CHECK`-Enums, kein Zeitstempel-/UUID-Feld für Chain-of-Thought |
+| `technology_radar_items` | ein Eintrag je Technologie/Werkzeug | `type`/`recommendation`/`status` als `CHECK`-Enums, kein Zugangstoken-/Provider-Secret-Feld |
+| `agent_technology_fit` | kontrollierte Zuordnung Radar-Eintrag ↔ Agent | `FOREIGN KEY (radarItemId) REFERENCES technology_radar_items(id) ON DELETE RESTRICT`, `recommendation`/`priority`/`status` als `CHECK`-Enums |
+
+Die Organisationssicht selbst (`agent-organization-service.js`) erhält **keine** eigene Tabelle – sie wird vollständig deterministisch aus dem bereits bestehenden, unveränderten `agent-registry.js` (+ optional `tool-registry.js`) abgeleitet, damit keine zweite, potenziell veraltende Agentenliste entsteht.
+
+| Bereich | Regel |
+|---|---|
+| agent-organization-service.js (neu) | reine, zustandslose Fachlogik ohne I/O: leitet Bereich/Führungsebene/Berichtslinie/Qualitätsverantwortung/Autonomierahmen/Werkzeugfähigkeit für alle 25 Agenten deterministisch aus `agent-registry.js` ab |
+| agent-hr-coaching-service.js (neu) | Statusmodell/-übergänge für den täglichen Lauf, Persistenz über `auth-db.js` (Migration 14), Audit über `auth-audit.js`, vollständig deterministisch (FNV-1a-Tagesindex statt Zufall), kein externer Modellaufruf |
+| technology-radar-service.js (neu) | Seed aus `tool-registry.js`, lokale Erfassung/Aktualisierung von Radar-Einträgen und Agent-Technology-Fit; kein Netzwerkzugriff |
+| agent-leadership-routes.js (neu) | reines HTTP-Glue-Modul (gleiches Muster wie `jamal-canva-routes.js`): liest den Anfragekörper, prüft je Aktion eine enge Known-Fields-Allowlist, bildet Fehler auf Statuscodes ab |
+| agent-leadership-ui.js (neu) | eigenständiges Vanilla-Client-Skript, rendert ausschließlich `#agent-leadership-view`; spricht ausschließlich `/api/agent-leadership/*` an |
+| auth-db-migrations.js (erweitert, Migration 14) | vier neue Tabellen (siehe oben); additive Erweiterung von `auth_audit_events` um neun neue Ereignistypen; Migrationen 1–13 byteidentisch unverändert |
+| auth-db.js (erweitert) | neue CRUD-Funktionen für Lauf-/Vorschlags-/Radar-/Fit-Datensätze |
+| auth-audit.js (erweitert) | neun neue Ereignistypen: `AGENT_ORGANIZATION_REVIEWED`, `HR_DAILY_RUN_CREATED`, `HR_PROPOSAL_REVIEWED`/`APPROVED`/`REJECTED`/`DEFERRED`, `TECH_RADAR_ITEM_CREATED`/`UPDATED`, `AGENT_TECH_FIT_REVIEWED` |
+
+Ergebnis: **77 GET, 52 POST, 8 GET-Präfixe, 6 POST-Präfixe, 30 statische Assets**, **2223** automatisierte Prüfpunkte in **79** Testdateien grün, `npm audit`: 0 Schwachstellen, `better-sqlite3@13.0.1` unverändert. **Lokal umgesetzt, noch nicht committed, gepusht oder deployt.**
+
+## V7.5 – Unternehmensleitlinien V1.0 als verbindliche Betriebslogik verankert (Migration 14 additiv erweitert, keine Migration 15, lokal umgesetzt, noch nicht committed/gepusht)
+
+Vorheriger Ausgang: HEAD/`origin/main` unverändert `c5b4130b8a3f6dbf4f6fb0d6f8b01598e595a43e`, V7.5-Agentenführung (oben) bereits lokal umgesetzt (77 GET/52 POST/8 GET-Präfixe/6 POST-Präfixe/30 statische Assets, **79 Testdateien, 2223 automatisierte Prüfpunkte grün**, Migration 14 mit vier Tabellen). Da Migration 14 noch nicht committed war, wurde sie gemäß Auftrag Abschnitt O **direkt erweitert statt einer neuen Migration 15** – Migrationen 1–13 bleiben byteidentisch unverändert.
+
+**Migration 14 additiv erweitert** (11 neue Spalten auf `agent_hr_daily_proposals`, 11 neue Spalten auf `technology_radar_items`, eine neue Tabelle `agent_reliability_signals`, additive Erweiterung von `auth_audit_events` um fünf weitere neue Ereignistypen – gleiches Recreate-Muster wie zuvor, jetzt über eine erneut erweiterte `AUDIT_EVENT_TYPES_AT_MIGRATION_14`):
+
+| Tabelle/Erweiterung | Zweck | Wichtige Felder/Regeln |
+|---|---|---|
+| `agent_hr_daily_proposals` (+11 Spalten) | Rosenberg-/1%-/PDCA-/Nutzen-Felder je Vorschlag | `observation`, `businessMeaning`, `desiredOutcome`, `priorityReason`, `benefitArea` (`CHECK`-Enum), `priorityBucket` (`CHECK`-Enum `NOW`/`NEXT`/`LATER`/`WATCH`), `nextReviewDate`, `pdcaStage` (`CHECK`-Enum `PLAN`/`DO`/`CHECK`/`ACT`, `DEFAULT 'PLAN'`), `pdcaDecision` (`CHECK`-Enum `KEEP`/`ADJUST`/`REPEAT`/`DISCARD`, nullable), `pdcaStageChangedAt`, `reliabilitySignal` (`CHECK`-Enum, `DEFAULT 'NONE'`) – die übrigen aus Auftrag Abschnitt E benannten Felder (`onePercentStep`/`trainingExercise`/`successMetric`/`safetyBoundary`/`ownership`) sind bewusst **keine** eigenen Spalten, sondern zur Lesezeit identisch mit bereits bestehenden Spalten (`improvementSuggestion`/`concreteExercise`/`qualityCriterion`/`riskBoundary`/`agentId`); `communicationPattern` wird ausschließlich zur Lesezeit aus vorhandenen Feldern zusammengesetzt – keine unnötige doppelte Speicherung |
+| `technology_radar_items` (+11 Spalten) | Zukunfts-/Szenario-/Nutzenfelder je Radar-Eintrag | `signalType`, `signalDescription`, `timeHorizon` (`CHECK`-Enum `NOW`/`1_2_YEARS`/`3_5_YEARS`/`5_PLUS_YEARS`), `uncertaintyLevel` (`CHECK`-Enum `LOW`/`MEDIUM`/`HIGH`), `scenarioConservative`, `scenarioLikely`, `scenarioDynamic`, `strategicImpact`, `todayPreparationStep`, `benefitArea` (`CHECK`-Enum), `priorityBucket` (`CHECK`-Enum), kein Zugangstoken-/Provider-Secret-Feld |
+| `agent_reliability_signals` (neu) | lokal erfasste Hochzuverlässigkeitssignale | `agentId`, `relatedProposalId`/`relatedRadarItemId` (optional, `FOREIGN KEY ... ON DELETE RESTRICT`), `signalType` (`CHECK`-Enum `UNCERTAINTY`/`EARLY_WARNING`/`DEVIATION`/`NEAR_MISS`/sicherheitsrelevante Eskalation), `observation`, `possibleImpact`, `recommendedCheck`, `status`, `jamalDecision`, Zeitstempel; kein Sanktionsfeld, keine Autonomiereduktion in der Tabelle |
+
+`company-principles.js` selbst erhält **keine** eigene Tabelle – analog zur Organisationssicht wird das Leitlinienmodell vollständig aus der versionierten Codedatei gelesen, damit keine zweite Leitlinienwahrheit in der Datenbank entsteht.
+
+| Bereich | Regel |
+|---|---|
+| company-principles.js (neu) | reine, zustandslose Konstantendatei ohne I/O: sechs Führungsrahmen, zehn Grundwerte, elf Sicherheitsplanken als strukturierte Regelobjekte, Version `1.0` identisch zu `COMPANY_PRINCIPLES.md` |
+| agent-reliability-signal-service.js (neu) | Statusmodell/-übergänge für Reliability-Signale, Persistenz über `auth-db.js` (Migration 14 erweitert), Audit über `auth-audit.js`, keine automatische Sanktion/Autonomieänderung |
+| agent-hr-coaching-service.js (erweitert) | PDCA-Stufenlogik (`advanceHrPdcaStage`) mit Guards, Ableitung von `benefitArea`/`priorityBucket`/`nextReviewDate`, Rosenberg-Kommunikationsmuster |
+| technology-radar-service.js (erweitert) | Zukunfts-/Szenariofelder, `reviewForesightScenario`, Erhalt manuell gepflegter Felder bei erneutem Seeding |
+| agent-organization-service.js (erweitert) | Finance-/Controlling-`CAPABILITY_GAP`-Kennzeichnung, `ownerAgentId`/`contributorAgentIds` |
+| agent-leadership-routes.js (erweitert) | zwei neue read-only GET-Handler, vier neue Aktionen im bestehenden POST-Aktions-Prefix |
+| auth-db-migrations.js (Migration 14 erweitert) | 11+11 neue Spalten, eine neue Tabelle (siehe oben); additive Erweiterung von `auth_audit_events` um fünf weitere Ereignistypen; Migrationen 1–13 byteidentisch unverändert |
+| auth-db.js (erweitert) | neue CRUD-Funktionen für Reliability-Signale, erweiterte Lese-/Schreibfunktionen für Vorschlags-/Radar-Datensätze |
+| auth-audit.js (erweitert) | fünf neue Ereignistypen: `COMPANY_PRINCIPLES_REVIEWED`, `HR_PDCA_STAGE_CHANGED`, `RELIABILITY_SIGNAL_RECORDED`, `RELIABILITY_SIGNAL_REVIEWED`, `FORESIGHT_SCENARIO_REVIEWED` |
+
+Ergebnis: **79 GET, 52 POST, 8 GET-Präfixe, 6 POST-Präfixe, 30 statische Assets**, **2269** automatisierte Prüfpunkte in **80** Testdateien grün, `npm audit`: 0 Schwachstellen, `better-sqlite3@13.0.1` unverändert. **Keine Migration 15, Migrationen 1–13 unverändert. Lokal umgesetzt, noch nicht committed, gepusht oder deployt.**
+
 ## V7.4 – Nachtrag: authentifizierter Canva-Abnahmelauf ohne neue Migration
 
 Nach dem Commit/Push von Schritt 1 (unten, Migration 13) wurde ein authentifizierter Canva-Abnahmelauf außerhalb von Cursor durchgeführt (siehe `CANVA_AUTHENTICATED_RUN_ACCEPTANCE.md`). Dieser Nachtrag ist **keine neue Migration** und **keine Codeänderung** – das reale Ergebnis (Canva-Design-ID `DAHQkWMxdPo`) wurde manuell dokumentiert, nicht automatisiert in `jamal_canva_productions` zurückgeschrieben. Migration 13 bleibt unverändert die letzte Migration.

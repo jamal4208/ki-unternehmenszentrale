@@ -1252,6 +1252,341 @@ function listJamalCanvaProductionsForWorkItem(db, workItemId) {
     .all(workItemId);
 }
 
+// ---------------------------------------------------------------------------
+// V7.5 – Agentenorganisation, tägliches HR-Coaching und
+// Technologie-/Plugin-Marktradar (Migration 14, siehe
+// auth-db-migrations.js). Ausschließlich agent-hr-coaching-service.js/
+// technology-radar-service.js rufen diese Funktionen auf. Kein Aufruf
+// verändert eine tatsächliche Autonomiestufe – dafür gibt es in diesen
+// Tabellen ohnehin kein Feld (siehe Migrationskommentar).
+// ---------------------------------------------------------------------------
+
+// Erzeugt höchstens einen Lauf je Kalendertag (runDate UNIQUE, siehe
+// Migration 14). Ein zweiter Aufruf für denselben Tag löst den
+// SQLITE_CONSTRAINT-Fehler von better-sqlite3 aus; der Aufrufer
+// (agent-hr-coaching-service.js#getOrCreateTodaysRun) fängt dies ab und
+// lädt stattdessen den bereits bestehenden Lauf – kein stilles
+// Überschreiben, kein zweiter aktiver Vorschlagssatz pro Tag.
+function insertAgentHrDailyRun(db, input = {}) {
+  const record = { id: input.id, runDate: input.runDate, createdAt: input.createdAt };
+  db.prepare(`INSERT INTO agent_hr_daily_runs (id, runDate, createdAt) VALUES (@id, @runDate, @createdAt)`).run(record);
+  return getAgentHrDailyRunById(db, record.id);
+}
+
+function getAgentHrDailyRunById(db, id) {
+  return db.prepare("SELECT * FROM agent_hr_daily_runs WHERE id = ?").get(id) || null;
+}
+
+function getAgentHrDailyRunByDate(db, runDate) {
+  return db.prepare("SELECT * FROM agent_hr_daily_runs WHERE runDate = ?").get(runDate) || null;
+}
+
+// Legt in EINER Transaktion genau 25 Vorschlagszeilen für einen Lauf an
+// (UNIQUE(runId, agentId), siehe Migration 14, verhindert strukturell
+// mehr als einen Vorschlag je Agent und Lauf). Wird ausschließlich beim
+// erstmaligen Anlegen eines Laufs aufgerufen – niemals zum Aktualisieren
+// bestehender Vorschläge (dafür siehe updateAgentHrDailyProposalReview).
+function insertAgentHrDailyProposalsBatch(db, proposals) {
+  const insert = db.prepare(`
+    INSERT INTO agent_hr_daily_proposals
+      (id, runId, agentId, runDate, improvementSuggestion, trainingGoal, concreteExercise, qualityCriterion,
+       possibleAutonomyExpansion, riskBoundary, requiredJamalDecision, hrRecommendation, reasoning, status,
+       jamalNote, createdAt, reviewedAt, observation, businessMeaning, desiredOutcome, priorityReason,
+       benefitArea, priorityBucket, nextReviewDate, pdcaStage, pdcaDecision, pdcaStageChangedAt, reliabilitySignal)
+     VALUES
+      (@id, @runId, @agentId, @runDate, @improvementSuggestion, @trainingGoal, @concreteExercise, @qualityCriterion,
+       @possibleAutonomyExpansion, @riskBoundary, @requiredJamalDecision, @hrRecommendation, @reasoning, @status,
+       @jamalNote, @createdAt, @reviewedAt, @observation, @businessMeaning, @desiredOutcome, @priorityReason,
+       @benefitArea, @priorityBucket, @nextReviewDate, @pdcaStage, @pdcaDecision, @pdcaStageChangedAt, @reliabilitySignal)
+  `);
+  const insertAll = db.transaction((rows) => {
+    rows.forEach((row) =>
+      insert.run({
+        jamalNote: null,
+        reviewedAt: null,
+        pdcaStage: "PLAN",
+        pdcaDecision: null,
+        pdcaStageChangedAt: null,
+        reliabilitySignal: "NONE",
+        ...row,
+      }),
+    );
+  });
+  insertAll(proposals);
+  return listAgentHrDailyProposalsForRun(db, proposals[0].runId);
+}
+
+function listAgentHrDailyProposalsForRun(db, runId) {
+  return db.prepare("SELECT * FROM agent_hr_daily_proposals WHERE runId = ? ORDER BY agentId ASC").all(runId);
+}
+
+function getAgentHrDailyProposalById(db, id) {
+  return db.prepare("SELECT * FROM agent_hr_daily_proposals WHERE id = ?").get(id) || null;
+}
+
+// Aktualisiert ausschließlich die Prüffelder einer bestehenden Vorschlags-
+// zeile (status/jamalNote/reviewedAt) – die vom deterministischen Lauf
+// erzeugten Inhaltsfelder (improvementSuggestion, trainingGoal, ...)
+// bleiben unverändert (Auftrag Abschnitt D: "bestehende Vorschläge nicht
+// überschreiben").
+function updateAgentHrDailyProposalReview(db, input = {}) {
+  db.prepare(
+    `UPDATE agent_hr_daily_proposals SET status = @status, jamalNote = @jamalNote, reviewedAt = @reviewedAt WHERE id = @id`,
+  ).run({
+    id: input.id,
+    status: input.status,
+    jamalNote: input.jamalNote ?? null,
+    reviewedAt: input.reviewedAt,
+  });
+  return getAgentHrDailyProposalById(db, input.id);
+}
+
+// Unternehmensleitlinien V1.0 (Auftrag Abschnitt G) – aktualisiert
+// ausschließlich pdcaStage/pdcaDecision/pdcaStageChangedAt einer bestehenden
+// Vorschlagszeile. Kein Aufruf verändert status/hrRecommendation oder einen
+// tatsächlichen Autonomierahmen (siehe agent-hr-coaching-service.js#
+// advanceHrPdcaStage, das jeden Übergang vor diesem Aufruf validiert).
+function updateAgentHrDailyProposalPdcaStage(db, input = {}) {
+  db.prepare(
+    `UPDATE agent_hr_daily_proposals SET pdcaStage = @pdcaStage, pdcaDecision = @pdcaDecision, pdcaStageChangedAt = @pdcaStageChangedAt WHERE id = @id`,
+  ).run({
+    id: input.id,
+    pdcaStage: input.pdcaStage,
+    pdcaDecision: input.pdcaDecision ?? null,
+    pdcaStageChangedAt: input.pdcaStageChangedAt,
+  });
+  return getAgentHrDailyProposalById(db, input.id);
+}
+
+// Radar-Einträge: "Anlegen" und "Aktualisieren" teilen sich bewusst
+// dieselbe Upsert-Funktion (Auftrag Abschnitt J: "Radar-Eintrag lokal
+// anlegen/aktualisieren" ist EINE Fähigkeit) – der Aufrufer entscheidet
+// anhand einer übergebenen id, ob eine bestehende Zeile aktualisiert oder
+// eine neue angelegt wird (siehe technology-radar-service.js#upsertRadarItem).
+function upsertTechnologyRadarItem(db, input = {}) {
+  const record = {
+    id: input.id,
+    name: input.name,
+    provider: input.provider,
+    category: input.category,
+    type: input.type,
+    shortDescription: input.shortDescription,
+    possibleAgentsJson: input.possibleAgentsJson,
+    possibleBusinessBenefit: input.possibleBusinessBenefit,
+    maturityLevel: input.maturityLevel,
+    securityRisk: input.securityRisk,
+    privacyRisk: input.privacyRisk,
+    costClass: input.costClass,
+    integrationEffort: input.integrationEffort,
+    vendorLockInRisk: input.vendorLockInRisk,
+    writeAccessRequired: input.writeAccessRequired ? 1 : 0,
+    humanApprovalRequired: input.humanApprovalRequired ? 1 : 0,
+    recommendation: input.recommendation,
+    reasoning: input.reasoning,
+    lastReviewedAt: input.lastReviewedAt ?? null,
+    nextReviewAt: input.nextReviewAt ?? null,
+    sourceNote: input.sourceNote ?? null,
+    status: input.status,
+    seedToolId: input.seedToolId ?? null,
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
+    signalType: input.signalType || "OTHER",
+    signalDescription: input.signalDescription,
+    timeHorizon: input.timeHorizon || "NOW",
+    uncertaintyLevel: input.uncertaintyLevel || "MEDIUM",
+    scenarioConservative: input.scenarioConservative,
+    scenarioLikely: input.scenarioLikely,
+    scenarioDynamic: input.scenarioDynamic,
+    strategicImpact: input.strategicImpact,
+    todayPreparationStep: input.todayPreparationStep,
+    benefitArea: input.benefitArea,
+    priorityBucket: input.priorityBucket || "WATCH",
+  };
+  db.prepare(
+    `INSERT INTO technology_radar_items
+      (id, name, provider, category, type, shortDescription, possibleAgentsJson, possibleBusinessBenefit,
+       maturityLevel, securityRisk, privacyRisk, costClass, integrationEffort, vendorLockInRisk,
+       writeAccessRequired, humanApprovalRequired, recommendation, reasoning, lastReviewedAt, nextReviewAt,
+       sourceNote, status, seedToolId, createdAt, updatedAt, signalType, signalDescription, timeHorizon,
+       uncertaintyLevel, scenarioConservative, scenarioLikely, scenarioDynamic, strategicImpact,
+       todayPreparationStep, benefitArea, priorityBucket)
+     VALUES
+      (@id, @name, @provider, @category, @type, @shortDescription, @possibleAgentsJson, @possibleBusinessBenefit,
+       @maturityLevel, @securityRisk, @privacyRisk, @costClass, @integrationEffort, @vendorLockInRisk,
+       @writeAccessRequired, @humanApprovalRequired, @recommendation, @reasoning, @lastReviewedAt, @nextReviewAt,
+       @sourceNote, @status, @seedToolId, @createdAt, @updatedAt, @signalType, @signalDescription, @timeHorizon,
+       @uncertaintyLevel, @scenarioConservative, @scenarioLikely, @scenarioDynamic, @strategicImpact,
+       @todayPreparationStep, @benefitArea, @priorityBucket)
+     ON CONFLICT(id) DO UPDATE SET
+       name = excluded.name,
+       provider = excluded.provider,
+       category = excluded.category,
+       type = excluded.type,
+       shortDescription = excluded.shortDescription,
+       possibleAgentsJson = excluded.possibleAgentsJson,
+       possibleBusinessBenefit = excluded.possibleBusinessBenefit,
+       maturityLevel = excluded.maturityLevel,
+       securityRisk = excluded.securityRisk,
+       privacyRisk = excluded.privacyRisk,
+       costClass = excluded.costClass,
+       integrationEffort = excluded.integrationEffort,
+       vendorLockInRisk = excluded.vendorLockInRisk,
+       writeAccessRequired = excluded.writeAccessRequired,
+       humanApprovalRequired = excluded.humanApprovalRequired,
+       recommendation = excluded.recommendation,
+       reasoning = excluded.reasoning,
+       lastReviewedAt = excluded.lastReviewedAt,
+       nextReviewAt = excluded.nextReviewAt,
+       sourceNote = excluded.sourceNote,
+       status = excluded.status,
+       updatedAt = excluded.updatedAt,
+       signalType = excluded.signalType,
+       signalDescription = excluded.signalDescription,
+       timeHorizon = excluded.timeHorizon,
+       uncertaintyLevel = excluded.uncertaintyLevel,
+       scenarioConservative = excluded.scenarioConservative,
+       scenarioLikely = excluded.scenarioLikely,
+       scenarioDynamic = excluded.scenarioDynamic,
+       strategicImpact = excluded.strategicImpact,
+       todayPreparationStep = excluded.todayPreparationStep,
+       benefitArea = excluded.benefitArea,
+       priorityBucket = excluded.priorityBucket`,
+  ).run(record);
+  return getTechnologyRadarItemById(db, record.id);
+}
+
+function getTechnologyRadarItemById(db, id) {
+  return db.prepare("SELECT * FROM technology_radar_items WHERE id = ?").get(id) || null;
+}
+
+function getTechnologyRadarItemBySeedToolId(db, seedToolId) {
+  return db.prepare("SELECT * FROM technology_radar_items WHERE seedToolId = ?").get(seedToolId) || null;
+}
+
+function listTechnologyRadarItems(db) {
+  return db.prepare("SELECT * FROM technology_radar_items ORDER BY name ASC").all();
+}
+
+function upsertAgentTechnologyFit(db, input = {}) {
+  const record = {
+    id: input.id,
+    agentId: input.agentId,
+    radarItemId: input.radarItemId,
+    benefit: input.benefit,
+    concreteUseCase: input.concreteUseCase,
+    requiredPermissions: input.requiredPermissions,
+    securityBoundary: input.securityBoundary,
+    testPrerequisite: input.testPrerequisite,
+    recommendation: input.recommendation,
+    priority: input.priority,
+    status: input.status,
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
+  };
+  db.prepare(
+    `INSERT INTO agent_technology_fit
+      (id, agentId, radarItemId, benefit, concreteUseCase, requiredPermissions, securityBoundary, testPrerequisite,
+       recommendation, priority, status, createdAt, updatedAt)
+     VALUES
+      (@id, @agentId, @radarItemId, @benefit, @concreteUseCase, @requiredPermissions, @securityBoundary, @testPrerequisite,
+       @recommendation, @priority, @status, @createdAt, @updatedAt)
+     ON CONFLICT(agentId, radarItemId) DO UPDATE SET
+       benefit = excluded.benefit,
+       concreteUseCase = excluded.concreteUseCase,
+       requiredPermissions = excluded.requiredPermissions,
+       securityBoundary = excluded.securityBoundary,
+       testPrerequisite = excluded.testPrerequisite,
+       recommendation = excluded.recommendation,
+       priority = excluded.priority,
+       status = excluded.status,
+       updatedAt = excluded.updatedAt`,
+  ).run(record);
+  return getAgentTechnologyFitById(db, record.id) || getAgentTechnologyFitByPair(db, record.agentId, record.radarItemId);
+}
+
+function getAgentTechnologyFitById(db, id) {
+  return db.prepare("SELECT * FROM agent_technology_fit WHERE id = ?").get(id) || null;
+}
+
+function getAgentTechnologyFitByPair(db, agentId, radarItemId) {
+  return db.prepare("SELECT * FROM agent_technology_fit WHERE agentId = ? AND radarItemId = ?").get(agentId, radarItemId) || null;
+}
+
+function listAgentTechnologyFit(db, filter = {}) {
+  if (filter.agentId) {
+    return db.prepare("SELECT * FROM agent_technology_fit WHERE agentId = ? ORDER BY priority DESC, createdAt ASC").all(filter.agentId);
+  }
+  if (filter.radarItemId) {
+    return db
+      .prepare("SELECT * FROM agent_technology_fit WHERE radarItemId = ? ORDER BY priority DESC, createdAt ASC")
+      .all(filter.radarItemId);
+  }
+  return db.prepare("SELECT * FROM agent_technology_fit ORDER BY priority DESC, createdAt ASC").all();
+}
+
+// ---------------------------------------------------------------------------
+// Unternehmensleitlinien V1.0 (Auftrag Abschnitt H) – Hochzuverlässigkeits-
+// signale. Ausschließlich agent-reliability-signal-service.js ruft diese
+// Funktionen auf. Kein Aufruf verändert eine Autonomiestufe oder löst eine
+// Sanktion aus (dafür gibt es in dieser Tabelle ohnehin kein Feld).
+// ---------------------------------------------------------------------------
+
+function insertAgentReliabilitySignal(db, input = {}) {
+  const record = {
+    id: input.id,
+    agentId: input.agentId,
+    relatedHrProposalId: input.relatedHrProposalId ?? null,
+    relatedRadarItemId: input.relatedRadarItemId ?? null,
+    signalType: input.signalType,
+    observation: input.observation,
+    possibleImpact: input.possibleImpact,
+    recommendedReview: input.recommendedReview,
+    status: input.status,
+    jamalDecisionNote: input.jamalDecisionNote ?? null,
+    createdAt: input.createdAt,
+    reviewedAt: input.reviewedAt ?? null,
+  };
+  db.prepare(
+    `INSERT INTO agent_reliability_signals
+      (id, agentId, relatedHrProposalId, relatedRadarItemId, signalType, observation, possibleImpact,
+       recommendedReview, status, jamalDecisionNote, createdAt, reviewedAt)
+     VALUES
+      (@id, @agentId, @relatedHrProposalId, @relatedRadarItemId, @signalType, @observation, @possibleImpact,
+       @recommendedReview, @status, @jamalDecisionNote, @createdAt, @reviewedAt)`,
+  ).run(record);
+  return getAgentReliabilitySignalById(db, record.id);
+}
+
+function getAgentReliabilitySignalById(db, id) {
+  return db.prepare("SELECT * FROM agent_reliability_signals WHERE id = ?").get(id) || null;
+}
+
+function listAgentReliabilitySignals(db, filter = {}) {
+  if (filter.agentId) {
+    return db
+      .prepare("SELECT * FROM agent_reliability_signals WHERE agentId = ? ORDER BY createdAt DESC")
+      .all(filter.agentId);
+  }
+  if (filter.status) {
+    return db
+      .prepare("SELECT * FROM agent_reliability_signals WHERE status = ? ORDER BY createdAt DESC")
+      .all(filter.status);
+  }
+  return db.prepare("SELECT * FROM agent_reliability_signals ORDER BY createdAt DESC").all();
+}
+
+function updateAgentReliabilitySignalReview(db, input = {}) {
+  db.prepare(
+    `UPDATE agent_reliability_signals SET status = @status, jamalDecisionNote = @jamalDecisionNote, reviewedAt = @reviewedAt WHERE id = @id`,
+  ).run({
+    id: input.id,
+    status: input.status,
+    jamalDecisionNote: input.jamalDecisionNote ?? null,
+    reviewedAt: input.reviewedAt,
+  });
+  return getAgentReliabilitySignalById(db, input.id);
+}
+
 module.exports = {
   AuthDatabaseStartupError,
   resolveAuthDbPaths,
@@ -1347,4 +1682,26 @@ module.exports = {
   getJamalCanvaProductionById,
   getLatestJamalCanvaProductionForWorkItem,
   listJamalCanvaProductionsForWorkItem,
+  // V7.5 Agentenorganisation/HR-Coaching/Technologie-Radar
+  insertAgentHrDailyRun,
+  getAgentHrDailyRunById,
+  getAgentHrDailyRunByDate,
+  insertAgentHrDailyProposalsBatch,
+  listAgentHrDailyProposalsForRun,
+  getAgentHrDailyProposalById,
+  updateAgentHrDailyProposalReview,
+  updateAgentHrDailyProposalPdcaStage,
+  upsertTechnologyRadarItem,
+  getTechnologyRadarItemById,
+  getTechnologyRadarItemBySeedToolId,
+  listTechnologyRadarItems,
+  upsertAgentTechnologyFit,
+  getAgentTechnologyFitById,
+  getAgentTechnologyFitByPair,
+  listAgentTechnologyFit,
+  // Unternehmensleitlinien V1.0 – Hochzuverlässigkeitssignale
+  insertAgentReliabilitySignal,
+  getAgentReliabilitySignalById,
+  listAgentReliabilitySignals,
+  updateAgentReliabilitySignalReview,
 };
