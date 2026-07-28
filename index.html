@@ -177,11 +177,19 @@
             einen Commit, einen Push oder ein Deployment aus. Vollständig
             von pilot-work-order-ui.js gerendert (gleiches Grundmuster wie
             #health-reference-run-card).
+
+            Phase 5 – Pilot-Auftragszentrale: #pilot-work-order-list-output
+            ergänzt additiv die Auftragsauswahl/-anlage (mehrere,
+            voneinander isolierte Pilotaufträge); #pilot-work-order-output
+            bleibt unverändert der auftragsbezogene Detailbereich des
+            jeweils ausgewählten Auftrags (standardmäßig der kanonische
+            Auftrag, siehe pilot-work-order-ui.js#Kopfkommentar).
           -->
           <section class="pilot-work-order-card" id="pilot-work-order-card" aria-labelledby="pilot-work-order-title">
             <div class="pilot-work-order-head-row">
               <p class="eyebrow" id="pilot-work-order-title">Pilotauftrag</p>
             </div>
+            <div id="pilot-work-order-list-output" class="pilot-work-order-list-wrap" aria-live="polite">Lade Pilotaufträge…</div>
             <div id="pilot-work-order-output" aria-live="polite">Lade Pilotauftrag…</div>
             <details class="pilot-work-order-details">
               <summary>Agentenzuordnung, Qualitätskriterien, Werkzeuge, Freigaben, Rollenübergaben</summary>

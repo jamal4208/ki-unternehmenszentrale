@@ -9841,3 +9841,104 @@ details.local-agent-assignment-details > summary {
   margin: 0;
   padding-left: 18px;
 }
+
+/* Phase 5 – Pilot-Auftragszentrale im Cockpit: additive Auftragsauswahl/
+   -anlage und Konfliktanzeige, gleicher visueller Grundton wie die
+   bestehende Pilotauftrags-Karte, kein Umbau bestehender Klassen. */
+.pilot-work-order-list-wrap {
+  display: grid;
+  gap: 10px;
+}
+
+.pilot-order-list {
+  display: grid;
+  gap: 8px;
+}
+
+.pilot-order-row {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--card-border-soft, var(--line));
+  border-radius: var(--radius-card, var(--radius));
+  background: var(--card-bg, #fff);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.pilot-order-row.is-selected {
+  border-color: var(--accent, #2f6f4f);
+  box-shadow: 0 0 0 1px var(--accent, #2f6f4f);
+}
+
+.pilot-order-row-title {
+  font-weight: var(--font-medium);
+}
+
+.pilot-order-canonical-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--card-bg-muted);
+  font-size: var(--text-xs, 12px);
+  font-weight: var(--font-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.pilot-order-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: var(--text-xs, 12px);
+  color: var(--muted);
+}
+
+.pilot-order-row-id {
+  font-family: var(--font-mono, monospace);
+}
+
+.pilot-order-create {
+  display: grid;
+  gap: 10px;
+}
+
+.pilot-order-create-form {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--card-border-soft, var(--line));
+  border-radius: var(--radius-card, var(--radius));
+  background: var(--card-bg-muted);
+}
+
+.pilot-order-create-form label {
+  font-size: var(--text-xs, 12px);
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.pilot-order-create-form input,
+.pilot-order-create-form textarea {
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--card-border-soft, var(--line));
+  border-radius: var(--radius, 8px);
+}
+
+.pilot-work-order-conflict {
+  display: grid;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--red, #b3441f);
+  border-radius: var(--radius-card, var(--radius));
+  background: var(--card-bg, #fff);
+}
+
+.pilot-work-order-conflict p {
+  margin: 0;
+  color: var(--red, #b3441f);
+}
