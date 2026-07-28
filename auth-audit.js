@@ -191,6 +191,21 @@ const EVENT_TYPES = Object.freeze([
   // Änderung angefordert, blockiert, abgebrochen) – zusätzlich zu den
   // bereits bestehenden, spezifischeren Ereignistypen.
   "HEALTH_REFERENCE_WORK_PACKAGE_STATUS_CHANGED",
+  // KI-Unternehmenszentrale-Pilotbetrieb – erster produktiver
+  // Drei-Agenten-Pilot (Auftrag "Pilotstruktur umsetzen"). Muss exakt der
+  // in auth-db-migrations.js#AUDIT_EVENT_TYPES_AT_MIGRATION_18 erweiterten
+  // CHECK-Aufzählung (Migration 18) entsprechen. Ausschließlich Jamal
+  // selbst (OWNER) löst diese acht Ereignisse aus; keines davon ist eine
+  // externe Aktion, kein Commit/Push/Deployment, keine automatische
+  // Freigabe durch einen Agenten.
+  "PILOT_WORK_ORDER_CREATED",
+  "PILOT_WORK_ORDER_STATUS_CHANGED",
+  "PILOT_HANDOFF_SUBMITTED",
+  "PILOT_HANDOFF_ACCEPTED_BY_PM_FILTER",
+  "PILOT_HANDOFF_REJECTED_BY_PM_FILTER",
+  "PILOT_HANDOFF_BLOCKED_BY_FORBIDDEN_ACTION",
+  "PILOT_EXECUTION_APPROVAL_RECORDED",
+  "PILOT_COMPLETION_APPROVAL_RECORDED",
 ]);
 
 const RESULTS = Object.freeze(["OK", "DENIED", "ERROR"]);
@@ -317,6 +332,16 @@ const METADATA_ALLOWLIST = Object.freeze([
   // Gesundheitsdaten.
   "previousStatus",
   "nextStatus",
+  // KI-Unternehmenszentrale-Pilotbetrieb: "pilotOrderId" (feste kanonische
+  // Pilotauftrags-ID), "pilotHandoffId" (interne Übergabe-ID), "pilotRole"
+  // (einer der drei festen Pilotrollen-Codes) und "pmFilterStatus" (einer
+  // der drei festen Filterergebnis-Codes) – ausschließlich
+  // Steuerungsmetadaten des Pilotlaufs selbst, niemals Auftrags- oder
+  // Ergebnistext, kein Kundendatum.
+  "pilotOrderId",
+  "pilotHandoffId",
+  "pilotRole",
+  "pmFilterStatus",
 ]);
 
 // Verbotene Inhalte, unabhängig vom Feldnamen (Verteidigung in der Tiefe:

@@ -361,6 +361,11 @@ const GET_POLICIES = [
   // einzige read-only Git-Zugriff (siehe health-reference-work-run-routes.js
   // #Kopfkommentar).
   ownerGet("/api/health-reference/status", "Health-Referenzlauf Kompaktübersicht und Details"),
+  // KI-Unternehmenszentrale-Pilotbetrieb – erster produktiver
+  // Drei-Agenten-Pilot: ein einziger lesender Endpunkt für den kanonischen
+  // Pilotauftrag (Auftrag, Team, Rollenübergaben, offene Entscheidung,
+  // Risiken/Grenzen, nächster Schritt).
+  ownerGet("/api/pilot-work-order/status", "Pilotauftrag Kompaktübersicht und Details"),
 ];
 
 const POST_POLICIES = [
@@ -493,6 +498,13 @@ const PREFIX_POLICIES = [
   // eine echte Health-Ausführung aus (siehe
   // health-reference-work-run-routes.js#Kopfkommentar).
   ownerPostPrefix("/api/health-reference/", "Health-Referenzlauf Aktion (Prompt-Entwurf/Freigabe/Ergebnis/QA, keine echte Health-Ausführung)"),
+  // KI-Unternehmenszentrale-Pilotbetrieb – erster produktiver
+  // Drei-Agenten-Pilot: ein einziger Prefix für alle schreibenden, rein
+  // vorbereitenden Aktionen (Status vorlegen, Freigabe dokumentieren,
+  // Ausführung starten, Rollenübergabe einreichen, Abschlussprüfung,
+  // Abnahme, Rückgabe, Blockierung). Keine Aktion führt eine externe
+  // Aktion aus, committet, pusht oder deployt.
+  ownerPostPrefix("/api/pilot-work-order/", "Pilotauftrag Aktion (Status/Rollenübergabe/Freigabe, keine externe Aktion)"),
 ];
 
 const STATIC_POLICIES = [
@@ -571,6 +583,11 @@ const STATIC_POLICIES = [
   // Health-Referenzlauf-Karte im Cockpit (gleiches Muster wie
   // office-finance-ui.js).
   staticOwnerOnly("/health-reference-work-run-ui.js", "Chef-UI-Skript Health-Referenzlauf-Karte"),
+  // KI-Unternehmenszentrale-Pilotbetrieb – erster produktiver
+  // Drei-Agenten-Pilot: eigenständiges, additives Chef-UI-Skript für die
+  // kompakte Pilotauftrags-Karte im Cockpit (gleiches Muster wie
+  // health-reference-work-run-ui.js).
+  staticOwnerOnly("/pilot-work-order-ui.js", "Chef-UI-Skript Pilotauftrags-Karte"),
 ];
 
 const ALL_POLICIES = Object.freeze([

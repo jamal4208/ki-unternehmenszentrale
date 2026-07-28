@@ -265,10 +265,16 @@ async function run() {
   // exakte POST-Route (alle schreibenden Health-Referenzlauf-Aktionen
   // laufen über einen neuen POST-Prefix /api/health-reference/), keine
   // neue GET-Prefix-Route und ein neues statisches Asset
-  // (health-reference-work-run-ui.js).
-  await check("Routenzahlen in Policy und Server sind identisch (89/52/8/8/32)", () => {
-    assert.strictEqual(server.getRoutes.size, 89);
-    assert.strictEqual(routeAccessPolicy.GET_POLICIES.length, 89);
+  // (health-reference-work-run-ui.js). KI-Unternehmenszentrale-Pilotbetrieb
+  // (erster produktiver Drei-Agenten-Pilot) ergänzt eine neue lesende
+  // GET-Route (/api/pilot-work-order/status), keine neue exakte POST-Route
+  // (alle schreibenden Pilotauftrags-Aktionen laufen über einen neuen
+  // POST-Prefix /api/pilot-work-order/), keine neue GET-Prefix-Route, einen
+  // neuen POST-Prefix und ein neues statisches Asset
+  // (pilot-work-order-ui.js).
+  await check("Routenzahlen in Policy und Server sind identisch (90/52/8/9/33)", () => {
+    assert.strictEqual(server.getRoutes.size, 90);
+    assert.strictEqual(routeAccessPolicy.GET_POLICIES.length, 90);
     assert.strictEqual(server.postRoutes.size, 52);
     assert.strictEqual(routeAccessPolicy.POST_POLICIES.length, 52);
     assert.strictEqual(server.routePrefixHandlers.length, 8);
@@ -276,13 +282,13 @@ async function run() {
       routeAccessPolicy.PREFIX_POLICIES.filter((entry) => entry.method === "GET").length,
       8,
     );
-    assert.strictEqual(server.postRoutePrefixHandlers.length, 8);
+    assert.strictEqual(server.postRoutePrefixHandlers.length, 9);
     assert.strictEqual(
       routeAccessPolicy.PREFIX_POLICIES.filter((entry) => entry.method === "POST").length,
-      8,
+      9,
     );
-    assert.strictEqual(server.staticAssets.size, 32);
-    assert.strictEqual(routeAccessPolicy.STATIC_POLICIES.length, 32);
+    assert.strictEqual(server.staticAssets.size, 33);
+    assert.strictEqual(routeAccessPolicy.STATIC_POLICIES.length, 33);
   });
 
   // -------------------------------------------------------------------

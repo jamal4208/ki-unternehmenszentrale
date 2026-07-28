@@ -9718,3 +9718,126 @@ details.local-agent-assignment-details > summary {
   margin: 0;
   padding-left: 18px;
 }
+
+/* KI-Unternehmenszentrale-Pilotbetrieb – erster produktiver
+   Drei-Agenten-Pilot: gleiches visuelles Grundmuster wie
+   .health-reference-run-card, bewusst eigener, additiver Klassenraum ohne
+   Umbau bestehender Karten. */
+.pilot-work-order-card {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 20px;
+  padding: clamp(18px, 3vw, 28px);
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: 22px;
+  background: var(--card-bg, #fff);
+  box-shadow: 0 16px 40px rgba(50, 39, 25, 0.07);
+}
+
+.pilot-work-order-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pilot-work-order-head h3 {
+  margin: 4px 0 8px;
+  font-size: 1.15rem;
+  letter-spacing: -0.01em;
+}
+
+.pilot-work-order-head p {
+  margin: 0 0 4px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.pilot-work-order-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 16px;
+  margin: 0;
+}
+
+.pilot-work-order-facts div {
+  display: grid;
+  gap: 2px;
+}
+
+.pilot-work-order-facts dt {
+  font-size: var(--text-xs, 12px);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.pilot-work-order-facts dd {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--ink);
+}
+
+.pilot-work-order-primary-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--card-border-soft, var(--line));
+  border-radius: var(--radius-card, var(--radius));
+  background: var(--card-bg-muted);
+}
+
+.pilot-work-order-primary-action p {
+  margin: 0;
+  color: var(--ink);
+}
+
+.pilot-work-order-action-error {
+  margin: 0;
+  color: var(--red);
+  font-size: var(--text-sm);
+}
+
+.pilot-work-order-disclaimer {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-xs, 12px);
+  font-style: italic;
+}
+
+.pilot-work-order-details summary {
+  cursor: pointer;
+  font-weight: var(--font-medium);
+  padding: 6px 0;
+  color: var(--muted);
+}
+
+.pilot-work-order-details[open] summary {
+  color: var(--ink);
+}
+
+#pilot-work-order-diagnostics-output {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--card-border-soft, var(--line));
+  border-radius: var(--radius-card, var(--radius));
+  background: var(--card-bg-muted);
+  font-size: var(--text-sm);
+}
+
+#pilot-work-order-diagnostics-output h4 {
+  margin: 8px 0 4px;
+}
+
+#pilot-work-order-diagnostics-output h4:first-child {
+  margin-top: 0;
+}
+
+#pilot-work-order-diagnostics-output ul,
+#pilot-work-order-diagnostics-output ol {
+  margin: 0;
+  padding-left: 18px;
+}

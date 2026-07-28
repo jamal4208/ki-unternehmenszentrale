@@ -94,6 +94,12 @@ const agentLeadershipRoutesModule = require("./agent-leadership-routes");
 // office-work-service.js/finance-handoff-service.js.
 const officeFinanceRoutesModule = require("./office-finance-routes");
 const healthReferenceWorkRunRoutesModule = require("./health-reference-work-run-routes");
+// KI-Unternehmenszentrale-Pilotbetrieb – erster produktiver Drei-Agenten-
+// Pilot (Projektmanager-/Recherche-Analyse-/Dokumentations-Agent):
+// eigenständiges, additives Routenmodul (gleiches Muster wie
+// health-reference-work-run-routes.js). Reine Fachlogik lebt in
+// pilot-work-order-service.js.
+const pilotWorkOrderRoutesModule = require("./pilot-work-order-routes");
 
 const rootDir = __dirname;
 const staticAssets = new Map([
@@ -130,6 +136,11 @@ const staticAssets = new Map([
   // Skript für die kompakte Health-Referenzlauf-Karte (gleiches Muster wie
   // office-finance-ui.js).
   ["/health-reference-work-run-ui.js", "health-reference-work-run-ui.js"],
+  // KI-Unternehmenszentrale-Pilotbetrieb – erster produktiver
+  // Drei-Agenten-Pilot: eigenständiges, additives Chef-UI-Skript für die
+  // kompakte Pilotauftrags-Karte (gleiches Muster wie
+  // health-reference-work-run-ui.js).
+  ["/pilot-work-order-ui.js", "pilot-work-order-ui.js"],
   ["/app.js", "app.js"],
   ["/styles.css", "styles.css"],
   ["/v71-ui.js", "v71-ui.js"],
@@ -23686,6 +23697,27 @@ function handleHealthReferenceStatus(res) {
   healthReferenceWorkRunRoutesModule.handleRunStatus(res, { getDb: ensureAuthDbReady, sendJson });
 }
 
+// KI-Unternehmenszentrale-Pilotbetrieb – erster produktiver Drei-Agenten-
+// Pilot: ein einziger lesender OWNER_ONLY-Endpunkt für die kompakte
+// Pilotauftrags-Karte. Reine Fachlogik lebt in
+// pilot-work-order-service.js (siehe pilot-work-order-routes.js#Kopfkommentar).
+function handlePilotWorkOrderStatus(res) {
+  pilotWorkOrderRoutesModule.handlePilotOverview(res, { getDb: ensureAuthDbReady, sendJson });
+}
+
+async function dispatchPilotWorkOrderActionPostPrefix(res, context, remainder) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert." });
+    return;
+  }
+  const actionName = typeof remainder === "string" ? remainder : "";
+  if (actionName.includes("/") || !pilotWorkOrderRoutesModule.isPilotAction(actionName)) {
+    sendJson(res, 404, { ok: false, message: "Nicht gefunden." });
+    return;
+  }
+  await pilotWorkOrderRoutesModule.dispatchPilotAction(res, context, { getDb: ensureAuthDbReady, sendJson }, actionName);
+}
+
 async function dispatchHealthReferenceActionPostPrefix(res, context, remainder) {
   if (!isExecutionRequestOriginAllowed(context.req)) {
     sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert." });
@@ -23936,6 +23968,9 @@ const getRoutes = buildRouteMap([
   // V7.6.3 – Health Upgrade Kompass als ersten echten Referenz-Arbeitslauf
   // verankern (Auftrag Abschnitt 11) – Ansicht "Health-Referenzlauf".
   ["/api/health-reference/status", (res) => handleHealthReferenceStatus(res)],
+  // KI-Unternehmenszentrale-Pilotbetrieb – erster produktiver
+  // Drei-Agenten-Pilot – Ansicht "Pilotauftrag".
+  ["/api/pilot-work-order/status", (res) => handlePilotWorkOrderStatus(res)],
   ["/api/office-finance/capabilities", (res, context) => handleOfficeFinanceCapabilities(res, context)],
   ["/api/office-finance/approval-matrix", (res) => handleOfficeFinanceApprovalMatrix(res)],
   ["/api/office-finance/work-items", (res, context) => handleOfficeFinanceWorkItems(res, context)],
@@ -24186,6 +24221,17 @@ const postRoutePrefixHandlers = [
     handler: (res, context) => {
       const remainder = decodeURIComponent(context.pathname.slice("/api/health-reference/".length));
       dispatchHealthReferenceActionPostPrefix(res, context, remainder);
+    },
+  },
+  {
+    // KI-Unternehmenszentrale-Pilotbetrieb – erster produktiver
+    // Drei-Agenten-Pilot – eine Aktion je Anfrage (POST .../:action, siehe
+    // PILOT_ACTIONS). Keine Aktion führt eine externe Aktion aus, committet,
+    // pusht oder deployt.
+    prefix: "/api/pilot-work-order/",
+    handler: (res, context) => {
+      const remainder = decodeURIComponent(context.pathname.slice("/api/pilot-work-order/".length));
+      dispatchPilotWorkOrderActionPostPrefix(res, context, remainder);
     },
   },
 ];

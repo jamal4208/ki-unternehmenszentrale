@@ -1933,6 +1933,88 @@ function listHealthReferenceResults(db, runId) {
   return db.prepare("SELECT * FROM health_reference_results WHERE runId = ? ORDER BY createdAt ASC").all(runId);
 }
 
+// ---------------------------------------------------------------------------
+// KI-Unternehmenszentrale-Pilotbetrieb – Drei-Agenten-Pilotauftrag (siehe
+// pilot-work-order-service.js#Kopfkommentar). Genau ein kanonischer
+// Pilotauftrag; Eindeutigkeit der festen id wird fachlich vom Service
+// sichergestellt (INSERT OR IGNORE hier zusätzlich defensiv).
+// ---------------------------------------------------------------------------
+function insertPilotWorkOrderIfMissing(db, input = {}) {
+  db.prepare(
+    `INSERT OR IGNORE INTO pilot_work_orders
+      (id, title, desiredOutcome, requestedBy, involvedAgentsJson, status, qualityCriteriaJson,
+       allowedToolsJson, forbiddenActionsJson, requiredApprovalsJson, timeframe, createdAt, updatedAt)
+     VALUES
+      (@id, @title, @desiredOutcome, @requestedBy, @involvedAgentsJson, @status, @qualityCriteriaJson,
+       @allowedToolsJson, @forbiddenActionsJson, @requiredApprovalsJson, @timeframe, @createdAt, @updatedAt)`,
+  ).run({
+    id: input.id,
+    title: input.title,
+    desiredOutcome: input.desiredOutcome,
+    requestedBy: input.requestedBy,
+    involvedAgentsJson: input.involvedAgentsJson,
+    status: input.status,
+    qualityCriteriaJson: input.qualityCriteriaJson,
+    allowedToolsJson: input.allowedToolsJson,
+    forbiddenActionsJson: input.forbiddenActionsJson,
+    requiredApprovalsJson: input.requiredApprovalsJson,
+    timeframe: input.timeframe,
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
+  });
+  return getPilotWorkOrderById(db, input.id);
+}
+
+function getPilotWorkOrderById(db, id) {
+  return db.prepare("SELECT * FROM pilot_work_orders WHERE id = ?").get(id) || null;
+}
+
+function updatePilotWorkOrderStatus(db, input = {}) {
+  db.prepare(`UPDATE pilot_work_orders SET status = @status, updatedAt = @updatedAt WHERE id = @id`).run({
+    id: input.id,
+    status: input.status,
+    updatedAt: input.updatedAt,
+  });
+  return getPilotWorkOrderById(db, input.id);
+}
+
+function insertPilotHandoff(db, input = {}) {
+  db.prepare(
+    `INSERT INTO pilot_handoffs
+      (id, pilotOrderId, sequence, fromPilotRole, toPilotRole, shortFinding, resultOrRecommendation,
+       basisUsed, riskOrLimit, nextStep, decisionNeeded, forbiddenActionOccurred, autonomyBoundaryRespected,
+       pmFilterStatus, pmFilterReasonsJson, createdAt)
+     VALUES
+      (@id, @pilotOrderId, @sequence, @fromPilotRole, @toPilotRole, @shortFinding, @resultOrRecommendation,
+       @basisUsed, @riskOrLimit, @nextStep, @decisionNeeded, @forbiddenActionOccurred, @autonomyBoundaryRespected,
+       @pmFilterStatus, @pmFilterReasonsJson, @createdAt)`,
+  ).run({
+    id: input.id,
+    pilotOrderId: input.pilotOrderId,
+    sequence: input.sequence,
+    fromPilotRole: input.fromPilotRole,
+    toPilotRole: input.toPilotRole,
+    shortFinding: input.shortFinding,
+    resultOrRecommendation: input.resultOrRecommendation,
+    basisUsed: input.basisUsed,
+    riskOrLimit: input.riskOrLimit,
+    nextStep: input.nextStep,
+    decisionNeeded: input.decisionNeeded ?? null,
+    forbiddenActionOccurred: input.forbiddenActionOccurred ? 1 : 0,
+    autonomyBoundaryRespected: input.autonomyBoundaryRespected === false ? 0 : 1,
+    pmFilterStatus: input.pmFilterStatus,
+    pmFilterReasonsJson: input.pmFilterReasonsJson ?? null,
+    createdAt: input.createdAt,
+  });
+  return db.prepare("SELECT * FROM pilot_handoffs WHERE id = ?").get(input.id) || null;
+}
+
+function listPilotHandoffs(db, pilotOrderId) {
+  return db
+    .prepare("SELECT * FROM pilot_handoffs WHERE pilotOrderId = ? ORDER BY sequence ASC, createdAt ASC")
+    .all(pilotOrderId);
+}
+
 module.exports = {
   AuthDatabaseStartupError,
   resolveAuthDbPaths,
@@ -2076,4 +2158,9 @@ module.exports = {
   listHealthReferenceApprovals,
   insertHealthReferenceResult,
   listHealthReferenceResults,
+  insertPilotWorkOrderIfMissing,
+  getPilotWorkOrderById,
+  updatePilotWorkOrderStatus,
+  insertPilotHandoff,
+  listPilotHandoffs,
 };

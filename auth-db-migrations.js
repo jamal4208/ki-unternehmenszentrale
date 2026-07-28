@@ -994,6 +994,42 @@ const AUDIT_EVENT_TYPES_AT_MIGRATION_17 = Object.freeze([
   "HEALTH_REFERENCE_WORK_PACKAGE_STATUS_CHANGED",
 ]);
 
+// KI-Unternehmenszentrale-Pilotbetrieb – erster produktiver Drei-Agenten-
+// Pilot (Projektmanager-/Recherche-Analyse-/Dokumentations-Agent). Genau
+// EIN kanonischer Pilotauftrag (gleiches Architekturmuster wie
+// health-reference-work-run-service.js: additive, eng begrenzte
+// Governance-Tabellen statt einer zweiten generischen Arbeitsauftrags-
+// Architektur). Siehe pilot-work-order-service.js#Kopfkommentar.
+const PILOT_WORK_ORDER_STATUS_VALUES = Object.freeze([
+  "DRAFT",
+  "READY_FOR_JAMAL_APPROVAL",
+  "APPROVED_FOR_EXECUTION",
+  "IN_EXECUTION",
+  "READY_FOR_REVIEW",
+  "COMPLETED",
+  "RETURNED",
+  "BLOCKED",
+]);
+
+const PILOT_ROLE_VALUES = Object.freeze(["PROJEKTMANAGER", "RECHERCHE_ANALYSE", "DOKUMENTATION"]);
+const PILOT_HANDOFF_FROM_VALUES = Object.freeze(["JAMAL", ...PILOT_ROLE_VALUES]);
+const PILOT_PM_FILTER_STATUS_VALUES = Object.freeze(["PENDING", "PASSED", "REJECTED"]);
+
+// Genau acht zusätzliche Ereignistypen, zusätzlich zur vollständigen,
+// bereits bestehenden AUDIT_EVENT_TYPES_AT_MIGRATION_17-Menge oben.
+// auth-audit.js#EVENT_TYPES muss exakt dieser Aufzählung entsprechen.
+const AUDIT_EVENT_TYPES_AT_MIGRATION_18 = Object.freeze([
+  ...AUDIT_EVENT_TYPES_AT_MIGRATION_17,
+  "PILOT_WORK_ORDER_CREATED",
+  "PILOT_WORK_ORDER_STATUS_CHANGED",
+  "PILOT_HANDOFF_SUBMITTED",
+  "PILOT_HANDOFF_ACCEPTED_BY_PM_FILTER",
+  "PILOT_HANDOFF_REJECTED_BY_PM_FILTER",
+  "PILOT_HANDOFF_BLOCKED_BY_FORBIDDEN_ACTION",
+  "PILOT_EXECUTION_APPROVAL_RECORDED",
+  "PILOT_COMPLETION_APPROVAL_RECORDED",
+]);
+
 function sqlEnum(values) {
   return values.map((value) => `'${value}'`).join(",");
 }
@@ -2336,6 +2372,86 @@ const MIGRATIONS = Object.freeze([
       CREATE INDEX idx_auth_audit_events_timestamp ON auth_audit_events(timestamp);
     `,
   }),
+  // KI-Unternehmenszentrale-Pilotbetrieb – erster produktiver Drei-Agenten-
+  // Pilot. Rein additiv gegenüber Migration 17: zwei neue Tabellen
+  // (pilot_work_orders, pilot_handoffs) plus die erneute
+  // Audit-Ereignistyp-Erweiterung (gleiches, bereits etabliertes
+  // Rename-Muster für die CHECK-Erweiterung von auth_audit_events).
+  // Migrationen 1–17 bleiben dabei byteidentisch unverändert. Dieses
+  // Modul ändert weder das kanonische 25-Agenten-Register noch den
+  // Health Upgrade Kompass.
+  Object.freeze({
+    version: 18,
+    name: "create_pilot_work_order_tables_and_widen_audit_event_types_v12",
+    sql: `
+      CREATE TABLE pilot_work_orders (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 200),
+        desiredOutcome TEXT NOT NULL CHECK (length(desiredOutcome) BETWEEN 1 AND 2000),
+        requestedBy TEXT NOT NULL CHECK (length(requestedBy) BETWEEN 1 AND 200),
+        involvedAgentsJson TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN (${sqlEnum(PILOT_WORK_ORDER_STATUS_VALUES)})),
+        qualityCriteriaJson TEXT NOT NULL,
+        allowedToolsJson TEXT NOT NULL,
+        forbiddenActionsJson TEXT NOT NULL,
+        requiredApprovalsJson TEXT NOT NULL,
+        timeframe TEXT NOT NULL CHECK (length(timeframe) BETWEEN 1 AND 500),
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      );
+
+      CREATE TABLE pilot_handoffs (
+        id TEXT PRIMARY KEY,
+        pilotOrderId TEXT NOT NULL REFERENCES pilot_work_orders(id) ON DELETE CASCADE,
+        sequence INTEGER NOT NULL CHECK (sequence >= 1),
+        fromPilotRole TEXT NOT NULL CHECK (fromPilotRole IN (${sqlEnum(PILOT_HANDOFF_FROM_VALUES)})),
+        toPilotRole TEXT NOT NULL CHECK (toPilotRole IN (${sqlEnum(PILOT_ROLE_VALUES)})),
+        shortFinding TEXT NOT NULL CHECK (length(shortFinding) BETWEEN 1 AND 1000),
+        resultOrRecommendation TEXT NOT NULL CHECK (length(resultOrRecommendation) BETWEEN 1 AND 4000),
+        basisUsed TEXT NOT NULL CHECK (length(basisUsed) BETWEEN 1 AND 2000),
+        riskOrLimit TEXT NOT NULL CHECK (length(riskOrLimit) BETWEEN 1 AND 2000),
+        nextStep TEXT NOT NULL CHECK (length(nextStep) BETWEEN 1 AND 1000),
+        decisionNeeded TEXT CHECK (decisionNeeded IS NULL OR length(decisionNeeded) <= 1000),
+        forbiddenActionOccurred INTEGER NOT NULL DEFAULT 0 CHECK (forbiddenActionOccurred IN (0,1)),
+        autonomyBoundaryRespected INTEGER NOT NULL DEFAULT 1 CHECK (autonomyBoundaryRespected IN (0,1)),
+        pmFilterStatus TEXT NOT NULL DEFAULT 'PENDING' CHECK (pmFilterStatus IN (${sqlEnum(PILOT_PM_FILTER_STATUS_VALUES)})),
+        pmFilterReasonsJson TEXT,
+        createdAt TEXT NOT NULL
+      );
+
+      CREATE INDEX idx_pilot_handoffs_pilotOrderId ON pilot_handoffs(pilotOrderId);
+
+      CREATE TABLE auth_audit_events_v12 (
+        eventId TEXT PRIMARY KEY,
+        actorUserId TEXT,
+        tenantId TEXT,
+        eventType TEXT NOT NULL CHECK (eventType IN (${sqlEnum(AUDIT_EVENT_TYPES_AT_MIGRATION_18)})),
+        result TEXT NOT NULL CHECK (result IN (${sqlEnum(AUDIT_RESULT_VALUES)})),
+        timestamp TEXT NOT NULL,
+        metadata TEXT
+      );
+
+      INSERT INTO auth_audit_events_v12 (eventId, actorUserId, tenantId, eventType, result, timestamp, metadata)
+      SELECT eventId, actorUserId, tenantId, eventType, result, timestamp, metadata FROM auth_audit_events;
+
+      DROP TABLE auth_audit_events;
+      ALTER TABLE auth_audit_events_v12 RENAME TO auth_audit_events;
+
+      CREATE TRIGGER trg_auth_audit_events_no_update
+      BEFORE UPDATE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: UPDATE ist nicht erlaubt.');
+      END;
+
+      CREATE TRIGGER trg_auth_audit_events_no_delete
+      BEFORE DELETE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: DELETE ist nicht erlaubt.');
+      END;
+
+      CREATE INDEX idx_auth_audit_events_timestamp ON auth_audit_events(timestamp);
+    `,
+  }),
 ]);
 
 function ensureMigrationsTable(db) {
@@ -2444,6 +2560,12 @@ module.exports = {
   // V7.6.4 – Health-Arbeitspaket-COMPLETED-Status
   HEALTH_REFERENCE_WORK_PACKAGE_STATUS_VALUES,
   AUDIT_EVENT_TYPES_AT_MIGRATION_17,
+  // KI-Unternehmenszentrale-Pilotbetrieb – Drei-Agenten-Pilotauftrag
+  PILOT_WORK_ORDER_STATUS_VALUES,
+  PILOT_ROLE_VALUES,
+  PILOT_HANDOFF_FROM_VALUES,
+  PILOT_PM_FILTER_STATUS_VALUES,
+  AUDIT_EVENT_TYPES_AT_MIGRATION_18,
   MIGRATIONS,
   ensureMigrationsTable,
   getAppliedVersions,
