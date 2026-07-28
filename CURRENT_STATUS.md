@@ -1,5 +1,25 @@
 # CURRENT STATUS
 
+## V7.6.5 – Health-Referenzlauf vollständig abgeschlossen, `REFERENCE_READY` dokumentiert (lokal umgesetzt, zur Commitprüfung bereit)
+
+**Ausgangsstand (real gemessen):** Branch `main`, HEAD/`origin/main` unverändert `ddf4fe85f482f33be81d512f4eb55eff9c7b814d` (V7.6.4, committed/gepusht), Working Tree zu Beginn sauber, kein Stash, 25 kanonische Agenten. Kanonischer Referenzlauf `health-reference-work-run-v1` stand zu Beginn dieses Dokumentations-Updates bereits **live in der Datenbank** bei Fortschritt `7 von 7`, Laufstatus `REFERENCE_READY` (über mehrere separat freigegebene, dokumentierte Cursor-Arbeitsaufträge seit V7.6.4 erreicht) – dieser Eintrag zieht ausschließlich die begleitende Markdown-Dokumentation der Unternehmenszentrale auf diesen bereits erreichten, live verifizierten Datenbankstand nach.
+
+- **Zweck dieses Eintrags:** Die Einträge V7.6.3/V7.6.4 unten dokumentierten den Zwischenstand `1 von 7` (Paket 1 `COMPLETED`, Paket 2 `WAITING_FOR_JAMAL_APPROVAL`). Zwischen V7.6.4 und diesem Eintrag wurden die Arbeitspakete 2–7 in separat freigegebenen, einzeln dokumentierten Cursor-Arbeitsaufträgen umgesetzt, getestet, per Browser-QA geprüft und jeweils einzeln im Health-Repository committed/gepusht. Dieser Eintrag hält ausschließlich den **Endstand** fest; er löscht keinen der historischen Zwischenstände unten.
+- **Abgeschlossene Arbeitspakete (chronologisch, jeweils einzeln freigegeben, umgesetzt, QA-geprüft, committed und gepusht im Health-Repository):**
+  1. `HEALTH_BASELINE_CONFIRMATION` → `COMPLETED` (bereits in V7.6.4 dokumentiert)
+  2. `START_GATE_AND_ENTRY` → `COMPLETED` (Einstieg/Start-Gate verständlicher geführt)
+  3. `SIX_ANSWERS_AND_RESULT` → `COMPLETED` (Fortschritt/Sechs-Antworten-Regel/„Orientierung, keine Diagnose" geschärft)
+  4. `ADVISOR_HANDOFF_AND_CUSTOMER_AREA` → `COMPLETED` (Beraterinnenkontakt bestätigungspflichtig statt sofort auslösend)
+  5. `PERSISTENCE_PRIVACY_AND_LEGAL_BOUNDARIES` → `COMPLETED` (sofortige lokale Löschfunktion, Rechtstexte als Entwurf gekennzeichnet)
+  6. `REFERENCE_WALKTHROUGH_AND_QA` → `COMPLETED` (vollständiger Referenz-Walkthrough, Ergebnisschutz vor Mindestantwortzahl ergänzt)
+  7. `JAMAL_FINAL_ACCEPTANCE` → `REFERENCE_READY` (Jamal hat den finalen Walkthrough selbst durchgeführt und die Abnahme ausdrücklich mit **FREIGEGEBEN** bestätigt; ausschließlich über `recordFinalAcceptance({ confirmed: true })` ausgeführt)
+- **Laufstatus:** `REFERENCE_READY` (technisch ausschließlich über `recordFinalAcceptance({ confirmed: true })` erreicht, kein automatischer Sprung, kein grüner Test und kein `COMPLETED`-Arbeitspaket allein hätte dafür ausgereicht – siehe `HEALTH_REFERENCE_WORK_RUN.md` Abschnitt 7).
+- **Fortschritt:** `7 von 7 Arbeitspaketen abgeschlossen`.
+- **Finaler Health-Commit (Referenz, read-only):** Branch `work/check-start-gate-2026-07-19`, HEAD `a896dbe20426facd5d76201c877cb3664b376011`, Working Tree sauber.
+- **Diese Aktualisierung enthält:** ausschließlich Dokumentationsänderungen an `CURRENT_STATUS.md`, `PROJECT_MASTER.md`, `HEALTH_REFERENCE_WORK_RUN.md`, `MIGRATION_PLAN.md`. Keine Codeänderung, keine API-Änderung, keine Änderung an Migrationen, keine Health-Datei verändert (Health-Repository ausschließlich read-only gelesen), kein Deployment.
+- **Nicht enthalten:** neue Produktfunktionen, neue Agenten, kein Agent 26, keine zweite Arbeitslaufarchitektur, keine Folgephase (Testkundin/Deployment) formal begonnen.
+- **Urteil:** Der Health-Referenzlauf `health-reference-work-run-v1` ist vollständig abgeschlossen. Alle sieben Arbeitspakete sind abgeschlossen, Jamal hat die finale Abnahme ausdrücklich bestätigt, der Laufstatus ist `REFERENCE_READY`. Die Dokumentation der Unternehmenszentrale spiegelt diesen Endstand jetzt korrekt wider. **Nächster Schritt (separate Freigabe erforderlich):** Entscheidung über eine mögliche Folgephase (kontrollierter interner Testbetrieb, echte Testkundin, Deployment-Vorbereitung) liegt bei Jamal und ist nicht Bestandteil dieses abgeschlossenen Referenzlaufs.
+
 ## V7.6.4 – Einzelne Health-Arbeitspakete korrekt abschließen, ohne den Referenzlauf vorzeitig als fertig zu markieren (lokal umgesetzt, zur Commitprüfung bereit)
 
 **Ausgangsstand (real gemessen):** Branch `main`, HEAD/`origin/main` unverändert `73a6a055414ff4baffa7f8dbf903a6e4a711e37b` (V7.6.3), Working Tree zu Beginn sauber, kein Stash, 25 kanonische Agenten, **86** Testdateien, **2454** Prüfpunkte, Migration 16. Kanonischer Referenzlauf `health-reference-work-run-v1`: Arbeitspaket 1 (`HEALTH_BASELINE_CONFIRMATION`) mit eingereichtem Ergebnisbericht und `APPROVED`-QA-Befund, Paketstatus `WAITING_FOR_FINAL_ACCEPTANCE`, Laufstatus `QA_REVIEW`; Arbeitspaket 2 (`START_GATE_AND_ENTRY`) mit vorhandenem Prompt-Entwurf, Status `WAITING_FOR_JAMAL_APPROVAL`, nicht freigegeben, nicht ausgeführt. Health Upgrade Kompass zu Beginn und am Ende unverändert: Branch `work/check-start-gate-2026-07-19`, HEAD `81dca3a9967b1763d7b3e881fffe213fe64f9d62`, Working Tree sauber.

@@ -1,6 +1,6 @@
 # HEALTH REFERENCE WORK RUN
 
-Stand: 2026-07-28 · Lauf V7.6.4 · lokal umgesetzt, **keine Health-Datei verändert, kein Commit, kein Push in diesem Lauf.**
+Stand: 2026-07-28 · **Referenzlauf abgeschlossen (V7.6.5)** · 7 von 7 Arbeitspaketen abgeschlossen, Laufstatus `REFERENCE_READY`, finaler Health-Commit `a896dbe20426facd5d76201c877cb3664b376011` · dieses Dokumentations-Update: lokal umgesetzt, **keine Health-Datei verändert, kein Commit, kein Push in diesem Update.** Frühere Zwischenstände (V7.6.3 „Referenzlauf verankert", V7.6.4 „1 von 7") bleiben unten in Abschnitt 12 als Historie erhalten.
 
 Dieses Dokument ist die **maßgebliche, kanonische Beschreibung** des ersten echten, kontrollierten Referenz-Arbeitslaufs der KI-Unternehmenszentrale am Health Upgrade Kompass (`health-reference-work-run-v1`). Es ersetzt für den tatsächlichen Lauf die ursprüngliche Planung in `INTERNAL_PROJECT_REFERENCE_PLAN.md` (Testlauf 1) und referenziert weiterhin `HEALTH_REFERENCE_FINISH_PLAN.md` als fachliche Pflichtumfang-Quelle. Keine doppelte, widersprüchliche Dokumentation.
 
@@ -20,6 +20,7 @@ Dieser Lauf implementiert **keine** Health-Funktion. Er verankert ausschließlic
 | Projektpfad (reine Referenz, read-only) | `/Users/jamal/Documents/New project/health-upgrade-kompass` |
 | Ergebniswunsch | „Der Health Upgrade Kompass durchläuft stabil und nachvollziehbar den vollständigen Referenzweg von Start und sechs Antworten über Ergebnis und Beraterinnenübergabe bis zum Kundenbereich und kann von Jamal anhand eines dokumentierten Walkthroughs abgenommen werden." |
 | Startstatus | `PREPARED_FOR_EXECUTION` (keine Behauptung, Health sei bereits `REFERENCE_READY`) |
+| Endstatus (V7.6.5, siehe Abschnitt 12a) | `REFERENCE_READY` — 7 von 7 Arbeitspaketen abgeschlossen, ausschließlich über Jamals ausdrückliche `recordFinalAcceptance({ confirmed: true })`-Bestätigung erreicht |
 
 ## 2. Agentenzuteilung (ausschließlich bestehende kanonische Agenten)
 
@@ -151,8 +152,23 @@ Eine neue OWNER_ONLY-GET-Route (`GET /api/health-reference/status`) und ein neue
 - `npm run check`/`npm test` Exit 0, `npm audit`: 0 Schwachstellen, `better-sqlite3@13.0.1` unverändert.
 - Kein Commit, kein Push, kein Deployment in diesem Lauf.
 
+## 12a. Referenznachweis (Abschluss, V7.6.5)
+
+Nach dem in Abschnitt 12 dokumentierten Zwischenstand (V7.6.4, 1 von 7) wurden die verbleibenden sechs Arbeitspakete jeweils einzeln über separat freigegebene Cursor-Arbeitsaufträge freigegeben, umgesetzt, getestet, per Browser-QA geprüft, im Health-Repository committed und gepusht:
+
+- `START_GATE_AND_ENTRY` (2) → `COMPLETED` — Einstieg/Start-Gate verständlicher geführt (Zeitaufwand, Speicher-/Diagnosegrenzen sichtbar).
+- `SIX_ANSWERS_AND_RESULT` (3) → `COMPLETED` — sichtbarer numerischer Fortschritt, Sechs-Antworten-Regel, Ergebnisansicht schärft „Orientierung, keine Diagnose".
+- `ADVISOR_HANDOFF_AND_CUSTOMER_AREA` (4) → `COMPLETED` — Beraterinnenkontakt (WhatsApp/Telefon/E-Mail) jetzt bestätigungspflichtig statt sofort auslösend.
+- `PERSISTENCE_PRIVACY_AND_LEGAL_BOUNDARIES` (5) → `COMPLETED` — sofortige lokale Löschfunktion, Rechtstexte ausdrücklich als ungeprüften Entwurf gekennzeichnet.
+- `REFERENCE_WALKTHROUGH_AND_QA` (6) → `COMPLETED` — vollständiger Referenz-Walkthrough durchgeführt; echte Lücke gefunden und behoben (Ergebnisschutz vor Erreichen der Mindestantwortzahl bei direktem Hash-Zugriff/Reset).
+- `JAMAL_FINAL_ACCEPTANCE` (7) → `REFERENCE_READY` — Jamal hat den finalen Referenz-Walkthrough (Start, Gastablauf, sechs Antworten, Ergebnis, Kundenbereich, Rückweg) selbst durchgeführt und die Abnahme ausdrücklich mit **FREIGEGEBEN** bestätigt. Ausschließlich über `recordFinalAcceptance({ confirmed: true })` ausgeführt — der einzige technisch mögliche Codepfad zu `REFERENCE_READY` (siehe Abschnitt 7).
+
+**Endstand:** Laufstatus `REFERENCE_READY`, Fortschritt **7 von 7**, `nextWorkPackage` entfällt (keine offenen Arbeitspakete mehr). Health-Repository ausschließlich read-only als Referenz gelesen: Branch `work/check-start-gate-2026-07-19`, finaler HEAD `a896dbe20426facd5d76201c877cb3664b376011`, Working Tree sauber. Diese Dokumentationsaktualisierung selbst: keine Codeänderung, keine API-Änderung, keine Migration, keine Health-Datei verändert, kein Deployment, kein Commit/Push im Health-Repository durch die Zentrale.
+
 ## 13. Urteil
 
-Die KI-Unternehmenszentrale kann einzelne Health-Arbeitspakete nun korrekt abschließen, ohne den gesamten Referenzlauf vorzeitig als fertig zu markieren. `HEALTH_BASELINE_CONFIRMATION` ist abgeschlossen und `START_GATE_AND_ENTRY` wartet als nächster kontrollierter Schritt auf Freigabe.
+**Zwischenurteil (V7.6.4, historisch):** Die KI-Unternehmenszentrale kann einzelne Health-Arbeitspakete korrekt abschließen, ohne den gesamten Referenzlauf vorzeitig als fertig zu markieren. `HEALTH_BASELINE_CONFIRMATION` war abgeschlossen und `START_GATE_AND_ENTRY` wartete als nächster kontrollierter Schritt auf Freigabe.
 
-**Nächster Schritt (separate Freigabe erforderlich):** Die verantwortliche Leitung prüft und genehmigt den `START_GATE_AND_ENTRY`-Prompt.
+**Abschlussurteil (V7.6.5):** Der Health-Referenzlauf `health-reference-work-run-v1` ist vollständig abgeschlossen. Alle sieben Arbeitspakete sind abgeschlossen (Pakete 1–6 `COMPLETED`, Paket 7 `REFERENCE_READY`), Jamal hat den finalen Referenz-Walkthrough selbst durchgeführt und die Abnahme ausdrücklich bestätigt, der Laufstatus ist `REFERENCE_READY`. Der Health Upgrade Kompass ist damit vom bestätigten Referenznachweis her abgenommen — eine Aussage über Produktionsreife, Rechtsfreigabe, Authentifizierung, Datenbank oder Deployment ist damit ausdrücklich **nicht** getroffen (siehe `HEALTH_REFERENCE_FINISH_PLAN.md`/separate Folgephasen-Entscheidung).
+
+**Nächster Schritt (separate Freigabe erforderlich):** Kein weiterer Schritt innerhalb dieses abgeschlossenen Referenzlaufs. Eine mögliche Folgephase (kontrollierter interner Testbetrieb, echte Testkundin, Deployment-Vorbereitung) ist eigenständig und benötigt eine neue, ausdrückliche Freigabe durch Jamal.

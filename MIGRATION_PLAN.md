@@ -22,6 +22,8 @@ Bewusst **kein** paralleles Statusmodell: `COMPLETED` existiert ausschließlich 
 
 Ergebnis: Routenzahlen unverändert **89 GET, 52 POST, 8 GET-Präfixe, 8 POST-Präfixe, 32 statische Assets**, **2477** automatisierte Prüfpunkte in weiterhin **86** Testdateien grün (+23 gegenüber Migration 16), `npm audit`: 0 Schwachstellen, `better-sqlite3@13.0.1` unverändert, exakt 25 kanonische Agenten unverändert. Health Upgrade Kompass (`work/check-start-gate-2026-07-19`, HEAD `81dca3a9967b1763d7b3e881fffe213fe64f9d62`) wurde ausschließlich read-only gelesen, nicht verändert. **Lokal umgesetzt, noch nicht committed, gepusht oder deployt.**
 
+**Nachtrag (V7.6.5, Dokumentationsstand):** Migration 17 wurde inzwischen committed und nach `origin/main` gepusht; Migrationen 1–17 sind unverändert und byteidentisch. Der auf dieser Migration aufbauende kanonische Health-Referenzlauf (`health-reference-work-run-v1`) hat seither über mehrere separat freigegebene Arbeitspakete den Endstand **7 von 7, Laufstatus `REFERENCE_READY`** erreicht (Details: `HEALTH_REFERENCE_WORK_RUN.md` Abschnitt 12a, `CURRENT_STATUS.md` V7.6.5). Keine weitere Migration in diesem Nachtrag, keine Schema-Änderung.
+
 ## V7.6.3 – Health Upgrade Kompass als ersten echten Referenz-Arbeitslauf verankern (Migration 16, additiv, lokal umgesetzt, noch nicht committed/gepusht)
 
 Vorheriger Ausgang: HEAD/`origin/main` `c9635a56d5fa4fcc730fd7471db5b1cd0ea08aa8` (V7.6.2, Working Tree sauber, 88 GET/52 POST/8 GET-Präfixe/7 POST-Präfixe/31 statische Assets, **83 Testdateien, 2386 automatisierte Prüfpunkte grün**, Migration 15). Dieser Schritt ist rein additiv; Migrationen 1–15 byteidentisch unverändert.
