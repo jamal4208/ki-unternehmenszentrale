@@ -23,6 +23,7 @@ delete process.env.KUZ_PUBLIC_ORIGIN;
 
 const routeAccessPolicy = require("./route-access-policy");
 const authRouteGuard = require("./auth-route-guard");
+const RouteInventory = require("./route-inventory");
 const authHttp = require("./auth-http");
 const authDb = require("./auth-db");
 const authPassword = require("./auth-password");
@@ -272,23 +273,27 @@ async function run() {
   // POST-Prefix /api/pilot-work-order/), keine neue GET-Prefix-Route, einen
   // neuen POST-Prefix und ein neues statisches Asset
   // (pilot-work-order-ui.js).
-  await check("Routenzahlen in Policy und Server sind identisch (90/52/8/9/33)", () => {
-    assert.strictEqual(server.getRoutes.size, 90);
-    assert.strictEqual(routeAccessPolicy.GET_POLICIES.length, 90);
-    assert.strictEqual(server.postRoutes.size, 52);
-    assert.strictEqual(routeAccessPolicy.POST_POLICIES.length, 52);
-    assert.strictEqual(server.routePrefixHandlers.length, 8);
+  // Erwartete Bestandszahlen kommen jetzt ausschließlich aus der kanonischen
+  // Quelle route-inventory.js (siehe dort für die vollständige
+  // Änderungshistorie je Phase) statt aus lokal hartkodierten Literalen.
+  await check("Routenzahlen in Policy und Server sind identisch und entsprechen dem kanonischen Bestand aus route-inventory.js", () => {
+    const expected = RouteInventory.EXPECTED_ROUTE_INVENTORY;
+    assert.strictEqual(server.getRoutes.size, expected.getRoutes);
+    assert.strictEqual(routeAccessPolicy.GET_POLICIES.length, expected.getRoutes);
+    assert.strictEqual(server.postRoutes.size, expected.postRoutes);
+    assert.strictEqual(routeAccessPolicy.POST_POLICIES.length, expected.postRoutes);
+    assert.strictEqual(server.routePrefixHandlers.length, expected.getRoutePrefixes);
     assert.strictEqual(
       routeAccessPolicy.PREFIX_POLICIES.filter((entry) => entry.method === "GET").length,
-      8,
+      expected.getRoutePrefixes,
     );
-    assert.strictEqual(server.postRoutePrefixHandlers.length, 9);
+    assert.strictEqual(server.postRoutePrefixHandlers.length, expected.postRoutePrefixes);
     assert.strictEqual(
       routeAccessPolicy.PREFIX_POLICIES.filter((entry) => entry.method === "POST").length,
-      9,
+      expected.postRoutePrefixes,
     );
-    assert.strictEqual(server.staticAssets.size, 33);
-    assert.strictEqual(routeAccessPolicy.STATIC_POLICIES.length, 33);
+    assert.strictEqual(server.staticAssets.size, expected.staticAssets);
+    assert.strictEqual(routeAccessPolicy.STATIC_POLICIES.length, expected.staticAssets);
   });
 
   // -------------------------------------------------------------------

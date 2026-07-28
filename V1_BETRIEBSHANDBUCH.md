@@ -216,6 +216,26 @@ Der Controller (`scripts/zentral-ctl.js`) ist ein separates lokales Werkzeug und
 4. Letzten funktionierenden Commit und letztes Backup nennen
 5. Bei Bedarf aus Backup wiederherstellen und Seite neu laden
 
+## 18a. Dokumentations-Checkliste bei Status-, Versions- oder Phasenänderungen
+
+Diese Checkliste ist ab sofort fester Bestandteil jedes Abschlussberichts, der einen neuen Versionsstand, eine Statusänderung oder einen Phasenabschluss dokumentiert (Ursprung: Empfehlung aus dem ersten Pilotauftrag der Drei-Agenten-Pilotstruktur, `PILOT_WORK_ORDER_ANALYSIS_V1`-Auswertung des Health-Referenzlaufs). Sie ersetzt keine Freigabe: Sie löst selbst **keine automatische Dokumentänderung** aus und ersetzt **nicht** Jamals Commit-/Push-Entscheidung. Bestehende historische Einträge in den unten genannten Dokumenten werden durch diese Checkliste **nicht überschrieben** – jede Aktualisierung erfolgt weiterhin additiv nach dem bestehenden Muster (neuer Abschnitt/neuer Eintrag ergänzt, ältere Stände bleiben unverändert erhalten).
+
+Je Abschlussbericht wird für jedes der folgenden Dokumente genau einer von drei Zuständen benannt:
+
+- **MUSS AKTUALISIERT WERDEN** – der neue Stand (Version, Status, Migration, Testzahl, Commit) gehört inhaltlich in dieses Dokument und fehlt dort noch.
+- **MUSS GEPRÜFT WERDEN** – das Dokument könnte betroffen sein und wird gelesen, bleibt aber ggf. unverändert (z. B. weil der neue Stand ohne inhaltliche Auswirkung auf dieses Dokument ist).
+- **NICHT BETROFFEN** – das Dokument hat keinen fachlichen Bezug zu dieser Änderung.
+
+| Dokument | Typischer Auslöser für „muss aktualisiert werden" |
+|---|---|
+| `CURRENT_STATUS.md` | jeder neue Versionsstand (Vx.y.z), jede abgeschlossene Phase, jeder neue Prüfpunkte-/Testdateien-Stand |
+| `PROJECT_MASTER.md` | jede Änderung am Gesamtüberblick/Portfolio-Stand, die sich auf die Kurzfassung auswirkt |
+| `MIGRATION_PLAN.md` | jede neue additive Datenbank-Migration (neue Tabelle, neuer Enum-Wert, neuer Audit-Ereignistyp) |
+| `V1_BETRIEBSHANDBUCH.md` | jede Änderung, die den verbindlichen Versionsstand (Abschnitt 1), die Fähigkeitenliste (Abschnitt 2/3) oder die Routenzahlen betrifft – **in der Historie bereits einmal übersehen und nachträglich per Extra-Commit korrigiert (V7.6.5 → V7.6.6)** |
+| projektspezifisches kanonisches Laufdokument (z. B. `HEALTH_REFERENCE_WORK_RUN.md`, künftige gleichartige Referenz-/Pilotlauf-Dokumente) | jede Statusänderung des jeweiligen Laufs/Piloten selbst |
+
+Ablauf: Vor dem Formulieren des Abschlussberichts alle fünf Zeilen einmal durchgehen und je einen der drei Zustände eintragen. Kein Dokument wird dadurch automatisch geändert – jede tatsächliche Änderung bleibt ein bewusster, im Abschlussbericht ausdrücklich genannter Schritt; Commit und Push bleiben ausschließlich Jamals Freigabe.
+
 ## 19. Update- und Versionsregel
 
 - V6.44.0 friert den lokalen V1-Betrieb ein; V6.44.1 synchronisiert nur die Health-Verifizierungsmomentaufnahme

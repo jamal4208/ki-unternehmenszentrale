@@ -69,9 +69,19 @@ withIsolatedDataDir((dataDir) => {
   const migrations = require("./auth-db-migrations");
 
   const opened = authDb.openAuthDatabase({ dataDir });
-  check("Erststart: alle 18 Migrationen werden in aufsteigender Reihenfolge angewendet", () => {
+  // Dynamisch aus der kanonischen Migrationsliste (auth-db-migrations.js)
+  // abgeleitet statt eines hartkodierten Zahlenarrays: bei einer neuen
+  // additiven Migration muss diese Assertion nicht mehr manuell angepasst
+  // werden, der Schutzwert bleibt erhalten (aufsteigende Reihenfolge ohne
+  // Lücke oder Duplikat wird weiterhin real geprüft).
+  check("Erststart: alle Migrationen werden vollständig und in aufsteigender Reihenfolge angewendet", () => {
     const applied = migrations.getAppliedVersions(opened.db);
-    assert.deepStrictEqual(applied, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]);
+    const expectedVersions = migrations.MIGRATIONS.map((migration) => migration.version);
+    assert.deepStrictEqual(applied, expectedVersions);
+    assert.deepStrictEqual(
+      expectedVersions,
+      Array.from({ length: expectedVersions.length }, (_, index) => index + 1),
+    );
   });
   check("Erststart: die Datenbankdatei existiert unter dem erwarteten isolierten Pfad", () => {
     assert.ok(fs.existsSync(path.join(dataDir, "auth", "auth.sqlite")));
@@ -140,8 +150,15 @@ withIsolatedDataDir((dataDir) => {
   }
 
   const opened = authDb.openAuthDatabase({ dataDir });
-  check("Migration 7 bis 18 werden auf einer bestehenden Vor-Schritt-3-Datenbank nachträglich angewendet", () => {
-    assert.deepStrictEqual(migrations.getAppliedVersions(opened.db), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]);
+  // Dynamisch aus der kanonischen Migrationsliste abgeleitet statt eines
+  // hartkodierten Zahlenarrays (siehe Kommentar bei der Erststart-Prüfung
+  // oben) – bei einer neuen additiven Migration muss auch dieser
+  // Nachzieh-Fall nicht mehr manuell angepasst werden.
+  check("alle fehlenden Migrationen werden auf einer bestehenden Vor-Schritt-3-Datenbank (nur 1–6) nachträglich vollständig angewendet", () => {
+    assert.deepStrictEqual(
+      migrations.getAppliedVersions(opened.db),
+      migrations.MIGRATIONS.map((migration) => migration.version),
+    );
   });
   check("Migration 7 erhält bestehende Auditdaten vollständig (keine verlorene Zeile)", () => {
     const row = authAudit.listAuditEventsByType(opened.db, "LOGIN_SUCCESS");

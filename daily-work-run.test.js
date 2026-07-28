@@ -7,6 +7,7 @@ const AgentRegistry = require("./agent-registry");
 const DailyWorkRun = require("./daily-work-run");
 const { API_SECURITY_FLAGS, PROJECT_REGISTRY, buildProjectsResponse, getProjectById } = require("./project-registry");
 const { requestHandler } = require("./server");
+const RouteInventory = require("./route-inventory");
 
 let passed = 0;
 function check(label, assertion) {
@@ -945,9 +946,10 @@ function runTests() {
   check("bestehende Registertests bleiben eingebunden", () => assert.ok(fs.readFileSync(path.join(__dirname, "package.json"), "utf8").includes("project-registry.test.js")));
 
   const serverSource = fs.readFileSync(path.join(__dirname, "server.js"), "utf8");
-  const getRouteBlockMatch = serverSource.match(/const getRoutes = buildRouteMap\(\[([\s\S]*?)\n\]\);/);
-  const routeCount = getRouteBlockMatch ? (getRouteBlockMatch[1].match(/^\s+\["\/api\//gm) || []).length : 0;
-  check("90 GET-Routen bleiben erhalten (Phase C: +2 GET Execution-Status/-Ergebnis, Phase D: +1 GET Executor-Registry, Phase E: +1 GET Freeze-Status, V7.1 Phase A: +5 GET Dokumente/Tools/Plugin-Gateway/Tool-Routing/Backup-Export, V7.1 Phase B: +3 GET HeyGen-Status/Jobpakete/Backup-Export, V7.1 Phase B.1: +5 GET Agentur-Mandantenbasis/Pilot-Review/Backup-Export, V7.1 Phase C: +3 GET Canva-Status/Jobpakete/Backup-Export, V7.1 Phase C.1: +1 GET Pilot-Ergebnisakten-Liste, V7.2 Phase A Schritt 2: +1 GET Auth-Sessionstatus, V7.2 Phase A Schritt 3: +3 GET Owner-Mandantenliste/Kundenportal-Konto/Kundenportal-Status, V7.2 Phase B Schritt 1: +2 GET Kundenportal-/Owner-Arbeitsauftragsliste, V7.3 Jamal-Arbeitsmodus: +1 GET Jamal-Arbeitsmodus-Zustand, V7.4 Canva-Produktionskorridor: +1 GET Jamal-Canva-Produktionsstatus, V7.5 Agentenführung: +5 GET Führungsübersicht/Organisation/HR-Lauf/Technologie-Radar/Agent-Technology-Fit, Unternehmensleitlinien V1.0: +2 GET Leitlinien/Reliability-Signale, V7.6.1 Office & Finanzen: +9 GET Kompaktübersicht/Systemlandkarte/Identitäten/Fähigkeiten/Freigabematrix/Office-Aufträge/Finance-Handoffs/Authentifizierungsbedarf/Freigabeschritte, V7.6.3 Health-Referenzlauf: +1 GET Health-Referenzlauf-Status, KI-Unternehmenszentrale-Pilotbetrieb: +1 GET Pilotauftrags-Status; die Einzelabruf-/Feedback-GET-Routen laufen wie bei bestehenden Einzelressourcen über routePrefixHandlers und werden hier konventionsgemäß nicht mitgezählt)", () => assert.strictEqual(routeCount, 90));
+  const routeCount = RouteInventory.countGetRoutesFromServerSource(serverSource);
+  check("GET-Routen bleiben exakt auf dem kanonischen Bestand aus route-inventory.js (siehe dort für die vollständige Änderungshistorie)", () =>
+    assert.strictEqual(routeCount, RouteInventory.EXPECTED_ROUTE_INVENTORY.getRoutes),
+  );
   check("unbekannte Projekt-ID bleibt 404", () => assert.strictEqual(invoke("GET", "/api/projects/unbekannt").statusCode, 404));
   check("POST bleibt 405", () => assert.strictEqual(invoke("POST", "/api/projects").statusCode, 405));
   check("writeOperationsBlocked bleibt true", () => assert.strictEqual(API_SECURITY_FLAGS.writeOperationsBlocked, true));
