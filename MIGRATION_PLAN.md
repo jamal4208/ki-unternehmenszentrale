@@ -1,5 +1,27 @@
 # MIGRATION PLAN
 
+## V7.6.4 – Einzelne Health-Arbeitspakete korrekt abschließen (Migration 17, additiv, lokal umgesetzt, noch nicht committed/gepusht)
+
+Vorheriger Ausgang: HEAD/`origin/main` unverändert `73a6a055414ff4baffa7f8dbf903a6e4a711e37b` (V7.6.3, Working Tree sauber, 89 GET/52 POST/8 GET-Präfixe/8 POST-Präfixe/32 statische Assets, **86 Testdateien, 2454 automatisierte Prüfpunkte grün**, Migration 16). Dieser Schritt ist rein additiv; Migrationen 1–16 byteidentisch unverändert.
+
+**Neue Migration 17** (`add_health_reference_work_package_completed_status_and_status_changed_audit_event_v11`, gleiches bewährte Recreate-Muster wie bei jeder vorherigen CHECK-Erweiterung: Tabelle unter Versionsnamen neu angelegt, Daten verlustfrei kopiert, alte Tabelle gelöscht, umbenannt – SQLite kennt kein `ALTER TABLE ... ALTER COLUMN ... CHECK`):
+
+| Tabelle | Änderung |
+|---|---|
+| `health_reference_work_packages` | `status`-Spalte erhält einen eigenständigen, um `COMPLETED` erweiterten Wertebereich (`HEALTH_REFERENCE_WORK_PACKAGE_STATUS_VALUES` = `HEALTH_REFERENCE_RUN_STATUS_VALUES` plus `COMPLETED`); `health_reference_runs.status` bleibt unverändert (Laufstatus kennt weiterhin kein `COMPLETED`) |
+| `auth_audit_events` | additive Erweiterung um genau einen neuen Ereignistyp über eine neue, additive Konstante `AUDIT_EVENT_TYPES_AT_MIGRATION_17` (nicht die veränderliche `AUDIT_EVENT_TYPES`-Live-Konstante) |
+
+Bewusst **kein** paralleles Statusmodell: `COMPLETED` existiert ausschließlich als Arbeitspaket-Status, niemals als Laufstatus; der Laufstatus bleibt weiterhin ausschließlich über `recordFinalAcceptance({ confirmed: true })` nach `REFERENCE_READY` überführbar.
+
+| Bereich | Regel |
+|---|---|
+| health-reference-work-run-service.js (erweitert) | `syncRunStatusToActivePackage`-Helfer leitet den Laufstatus nach jedem Arbeitspaket-Statuswechsel aus dem Status des ersten nicht abgeschlossenen/abgebrochenen Pakets ab; `submitQaFinding` setzt Pakete 1–6 nach bestandenem QA auf `COMPLETED`, Paket 7 weiterhin auf `WAITING_FOR_FINAL_ACCEPTANCE`; `computeNextAction`/`PROGRESS_COMPLETED_PACKAGE_STATUSES`/`NEXT_PACKAGE_SKIP_STATUSES` für Fortschritt und `nextWorkPackage` |
+| health-reference-work-run-ui.js (erweitert) | `biggestBlockerText` nennt jetzt konkret das betroffene Arbeitspaket statt generischem Text |
+| auth-db-migrations.js (erweitert, Migration 17) | eigenständiger Wertebereich für `health_reference_work_packages.status` (siehe oben); ein neuer Audit-Ereignistyp; Migrationen 1–16 byteidentisch unverändert |
+| auth-audit.js (erweitert) | ein neuer Ereignistyp: `HEALTH_REFERENCE_WORK_PACKAGE_STATUS_CHANGED` (Metadaten ausschließlich `healthReferenceRunId`, `workPackageKey`, `previousStatus`, `nextStatus`) |
+
+Ergebnis: Routenzahlen unverändert **89 GET, 52 POST, 8 GET-Präfixe, 8 POST-Präfixe, 32 statische Assets**, **2477** automatisierte Prüfpunkte in weiterhin **86** Testdateien grün (+23 gegenüber Migration 16), `npm audit`: 0 Schwachstellen, `better-sqlite3@13.0.1` unverändert, exakt 25 kanonische Agenten unverändert. Health Upgrade Kompass (`work/check-start-gate-2026-07-19`, HEAD `81dca3a9967b1763d7b3e881fffe213fe64f9d62`) wurde ausschließlich read-only gelesen, nicht verändert. **Lokal umgesetzt, noch nicht committed, gepusht oder deployt.**
+
 ## V7.6.3 – Health Upgrade Kompass als ersten echten Referenz-Arbeitslauf verankern (Migration 16, additiv, lokal umgesetzt, noch nicht committed/gepusht)
 
 Vorheriger Ausgang: HEAD/`origin/main` `c9635a56d5fa4fcc730fd7471db5b1cd0ea08aa8` (V7.6.2, Working Tree sauber, 88 GET/52 POST/8 GET-Präfixe/7 POST-Präfixe/31 statische Assets, **83 Testdateien, 2386 automatisierte Prüfpunkte grün**, Migration 15). Dieser Schritt ist rein additiv; Migrationen 1–15 byteidentisch unverändert.

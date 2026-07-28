@@ -931,6 +931,21 @@ const HEALTH_REFERENCE_WORK_PACKAGE_KEY_VALUES = Object.freeze([
   "JAMAL_FINAL_ACCEPTANCE",
 ]);
 
+// V7.6.4 – einzelne Arbeitspakete korrekt abschließen (Auftrag Abschnitt 2):
+// eigenständiger, rein additiver Statuswertebereich AUSSCHLIESSLICH für
+// health_reference_work_packages.status. `COMPLETED` bedeutet ausdrücklich
+// "dieses eine Arbeitspaket ist fachlich abgeschlossen" – NICHT
+// "gesamter Lauf abgeschlossen" und NICHT `REFERENCE_READY`. Bewusst KEIN
+// paralleles Statusmodell: identisch mit HEALTH_REFERENCE_RUN_STATUS_VALUES
+// plus genau einem zusätzlichen Wert. health_reference_runs.status bleibt
+// unverändert bei HEALTH_REFERENCE_RUN_STATUS_VALUES (ein Lauf wird niemals
+// `COMPLETED`, sondern ausschließlich über recordFinalAcceptance
+// `REFERENCE_READY`).
+const HEALTH_REFERENCE_WORK_PACKAGE_STATUS_VALUES = Object.freeze([
+  ...HEALTH_REFERENCE_RUN_STATUS_VALUES,
+  "COMPLETED",
+]);
+
 const HEALTH_REFERENCE_APPROVAL_KEY_VALUES = Object.freeze([
   "SCOPE",
   "EXECUTABLE_WORK_ORDER",
@@ -964,6 +979,19 @@ const AUDIT_EVENT_TYPES_AT_MIGRATION_16 = Object.freeze([
   "HEALTH_REFERENCE_CHANGES_REQUESTED",
   "HEALTH_REFERENCE_FINAL_ACCEPTANCE_PREPARED",
   "HEALTH_REFERENCE_REFERENCE_READY_GRANTED",
+]);
+
+// V7.6.4 – genau ein zusätzlicher Ereignistyp (Auftrag Abschnitt 4),
+// zusätzlich zur vollständigen, bereits bestehenden
+// AUDIT_EVENT_TYPES_AT_MIGRATION_16-Menge oben. auth-audit.js#EVENT_TYPES
+// muss exakt dieser Aufzählung entsprechen. Deckt jeden Statusübergang
+// eines Arbeitspakets ab (Freigabe, Ausführung gestartet, Ergebnis
+// eingereicht, QA-Ergebnis, Paket abgeschlossen, Änderung angefordert,
+// blockiert, abgebrochen) – zusätzlich zu den bereits bestehenden,
+// spezifischeren Ereignistypen, niemals als Ersatz dafür.
+const AUDIT_EVENT_TYPES_AT_MIGRATION_17 = Object.freeze([
+  ...AUDIT_EVENT_TYPES_AT_MIGRATION_16,
+  "HEALTH_REFERENCE_WORK_PACKAGE_STATUS_CHANGED",
 ]);
 
 function sqlEnum(values) {
@@ -2238,6 +2266,76 @@ const MIGRATIONS = Object.freeze([
       CREATE INDEX idx_auth_audit_events_timestamp ON auth_audit_events(timestamp);
     `,
   }),
+  // V7.6.4 – einzelne Health-Arbeitspakete korrekt abschließen (Auftrag
+  // Abschnitt 2/4). Rein additiv gegenüber Migration 16: health_reference_
+  // work_packages.status erhält einen eigenständigen, um "COMPLETED"
+  // erweiterten Wertebereich (health_reference_runs.status bleibt
+  // unverändert, siehe HEALTH_REFERENCE_WORK_PACKAGE_STATUS_VALUES oben);
+  // dazu die erneute Audit-Ereignistyp-Erweiterung um genau einen
+  // zusätzlichen Ereignistyp für Arbeitspaket-Statusübergänge. Migrationen
+  // 1–16 bleiben dabei byteidentisch unverändert. Gleiches, bereits
+  // etabliertes Muster wie bei jeder vorherigen CHECK-Erweiterung: Tabelle
+  // unter Versionsnamen neu anlegen, Daten verlustfrei kopieren, alte
+  // Tabelle löschen, umbenennen (SQLite kennt kein
+  // "ALTER TABLE ... ALTER COLUMN ... CHECK").
+  Object.freeze({
+    version: 17,
+    name: "add_health_reference_work_package_completed_status_and_status_changed_audit_event_v11",
+    sql: `
+      CREATE TABLE health_reference_work_packages_v2 (
+        id TEXT PRIMARY KEY,
+        runId TEXT NOT NULL REFERENCES health_reference_runs(id) ON DELETE CASCADE,
+        packageKey TEXT NOT NULL CHECK (packageKey IN (${sqlEnum(HEALTH_REFERENCE_WORK_PACKAGE_KEY_VALUES)})),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 7),
+        title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 200),
+        status TEXT NOT NULL DEFAULT 'PREPARED_FOR_EXECUTION' CHECK (status IN (${sqlEnum(HEALTH_REFERENCE_WORK_PACKAGE_STATUS_VALUES)})),
+        promptDraftJson TEXT CHECK (promptDraftJson IS NULL OR length(promptDraftJson) <= 8000),
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        UNIQUE (runId, packageKey)
+      );
+
+      INSERT INTO health_reference_work_packages_v2
+        (id, runId, packageKey, sequence, title, status, promptDraftJson, createdAt, updatedAt)
+      SELECT id, runId, packageKey, sequence, title, status, promptDraftJson, createdAt, updatedAt
+      FROM health_reference_work_packages;
+
+      DROP TABLE health_reference_work_packages;
+      ALTER TABLE health_reference_work_packages_v2 RENAME TO health_reference_work_packages;
+
+      CREATE INDEX idx_health_reference_work_packages_runId ON health_reference_work_packages(runId);
+
+      CREATE TABLE auth_audit_events_v11 (
+        eventId TEXT PRIMARY KEY,
+        actorUserId TEXT,
+        tenantId TEXT,
+        eventType TEXT NOT NULL CHECK (eventType IN (${sqlEnum(AUDIT_EVENT_TYPES_AT_MIGRATION_17)})),
+        result TEXT NOT NULL CHECK (result IN (${sqlEnum(AUDIT_RESULT_VALUES)})),
+        timestamp TEXT NOT NULL,
+        metadata TEXT
+      );
+
+      INSERT INTO auth_audit_events_v11 (eventId, actorUserId, tenantId, eventType, result, timestamp, metadata)
+      SELECT eventId, actorUserId, tenantId, eventType, result, timestamp, metadata FROM auth_audit_events;
+
+      DROP TABLE auth_audit_events;
+      ALTER TABLE auth_audit_events_v11 RENAME TO auth_audit_events;
+
+      CREATE TRIGGER trg_auth_audit_events_no_update
+      BEFORE UPDATE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: UPDATE ist nicht erlaubt.');
+      END;
+
+      CREATE TRIGGER trg_auth_audit_events_no_delete
+      BEFORE DELETE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: DELETE ist nicht erlaubt.');
+      END;
+
+      CREATE INDEX idx_auth_audit_events_timestamp ON auth_audit_events(timestamp);
+    `,
+  }),
 ]);
 
 function ensureMigrationsTable(db) {
@@ -2343,6 +2441,9 @@ module.exports = {
   HEALTH_REFERENCE_APPROVAL_DECISION_VALUES,
   HEALTH_REFERENCE_RESULT_KIND_VALUES,
   AUDIT_EVENT_TYPES_AT_MIGRATION_16,
+  // V7.6.4 – Health-Arbeitspaket-COMPLETED-Status
+  HEALTH_REFERENCE_WORK_PACKAGE_STATUS_VALUES,
+  AUDIT_EVENT_TYPES_AT_MIGRATION_17,
   MIGRATIONS,
   ensureMigrationsTable,
   getAppliedVersions,

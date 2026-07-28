@@ -166,4 +166,27 @@ check("bestehendes Kartendesign wird über eigene, additive Klassen gestaltet (k
   assert.ok(!/\.jamal-work-card\s*\{[^}]*health-reference/i.test(css));
 });
 
+// ---------------------------------------------------------------------------
+// V7.6.4 – einzelne Health-Arbeitspakete korrekt abschließen (Auftrag
+// Abschnitt 8, Prüfpunkt 11): die Karte besitzt an keiner Stelle eine
+// Schaltfläche, die eine erneute QA-Prüfung für ein bereits abgeschlossenes
+// (COMPLETED) Arbeitspaket auslöst – QA/Ergebnis-Erfassung läuft
+// ausschließlich außerhalb dieser rein lesenden/vorbereitenden Karte.
+// ---------------------------------------------------------------------------
+
+check("V7.6.4-11. keine Schaltfläche löst eine (erneute) QA-Prüfung oder Ergebniseinreichung aus", () => {
+  assert.ok(!/data-action="(submit-qa-finding|submit-qa|submit-result-report|request-changes)"/i.test(js));
+  assert.ok(!/postAction\(\s*["'](submit-qa-finding|submit-result-report|request-changes)/i.test(js));
+});
+
+check("V7.6.4-9/10. Fortschritt und nächstes Arbeitspaket werden generisch aus run.progress/run.nextWorkPackage abgeleitet (kein hartcodiertes '1 von 7')", () => {
+  assert.ok(!/1\s+von\s+7/.test(js), "Fortschritt darf nicht als fester Text verdrahtet sein");
+  assert.match(js, /progress\.completed/);
+  assert.match(js, /progress\.total/);
+});
+
+check("V7.6.4-7. abgeschlossene Arbeitspakete zeigen ihren Status (pkg.statusLabel), keinen erfundenen Text", () => {
+  assert.match(js, /pkg\.statusLabel/);
+});
+
 console.log(`health-reference-work-run-ui.test.js: ${passed} Prüfpunkte erfolgreich`);

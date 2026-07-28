@@ -245,6 +245,14 @@ const ACCEPTANCE_CRITERIA = Object.freeze([
   "Jamal hat den Referenz-Walkthrough ausdrücklich freigegeben",
 ]);
 
+// V7.6.4 (Auftrag Abschnitt 2): "COMPLETED" ist ausschließlich ein
+// Arbeitspaket-Status (health_reference_work_packages.status, siehe
+// auth-db-migrations.js#HEALTH_REFERENCE_WORK_PACKAGE_STATUS_VALUES) und
+// bedeutet ausdrücklich NICHT "gesamter Lauf abgeschlossen"/
+// `REFERENCE_READY`. Ein Lauf (health_reference_runs.status) wird niemals
+// `COMPLETED` – siehe syncRunStatusToActivePackage/NEXT_PACKAGE_SKIP_
+// STATUSES unten. Dieser Eintrag wird ausschließlich für die Anzeige des
+// Arbeitspaket-Status (rowToWorkPackageView) benötigt.
 const RUN_STATUS_LABELS_DE = Object.freeze({
   PREPARED_FOR_EXECUTION: "Vorbereitet",
   WAITING_FOR_JAMAL_APPROVAL: "Wartet auf Jamal-Freigabe",
@@ -254,6 +262,7 @@ const RUN_STATUS_LABELS_DE = Object.freeze({
   QA_REVIEW: "In QA-Prüfung",
   CHANGES_REQUESTED: "Änderung angefordert",
   WAITING_FOR_FINAL_ACCEPTANCE: "Wartet auf finale Abnahme",
+  COMPLETED: "Abgeschlossen",
   REFERENCE_READY: "Referenz abgenommen",
   BLOCKED: "Blockiert",
   CANCELLED: "Abgebrochen",
@@ -272,6 +281,34 @@ const NEXT_ACTION_BY_STATUS = Object.freeze({
   BLOCKED: { id: "RESOLVE_BLOCKER", label: "Blocker mit Jamal klären" },
   CANCELLED: { id: "NONE", label: "Lauf abgebrochen." },
 });
+
+// V7.6.4 (Auftrag Abschnitt 7): die statische NEXT_ACTION_BY_STATUS-Tabelle
+// oben bleibt der Fallback, wird aber für die beiden häufigsten Zustände um
+// den Titel des tatsächlich betroffenen Arbeitspakets ergänzt ("Prompt für
+// Start-Gate und Einstieg prüfen und freigeben" statt generisch "Prompt-
+// Entwurf von Jamal prüfen lassen"). Die id bleibt stabil, damit
+// health-reference-work-run-ui.js unverändert auf `nextAction.id` schalten
+// kann.
+function computeNextAction(runStatus, nextWorkPackage) {
+  if (runStatus === "PREPARED_FOR_EXECUTION" && nextWorkPackage) {
+    return { id: "PREPARE_FIRST_WORK_PACKAGE", label: `Prompt für ${nextWorkPackage.title} vorbereiten` };
+  }
+  if (runStatus === "WAITING_FOR_JAMAL_APPROVAL" && nextWorkPackage && nextWorkPackage.hasPromptDraft) {
+    return { id: "REVIEW_PROMPT_DRAFT", label: `Prompt für ${nextWorkPackage.title} prüfen und freigeben` };
+  }
+  return NEXT_ACTION_BY_STATUS[runStatus] || NEXT_ACTION_BY_STATUS.PREPARED_FOR_EXECUTION;
+}
+
+// V7.6.4 (Auftrag Abschnitt 2/6): getrennte Statusmengen für Fortschritt und
+// "nächstes Arbeitspaket". `COMPLETED` zählt fachlich als abgeschlossen für
+// den Fortschritt (X von 7); ein abgebrochenes Einzelpaket (`CANCELLED`)
+// blockiert die Ermittlung des nächsten Pakets zusätzlich, zählt aber
+// NICHT als Fortschritt (kein erfundener Erfolg). `WAITING_FOR_FINAL_
+// ACCEPTANCE`, `QA_REVIEW`, `RESULT_SUBMITTED`, `CHANGES_REQUESTED` und
+// `BLOCKED` zählen ausdrücklich NICHT als abgeschlossen.
+const PROGRESS_COMPLETED_PACKAGE_STATUSES = Object.freeze(new Set(["COMPLETED", "REFERENCE_READY"]));
+const NEXT_PACKAGE_SKIP_STATUSES = Object.freeze(new Set(["COMPLETED", "REFERENCE_READY", "CANCELLED"]));
+const RUN_STATUS_VALUE_SET = new Set(RUN_STATUS_VALUES);
 
 // Fester, unveränderlicher Hinweistext (Auftrag Abschnitt 11 – "keine
 // Schaltfläche, die echte Health-Arbeit ausführt" / "UI behauptet keine
@@ -438,9 +475,8 @@ function buildRunView(db, runRow) {
   const workPackages = authDb.listHealthReferenceWorkPackages(db, runRow.id).map(rowToWorkPackageView);
   const approvals = authDb.listHealthReferenceApprovals(db, runRow.id).map(rowToApprovalView);
   const results = authDb.listHealthReferenceResults(db, runRow.id).map(rowToResultView);
-  const TERMINAL_PACKAGE_STATUSES = new Set(["REFERENCE_READY", "CANCELLED"]);
-  const nextWorkPackage = workPackages.find((pkg) => !TERMINAL_PACKAGE_STATUSES.has(pkg.status)) || null;
-  const completedCount = workPackages.filter((pkg) => TERMINAL_PACKAGE_STATUSES.has(pkg.status)).length;
+  const nextWorkPackage = workPackages.find((pkg) => !NEXT_PACKAGE_SKIP_STATUSES.has(pkg.status)) || null;
+  const completedCount = workPackages.filter((pkg) => PROGRESS_COMPLETED_PACKAGE_STATUSES.has(pkg.status)).length;
 
   let specialistAgents = SPECIALIST_AGENTS;
   try {
@@ -460,7 +496,7 @@ function buildRunView(db, runRow) {
     outcomeText: runRow.outcomeText,
     status: runRow.status,
     statusLabel: RUN_STATUS_LABELS_DE[runRow.status] || runRow.status,
-    nextAction: NEXT_ACTION_BY_STATUS[runRow.status] || NEXT_ACTION_BY_STATUS.PREPARED_FOR_EXECUTION,
+    nextAction: computeNextAction(runRow.status, nextWorkPackage),
     team: {
       mainAgent: MAIN_AGENT,
       specialists: specialistAgents,
@@ -481,6 +517,63 @@ function buildRunView(db, runRow) {
 
 function getRunView(db) {
   return getOrCreateCanonicalRun(db);
+}
+
+// ---------------------------------------------------------------------------
+// V7.6.4 (Auftrag Abschnitt 3) – zentrale, einzige Stelle, die den
+// Laufstatus aus dem tatsächlichen Arbeitspaket-Zustand ableitet: der
+// Laufstatus spiegelt immer den Status des "aktiven" Arbeitspakets (das
+// erste noch nicht abgeschlossene/abgebrochene Paket in fester Reihenfolge).
+// Das behebt gleichzeitig drei zuvor gemeldete Lücken, ohne Sonderfälle je
+// Funktion zu benötigen:
+//   - Ein auf APPROVED_FOR_EXECUTION gesetztes Paket macht diesen Zustand
+//     jetzt auch im Lauf sichtbar (statt ihn zu überspringen).
+//   - Ist ein Paket abgeschlossen (COMPLETED) und das nächste Paket bereits
+//     WAITING_FOR_JAMAL_APPROVAL, zeigt der Lauf automatisch ebenfalls
+//     WAITING_FOR_JAMAL_APPROVAL (statt im alten QA_REVIEW/RESULT_SUBMITTED
+//     hängen zu bleiben).
+//   - Sind alle Pakete abgeschlossen/abgebrochen, bleibt der Laufstatus
+//     unverändert (kein automatischer Sprung zu REFERENCE_READY) –
+//     REFERENCE_READY wird ausschließlich über recordFinalAcceptance
+//     erreicht.
+// BLOCKED, CANCELLED und REFERENCE_READY sind bewusste Übersteuerungen/
+// Endzustände des GESAMTEN Laufs und werden von dieser Funktion niemals
+// automatisch überschrieben.
+function syncRunStatusToActivePackage(db, runRow, now) {
+  if (runRow.status === "BLOCKED" || runRow.status === "CANCELLED" || runRow.status === "REFERENCE_READY") {
+    return;
+  }
+  const packages = authDb.listHealthReferenceWorkPackages(db, runRow.id);
+  const activePackage = packages.find((pkg) => !NEXT_PACKAGE_SKIP_STATUSES.has(pkg.status));
+  if (!activePackage) return;
+  const derivedStatus = RUN_STATUS_VALUE_SET.has(activePackage.status) ? activePackage.status : null;
+  if (derivedStatus && derivedStatus !== runRow.status) {
+    authDb.updateHealthReferenceRunStatus(db, { id: runRow.id, status: derivedStatus, updatedAt: nowIso(now) });
+  }
+}
+
+// V7.6.4 (Auftrag Abschnitt 4) – ein einziger, additiver Audit-Ereignistyp
+// für JEDEN Arbeitspaket-Statusübergang (Freigabe, Ausführung gestartet,
+// Ergebnis eingereicht, QA-Ergebnis, Paket abgeschlossen, Änderung
+// angefordert, blockiert, abgebrochen), ausschließlich mit den vier
+// erlaubten Metadatenfeldern. Ergänzt die bereits bestehenden,
+// spezifischeren Ereignistypen (HEALTH_REFERENCE_RESULT_REPORT_SUBMITTED
+// etc.) – ersetzt sie nicht.
+function auditWorkPackageStatusChanged(db, options = {}) {
+  const { packageKey, previousStatus, nextStatus, actorUserId, now } = options;
+  if (previousStatus === nextStatus) return;
+  try {
+    authAudit.recordAuditEvent(db, {
+      eventType: "HEALTH_REFERENCE_WORK_PACKAGE_STATUS_CHANGED",
+      result: "OK",
+      actorUserId: actorUserId ?? null,
+      tenantId: null,
+      timestamp: nowIso(now),
+      metadata: { healthReferenceRunId: CANONICAL_RUN_ID, workPackageKey: packageKey, previousStatus, nextStatus },
+    });
+  } catch (_error) {
+    /* Audit-Fehler dürfen die bereits gültige Statusänderung nicht rückgängig machen. */
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -567,6 +660,7 @@ async function prepareWorkPackagePromptDraft(db, options = {}) {
     throw badRequest("Der Prompt-Entwurf ist zu umfangreich für die lokale Ablage (maximal 8000 Zeichen).");
   }
 
+  const previousStatus = pkgRow.status;
   const updated = authDb.updateHealthReferenceWorkPackage(db, {
     id: pkgRow.id,
     status: "WAITING_FOR_JAMAL_APPROVAL",
@@ -574,13 +668,7 @@ async function prepareWorkPackagePromptDraft(db, options = {}) {
     updatedAt: nowIso(now),
   });
 
-  if (runRow.status === "PREPARED_FOR_EXECUTION") {
-    authDb.updateHealthReferenceRunStatus(db, {
-      id: CANONICAL_RUN_ID,
-      status: "WAITING_FOR_JAMAL_APPROVAL",
-      updatedAt: nowIso(now),
-    });
-  }
+  syncRunStatusToActivePackage(db, runRow, now);
 
   try {
     authAudit.recordAuditEvent(db, {
@@ -602,6 +690,13 @@ async function prepareWorkPackagePromptDraft(db, options = {}) {
   } catch (_error) {
     /* Audit-Fehler dürfen die bereits gültige Vorbereitung nicht rückgängig machen. */
   }
+  auditWorkPackageStatusChanged(db, {
+    packageKey,
+    previousStatus,
+    nextStatus: "WAITING_FOR_JAMAL_APPROVAL",
+    actorUserId: options.actorUserId,
+    now,
+  });
 
   return rowToWorkPackageView(updated);
 }
@@ -657,10 +752,15 @@ function recordApproval(db, options = {}) {
 // Generischer, aber eingeschränkter Statuswechsel für ein Arbeitspaket.
 // REFERENCE_READY ist niemals ein zulässiges Ziel dieser Funktion (siehe
 // recordFinalAcceptance).
+// V7.6.4 (Auftrag Abschnitt 3): "COMPLETED" ergänzt – erreichbar sowohl
+// generisch über diese Funktion als auch automatisch über submitQaFinding
+// (Pakete 1–6 nach bestandenem QA). REFERENCE_READY bleibt weiterhin
+// niemals ein zulässiges Ziel dieser Funktion (siehe recordFinalAcceptance).
 const ALLOWED_GENERIC_PACKAGE_TARGET_STATUSES = Object.freeze([
   "APPROVED_FOR_EXECUTION",
   "IN_EXECUTION",
   "WAITING_FOR_FINAL_ACCEPTANCE",
+  "COMPLETED",
   "BLOCKED",
   "CANCELLED",
 ]);
@@ -681,6 +781,7 @@ function transitionWorkPackage(db, options = {}) {
   if (!pkgRow) throw notFound("Dieses Arbeitspaket wurde nicht gefunden.");
 
   const now = options.now || new Date();
+  const previousStatus = pkgRow.status;
   const updated = authDb.updateHealthReferenceWorkPackage(db, {
     id: pkgRow.id,
     status: toStatus,
@@ -688,12 +789,23 @@ function transitionWorkPackage(db, options = {}) {
     updatedAt: nowIso(now),
   });
 
-  if (toStatus === "IN_EXECUTION" && runRow.status !== "IN_EXECUTION") {
-    authDb.updateHealthReferenceRunStatus(db, { id: CANONICAL_RUN_ID, status: "IN_EXECUTION", updatedAt: nowIso(now) });
-  }
+  // BLOCKED/CANCELLED sind bewusste Übersteuerungen des gesamten Laufs;
+  // jeder andere Zielstatus wird über die einheitliche Ableitungsfunktion
+  // (Auftrag Abschnitt 3: "Laufstatus folgt dem aktiven Arbeitspaket")
+  // in den Lauf gespiegelt.
   if (toStatus === "BLOCKED" || toStatus === "CANCELLED") {
     authDb.updateHealthReferenceRunStatus(db, { id: CANONICAL_RUN_ID, status: toStatus, updatedAt: nowIso(now) });
+  } else {
+    syncRunStatusToActivePackage(db, runRow, now);
   }
+
+  auditWorkPackageStatusChanged(db, {
+    packageKey,
+    previousStatus,
+    nextStatus: toStatus,
+    actorUserId: options.actorUserId,
+    now,
+  });
 
   return rowToWorkPackageView(updated);
 }
@@ -709,6 +821,7 @@ function submitResultReport(db, options = {}) {
   if (!pkgRow) throw notFound("Dieses Arbeitspaket wurde nicht gefunden.");
 
   const now = options.now || new Date();
+  const previousStatus = pkgRow.status;
   const detailsJson = options.details ? JSON.stringify(options.details).slice(0, 4000) : null;
 
   authDb.insertHealthReferenceResult(db, {
@@ -727,7 +840,7 @@ function submitResultReport(db, options = {}) {
     promptDraftJson: pkgRow.promptDraftJson,
     updatedAt: nowIso(now),
   });
-  authDb.updateHealthReferenceRunStatus(db, { id: CANONICAL_RUN_ID, status: "RESULT_SUBMITTED", updatedAt: nowIso(now) });
+  syncRunStatusToActivePackage(db, runRow, now);
 
   try {
     authAudit.recordAuditEvent(db, {
@@ -741,6 +854,13 @@ function submitResultReport(db, options = {}) {
   } catch (_error) {
     /* Audit-Fehler dürfen die bereits gültige Einreichung nicht rückgängig machen. */
   }
+  auditWorkPackageStatusChanged(db, {
+    packageKey,
+    previousStatus,
+    nextStatus: "RESULT_SUBMITTED",
+    actorUserId: options.actorUserId,
+    now,
+  });
 
   return rowToWorkPackageView(authDb.getHealthReferenceWorkPackage(db, CANONICAL_RUN_ID, packageKey));
 }
@@ -757,6 +877,7 @@ function submitQaFinding(db, options = {}) {
   if (!pkgRow) throw notFound("Dieses Arbeitspaket wurde nicht gefunden.");
 
   const now = options.now || new Date();
+  const previousStatus = pkgRow.status;
   const detailsJson = options.details ? JSON.stringify(options.details).slice(0, 4000) : null;
 
   authDb.insertHealthReferenceResult(db, {
@@ -769,18 +890,22 @@ function submitQaFinding(db, options = {}) {
     createdAt: nowIso(now),
   });
 
-  const nextPackageStatus = passed ? "WAITING_FOR_FINAL_ACCEPTANCE" : "CHANGES_REQUESTED";
+  // V7.6.4 (Auftrag Abschnitt 2/3): bevorzugte Regel – Pakete 1–6 werden
+  // nach bestandenem QA fachlich `COMPLETED` (nicht `REFERENCE_READY`, nicht
+  // Gesamtabschluss); ausschließlich das letzte Paket (`JAMAL_FINAL_
+  // ACCEPTANCE`) wartet stattdessen weiterhin auf die finale Abnahme
+  // (`WAITING_FOR_FINAL_ACCEPTANCE`), die ausschließlich über
+  // recordFinalAcceptance zu `REFERENCE_READY` führen kann.
+  const definition = WORK_PACKAGE_DEFINITIONS_BY_KEY.get(packageKey);
+  const isFinalPackage = Boolean(definition && definition.key === "JAMAL_FINAL_ACCEPTANCE");
+  const nextPackageStatus = passed ? (isFinalPackage ? "WAITING_FOR_FINAL_ACCEPTANCE" : "COMPLETED") : "CHANGES_REQUESTED";
   authDb.updateHealthReferenceWorkPackage(db, {
     id: pkgRow.id,
     status: nextPackageStatus,
     promptDraftJson: pkgRow.promptDraftJson,
     updatedAt: nowIso(now),
   });
-  authDb.updateHealthReferenceRunStatus(db, {
-    id: CANONICAL_RUN_ID,
-    status: passed ? "QA_REVIEW" : "CHANGES_REQUESTED",
-    updatedAt: nowIso(now),
-  });
+  syncRunStatusToActivePackage(db, runRow, now);
 
   try {
     authAudit.recordAuditEvent(db, {
@@ -804,6 +929,13 @@ function submitQaFinding(db, options = {}) {
   } catch (_error) {
     /* Audit-Fehler dürfen den bereits gültigen QA-Befund nicht rückgängig machen. */
   }
+  auditWorkPackageStatusChanged(db, {
+    packageKey,
+    previousStatus,
+    nextStatus: nextPackageStatus,
+    actorUserId: options.actorUserId,
+    now,
+  });
 
   return rowToWorkPackageView(authDb.getHealthReferenceWorkPackage(db, CANONICAL_RUN_ID, packageKey));
 }
@@ -819,6 +951,7 @@ function requestChanges(db, options = {}) {
   if (!pkgRow) throw notFound("Dieses Arbeitspaket wurde nicht gefunden.");
 
   const now = options.now || new Date();
+  const previousStatus = pkgRow.status;
   authDb.insertHealthReferenceResult(db, {
     id: crypto.randomUUID(),
     runId: CANONICAL_RUN_ID,
@@ -835,7 +968,7 @@ function requestChanges(db, options = {}) {
     promptDraftJson: pkgRow.promptDraftJson,
     updatedAt: nowIso(now),
   });
-  authDb.updateHealthReferenceRunStatus(db, { id: CANONICAL_RUN_ID, status: "CHANGES_REQUESTED", updatedAt: nowIso(now) });
+  syncRunStatusToActivePackage(db, runRow, now);
 
   try {
     authAudit.recordAuditEvent(db, {
@@ -849,6 +982,13 @@ function requestChanges(db, options = {}) {
   } catch (_error) {
     /* Audit-Fehler dürfen die bereits gültige Änderungsanforderung nicht rückgängig machen. */
   }
+  auditWorkPackageStatusChanged(db, {
+    packageKey,
+    previousStatus,
+    nextStatus: "CHANGES_REQUESTED",
+    actorUserId: options.actorUserId,
+    now,
+  });
 
   return rowToWorkPackageView(authDb.getHealthReferenceWorkPackage(db, CANONICAL_RUN_ID, packageKey));
 }

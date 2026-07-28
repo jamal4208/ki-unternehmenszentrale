@@ -1,6 +1,6 @@
 # HEALTH REFERENCE WORK RUN
 
-Stand: 2026-07-28 · Lauf V7.6.3 · lokal umgesetzt, **keine Health-Datei verändert, kein Commit, kein Push in diesem Lauf.**
+Stand: 2026-07-28 · Lauf V7.6.4 · lokal umgesetzt, **keine Health-Datei verändert, kein Commit, kein Push in diesem Lauf.**
 
 Dieses Dokument ist die **maßgebliche, kanonische Beschreibung** des ersten echten, kontrollierten Referenz-Arbeitslaufs der KI-Unternehmenszentrale am Health Upgrade Kompass (`health-reference-work-run-v1`). Es ersetzt für den tatsächlichen Lauf die ursprüngliche Planung in `INTERNAL_PROJECT_REFERENCE_PLAN.md` (Testlauf 1) und referenziert weiterhin `HEALTH_REFERENCE_FINISH_PLAN.md` als fachliche Pflichtumfang-Quelle. Keine doppelte, widersprüchliche Dokumentation.
 
@@ -83,15 +83,27 @@ Der Entwurf setzt das Arbeitspaket und ggf. den Gesamtlauf auf `WAITING_FOR_JAMA
 
 ## 7. Statusmodell
 
-Elf Statuswerte: `PREPARED_FOR_EXECUTION` → `WAITING_FOR_JAMAL_APPROVAL` → `APPROVED_FOR_EXECUTION` → `IN_EXECUTION` → `RESULT_SUBMITTED` → `QA_REVIEW` → `CHANGES_REQUESTED`/`WAITING_FOR_FINAL_ACCEPTANCE` → `REFERENCE_READY`, daneben `BLOCKED`/`CANCELLED`.
+**Wichtige Trennung (seit V7.6.4):** Einzelne Arbeitspakete und der Gesamtlauf besitzen zwei unterschiedliche, aber konsistent geführte Statuswerte-Räume. Ein abgeschlossenes Arbeitspaket (`COMPLETED`) bedeutet **nicht**, dass der gesamte Referenzlauf oder Health fertig ist.
 
-**`REFERENCE_READY` ist ausschließlich über `recordFinalAcceptance({ confirmed: true })` erreichbar** — kein automatischer Sprung, kein Abschluss allein aufgrund grüner Tests. Technisch abgesichert:
+**Arbeitspaket-Status (12 Werte):** `PREPARED_FOR_EXECUTION` → `WAITING_FOR_JAMAL_APPROVAL` → `APPROVED_FOR_EXECUTION` → `IN_EXECUTION` → `RESULT_SUBMITTED` → `QA_REVIEW` → `CHANGES_REQUESTED`/`COMPLETED` (Pakete 1–6) bzw. `WAITING_FOR_FINAL_ACCEPTANCE` (Paket 7, `JAMAL_FINAL_ACCEPTANCE`), daneben `BLOCKED`/`CANCELLED`. `COMPLETED` existiert ausschließlich als Arbeitspaket-Status, nicht als Laufstatus.
+
+**Laufstatus (11 Werte, unverändert):** `PREPARED_FOR_EXECUTION` → `WAITING_FOR_JAMAL_APPROVAL` → `APPROVED_FOR_EXECUTION` → `IN_EXECUTION` → `RESULT_SUBMITTED` → `QA_REVIEW` → `CHANGES_REQUESTED`/`WAITING_FOR_FINAL_ACCEPTANCE` → `REFERENCE_READY`, daneben `BLOCKED`/`CANCELLED`. Der Laufstatus wird nach jedem Paket-Statuswechsel (`syncRunStatusToActivePackage`) automatisch vom Status des ersten noch nicht abgeschlossenen/abgebrochenen Arbeitspakets ("aktives Paket") abgeleitet: Ist Paket 1 `COMPLETED` und Paket 2 `WAITING_FOR_JAMAL_APPROVAL`, zeigt der Lauf ebenfalls `WAITING_FOR_JAMAL_APPROVAL`; wird ein Paket auf `APPROVED_FOR_EXECUTION` gesetzt, führt der Lauf denselben Zwischenzustand sichtbar mit. Explizite `BLOCKED`/`CANCELLED`/`REFERENCE_READY`-Zustände des Laufs werden dabei nicht überschrieben.
+
+**Bevorzugte Regel für den Paketabschluss:**
+
+- Pakete 1–6: QA bestanden (`submitQaFinding(passed=true)`) → Paketstatus `COMPLETED`.
+- Paket 7 (`JAMAL_FINAL_ACCEPTANCE`): QA bestanden → Paketstatus `WAITING_FOR_FINAL_ACCEPTANCE` (kein automatisches `COMPLETED`, da hier die Gesamtabnahme ansteht).
+- Gesamter Lauf: erst nach bestätigter finaler Abnahme → `REFERENCE_READY`.
+
+**`REFERENCE_READY` ist ausschließlich über `recordFinalAcceptance({ confirmed: true })` erreichbar** — kein automatischer Sprung, kein Abschluss allein aufgrund grüner Tests, kein Abschluss allein aufgrund eines `COMPLETED`-Arbeitspakets. Technisch abgesichert:
 
 - `recordFinalAcceptance` ohne `confirmed === true` wird abgewiesen.
-- `submitQaFinding(passed=true)` erreicht niemals `REFERENCE_READY` (setzt maximal `WAITING_FOR_FINAL_ACCEPTANCE`/`QA_REVIEW`).
+- `submitQaFinding(passed=true)` erreicht niemals `REFERENCE_READY` (setzt maximal `COMPLETED`/`WAITING_FOR_FINAL_ACCEPTANCE`/`QA_REVIEW`).
 - `transitionWorkPackage` lehnt `REFERENCE_READY` als Ziel generell ab.
 - `recordApproval` lehnt `FINAL_REFERENCE_ACCEPTANCE` als generische Freigabe ab.
 - Nach `REFERENCE_READY` ist der Lauf unveränderlich (`assertRunIsMutable` blockiert jede weitere Schreibaktion).
+
+`nextWorkPackage` liefert das erste Arbeitspaket in der Sequenz, dessen Status weder `COMPLETED`, `REFERENCE_READY` noch `CANCELLED` ist. Der Fortschritt („X von 7 Arbeitspaketen abgeschlossen") zählt ausschließlich Pakete mit Status `COMPLETED` oder `REFERENCE_READY`; `WAITING_FOR_FINAL_ACCEPTANCE`, `QA_REVIEW`, `RESULT_SUBMITTED`, `CHANGES_REQUESTED` und `BLOCKED` zählen ausdrücklich nicht als abgeschlossen.
 
 ## 8. Abschlusskriterien für `REFERENCE_READY`
 
@@ -121,26 +133,26 @@ Kompakte Cockpit-Karte „Health-Referenzlauf" (`index.html#health-reference-run
 
 ## 10. Persistenz und Audit
 
-Additive **Migration 16** (`health_reference_runs`, `health_reference_work_packages`, `health_reference_approvals`, `health_reference_results`; Migrationen 1–15 unverändert). Gespeichert werden ausschließlich Lauf-ID, Projekt, Ergebniswunsch, Agentenzuordnung, Arbeitspaketstatus, Jamal-Freigaben, Ergebnisberichte, QA-Befunde, Abschlussnachweis, Zeitstempel und Auditverweise — **keine** Health-Nutzerdaten, **keine** medizinischen Daten, **keine** aus dem Health-Repository kopierten personenbezogenen Daten.
+Additive **Migration 16** (`health_reference_runs`, `health_reference_work_packages`, `health_reference_approvals`, `health_reference_results`; Migrationen 1–15 unverändert) sowie additive **Migration 17** (V7.6.4: eigenständiger, um `COMPLETED` erweiterter Wertebereich für `health_reference_work_packages.status` plus erneute Audit-Ereignistyp-Erweiterung; Migrationen 1–16 unverändert, keine destruktive Änderung, Tabellen unter Versionsnamen neu angelegt und Daten verlustfrei kopiert). Gespeichert werden ausschließlich Lauf-ID, Projekt, Ergebniswunsch, Agentenzuordnung, Arbeitspaketstatus, Jamal-Freigaben, Ergebnisberichte, QA-Befunde, Abschlussnachweis, Zeitstempel und Auditverweise — **keine** Health-Nutzerdaten, **keine** medizinischen Daten, **keine** aus dem Health-Repository kopierten personenbezogenen Daten.
 
-Neun neue, datensparsame Audit-Ereignistypen: `HEALTH_REFERENCE_RUN_CREATED`, `HEALTH_REFERENCE_WORK_PACKAGE_PREPARED`, `HEALTH_REFERENCE_PROMPT_DRAFT_CREATED`, `HEALTH_REFERENCE_APPROVAL_RECORDED`, `HEALTH_REFERENCE_RESULT_REPORT_SUBMITTED`, `HEALTH_REFERENCE_QA_FINDING_RECORDED`, `HEALTH_REFERENCE_CHANGES_REQUESTED`, `HEALTH_REFERENCE_FINAL_ACCEPTANCE_PREPARED`, `HEALTH_REFERENCE_REFERENCE_READY_GRANTED`.
+Zehn neue, datensparsame Audit-Ereignistypen: `HEALTH_REFERENCE_RUN_CREATED`, `HEALTH_REFERENCE_WORK_PACKAGE_PREPARED`, `HEALTH_REFERENCE_PROMPT_DRAFT_CREATED`, `HEALTH_REFERENCE_APPROVAL_RECORDED`, `HEALTH_REFERENCE_RESULT_REPORT_SUBMITTED`, `HEALTH_REFERENCE_QA_FINDING_RECORDED`, `HEALTH_REFERENCE_CHANGES_REQUESTED`, `HEALTH_REFERENCE_FINAL_ACCEPTANCE_PREPARED`, `HEALTH_REFERENCE_REFERENCE_READY_GRANTED`, `HEALTH_REFERENCE_WORK_PACKAGE_STATUS_CHANGED` (neu, V7.6.4: protokolliert jeden Arbeitspaket-Statuswechsel, Metadaten ausschließlich `healthReferenceRunId`, `workPackageKey`, `previousStatus`, `nextStatus` — keine Berichte, Inhalte oder Gesundheitsdaten).
 
 ## 11. API
 
 Eine neue OWNER_ONLY-GET-Route (`GET /api/health-reference/status`) und ein neuer POST-Aktions-Prefix `/api/health-reference/:action` (`ensure-run`, `prepare-work-package-prompt`, `record-approval`, `transition-work-package`, `submit-result-report`, `submit-qa-finding`, `request-changes`, `record-final-acceptance`, `block-or-cancel-run`). Identisches Sicherheitsmuster wie bestehende Owner-Routen (Origin-/Host-Prüfung, CSRF-Pflicht, Bodylimit, Known-fields-Allowlist, `Cache-Control: no-store`). Keine Login-/Send-/Deploy-/Commit-/Push-Route. Details: `API_REGISTER.md`.
 
-## 12. Referenznachweis (dieser Lauf, V7.6.3)
+## 12. Referenznachweis (dieser Lauf, V7.6.4)
 
 - Health-Repository ausschließlich read-only gelesen (`work/check-start-gate-2026-07-19`, HEAD `81dca3a9967b1763d7b3e881fffe213fe64f9d62`, Working Tree sauber) — unverändert am Ende dieses Laufs.
 - Exakt 25 kanonische Agenten unverändert, kein Agent 26.
-- Migration 16 additiv, Migrationen 1–15 unverändert.
-- Routenzahlen: 89 GET/52 POST/8 GET-Präfixe/8 POST-Präfixe/32 statische Assets.
-- Drei neue Testdateien (`health-reference-work-run.test.js`/22, `health-reference-work-run-security.test.js`/25, `health-reference-work-run-ui.test.js`/21 = 68 neue Prüfpunkte); Gesamtstand real gemessen: **2454** Prüfpunkte in **86** Testdateien grün.
+- Migration 17 additiv (`COMPLETED`-Paketstatus, `HEALTH_REFERENCE_WORK_PACKAGE_STATUS_CHANGED`-Audit-Ereignistyp), Migrationen 1–16 unverändert.
+- Persistierter Zustand des kanonischen Referenzlaufs kontrolliert über `transitionWorkPackage` korrigiert: Paket `HEALTH_BASELINE_CONFIRMATION` (1) → `COMPLETED`; Paket `START_GATE_AND_ENTRY` (2) unverändert `WAITING_FOR_JAMAL_APPROVAL`, nicht freigegeben, nicht ausgeführt; Laufstatus → `WAITING_FOR_JAMAL_APPROVAL`; Fortschritt 1 von 7; `nextWorkPackage = START_GATE_AND_ENTRY`; `REFERENCE_READY` weiterhin nicht gesetzt.
+- Keine neuen Testdateien, acht bestehende Dateien geändert (`health-reference-work-run.test.js` 22→33, `health-reference-work-run-security.test.js` 25→34, `health-reference-work-run-ui.test.js` 21→24 = 23 neue Prüfpunkte); Gesamtstand real gemessen: **2477** Prüfpunkte (vorher 2454, Delta +23) in weiterhin **86** Testdateien grün.
 - `npm run check`/`npm test` Exit 0, `npm audit`: 0 Schwachstellen, `better-sqlite3@13.0.1` unverändert.
 - Kein Commit, kein Push, kein Deployment in diesem Lauf.
 
 ## 13. Urteil
 
-Der Health Upgrade Kompass ist als erster echter, kontrollierter Referenz-Arbeitslauf in der KI-Unternehmenszentrale verankert.
+Die KI-Unternehmenszentrale kann einzelne Health-Arbeitspakete nun korrekt abschließen, ohne den gesamten Referenzlauf vorzeitig als fertig zu markieren. `HEALTH_BASELINE_CONFIRMATION` ist abgeschlossen und `START_GATE_AND_ENTRY` wartet als nächster kontrollierter Schritt auf Freigabe.
 
-**Nächster Schritt (separate Freigabe erforderlich):** Jamal prüft und genehmigt das erste ausführbare Health-Arbeitspaket.
+**Nächster Schritt (separate Freigabe erforderlich):** Die verantwortliche Leitung prüft und genehmigt den `START_GATE_AND_ENTRY`-Prompt.

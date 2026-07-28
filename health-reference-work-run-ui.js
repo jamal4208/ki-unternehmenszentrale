@@ -104,15 +104,21 @@
 
   function biggestBlockerText(run) {
     if (run.status === "BLOCKED") return "Der Referenzlauf ist blockiert – Klärung mit Jamal nötig.";
-    if (run.status === "CHANGES_REQUESTED") return "Es liegt eine offene Änderungsanforderung vor.";
-    var pendingApprovals = (run.approvals || []).filter(function (approval) {
-      return approval.decision === "PENDING" && approval.approvalKey !== "FINAL_REFERENCE_ACCEPTANCE";
-    });
-    if (run.status === "PREPARED_FOR_EXECUTION") {
-      return "Noch kein Arbeitspaket-Prompt vorbereitet.";
+    if (run.status === "CHANGES_REQUESTED") {
+      return run.nextWorkPackage
+        ? "Für " + run.nextWorkPackage.title + " liegt eine offene Änderungsanforderung vor."
+        : "Es liegt eine offene Änderungsanforderung vor.";
     }
-    if (pendingApprovals.length > 0 && run.status === "WAITING_FOR_JAMAL_APPROVAL") {
-      return "Scope-/Arbeitsauftrag-Freigabe von Jamal steht noch aus.";
+    if (run.status === "PREPARED_FOR_EXECUTION") {
+      return run.nextWorkPackage
+        ? "Für " + run.nextWorkPackage.title + " ist noch kein Arbeitspaket-Prompt vorbereitet."
+        : "Noch kein Arbeitspaket-Prompt vorbereitet.";
+    }
+    if (run.status === "WAITING_FOR_JAMAL_APPROVAL" && run.nextWorkPackage) {
+      return "Prompt für " + run.nextWorkPackage.title + " wartet auf Prüfung und Freigabe durch Jamal.";
+    }
+    if (run.status === "WAITING_FOR_FINAL_ACCEPTANCE") {
+      return "Jamals finale Referenzabnahme steht noch aus.";
     }
     return "Kein bekannter Blocker.";
   }

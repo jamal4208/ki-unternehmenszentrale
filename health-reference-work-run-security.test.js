@@ -312,6 +312,117 @@ async function run() {
   });
 
   // -------------------------------------------------------------------
+  // V7.6.4 – einzelne Health-Arbeitspakete korrekt abschließen (Auftrag
+  // Abschnitt 8, Prüfpunkte 9, 10, 11 aus HTTP-/Datensicht: dieselben
+  // Felder, die health-reference-work-run-ui.js für die Anzeige nutzt).
+  // Führt Paket 1 (firstWorkPackageKey) vollständig bis COMPLETED und
+  // bereitet Paket 2 vor – ausschließlich über HTTP, gleiches Muster wie
+  // oben.
+  // -------------------------------------------------------------------
+
+  await invoke({
+    method: "POST",
+    url: "/api/health-reference/transition-work-package",
+    headers: authedJsonHeaders(ownerSession),
+    bodyObj: { workPackageKey: firstWorkPackageKey, toStatus: "APPROVED_FOR_EXECUTION" },
+  });
+  await invoke({
+    method: "POST",
+    url: "/api/health-reference/transition-work-package",
+    headers: authedJsonHeaders(ownerSession),
+    bodyObj: { workPackageKey: firstWorkPackageKey, toStatus: "IN_EXECUTION" },
+  });
+  await invoke({
+    method: "POST",
+    url: "/api/health-reference/submit-result-report",
+    headers: authedJsonHeaders(ownerSession),
+    bodyObj: { workPackageKey: firstWorkPackageKey, summary: "Ergebnis Paket 1 (HTTP-Testfixtur)." },
+  });
+  const qaResult = record(
+    await invoke({
+      method: "POST",
+      url: "/api/health-reference/submit-qa-finding",
+      headers: authedJsonHeaders(ownerSession),
+      bodyObj: { workPackageKey: firstWorkPackageKey, summary: "QA Paket 1 bestanden (HTTP-Testfixtur).", passed: true },
+    }),
+  );
+
+  await check("V7.6.4-2. Paket 1 wird nach bestandenem QA über HTTP COMPLETED (nicht REFERENCE_READY)", () => {
+    assert.strictEqual(qaResult.statusCode, 200);
+    assert.strictEqual(qaResult.json.workPackage.status, "COMPLETED");
+  });
+
+  const statusAfterPkg1Result = record(
+    await invoke({ method: "GET", url: "/api/health-reference/status", headers: { cookie: ownerSession.cookieHeader } }),
+  );
+  await check("V7.6.4-7/8. Fortschritt zählt Paket 1 (1 von 7), nextWorkPackage liefert Paket 2", () => {
+    assert.strictEqual(statusAfterPkg1Result.json.run.progress.completed, 1);
+    assert.strictEqual(statusAfterPkg1Result.json.run.progress.total, 7);
+    assert.notStrictEqual(statusAfterPkg1Result.json.run.nextWorkPackage.packageKey, firstWorkPackageKey);
+  });
+  const secondWorkPackageKey = statusAfterPkg1Result.json.run.nextWorkPackage.packageKey;
+
+  const preparePrompt2Result = record(
+    await invoke({
+      method: "POST",
+      url: "/api/health-reference/prepare-work-package-prompt",
+      headers: authedJsonHeaders(ownerSession),
+      bodyObj: { workPackageKey: secondWorkPackageKey },
+    }),
+  );
+  await check("V7.6.4-6/9/10. nach Vorbereitung von Paket 2 zeigt der Lauf WAITING_FOR_JAMAL_APPROVAL mit Paket 2 als nächste Handlung", () => {
+    assert.strictEqual(preparePrompt2Result.statusCode, 200);
+    assert.strictEqual(preparePrompt2Result.json.workPackage.status, "WAITING_FOR_JAMAL_APPROVAL");
+  });
+
+  const finalStatusResult = record(
+    await invoke({ method: "GET", url: "/api/health-reference/status", headers: { cookie: ownerSession.cookieHeader } }),
+  );
+  await check("V7.6.4-6. der Laufstatus ist WAITING_FOR_JAMAL_APPROVAL, nicht mehr QA_REVIEW/RESULT_SUBMITTED", () => {
+    assert.strictEqual(finalStatusResult.json.run.status, "WAITING_FOR_JAMAL_APPROVAL");
+    assert.notStrictEqual(finalStatusResult.json.run.status, "REFERENCE_READY");
+  });
+
+  await check("V7.6.4-9/10. Fortschritt zeigt weiterhin 1 von 7 und Paket 2 als nächstes Arbeitspaket", () => {
+    assert.strictEqual(finalStatusResult.json.run.progress.completed, 1);
+    assert.strictEqual(finalStatusResult.json.run.progress.total, 7);
+    assert.strictEqual(finalStatusResult.json.run.nextWorkPackage.packageKey, secondWorkPackageKey);
+  });
+
+  await check("V7.6.4-10. die nächste Handlung nennt konkret das nächste Arbeitspaket (kein generischer Text ohne Bezug)", () => {
+    assert.strictEqual(finalStatusResult.json.run.nextAction.id, "REVIEW_PROMPT_DRAFT");
+    assert.match(finalStatusResult.json.run.nextAction.label, new RegExp(finalStatusResult.json.run.nextWorkPackage.title));
+  });
+
+  await check("V7.6.4-11. Paket 1 fordert nach COMPLETED keine erneute QA (Status bleibt COMPLETED, kein Rückfall)", () => {
+    const pkg1View = finalStatusResult.json.run.workPackages.find((pkg) => pkg.packageKey === firstWorkPackageKey);
+    assert.strictEqual(pkg1View.status, "COMPLETED");
+    assert.strictEqual(pkg1View.statusLabel, "Abgeschlossen");
+  });
+
+  await check("V7.6.4-14. Paket 2 bleibt nach der Vorbereitung unausgeführt (nicht freigegeben, nicht ausgeführt)", () => {
+    const pkg2View = finalStatusResult.json.run.workPackages.find((pkg) => pkg.packageKey === secondWorkPackageKey);
+    assert.strictEqual(pkg2View.status, "WAITING_FOR_JAMAL_APPROVAL");
+  });
+
+  await check("V7.6.4-12/13. der Statusübergang von Paket 1 erzeugt ein datensparsames HEALTH_REFERENCE_WORK_PACKAGE_STATUS_CHANGED-Auditereignis", () => {
+    const events = authDb
+      .listAuditEvents(seedDb, { eventType: "HEALTH_REFERENCE_WORK_PACKAGE_STATUS_CHANGED" })
+      .filter((event) => JSON.parse(event.metadata || "{}").workPackageKey === firstWorkPackageKey);
+    assert.ok(events.length > 0);
+    const completedEvent = events.find((event) => JSON.parse(event.metadata).nextStatus === "COMPLETED");
+    assert.ok(completedEvent, "kein Auditereignis für den Übergang nach COMPLETED gefunden");
+    events.forEach((event) => {
+      const metadataKeys = Object.keys(JSON.parse(event.metadata));
+      assert.deepStrictEqual(
+        metadataKeys.sort(),
+        ["healthReferenceRunId", "nextStatus", "previousStatus", "workPackageKey"].sort(),
+      );
+      assert.doesNotMatch(event.metadata, /gewicht|diagnose|medizinisch|kilogramm|geburtsdatum/i);
+    });
+  });
+
+  // -------------------------------------------------------------------
   // 14. Auditereignisse (HTTP-Ebene) sind datensparsam.
   // -------------------------------------------------------------------
 

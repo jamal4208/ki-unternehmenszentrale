@@ -20,6 +20,7 @@ const os = require("os");
 const path = require("path");
 
 const authDb = require("./auth-db");
+const migrations = require("./auth-db-migrations");
 const agentRegistry = require("./agent-registry");
 const service = require("./health-reference-work-run-service");
 
@@ -259,6 +260,126 @@ async function run() {
   });
 
   authDb.closeAuthDatabase(db);
+
+  // -------------------------------------------------------------------
+  // V7.6.4 – einzelne Arbeitspakete korrekt abschließen (Auftrag
+  // Abschnitt 8, Prüfpunkte 1-8, 12, 13). Eigene, frische isolierte
+  // Datenbank, da der obige Lauf bereits REFERENCE_READY (unveränderlich)
+  // ist.
+  // -------------------------------------------------------------------
+
+  const { db: db2 } = makeIsolatedDb("health-reference-work-run-test-v764-");
+  service.getOrCreateCanonicalRun(db2);
+  const [pkgKey1, pkgKey2, pkgKey3, pkgKey4, pkgKey5, pkgKey6, pkgKey7] = service.WORK_PACKAGE_DEFINITIONS.map(
+    (definition) => definition.key,
+  );
+
+  await check("V7.6.4-1. COMPLETED existiert ausschließlich als Arbeitspaket-Status, niemals als Laufstatus", () => {
+    assert.ok(migrations.HEALTH_REFERENCE_WORK_PACKAGE_STATUS_VALUES.includes("COMPLETED"));
+    assert.ok(!migrations.HEALTH_REFERENCE_RUN_STATUS_VALUES.includes("COMPLETED"));
+    assert.strictEqual(
+      migrations.HEALTH_REFERENCE_WORK_PACKAGE_STATUS_VALUES.length,
+      migrations.HEALTH_REFERENCE_RUN_STATUS_VALUES.length + 1,
+    );
+  });
+
+  await service.prepareWorkPackagePromptDraft(db2, { packageKey: pkgKey1 });
+  service.transitionWorkPackage(db2, { packageKey: pkgKey1, toStatus: "APPROVED_FOR_EXECUTION" });
+
+  await check("V7.6.4-5. der Laufstatus folgt APPROVED_FOR_EXECUTION, sobald ein Arbeitspaket dorthin wechselt", () => {
+    assert.strictEqual(service.getRunView(db2).status, "APPROVED_FOR_EXECUTION");
+  });
+
+  service.transitionWorkPackage(db2, { packageKey: pkgKey1, toStatus: "IN_EXECUTION" });
+  service.submitResultReport(db2, { packageKey: pkgKey1, summary: "Ergebnis Paket 1 (Testfixtur)." });
+  const pkg1AfterQa = service.submitQaFinding(db2, { packageKey: pkgKey1, summary: "QA Paket 1 bestanden (Testfixtur).", passed: true });
+
+  await check("V7.6.4-2. Paket 1 (eines von 1-6) wird nach bestandenem QA COMPLETED, nicht REFERENCE_READY", () => {
+    assert.strictEqual(pkg1AfterQa.status, "COMPLETED");
+    assert.notStrictEqual(pkg1AfterQa.status, "REFERENCE_READY");
+  });
+
+  const viewAfterPkg1Completed = service.getRunView(db2);
+  await check("V7.6.4-7. der Fortschritt zählt das abgeschlossene Paket 1 (1 von 7)", () => {
+    assert.strictEqual(viewAfterPkg1Completed.progress.completed, 1);
+    assert.strictEqual(viewAfterPkg1Completed.progress.total, 7);
+  });
+
+  await check("V7.6.4-8. nextWorkPackage liefert nach Abschluss von Paket 1 korrekt Paket 2", () => {
+    assert.strictEqual(viewAfterPkg1Completed.nextWorkPackage.packageKey, pkgKey2);
+  });
+
+  await service.prepareWorkPackagePromptDraft(db2, { packageKey: pkgKey2 });
+  const viewAfterPkg2Prepared = service.getRunView(db2);
+
+  await check("V7.6.4-6. nach Paketabschluss und vorbereitetem Folgepaket zeigt der Lauf WAITING_FOR_JAMAL_APPROVAL", () => {
+    assert.strictEqual(viewAfterPkg2Prepared.status, "WAITING_FOR_JAMAL_APPROVAL");
+    assert.strictEqual(viewAfterPkg2Prepared.workPackages[0].status, "COMPLETED");
+    assert.strictEqual(viewAfterPkg2Prepared.workPackages[1].status, "WAITING_FOR_JAMAL_APPROVAL");
+    assert.notStrictEqual(viewAfterPkg2Prepared.status, "REFERENCE_READY");
+  });
+
+  await check("V7.6.4-14. Paket 2 bleibt nach der Vorbereitung unausgeführt (nicht freigegeben, nicht ausgeführt)", () => {
+    assert.strictEqual(viewAfterPkg2Prepared.workPackages[1].status, "WAITING_FOR_JAMAL_APPROVAL");
+    assert.notStrictEqual(viewAfterPkg2Prepared.workPackages[1].status, "APPROVED_FOR_EXECUTION");
+    assert.notStrictEqual(viewAfterPkg2Prepared.workPackages[1].status, "IN_EXECUTION");
+    assert.notStrictEqual(viewAfterPkg2Prepared.workPackages[1].status, "COMPLETED");
+  });
+
+  await check("V7.6.4-12/13. jeder Statusübergang erzeugt ein datensparsames HEALTH_REFERENCE_WORK_PACKAGE_STATUS_CHANGED-Auditereignis", () => {
+    const events = authDb
+      .listAuditEvents(db2, { eventType: "HEALTH_REFERENCE_WORK_PACKAGE_STATUS_CHANGED" })
+      .filter((event) => JSON.parse(event.metadata || "{}").workPackageKey === pkgKey1);
+    const transitions = events.map((event) => {
+      const metadata = JSON.parse(event.metadata);
+      return `${metadata.previousStatus}->${metadata.nextStatus}`;
+    });
+    assert.ok(transitions.includes("WAITING_FOR_JAMAL_APPROVAL->APPROVED_FOR_EXECUTION"));
+    assert.ok(transitions.includes("APPROVED_FOR_EXECUTION->IN_EXECUTION"));
+    assert.ok(transitions.includes("IN_EXECUTION->RESULT_SUBMITTED"));
+    assert.ok(transitions.includes("RESULT_SUBMITTED->COMPLETED"));
+    events.forEach((event) => {
+      const metadataKeys = Object.keys(JSON.parse(event.metadata));
+      assert.deepStrictEqual(
+        metadataKeys.sort(),
+        ["healthReferenceRunId", "nextStatus", "previousStatus", "workPackageKey"].sort(),
+      );
+      assert.doesNotMatch(event.metadata, /gewicht|diagnose|medizinisch|kilogramm/i);
+    });
+  });
+
+  // Pakete 2-6 auf COMPLETED bringen (generischer Statuswechsel, gleiches
+  // Verhalten wie über submitQaFinding), um Paket 7 (letztes Paket) isoliert
+  // zu prüfen.
+  [pkgKey2, pkgKey3, pkgKey4, pkgKey5, pkgKey6].forEach((key) => {
+    service.transitionWorkPackage(db2, { packageKey: key, toStatus: "COMPLETED" });
+  });
+
+  await service.prepareWorkPackagePromptDraft(db2, { packageKey: pkgKey7 });
+  service.transitionWorkPackage(db2, { packageKey: pkgKey7, toStatus: "APPROVED_FOR_EXECUTION" });
+  service.transitionWorkPackage(db2, { packageKey: pkgKey7, toStatus: "IN_EXECUTION" });
+  service.submitResultReport(db2, { packageKey: pkgKey7, summary: "Ergebnis Paket 7 (Testfixtur)." });
+  const pkg7AfterQa = service.submitQaFinding(db2, { packageKey: pkgKey7, summary: "QA Paket 7 bestanden (Testfixtur).", passed: true });
+
+  await check("V7.6.4-3. Paket 7 (letztes Paket) wird nach bestandenem QA NICHT automatisch COMPLETED, sondern wartet auf finale Abnahme", () => {
+    assert.strictEqual(pkg7AfterQa.status, "WAITING_FOR_FINAL_ACCEPTANCE");
+    assert.notStrictEqual(pkg7AfterQa.status, "COMPLETED");
+  });
+
+  const viewBeforeFinalAcceptance = service.getRunView(db2);
+  await check("V7.6.4-4a. REFERENCE_READY ist vor der finalen Abnahme weiterhin nicht gesetzt (6 von 7 abgeschlossen)", () => {
+    assert.strictEqual(viewBeforeFinalAcceptance.status, "WAITING_FOR_FINAL_ACCEPTANCE");
+    assert.notStrictEqual(viewBeforeFinalAcceptance.status, "REFERENCE_READY");
+    assert.strictEqual(viewBeforeFinalAcceptance.progress.completed, 6);
+  });
+
+  const viewAfterFinalAcceptance = service.recordFinalAcceptance(db2, { confirmed: true, note: "Testfixtur-Abnahme." });
+  await check("V7.6.4-4b. REFERENCE_READY wird ausschließlich durch die bestätigte finale Abnahme erreicht (7 von 7)", () => {
+    assert.strictEqual(viewAfterFinalAcceptance.status, "REFERENCE_READY");
+    assert.strictEqual(viewAfterFinalAcceptance.progress.completed, 7);
+  });
+
+  authDb.closeAuthDatabase(db2);
   console.log(`health-reference-work-run.test.js: ${passed} Prüfpunkte erfolgreich`);
 }
 

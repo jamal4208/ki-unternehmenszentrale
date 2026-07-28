@@ -182,6 +182,15 @@ const EVENT_TYPES = Object.freeze([
   "HEALTH_REFERENCE_CHANGES_REQUESTED",
   "HEALTH_REFERENCE_FINAL_ACCEPTANCE_PREPARED",
   "HEALTH_REFERENCE_REFERENCE_READY_GRANTED",
+  // V7.6.4 – einzelne Health-Arbeitspakete korrekt abschließen (Auftrag
+  // Abschnitt 4). Muss exakt der in
+  // auth-db-migrations.js#AUDIT_EVENT_TYPES_AT_MIGRATION_17 erweiterten
+  // CHECK-Aufzählung (Migration 17) entsprechen. Deckt jeden
+  // Arbeitspaket-Statusübergang zusätzlich ab (Freigabe, Ausführung
+  // gestartet, Ergebnis eingereicht, QA-Ergebnis, Paket abgeschlossen,
+  // Änderung angefordert, blockiert, abgebrochen) – zusätzlich zu den
+  // bereits bestehenden, spezifischeren Ereignistypen.
+  "HEALTH_REFERENCE_WORK_PACKAGE_STATUS_CHANGED",
 ]);
 
 const RESULTS = Object.freeze(["OK", "DENIED", "ERROR"]);
@@ -301,6 +310,13 @@ const METADATA_ALLOWLIST = Object.freeze([
   "workPackageKey",
   "approvalKey",
   "resultKind",
+  // V7.6.4 – Health-Arbeitspaket-Statusübergänge: "previousStatus" und
+  // "nextStatus" sind ausschließlich einer der festen
+  // HEALTH_REFERENCE_WORK_PACKAGE_STATUS_VALUES-Codes (auth-db-
+  // migrations.js), niemals Freitext, kein Ergebnisbericht, keine
+  // Gesundheitsdaten.
+  "previousStatus",
+  "nextStatus",
 ]);
 
 // Verbotene Inhalte, unabhängig vom Feldnamen (Verteidigung in der Tiefe:
