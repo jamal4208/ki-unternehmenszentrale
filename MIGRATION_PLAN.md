@@ -1,5 +1,31 @@
 # MIGRATION PLAN
 
+## V7.6.3 – Health Upgrade Kompass als ersten echten Referenz-Arbeitslauf verankern (Migration 16, additiv, lokal umgesetzt, noch nicht committed/gepusht)
+
+Vorheriger Ausgang: HEAD/`origin/main` `c9635a56d5fa4fcc730fd7471db5b1cd0ea08aa8` (V7.6.2, Working Tree sauber, 88 GET/52 POST/8 GET-Präfixe/7 POST-Präfixe/31 statische Assets, **83 Testdateien, 2386 automatisierte Prüfpunkte grün**, Migration 15). Dieser Schritt ist rein additiv; Migrationen 1–15 byteidentisch unverändert.
+
+**Neue Migration 16** (vier neue Tabellen plus additive Erweiterung von `auth_audit_events` um neun neue Ereignistypen, gleiches bewährte Recreate-Muster wie bei Migration 14/15: neue Zwischentabelle mit erweitertem `CHECK` über eine neue, additive Konstante `AUDIT_EVENT_TYPES_AT_MIGRATION_16` – **nicht** die veränderliche `AUDIT_EVENT_TYPES`-Live-Konstante –, vollständige Datenübernahme, Umbenennung, erneute Anlage der append-only-Trigger/Indizes):
+
+| Tabelle | Zweck | Wichtige Felder/Regeln |
+|---|---|---|
+| `health_reference_runs` | genau ein kanonischer Health-Referenz-Arbeitslauf | `status` als `CHECK`-Enum (11 Werte, Standard `PREPARED_FOR_EXECUTION`), `mainAgentCanonicalName`/`qaAgentCanonicalName`/`specialistAgentsJson` (max. drei Fachagenten als JSON-Array), `outcomeText` 1–2000 Zeichen |
+| `health_reference_work_packages` | sieben feste, sequenzielle Arbeitspakete je Lauf | `packageKey` als `CHECK`-Enum (7 feste Codes), `sequence` `CHECK (sequence BETWEEN 1 AND 7)`, `UNIQUE (runId, packageKey)`, `promptDraftJson` auf 8000 Zeichen begrenzt |
+| `health_reference_approvals` | sieben feste Jamal-Freigabepunkte je Lauf | `approvalKey` als `CHECK`-Enum (7 feste Codes), `decision` als `CHECK`-Enum (`PENDING`/`APPROVED`/`REJECTED`), `UNIQUE (runId, approvalKey)` |
+| `health_reference_results` | Ergebnisberichte, QA-Befunde, Änderungsanforderungen, Abschlussnachweise | `kind` als `CHECK`-Enum (4 feste Werte), `summary` 1–500 Zeichen, `detailsJson` auf 4000 Zeichen begrenzt, `FOREIGN KEY (runId) REFERENCES health_reference_runs(id) ON DELETE CASCADE` |
+
+Bewusst **keine** zweite, parallele Arbeitslauf-/Projekttabelle: das Modell ist additiv auf derselben `auth-db.js`-SQLite-Schicht wie `office_work_items`/`finance_handoffs` (Migration 15) aufgebaut und nutzt dasselbe CRUD-/Audit-/Routing-Muster. Bewusst **keine** Health-Nutzerdaten-Spalte – gespeichert werden ausschließlich Steuerungsmetadaten der Zentrale selbst (Lauf-/Arbeitspaket-/Freigabe-/Ergebnisstatus, Zeitstempel, Auditverweise).
+
+| Bereich | Regel |
+|---|---|
+| health-reference-work-run-service.js (neu) | Statusmodell/-übergänge für den Referenzlauf, Persistenz über `auth-db.js` (Migration 16), Audit über `auth-audit.js`; `REFERENCE_READY` ausschließlich über `recordFinalAcceptance({ confirmed: true })` erreichbar, kein automatischer Sprung; liest Health-Branch/-HEAD ausschließlich read-only über das bestehende `health-repo-status.js` |
+| health-reference-work-run-routes.js (neu) | reines HTTP-Glue-Modul (gleiches Muster wie `office-finance-routes.js`): liest den Anfragekörper, prüft je Aktion eine enge Known-Fields-Allowlist, bildet Fehler auf Statuscodes ab; keine Login-/Send-/Deploy-/Commit-/Push-Aktion |
+| health-reference-work-run-ui.js (neu) | eigenständiges Vanilla-Client-Skript, rendert ausschließlich `#health-reference-run-card`; spricht ausschließlich `/api/health-reference/*` an |
+| auth-db-migrations.js (erweitert, Migration 16) | vier neue Tabellen (siehe oben); additive Erweiterung von `auth_audit_events` um neun neue Ereignistypen; Migrationen 1–15 byteidentisch unverändert |
+| auth-db.js (erweitert) | neue CRUD-Funktionen für Lauf-/Arbeitspaket-/Freigabe-/Ergebnisdatensätze |
+| auth-audit.js (erweitert) | neun neue Ereignistypen: `HEALTH_REFERENCE_RUN_CREATED`, `HEALTH_REFERENCE_WORK_PACKAGE_PREPARED`, `HEALTH_REFERENCE_PROMPT_DRAFT_CREATED`, `HEALTH_REFERENCE_APPROVAL_RECORDED`, `HEALTH_REFERENCE_RESULT_REPORT_SUBMITTED`, `HEALTH_REFERENCE_QA_FINDING_RECORDED`, `HEALTH_REFERENCE_CHANGES_REQUESTED`, `HEALTH_REFERENCE_FINAL_ACCEPTANCE_PREPARED`, `HEALTH_REFERENCE_REFERENCE_READY_GRANTED` |
+
+Ergebnis: **89 GET, 52 POST, 8 GET-Präfixe, 8 POST-Präfixe, 32 statische Assets**, **2454** automatisierte Prüfpunkte in **86** Testdateien grün, `npm audit`: 0 Schwachstellen, `better-sqlite3@13.0.1` unverändert, exakt 25 kanonische Agenten unverändert. Health Upgrade Kompass (`work/check-start-gate-2026-07-19`, HEAD `81dca3a9967b1763d7b3e881fffe213fe64f9d62`) wurde ausschließlich read-only gelesen, nicht verändert. **Lokal umgesetzt, noch nicht committed, gepusht oder deployt.**
+
 ## V7.6.2 – Projekt-Finish-Portfolio, interne Referenzläufe und verkaufsfähige Marketingagentur (keine neue Migration)
 
 Reiner Planungs- und Dokumentationslauf. **Keine neue Migration** – Migration 15 bleibt der aktuelle, unveränderte Stand (Migrationen 1–15 byteidentisch unverändert). Es wurden ausschließlich sechs neue Markdown-Dokumente erstellt (`PROJECT_FINISH_PORTFOLIO.md`, `INTERNAL_PROJECT_REFERENCE_PLAN.md`, `HEALTH_REFERENCE_FINISH_PLAN.md`, `MARKETING_AGENCY_SELLABLE_PILOT_PLAN.md`, `PROJECT_FINISH_DECISION_BOARD.md`, `HR_FUTURE_AGENT_DECISION_AGENDA.md`) und fünf kanonische Dokumente ergänzt (`PROJECT_MASTER.md`, `CURRENT_STATUS.md`, `MIGRATION_PLAN.md`, `README.md`, `V1_BETRIEBSHANDBUCH.md`). Kein Code, keine Datenbank, keine Tabelle, kein Index, kein Trigger geändert. Details siehe `CURRENT_STATUS.md` und `PROJECT_FINISH_PORTFOLIO.md`.

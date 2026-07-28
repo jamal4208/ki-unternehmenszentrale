@@ -354,6 +354,13 @@ const GET_POLICIES = [
   ownerGet("/api/office-finance/finance-handoffs", "Office & Finanzen Finance-Handoffs"),
   ownerGet("/api/office-finance/authentication-status", "Office & Finanzen Authentifizierungsbedarf"),
   ownerGet("/api/office-finance/activation-checklists", "Office & Finanzen spätere Jamal-Freigabeschritte"),
+  // V7.6.3 – Health Upgrade Kompass als ersten echten Referenz-Arbeitslauf
+  // verankern: ein einziger lesender Endpunkt für den kanonischen
+  // Referenzlauf (Team, Arbeitspakete, Freigaben, Ergebnisnachweise). Keine
+  // Health-Datei wird gelesen/geschrieben; health-repo-status.js bleibt der
+  // einzige read-only Git-Zugriff (siehe health-reference-work-run-routes.js
+  // #Kopfkommentar).
+  ownerGet("/api/health-reference/status", "Health-Referenzlauf Kompaktübersicht und Details"),
 ];
 
 const POST_POLICIES = [
@@ -479,6 +486,13 @@ const PREFIX_POLICIES = [
   // – ein Prefix für alle schreibenden Office-/Finance-Aktionen, keine
   // Ausführungsroute für eine echte Provideraktion.
   ownerPostPrefix("/api/office-finance/", "Office & Finanzen Aktion (Auftrag/Handoff anlegen und prüfen, keine echte Provideraktion)"),
+  // V7.6.3 – Health Upgrade Kompass als ersten echten Referenz-Arbeitslauf
+  // verankern: ein einziger Prefix für alle schreibenden, rein
+  // vorbereitenden Aktionen (Prompt-Entwurf, Jamal-Freigabe, Ergebnis-/
+  // QA-Nachweis, finale Abnahme). Keine Aktion committet, pusht oder führt
+  // eine echte Health-Ausführung aus (siehe
+  // health-reference-work-run-routes.js#Kopfkommentar).
+  ownerPostPrefix("/api/health-reference/", "Health-Referenzlauf Aktion (Prompt-Entwurf/Freigabe/Ergebnis/QA, keine echte Health-Ausführung)"),
 ];
 
 const STATIC_POLICIES = [
@@ -552,6 +566,11 @@ const STATIC_POLICIES = [
   // eigenständiges, additives Chef-UI-Skript für die neue Ansicht "Office &
   // Finanzen" (gleiches Muster wie agent-leadership-ui.js).
   staticOwnerOnly("/office-finance-ui.js", "Chef-UI-Skript Office & Finanzen"),
+  // V7.6.3 – Health Upgrade Kompass als ersten echten Referenz-Arbeitslauf
+  // verankern: eigenständiges, additives Chef-UI-Skript für die kompakte
+  // Health-Referenzlauf-Karte im Cockpit (gleiches Muster wie
+  // office-finance-ui.js).
+  staticOwnerOnly("/health-reference-work-run-ui.js", "Chef-UI-Skript Health-Referenzlauf-Karte"),
 ];
 
 const ALL_POLICIES = Object.freeze([

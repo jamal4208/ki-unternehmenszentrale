@@ -1782,6 +1782,157 @@ function updateFinanceHandoffReview(db, input = {}) {
   return getFinanceHandoffById(db, input.id);
 }
 
+// ---------------------------------------------------------------------------
+// V7.6.3 – Health Upgrade Kompass Referenz-Arbeitslauf (siehe
+// health-reference-work-run-service.js#Kopfkommentar). Genau ein
+// kanonischer Lauf; die Eindeutigkeit einer festen id wird fachlich vom
+// Service sichergestellt (INSERT OR IGNORE hier zusätzlich defensiv).
+// ---------------------------------------------------------------------------
+function insertHealthReferenceRunIfMissing(db, input = {}) {
+  db.prepare(
+    `INSERT OR IGNORE INTO health_reference_runs
+      (id, title, projectId, projectPath, outcomeText, status, mainAgentCanonicalName,
+       specialistAgentsJson, qaAgentCanonicalName, createdAt, updatedAt)
+     VALUES
+      (@id, @title, @projectId, @projectPath, @outcomeText, @status, @mainAgentCanonicalName,
+       @specialistAgentsJson, @qaAgentCanonicalName, @createdAt, @updatedAt)`,
+  ).run({
+    id: input.id,
+    title: input.title,
+    projectId: input.projectId,
+    projectPath: input.projectPath,
+    outcomeText: input.outcomeText,
+    status: input.status,
+    mainAgentCanonicalName: input.mainAgentCanonicalName,
+    specialistAgentsJson: input.specialistAgentsJson,
+    qaAgentCanonicalName: input.qaAgentCanonicalName,
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
+  });
+  return getHealthReferenceRunById(db, input.id);
+}
+
+function getHealthReferenceRunById(db, id) {
+  return db.prepare("SELECT * FROM health_reference_runs WHERE id = ?").get(id) || null;
+}
+
+function updateHealthReferenceRunStatus(db, input = {}) {
+  db.prepare(
+    `UPDATE health_reference_runs SET status = @status, updatedAt = @updatedAt WHERE id = @id`,
+  ).run({ id: input.id, status: input.status, updatedAt: input.updatedAt });
+  return getHealthReferenceRunById(db, input.id);
+}
+
+function insertHealthReferenceWorkPackageIfMissing(db, input = {}) {
+  db.prepare(
+    `INSERT OR IGNORE INTO health_reference_work_packages
+      (id, runId, packageKey, sequence, title, status, promptDraftJson, createdAt, updatedAt)
+     VALUES
+      (@id, @runId, @packageKey, @sequence, @title, @status, @promptDraftJson, @createdAt, @updatedAt)`,
+  ).run({
+    id: input.id,
+    runId: input.runId,
+    packageKey: input.packageKey,
+    sequence: input.sequence,
+    title: input.title,
+    status: input.status,
+    promptDraftJson: input.promptDraftJson ?? null,
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
+  });
+  return getHealthReferenceWorkPackage(db, input.runId, input.packageKey);
+}
+
+function getHealthReferenceWorkPackage(db, runId, packageKey) {
+  return (
+    db
+      .prepare("SELECT * FROM health_reference_work_packages WHERE runId = ? AND packageKey = ?")
+      .get(runId, packageKey) || null
+  );
+}
+
+function listHealthReferenceWorkPackages(db, runId) {
+  return db
+    .prepare("SELECT * FROM health_reference_work_packages WHERE runId = ? ORDER BY sequence ASC")
+    .all(runId);
+}
+
+function updateHealthReferenceWorkPackage(db, input = {}) {
+  db.prepare(
+    `UPDATE health_reference_work_packages
+       SET status = @status, promptDraftJson = @promptDraftJson, updatedAt = @updatedAt
+     WHERE id = @id`,
+  ).run({
+    id: input.id,
+    status: input.status,
+    promptDraftJson: input.promptDraftJson ?? null,
+    updatedAt: input.updatedAt,
+  });
+  return db.prepare("SELECT * FROM health_reference_work_packages WHERE id = ?").get(input.id) || null;
+}
+
+function upsertHealthReferenceApproval(db, input = {}) {
+  const existing = db
+    .prepare("SELECT * FROM health_reference_approvals WHERE runId = ? AND approvalKey = ?")
+    .get(input.runId, input.approvalKey);
+  if (existing) {
+    db.prepare(
+      `UPDATE health_reference_approvals
+         SET decision = @decision, note = @note, decidedAt = @decidedAt, updatedAt = @updatedAt
+       WHERE id = @id`,
+    ).run({
+      id: existing.id,
+      decision: input.decision,
+      note: input.note ?? null,
+      decidedAt: input.decidedAt ?? null,
+      updatedAt: input.updatedAt,
+    });
+    return db.prepare("SELECT * FROM health_reference_approvals WHERE id = ?").get(existing.id) || null;
+  }
+  db.prepare(
+    `INSERT INTO health_reference_approvals
+      (id, runId, approvalKey, decision, note, decidedAt, createdAt, updatedAt)
+     VALUES
+      (@id, @runId, @approvalKey, @decision, @note, @decidedAt, @createdAt, @updatedAt)`,
+  ).run({
+    id: input.id,
+    runId: input.runId,
+    approvalKey: input.approvalKey,
+    decision: input.decision,
+    note: input.note ?? null,
+    decidedAt: input.decidedAt ?? null,
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
+  });
+  return db.prepare("SELECT * FROM health_reference_approvals WHERE id = ?").get(input.id) || null;
+}
+
+function listHealthReferenceApprovals(db, runId) {
+  return db.prepare("SELECT * FROM health_reference_approvals WHERE runId = ?").all(runId);
+}
+
+function insertHealthReferenceResult(db, input = {}) {
+  db.prepare(
+    `INSERT INTO health_reference_results
+      (id, runId, workPackageKey, kind, summary, detailsJson, createdAt)
+     VALUES
+      (@id, @runId, @workPackageKey, @kind, @summary, @detailsJson, @createdAt)`,
+  ).run({
+    id: input.id,
+    runId: input.runId,
+    workPackageKey: input.workPackageKey ?? null,
+    kind: input.kind,
+    summary: input.summary,
+    detailsJson: input.detailsJson ?? null,
+    createdAt: input.createdAt,
+  });
+  return db.prepare("SELECT * FROM health_reference_results WHERE id = ?").get(input.id) || null;
+}
+
+function listHealthReferenceResults(db, runId) {
+  return db.prepare("SELECT * FROM health_reference_results WHERE runId = ? ORDER BY createdAt ASC").all(runId);
+}
+
 module.exports = {
   AuthDatabaseStartupError,
   resolveAuthDbPaths,
@@ -1913,4 +2064,16 @@ module.exports = {
   getFinanceHandoffById,
   listFinanceHandoffs,
   updateFinanceHandoffReview,
+  // V7.6.3 – Health Upgrade Kompass Referenz-Arbeitslauf
+  insertHealthReferenceRunIfMissing,
+  getHealthReferenceRunById,
+  updateHealthReferenceRunStatus,
+  insertHealthReferenceWorkPackageIfMissing,
+  getHealthReferenceWorkPackage,
+  listHealthReferenceWorkPackages,
+  updateHealthReferenceWorkPackage,
+  upsertHealthReferenceApproval,
+  listHealthReferenceApprovals,
+  insertHealthReferenceResult,
+  listHealthReferenceResults,
 };

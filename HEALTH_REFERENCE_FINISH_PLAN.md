@@ -4,6 +4,8 @@ Stand: 2026-07-27 · Lauf V7.6.2 · read-only geprüft, **keine Health-Datei ver
 
 Geprüfter Ordner: `/Users/jamal/Documents/New project/health-upgrade-kompass`. Bekannter, unveränderlicher Zustand zu Beginn dieses Laufs: Branch `work/check-start-gate-2026-07-19`, HEAD `395bf9e01f26d63dc4cc0bbc8343d10535c1ad64`, `M package.json`, unversioniert `src/logic/mockScaleAdapter.js`, `src/logic/scaleSnapshot.js`, `src/logic/scaleSnapshot.test.js`. Dieser Zustand wird hier **nicht als bereits freigegeben oder committed** behandelt.
 
+**Nachtrag V7.6.3 (weiterhin ausschließlich read-only geprüft):** Health hat zwischenzeitlich die Scale-V1-Vorarbeit als Phase 2 committed und gepusht; aktueller Health-Stand zu Beginn von V7.6.3: Branch `work/check-start-gate-2026-07-19`, HEAD `81dca3a9967b1763d7b3e881fffe213fe64f9d62`, Working Tree sauber. Der Pflichtumfang unten (Abschnitt A) bleibt fachlich unverändert die maßgebliche Referenz für die sieben Arbeitspakete des jetzt in `HEALTH_REFERENCE_WORK_RUN.md` verankerten kanonischen Referenzlaufs (`health-reference-work-run-v1`) – eine erneute inhaltliche Vollprüfung des aktuellen Health-Standes gegen Abschnitt A war in V7.6.3 nicht Teil des Auftrags und steht im Rahmen von Arbeitspaket `HEALTH_BASELINE_CONFIRMATION` noch aus. Keine Health-Datei wurde in V7.6.3 verändert.
+
 ## A. Pflichtumfang für die Referenz (bis `REFERENCE_READY`)
 
 Diese Punkte sind laut eigener Projektdokumentation (`ROADMAP.md`, `docs/MVP_STATUS_AUDIT.md`, `docs/UX_AUDIT.md`) noch offen und für einen glaubwürdigen Referenznachweis notwendig:

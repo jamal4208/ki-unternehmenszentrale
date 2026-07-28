@@ -259,10 +259,16 @@ async function run() {
   // .../activation-checklists), keine neue exakte POST-Route (alle
   // schreibenden Office-/Finance-Aktionen laufen über einen neuen
   // POST-Prefix /api/office-finance/), keine neue GET-Prefix-Route und ein
-  // neues statisches Asset (office-finance-ui.js).
-  await check("Routenzahlen in Policy und Server sind identisch (88/52/8/7/31)", () => {
-    assert.strictEqual(server.getRoutes.size, 88);
-    assert.strictEqual(routeAccessPolicy.GET_POLICIES.length, 88);
+  // neues statisches Asset (office-finance-ui.js). V7.6.3 (Auftrag
+  // Abschnitt 13, Health Upgrade Kompass als Referenz-Arbeitslauf) ergänzt
+  // eine neue lesende GET-Route (/api/health-reference/status), keine neue
+  // exakte POST-Route (alle schreibenden Health-Referenzlauf-Aktionen
+  // laufen über einen neuen POST-Prefix /api/health-reference/), keine
+  // neue GET-Prefix-Route und ein neues statisches Asset
+  // (health-reference-work-run-ui.js).
+  await check("Routenzahlen in Policy und Server sind identisch (89/52/8/8/32)", () => {
+    assert.strictEqual(server.getRoutes.size, 89);
+    assert.strictEqual(routeAccessPolicy.GET_POLICIES.length, 89);
     assert.strictEqual(server.postRoutes.size, 52);
     assert.strictEqual(routeAccessPolicy.POST_POLICIES.length, 52);
     assert.strictEqual(server.routePrefixHandlers.length, 8);
@@ -270,13 +276,13 @@ async function run() {
       routeAccessPolicy.PREFIX_POLICIES.filter((entry) => entry.method === "GET").length,
       8,
     );
-    assert.strictEqual(server.postRoutePrefixHandlers.length, 7);
+    assert.strictEqual(server.postRoutePrefixHandlers.length, 8);
     assert.strictEqual(
       routeAccessPolicy.PREFIX_POLICIES.filter((entry) => entry.method === "POST").length,
-      7,
+      8,
     );
-    assert.strictEqual(server.staticAssets.size, 31);
-    assert.strictEqual(routeAccessPolicy.STATIC_POLICIES.length, 31);
+    assert.strictEqual(server.staticAssets.size, 32);
+    assert.strictEqual(routeAccessPolicy.STATIC_POLICIES.length, 32);
   });
 
   // -------------------------------------------------------------------

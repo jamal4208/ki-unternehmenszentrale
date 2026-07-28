@@ -900,6 +900,72 @@ const AUDIT_EVENT_TYPES_AT_MIGRATION_15 = Object.freeze([
   "FINANCE_SPECIALIST_REQUIRED",
 ]);
 
+// V7.6.3 (Health Upgrade Kompass als ersten echten Referenz-Arbeitslauf
+// verankern) – additive Governance-/Nachweistabellen für GENAU EINEN
+// kanonischen Referenzlauf. Keine zweite Projektlaufarchitektur: dieses
+// Modul kennt weder Guided Work noch Jamal-Arbeitsmodus, sondern ergänzt
+// ausschließlich das bereits bestehende Migrations-/Audit-/Agentenmuster um
+// einen einzigen, eng begrenzten Anwendungsfall (siehe
+// health-reference-work-run-service.js#Kopfkommentar).
+const HEALTH_REFERENCE_RUN_STATUS_VALUES = Object.freeze([
+  "PREPARED_FOR_EXECUTION",
+  "WAITING_FOR_JAMAL_APPROVAL",
+  "APPROVED_FOR_EXECUTION",
+  "IN_EXECUTION",
+  "RESULT_SUBMITTED",
+  "QA_REVIEW",
+  "CHANGES_REQUESTED",
+  "WAITING_FOR_FINAL_ACCEPTANCE",
+  "REFERENCE_READY",
+  "BLOCKED",
+  "CANCELLED",
+]);
+
+const HEALTH_REFERENCE_WORK_PACKAGE_KEY_VALUES = Object.freeze([
+  "HEALTH_BASELINE_CONFIRMATION",
+  "START_GATE_AND_ENTRY",
+  "SIX_ANSWERS_AND_RESULT",
+  "ADVISOR_HANDOFF_AND_CUSTOMER_AREA",
+  "PERSISTENCE_PRIVACY_AND_LEGAL_BOUNDARIES",
+  "REFERENCE_WALKTHROUGH_AND_QA",
+  "JAMAL_FINAL_ACCEPTANCE",
+]);
+
+const HEALTH_REFERENCE_APPROVAL_KEY_VALUES = Object.freeze([
+  "SCOPE",
+  "EXECUTABLE_WORK_ORDER",
+  "SCOPE_EXTENSION",
+  "LEGAL_PRIVACY_WORDING",
+  "PRE_COMMIT",
+  "PRE_PUSH",
+  "FINAL_REFERENCE_ACCEPTANCE",
+]);
+
+const HEALTH_REFERENCE_APPROVAL_DECISION_VALUES = Object.freeze(["PENDING", "APPROVED", "REJECTED"]);
+
+const HEALTH_REFERENCE_RESULT_KIND_VALUES = Object.freeze([
+  "RESULT_REPORT",
+  "QA_FINDING",
+  "CHANGE_REQUEST_NOTE",
+  "FINAL_ACCEPTANCE_NOTE",
+]);
+
+// Genau neun zusätzliche Ereignistypen (Auftrag Abschnitt 12), zusätzlich zur
+// vollständigen, bereits bestehenden AUDIT_EVENT_TYPES_AT_MIGRATION_15-Menge
+// oben. auth-audit.js#EVENT_TYPES muss exakt dieser Aufzählung entsprechen.
+const AUDIT_EVENT_TYPES_AT_MIGRATION_16 = Object.freeze([
+  ...AUDIT_EVENT_TYPES_AT_MIGRATION_15,
+  "HEALTH_REFERENCE_RUN_CREATED",
+  "HEALTH_REFERENCE_WORK_PACKAGE_PREPARED",
+  "HEALTH_REFERENCE_PROMPT_DRAFT_CREATED",
+  "HEALTH_REFERENCE_APPROVAL_RECORDED",
+  "HEALTH_REFERENCE_RESULT_REPORT_SUBMITTED",
+  "HEALTH_REFERENCE_QA_FINDING_RECORDED",
+  "HEALTH_REFERENCE_CHANGES_REQUESTED",
+  "HEALTH_REFERENCE_FINAL_ACCEPTANCE_PREPARED",
+  "HEALTH_REFERENCE_REFERENCE_READY_GRANTED",
+]);
+
 function sqlEnum(values) {
   return values.map((value) => `'${value}'`).join(",");
 }
@@ -2074,6 +2140,104 @@ const MIGRATIONS = Object.freeze([
       CREATE INDEX idx_auth_audit_events_timestamp ON auth_audit_events(timestamp);
     `,
   }),
+  // V7.6.3 – Health Upgrade Kompass als ersten echten Referenz-Arbeitslauf in
+  // der KI-Unternehmenszentrale verankern. Rein additiv gegenüber Migration
+  // 15: vier neue Tabellen für GENAU EINEN kanonischen Referenzlauf
+  // (Lauf/Arbeitspakete/Freigaben/Ergebnisnachweise) plus die erneute
+  // Audit-Ereignistyp-Erweiterung. Migrationen 1–15 bleiben dabei
+  // byteidentisch unverändert. Keine Health-Nutzerdaten, keine
+  // medizinischen Daten – ausschließlich Governance-/Steuerungsmetadaten
+  // der Zentrale selbst (siehe health-reference-work-run-service.js).
+  Object.freeze({
+    version: 16,
+    name: "create_health_reference_work_run_tables_and_widen_audit_event_types_v10",
+    sql: `
+      CREATE TABLE health_reference_runs (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 200),
+        projectId TEXT NOT NULL CHECK (length(projectId) BETWEEN 1 AND 100),
+        projectPath TEXT NOT NULL CHECK (length(projectPath) BETWEEN 1 AND 500),
+        outcomeText TEXT NOT NULL CHECK (length(outcomeText) BETWEEN 1 AND 2000),
+        status TEXT NOT NULL DEFAULT 'PREPARED_FOR_EXECUTION' CHECK (status IN (${sqlEnum(HEALTH_REFERENCE_RUN_STATUS_VALUES)})),
+        mainAgentCanonicalName TEXT NOT NULL CHECK (length(mainAgentCanonicalName) BETWEEN 1 AND 100),
+        specialistAgentsJson TEXT NOT NULL CHECK (length(specialistAgentsJson) BETWEEN 1 AND 2000),
+        qaAgentCanonicalName TEXT NOT NULL CHECK (length(qaAgentCanonicalName) BETWEEN 1 AND 100),
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      );
+
+      CREATE TABLE health_reference_work_packages (
+        id TEXT PRIMARY KEY,
+        runId TEXT NOT NULL REFERENCES health_reference_runs(id) ON DELETE CASCADE,
+        packageKey TEXT NOT NULL CHECK (packageKey IN (${sqlEnum(HEALTH_REFERENCE_WORK_PACKAGE_KEY_VALUES)})),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 7),
+        title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 200),
+        status TEXT NOT NULL DEFAULT 'PREPARED_FOR_EXECUTION' CHECK (status IN (${sqlEnum(HEALTH_REFERENCE_RUN_STATUS_VALUES)})),
+        promptDraftJson TEXT CHECK (promptDraftJson IS NULL OR length(promptDraftJson) <= 8000),
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        UNIQUE (runId, packageKey)
+      );
+
+      CREATE INDEX idx_health_reference_work_packages_runId ON health_reference_work_packages(runId);
+
+      CREATE TABLE health_reference_approvals (
+        id TEXT PRIMARY KEY,
+        runId TEXT NOT NULL REFERENCES health_reference_runs(id) ON DELETE CASCADE,
+        approvalKey TEXT NOT NULL CHECK (approvalKey IN (${sqlEnum(HEALTH_REFERENCE_APPROVAL_KEY_VALUES)})),
+        decision TEXT NOT NULL DEFAULT 'PENDING' CHECK (decision IN (${sqlEnum(HEALTH_REFERENCE_APPROVAL_DECISION_VALUES)})),
+        note TEXT CHECK (note IS NULL OR length(note) <= 1000),
+        decidedAt TEXT,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        UNIQUE (runId, approvalKey)
+      );
+
+      CREATE INDEX idx_health_reference_approvals_runId ON health_reference_approvals(runId);
+
+      CREATE TABLE health_reference_results (
+        id TEXT PRIMARY KEY,
+        runId TEXT NOT NULL REFERENCES health_reference_runs(id) ON DELETE CASCADE,
+        workPackageKey TEXT CHECK (workPackageKey IS NULL OR workPackageKey IN (${sqlEnum(HEALTH_REFERENCE_WORK_PACKAGE_KEY_VALUES)})),
+        kind TEXT NOT NULL CHECK (kind IN (${sqlEnum(HEALTH_REFERENCE_RESULT_KIND_VALUES)})),
+        summary TEXT NOT NULL CHECK (length(summary) BETWEEN 1 AND 500),
+        detailsJson TEXT CHECK (detailsJson IS NULL OR length(detailsJson) <= 4000),
+        createdAt TEXT NOT NULL
+      );
+
+      CREATE INDEX idx_health_reference_results_runId ON health_reference_results(runId);
+
+      CREATE TABLE auth_audit_events_v10 (
+        eventId TEXT PRIMARY KEY,
+        actorUserId TEXT,
+        tenantId TEXT,
+        eventType TEXT NOT NULL CHECK (eventType IN (${sqlEnum(AUDIT_EVENT_TYPES_AT_MIGRATION_16)})),
+        result TEXT NOT NULL CHECK (result IN (${sqlEnum(AUDIT_RESULT_VALUES)})),
+        timestamp TEXT NOT NULL,
+        metadata TEXT
+      );
+
+      INSERT INTO auth_audit_events_v10 (eventId, actorUserId, tenantId, eventType, result, timestamp, metadata)
+      SELECT eventId, actorUserId, tenantId, eventType, result, timestamp, metadata FROM auth_audit_events;
+
+      DROP TABLE auth_audit_events;
+      ALTER TABLE auth_audit_events_v10 RENAME TO auth_audit_events;
+
+      CREATE TRIGGER trg_auth_audit_events_no_update
+      BEFORE UPDATE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: UPDATE ist nicht erlaubt.');
+      END;
+
+      CREATE TRIGGER trg_auth_audit_events_no_delete
+      BEFORE DELETE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: DELETE ist nicht erlaubt.');
+      END;
+
+      CREATE INDEX idx_auth_audit_events_timestamp ON auth_audit_events(timestamp);
+    `,
+  }),
 ]);
 
 function ensureMigrationsTable(db) {
@@ -2172,6 +2336,13 @@ module.exports = {
   FINANCE_CONFIDENCE_VALUES,
   FINANCE_HANDOFF_APPROVAL_STATUS_VALUES,
   AUDIT_EVENT_TYPES_AT_MIGRATION_15,
+  // V7.6.3 – Health Upgrade Kompass Referenz-Arbeitslauf
+  HEALTH_REFERENCE_RUN_STATUS_VALUES,
+  HEALTH_REFERENCE_WORK_PACKAGE_KEY_VALUES,
+  HEALTH_REFERENCE_APPROVAL_KEY_VALUES,
+  HEALTH_REFERENCE_APPROVAL_DECISION_VALUES,
+  HEALTH_REFERENCE_RESULT_KIND_VALUES,
+  AUDIT_EVENT_TYPES_AT_MIGRATION_16,
   MIGRATIONS,
   ensureMigrationsTable,
   getAppliedVersions,

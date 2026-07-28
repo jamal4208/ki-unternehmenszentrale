@@ -145,6 +145,28 @@
           </section>
 
           <!--
+            V7.6.3 – Health Upgrade Kompass als ersten echten Referenz-
+            Arbeitslauf verankern (Auftrag Abschnitt 11): eigenständige,
+            kompakte Karte "Oben arbeiten. Unten nachschauen." Oben sichtbar
+            bleibt kompakt (Projekt, Ergebniswunsch, Status, Hauptverant-
+            wortlicher, nächstes Arbeitspaket, Blocker, Fortschritt, eine
+            klare nächste Handlung); alles Weitere ist aufklappbar. Keine
+            Schaltfläche führt eine echte Health-Ausführung aus, committet
+            oder pusht. Vollständig von health-reference-work-run-ui.js
+            gerendert (gleiches Grundmuster wie #jamal-work-card).
+          -->
+          <section class="health-reference-run-card" id="health-reference-run-card" aria-labelledby="health-reference-run-title">
+            <div class="health-reference-run-head-row">
+              <p class="eyebrow" id="health-reference-run-title">Health-Referenzlauf</p>
+            </div>
+            <div id="health-reference-run-output" aria-live="polite">Lade Health-Referenzlauf…</div>
+            <details class="health-reference-run-details">
+              <summary>Team, Arbeitspakete, Freigaben, Nicht-Ziele, Abschlusskriterien, Nachweise</summary>
+              <div id="health-reference-run-diagnostics-output" aria-live="polite">Keine Details verfügbar.</div>
+            </details>
+          </section>
+
+          <!--
             V7.3 – Jamal-Arbeitsmodus (Auftrag Abschnitt J): "Oben arbeiten.
             Unten nachschauen." – der bisherige Tageslauf bleibt vollständig
             erhalten (keine Funktion gelöscht) und ist standardmäßig weiter
@@ -1540,5 +1562,6 @@
     <script src="jamal-canva-ui.js"></script>
     <script src="agent-leadership-ui.js"></script>
     <script src="office-finance-ui.js"></script>
+    <script src="health-reference-work-run-ui.js"></script>
   </body>
 </html>

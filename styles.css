@@ -9595,3 +9595,126 @@ details.local-agent-assignment-details > summary {
   padding: 6px 8px;
   text-align: left;
 }
+
+/* V7.6.3 – Health Upgrade Kompass als ersten echten Referenz-Arbeitslauf
+   verankern (Auftrag Abschnitt 11): kompakte Karte "Oben arbeiten. Unten
+   nachschauen." – gleiches visuelles Grundmuster wie .jamal-work-card,
+   bewusst eigener, additiver Klassenraum ohne Umbau bestehender Karten. */
+.health-reference-run-card {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 20px;
+  padding: clamp(18px, 3vw, 28px);
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: 22px;
+  background: var(--card-bg, #fff);
+  box-shadow: 0 16px 40px rgba(50, 39, 25, 0.07);
+}
+
+.health-reference-run-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.health-reference-run-head h3 {
+  margin: 4px 0 8px;
+  font-size: 1.15rem;
+  letter-spacing: -0.01em;
+}
+
+.health-reference-run-head p {
+  margin: 0 0 4px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.health-reference-run-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 16px;
+  margin: 0;
+}
+
+.health-reference-run-facts div {
+  display: grid;
+  gap: 2px;
+}
+
+.health-reference-run-facts dt {
+  font-size: var(--text-xs, 12px);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.health-reference-run-facts dd {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--ink);
+}
+
+.health-reference-run-primary-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--card-border-soft, var(--line));
+  border-radius: var(--radius-card, var(--radius));
+  background: var(--card-bg-muted);
+}
+
+.health-reference-run-primary-action p {
+  margin: 0;
+  color: var(--ink);
+}
+
+.health-reference-run-action-error {
+  margin: 0;
+  color: var(--red);
+  font-size: var(--text-sm);
+}
+
+.health-reference-run-disclaimer {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-xs, 12px);
+  font-style: italic;
+}
+
+.health-reference-run-details summary {
+  cursor: pointer;
+  font-weight: var(--font-medium);
+  padding: 6px 0;
+  color: var(--muted);
+}
+
+.health-reference-run-details[open] summary {
+  color: var(--ink);
+}
+
+#health-reference-run-diagnostics-output {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--card-border-soft, var(--line));
+  border-radius: var(--radius-card, var(--radius));
+  background: var(--card-bg-muted);
+  font-size: var(--text-sm);
+}
+
+#health-reference-run-diagnostics-output h4 {
+  margin: 8px 0 4px;
+}
+
+#health-reference-run-diagnostics-output h4:first-child {
+  margin-top: 0;
+}
+
+#health-reference-run-diagnostics-output ul,
+#health-reference-run-diagnostics-output ol {
+  margin: 0;
+  padding-left: 18px;
+}

@@ -165,6 +165,23 @@ const EVENT_TYPES = Object.freeze([
   "FINANCE_HANDOFF_CREATED",
   "FINANCE_HANDOFF_REVIEWED",
   "FINANCE_SPECIALIST_REQUIRED",
+  // V7.6.3 – Health Upgrade Kompass als ersten echten Referenz-Arbeitslauf
+  // verankern (Auftrag Abschnitt 12) – health-reference-work-run-service.js/
+  // health-reference-work-run-routes.js. Muss exakt der in
+  // auth-db-migrations.js#AUDIT_EVENT_TYPES_AT_MIGRATION_16 erweiterten
+  // CHECK-Aufzählung (Migration 16) entsprechen. Ausschließlich Jamal selbst
+  // (OWNER) löst diese neun Ereignisse aus; keines davon ist eine echte
+  // Health-Ausführung, keine externe Aktion, keine Datei-Änderung im
+  // Health-Repository.
+  "HEALTH_REFERENCE_RUN_CREATED",
+  "HEALTH_REFERENCE_WORK_PACKAGE_PREPARED",
+  "HEALTH_REFERENCE_PROMPT_DRAFT_CREATED",
+  "HEALTH_REFERENCE_APPROVAL_RECORDED",
+  "HEALTH_REFERENCE_RESULT_REPORT_SUBMITTED",
+  "HEALTH_REFERENCE_QA_FINDING_RECORDED",
+  "HEALTH_REFERENCE_CHANGES_REQUESTED",
+  "HEALTH_REFERENCE_FINAL_ACCEPTANCE_PREPARED",
+  "HEALTH_REFERENCE_REFERENCE_READY_GRANTED",
 ]);
 
 const RESULTS = Object.freeze(["OK", "DENIED", "ERROR"]);
@@ -274,6 +291,16 @@ const METADATA_ALLOWLIST = Object.freeze([
   "financeHandoffId",
   "financeType",
   "approvalStatusCode",
+  // V7.6.3 – Health Upgrade Kompass Referenz-Arbeitslauf: "healthReferenceRunId"
+  // (feste kanonische Lauf-ID, keine Health-Nutzerdaten), "workPackageKey"
+  // (einer der sieben festen Arbeitspaket-Codes), "approvalKey" (einer der
+  // sieben festen Freigabe-Codes) und "resultKind" (einer der vier festen
+  // Ergebnisnachweis-Codes) – ausschließlich Steuerungsmetadaten der
+  // Zentrale selbst, niemals ein Health-Nutzer-/Gesundheitsdatum.
+  "healthReferenceRunId",
+  "workPackageKey",
+  "approvalKey",
+  "resultKind",
 ]);
 
 // Verbotene Inhalte, unabhängig vom Feldnamen (Verteidigung in der Tiefe:

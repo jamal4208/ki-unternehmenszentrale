@@ -2,6 +2,8 @@
 
 Stand: 2026-07-27 · Lauf V7.6.2 · reine Planung, **keine Ausführung** in diesem Lauf.
 
+**Nachtrag V7.6.3:** Testlauf 1 (Health Upgrade Kompass) ist jetzt als kanonischer, kontrollierter Referenz-Arbeitslauf `health-reference-work-run-v1` in der Unternehmenszentrale verankert – Status `PREPARED_FOR_EXECUTION`, sieben feste Arbeitspakete, sieben Jamal-Freigabepunkte, Übergabevertrag an Cursor. Die verbindliche Agentenzuteilung wurde dabei gegenüber der ursprünglichen Planung unten leicht angepasst (Auftrag Abschnitt 4 der V7.6.3-Freigabe): Hauptagent **Projektmanager-Agent** statt Produktmanager-Agent, Fachagenten **Produktmanager-Agent/Entwickler-Agent/Content-Agent** statt Entwickler-/Design-Director-/Content-Agent, QA-/Sicherheitsagent ausschließlich **QA-Agent** (ohne Compliance-/Risiko-Agent als zweiten QA-Agenten, da maximal ein QA-/Sicherheitsagent zulässig ist). Maßgeblich für den tatsächlichen, verankerten Referenzlauf ist ab sofort ausschließlich `HEALTH_REFERENCE_WORK_RUN.md`; die ursprüngliche Planung unten bleibt als historischer Ausgangspunkt unverändert stehen. **Kein Arbeitspaket wurde in V7.6.3 ausgeführt**, keine Health-Funktion implementiert.
+
 Dieses Dokument plant echte, spätere End-to-End-Testläufe der KI-Unternehmenszentrale an den eigenen priorisierten Projekten. Jeder Lauf nutzt ausschließlich bestehende, kanonische Agenten (`agent-registry.js`, 25 Agenten) – **kein neuer Agent, keine Erweiterung der Agentenzahl.** Jeder Lauf benötigt eine separate Jamal-Freigabe, bevor er real gestartet wird.
 
 ## Gemeinsame Leitplanken aller Testläufe

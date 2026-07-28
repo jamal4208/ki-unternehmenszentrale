@@ -93,6 +93,7 @@ const agentLeadershipRoutesModule = require("./agent-leadership-routes");
 // external-identity-service.js/google-workspace-capability-service.js/
 // office-work-service.js/finance-handoff-service.js.
 const officeFinanceRoutesModule = require("./office-finance-routes");
+const healthReferenceWorkRunRoutesModule = require("./health-reference-work-run-routes");
 
 const rootDir = __dirname;
 const staticAssets = new Map([
@@ -124,6 +125,11 @@ const staticAssets = new Map([
   // eigenständiges, additives Chef-UI-Skript für die neue Ansicht "Office &
   // Finanzen" (gleiches Muster wie agent-leadership-ui.js).
   ["/office-finance-ui.js", "office-finance-ui.js"],
+  // V7.6.3 – Health Upgrade Kompass als ersten echten Referenz-Arbeitslauf
+  // verankern (Auftrag Abschnitt 11): eigenständiges, additives Chef-UI-
+  // Skript für die kompakte Health-Referenzlauf-Karte (gleiches Muster wie
+  // office-finance-ui.js).
+  ["/health-reference-work-run-ui.js", "health-reference-work-run-ui.js"],
   ["/app.js", "app.js"],
   ["/styles.css", "styles.css"],
   ["/v71-ui.js", "v71-ui.js"],
@@ -23670,6 +23676,34 @@ function handleOfficeFinanceActivationChecklists(res) {
 // Ein einziges neues POST-Prefix für alle schreibenden Office-/Finance-
 // Aktionen (gleiches Muster wie dispatchAgentLeadershipActionPostPrefix),
 // keine zusätzliche Route ohne Not.
+// V7.6.3 – Health Upgrade Kompass als ersten echten Referenz-Arbeitslauf in
+// der KI-Unternehmenszentrale verankern (Auftrag Abschnitt 11/13): ein
+// einziger lesender OWNER_ONLY-Endpunkt für die kompakte
+// Health-Referenzlauf-Karte. Reine Fachlogik lebt in
+// health-reference-work-run-service.js (siehe
+// health-reference-work-run-routes.js#Kopfkommentar).
+function handleHealthReferenceStatus(res) {
+  healthReferenceWorkRunRoutesModule.handleRunStatus(res, { getDb: ensureAuthDbReady, sendJson });
+}
+
+async function dispatchHealthReferenceActionPostPrefix(res, context, remainder) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert." });
+    return;
+  }
+  const actionName = typeof remainder === "string" ? remainder : "";
+  if (actionName.includes("/") || !healthReferenceWorkRunRoutesModule.isHealthReferenceAction(actionName)) {
+    sendJson(res, 404, { ok: false, message: "Nicht gefunden." });
+    return;
+  }
+  await healthReferenceWorkRunRoutesModule.dispatchHealthReferenceAction(
+    res,
+    context,
+    { getDb: ensureAuthDbReady, sendJson },
+    actionName,
+  );
+}
+
 async function dispatchOfficeFinanceActionPostPrefix(res, context, remainder) {
   if (!isExecutionRequestOriginAllowed(context.req)) {
     sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert." });
@@ -23899,6 +23933,9 @@ const getRoutes = buildRouteMap([
   ["/api/office-finance/summary", (res) => handleOfficeFinanceSummary(res)],
   ["/api/office-finance/system-map", (res) => handleOfficeFinanceSystemMap(res)],
   ["/api/office-finance/identities", (res) => handleOfficeFinanceIdentities(res)],
+  // V7.6.3 – Health Upgrade Kompass als ersten echten Referenz-Arbeitslauf
+  // verankern (Auftrag Abschnitt 11) – Ansicht "Health-Referenzlauf".
+  ["/api/health-reference/status", (res) => handleHealthReferenceStatus(res)],
   ["/api/office-finance/capabilities", (res, context) => handleOfficeFinanceCapabilities(res, context)],
   ["/api/office-finance/approval-matrix", (res) => handleOfficeFinanceApprovalMatrix(res)],
   ["/api/office-finance/work-items", (res, context) => handleOfficeFinanceWorkItems(res, context)],
@@ -24138,6 +24175,17 @@ const postRoutePrefixHandlers = [
     handler: (res, context) => {
       const remainder = decodeURIComponent(context.pathname.slice("/api/office-finance/".length));
       dispatchOfficeFinanceActionPostPrefix(res, context, remainder);
+    },
+  },
+  {
+    // V7.6.3 – Health Upgrade Kompass als ersten echten Referenz-Arbeitslauf
+    // verankern (Auftrag Abschnitt 8/11) – eine Aktion je Anfrage (POST
+    // .../:action, siehe HEALTH_REFERENCE_ACTIONS). Keine Aktion committet,
+    // pusht oder führt eine echte Health-Ausführung aus.
+    prefix: "/api/health-reference/",
+    handler: (res, context) => {
+      const remainder = decodeURIComponent(context.pathname.slice("/api/health-reference/".length));
+      dispatchHealthReferenceActionPostPrefix(res, context, remainder);
     },
   },
 ];
