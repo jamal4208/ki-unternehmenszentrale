@@ -56,9 +56,47 @@
 // angelegt (eigene, kollisionssichere ID; niemals ein Überschreiben einer
 // bestehenden ID). Die Statusmaschine selbst (PILOT_WORK_ORDER_STATUS_VALUES,
 // Übergangsregeln, Freigabegrenzen) bleibt unverändert und generisch; ihr
-// wird lediglich der jeweils adressierte Auftrag als Kontext übergeben. Noch
-// KEINE echte Parallelverarbeitung, keine Worker/Queues – Aufträge werden
-// weiterhin ausschließlich nacheinander bearbeitet.
+// wird lediglich der jeweils adressierte Auftrag als Kontext übergeben.
+//
+// Phase 3 – Kontrollierte Parallelfähigkeit (Auftrag "mehrere Pilotaufträge
+// technisch sicher gleichzeitig bearbeiten, ohne Kollisionen"): Phase 2 hat
+// mehrere Aufträge nacheinander geführt, aber Statusübergänge unbedingt
+// zurückgeschrieben ("lesen, prüfen, schreiben" ohne Absicherung des
+// Zwischenraums) und Audit-Ereignisse nach dem Motto "Audit-Fehler dürfen
+// die bereits gültige Aktion nicht rückgängig machen" bewusst vom
+// eigentlichen Schreibvorgang entkoppelt. Für kontrollierte Nebenläufigkeit
+// reicht das nicht: (1) jeder Pilotauftrag trägt jetzt einen monoton
+// steigenden `revision`-Zähler (Migration 19); jeder Statusübergang läuft
+// über ein einziges atomares Compare-and-Set-UPDATE
+// (auth-db.js#updatePilotWorkOrderStatusConditional), das nur greift, wenn
+// der Auftrag zum Schreibzeitpunkt noch exakt den Status UND die Revision
+// besitzt, auf deren Grundlage die Entscheidung getroffen wurde – sonst
+// wird ein klar unterscheidbarer Konfliktfehler geworfen, niemals ein
+// stiller Erfolg. (2) Statusänderung und ihr zugehöriges Audit-Ereignis
+// (sowie, bei Rollenübergaben, die Übergabe selbst) laufen jetzt in EINER
+// gemeinsamen Transaktion (authDb.withAuthTransaction) – ein fehlschlagendes
+// Audit-Ereignis macht die gesamte Aktion rückgängig, statt eine
+// Statusänderung ohne Beleg zu hinterlassen. Das ist eine bewusste
+// Abweichung vom sonst im Projekt üblichen "auditSafe"-Muster (Audit
+// außerhalb der Transaktion, Fehler werden verschluckt, siehe z. B.
+// work-order-execution-service.js) – hier ausdrücklich gefordert, weil ein
+// Pilotauftrags-Statuswechsel ohne Audit-Beleg fachlich nicht vertretbar
+// wäre. (3) Die Auftragsanlage (createPilotOrder/
+// getOrCreateCanonicalPilotOrder) prüft Existenz nicht mehr über ein
+// vorgelagertes SELECT, sondern ausschließlich über das Ergebnis eines
+// einzigen atomaren INSERT OR IGNORE (kein INSERT OR REPLACE, niemals ein
+// stilles Überschreiben). Jede mutierende Funktion akzeptiert zusätzlich
+// ein optionales `options.expectedRevision`: wird es übergeben, muss es mit
+// der aktuell gespeicherten Revision übereinstimmen, sonst wird die Aktion
+// als Konflikt abgelehnt, bevor irgendetwas geschrieben wird – so bleibt
+// eine Entscheidung, die auf einem inzwischen veralteten Auftragszustand
+// beruht, folgenlos. Ohne `expectedRevision` bleibt das bisherige Verhalten
+// (Entscheidung ausschließlich auf Basis des frisch gelesenen Zustands)
+// vollständig rückwärtskompatibel erhalten. Weiterhin KEINE Worker, KEINE
+// Queue, KEIN zweiter Prozess – dieses Arbeitspaket schafft ausschließlich
+// die datenbankseitige Konfliktsicherheit, auf der eine spätere Worker-/
+// Queue-Architektur aufsetzen könnte, ohne hier noch einmal grundlegend
+// umgebaut werden zu müssen.
 
 const crypto = require("crypto");
 const agentRegistry = require("./agent-registry");
@@ -200,6 +238,37 @@ function assertOrderIsMutable(order, orderId) {
   }
 }
 
+// Phase 3 (kontrollierte Nebenläufigkeit): optionale, vom Aufrufer
+// mitgegebene Erwartung der zuletzt gelesenen Revision. Nur wenn
+// `options.expectedRevision` tatsächlich übergeben wird, wird geprüft; ohne
+// diesen Wert bleibt das Verhalten vollständig rückwärtskompatibel (reine
+// Entscheidung auf Basis des gerade frisch gelesenen Zustands, wie vor
+// Phase 3). Ein Abweichen wird IMMER als Konflikt behandelt – nie als
+// stiller Fallback auf den aktuellen Zustand -, weil genau das die
+// Situation ist, die diese Prüfung erkennen soll: eine Entscheidung, die
+// auf einem inzwischen überholten Auftragszustand beruht.
+function assertExpectedRevision(order, options = {}) {
+  if (options.expectedRevision === undefined || options.expectedRevision === null) return;
+  if (order.revision !== options.expectedRevision) {
+    throw conflict(
+      `Der Pilotauftrag "${order.id}" hat sich seit dem zuletzt gelesenen Zustand geändert ` +
+        `(erwartete Revision ${options.expectedRevision}, aktuell ${order.revision}). ` +
+        "Bitte den aktuellen Zustand erneut laden und die Entscheidung erneut treffen.",
+    );
+  }
+}
+
+// Bündelt den bisher an jeder mutierenden Funktion wiederholten Ablauf
+// "frisch laden, Unveränderlichkeit prüfen, optionale Revisionserwartung
+// prüfen" – fachlich unverändert gegenüber Phase 2, nur nicht mehr
+// dupliziert.
+function loadMutableOrder(db, orderId, options) {
+  const orderRow = authDb.getPilotWorkOrderById(db, orderId);
+  assertOrderIsMutable(orderRow, orderId);
+  assertExpectedRevision(orderRow, options);
+  return orderRow;
+}
+
 // ---------------------------------------------------------------------------
 // Validierung des Pilotauftragsobjekts (Auftrag Abschnitt 1). Wird
 // unabhängig getestet ("gültige Pilotauftragserstellung" /
@@ -274,6 +343,10 @@ function rowToOrderView(row) {
     requestedBy: row.requestedBy,
     status: row.status,
     statusLabel: PILOT_STATUS_LABELS_DE[row.status] || row.status,
+    // Phase 3 (kontrollierte Nebenläufigkeit): sichtbarer Revisionszähler,
+    // damit ein Aufrufer die zuletzt gelesene Revision als
+    // `options.expectedRevision` bei der nächsten Aktion mitgeben kann.
+    revision: row.revision,
     involvedAgents,
     qualityCriteria: JSON.parse(row.qualityCriteriaJson),
     allowedTools: JSON.parse(row.allowedToolsJson),
@@ -318,14 +391,17 @@ function rowToHandoffView(row) {
 // Anlage/Abruf des kanonischen Pilotauftrags – idempotent, genau eine feste
 // ID (Auftrag Abschnitt 1).
 // ---------------------------------------------------------------------------
+// Phase 3: Anlage und Audit-Nachweis laufen jetzt in einer einzigen
+// atomaren Transaktion – entweder existiert nach diesem Aufruf ein
+// vollständiger Datensatz MIT passendem PILOT_WORK_ORDER_CREATED-Audit,
+// oder (bei einem Audit-Fehler) gar nichts davon. Die Existenzprüfung
+// selbst beruht ausschließlich auf dem `created`-Rückgabewert des
+// atomaren INSERT OR IGNORE, nicht mehr auf einem vorgelagerten SELECT.
 function getOrCreateCanonicalPilotOrder(db, options = {}) {
   const now = options.now || new Date();
-  let orderRow = authDb.getPilotWorkOrderById(db, CANONICAL_PILOT_ORDER_ID);
-  const alreadyExisted = Boolean(orderRow);
-
-  if (!orderRow) {
-    validatePilotOrderInput(CANONICAL_PILOT_ORDER_INPUT);
-    orderRow = authDb.insertPilotWorkOrderIfMissing(db, {
+  validatePilotOrderInput(CANONICAL_PILOT_ORDER_INPUT);
+  const orderRow = authDb.withAuthTransaction(db, () => {
+    const { row, created } = authDb.insertPilotWorkOrderIfMissing(db, {
       id: CANONICAL_PILOT_ORDER_ID,
       title: CANONICAL_PILOT_ORDER_INPUT.title,
       desiredOutcome: CANONICAL_PILOT_ORDER_INPUT.desiredOutcome,
@@ -340,10 +416,7 @@ function getOrCreateCanonicalPilotOrder(db, options = {}) {
       createdAt: nowIso(now),
       updatedAt: nowIso(now),
     });
-  }
-
-  if (!alreadyExisted) {
-    try {
+    if (created) {
       authAudit.recordAuditEvent(db, {
         eventType: "PILOT_WORK_ORDER_CREATED",
         result: "OK",
@@ -352,12 +425,10 @@ function getOrCreateCanonicalPilotOrder(db, options = {}) {
         timestamp: nowIso(now),
         metadata: { pilotOrderId: CANONICAL_PILOT_ORDER_ID },
       });
-    } catch (_error) {
-      /* Audit-Fehler dürfen die bereits gültige Anlage nicht rückgängig machen. */
     }
-  }
-
-  return orderRow ? buildOverview(db, authDb.getPilotWorkOrderById(db, CANONICAL_PILOT_ORDER_ID)) : null;
+    return row;
+  });
+  return orderRow ? buildOverview(db, orderRow) : null;
 }
 
 const PILOT_ORDER_ID_PREFIX = "pilot-order-";
@@ -379,6 +450,14 @@ function generatePilotOrderId() {
 // Rollenübergabe- und Audit-Event-IDs); mit options.id bleibt die ID in
 // Tests deterministisch kontrollierbar.
 // ---------------------------------------------------------------------------
+// Phase 3: die Existenzprüfung erfolgt ausschließlich atomar (siehe
+// auth-db.js#insertPilotWorkOrderIfMissing) – kein vorgelagertes SELECT
+// mehr, das eine Lücke zwischen Prüfen und Schreiben öffnen könnte. Ein
+// gleichzeitiger zweiter Anlageversuch derselben ID sieht garantiert
+// `created === false` und verändert nichts am bereits bestehenden
+// Datensatz. Anlage und Audit-Nachweis laufen zusätzlich in einer
+// gemeinsamen Transaktion (kein Auftrag ohne Audit-Beleg, kein Audit-Beleg
+// ohne Auftrag).
 function createPilotOrder(db, input = {}, options = {}) {
   validatePilotOrderInput(input);
   const now = options.now || new Date();
@@ -386,29 +465,31 @@ function createPilotOrder(db, input = {}, options = {}) {
   const orderId = requestedId || generatePilotOrderId();
   // Die kanonische ID ist immer reserviert, unabhängig davon, ob der
   // kanonische Auftrag in dieser Datenbank bereits materialisiert wurde
-  // (getOrCreateCanonicalPilotOrder legt ihn erst bei Bedarf an). Ohne diese
-  // Prüfung könnte createPilotOrder der kanonischen ID vor ihrer ersten
-  // Nutzung beliebigen Inhalt zuweisen und damit den kanonischen Pilotauftrag
-  // faktisch überschreiben.
-  if (orderId === CANONICAL_PILOT_ORDER_ID || authDb.getPilotWorkOrderById(db, orderId)) {
+  // (getOrCreateCanonicalPilotOrder legt ihn erst bei Bedarf an). Reiner
+  // Wertevergleich, kein DB-Zugriff nötig, also keine Race-Betrachtung
+  // erforderlich.
+  if (orderId === CANONICAL_PILOT_ORDER_ID) {
     throw conflict(`Ein Pilotauftrag mit der ID "${orderId}" existiert bereits und wird nicht überschrieben.`);
   }
-  const orderRow = authDb.insertPilotWorkOrderIfMissing(db, {
-    id: orderId,
-    title: input.title,
-    desiredOutcome: input.desiredOutcome,
-    requestedBy: input.requestedBy,
-    involvedAgentsJson: JSON.stringify(PILOT_TEAM.map((agent) => ({ pilotRole: agent.pilotRole, canonicalName: agent.canonicalName }))),
-    status: "DRAFT",
-    qualityCriteriaJson: JSON.stringify(input.qualityCriteria),
-    allowedToolsJson: JSON.stringify(input.allowedTools),
-    forbiddenActionsJson: JSON.stringify(input.forbiddenActions),
-    requiredApprovalsJson: JSON.stringify(input.requiredApprovals),
-    timeframe: input.timeframe,
-    createdAt: nowIso(now),
-    updatedAt: nowIso(now),
-  });
-  try {
+  const orderRow = authDb.withAuthTransaction(db, () => {
+    const { row, created } = authDb.insertPilotWorkOrderIfMissing(db, {
+      id: orderId,
+      title: input.title,
+      desiredOutcome: input.desiredOutcome,
+      requestedBy: input.requestedBy,
+      involvedAgentsJson: JSON.stringify(PILOT_TEAM.map((agent) => ({ pilotRole: agent.pilotRole, canonicalName: agent.canonicalName }))),
+      status: "DRAFT",
+      qualityCriteriaJson: JSON.stringify(input.qualityCriteria),
+      allowedToolsJson: JSON.stringify(input.allowedTools),
+      forbiddenActionsJson: JSON.stringify(input.forbiddenActions),
+      requiredApprovalsJson: JSON.stringify(input.requiredApprovals),
+      timeframe: input.timeframe,
+      createdAt: nowIso(now),
+      updatedAt: nowIso(now),
+    });
+    if (!created) {
+      throw conflict(`Ein Pilotauftrag mit der ID "${orderId}" existiert bereits und wird nicht überschrieben.`);
+    }
     authAudit.recordAuditEvent(db, {
       eventType: "PILOT_WORK_ORDER_CREATED",
       result: "OK",
@@ -417,9 +498,8 @@ function createPilotOrder(db, input = {}, options = {}) {
       timestamp: nowIso(now),
       metadata: { pilotOrderId: orderId },
     });
-  } catch (_error) {
-    /* Audit-Fehler dürfen die bereits gültige Anlage nicht rückgängig machen. */
-  }
+    return row;
+  });
   return buildOverview(db, orderRow);
 }
 
@@ -489,31 +569,63 @@ function getPilotOverview(db, options = {}) {
   return getPilotOrderOverview(db, orderId);
 }
 
-function auditStatusChanged(db, options = {}) {
-  const { orderId, previousStatus, nextStatus, actorUserId, now } = options;
-  if (previousStatus === nextStatus) return;
-  try {
+// Phase 3 (kontrollierte Nebenläufigkeit) – generische, atomare
+// Statusmaschinen-Anwendung: `order` (der bereits geladene, dem Aufruf
+// zugrunde liegende Auftragszustand samt Revision) wird als Kontext
+// übergeben; der Übergang verändert ausschließlich diesen einen,
+// ausdrücklich adressierten Auftrag (order.id) – niemals einen anderen.
+//
+// Statusänderung und ihr PILOT_WORK_ORDER_STATUS_CHANGED-Audit-Ereignis
+// laufen in einer gemeinsamen Transaktion (authDb.withAuthTransaction):
+// entweder werden beide dauerhaft, oder keins von beiden. better-sqlite3
+// unterstützt verschachtelte Transaktionen über SAVEPOINTs – ruft eine
+// aufrufende Funktion (z. B. approveForExecution, submitHandoff) diese
+// Funktion bereits innerhalb einer eigenen äußeren Transaktion auf, bleibt
+// die Gesamtheit trotzdem atomar, ein Fehlschlag an beliebiger Stelle
+// macht alles rückgängig.
+//
+// Die eigentliche Zustandsänderung läuft über ein einziges atomares
+// Compare-and-Set-UPDATE (WHERE status = <erwarteter Ausgangsstatus> AND
+// revision = <erwartete Revision>). Trifft die Bedingung nicht mehr zu
+// (weil der Auftrag zwischenzeitlich verändert wurde), wird ein klar
+// unterscheidbarer Konfliktfehler geworfen statt eines stillen Erfolgs
+// oder eines stillen Fallbacks auf den aktuellen Zustand.
+//
+// Bleibt previousStatus === nextStatus (z. B. blockOrder auf einem
+// bereits blockierten Auftrag), ist das fachlich ein wirkungsloses No-op:
+// keine Revisionserhöhung, kein Audit-Ereignis – identisches Verhalten zu
+// vor Phase 3, nur jetzt ausdrücklich benannt statt implizit über eine
+// Bedingung in einer separaten Auditfunktion.
+function applyStatusTransition(db, order, nextStatus, options) {
+  const previousStatus = order.status;
+  if (previousStatus === nextStatus) return order.revision;
+  return authDb.withAuthTransaction(db, () => {
+    const previousRevision = order.revision;
+    const applied = authDb.updatePilotWorkOrderStatusConditional(db, {
+      id: order.id,
+      expectedStatus: previousStatus,
+      expectedRevision: previousRevision,
+      nextStatus,
+      updatedAt: nowIso(options.now),
+    });
+    if (!applied) {
+      throw conflict(
+        `Der Pilotauftrag "${order.id}" wurde zwischenzeitlich verändert (erwarteter Status "${previousStatus}" ` +
+          `mit Revision ${previousRevision} stimmt nicht mehr mit dem gespeicherten Zustand überein). ` +
+          "Bitte den aktuellen Zustand erneut laden und die Aktion wiederholen.",
+      );
+    }
+    const nextRevision = previousRevision + 1;
     authAudit.recordAuditEvent(db, {
       eventType: "PILOT_WORK_ORDER_STATUS_CHANGED",
       result: "OK",
-      actorUserId: actorUserId ?? null,
+      actorUserId: options.actorUserId ?? null,
       tenantId: null,
-      timestamp: nowIso(now),
-      metadata: { pilotOrderId: orderId, previousStatus, nextStatus },
+      timestamp: nowIso(options.now),
+      metadata: { pilotOrderId: order.id, previousStatus, nextStatus, previousRevision, nextRevision },
     });
-  } catch (_error) {
-    /* Audit-Fehler dürfen die bereits gültige Statusänderung nicht rückgängig machen. */
-  }
-}
-
-// Generische Statusmaschinen-Anwendung: `order` (der bereits geladene
-// Auftragszustand) wird als Kontext übergeben, der Übergang verändert
-// ausschließlich diesen einen, ausdrücklich adressierten Auftrag
-// (order.id) – niemals einen anderen.
-function transitionStatus(db, order, nextStatus, options) {
-  const previousStatus = order.status;
-  authDb.updatePilotWorkOrderStatus(db, { id: order.id, status: nextStatus, updatedAt: nowIso(options.now) });
-  auditStatusChanged(db, { orderId: order.id, previousStatus, nextStatus, actorUserId: options.actorUserId, now: options.now });
+    return nextRevision;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -522,27 +634,29 @@ function transitionStatus(db, order, nextStatus, options) {
 // ---------------------------------------------------------------------------
 function markReadyForApproval(db, options = {}) {
   const orderId = resolveOrderId(options);
-  const orderRow = authDb.getPilotWorkOrderById(db, orderId);
-  assertOrderIsMutable(orderRow, orderId);
+  const orderRow = loadMutableOrder(db, orderId, options);
   if (orderRow.status !== "DRAFT") {
     throw conflict(`Der Pilotauftrag kann nur aus DRAFT heraus zur Freigabe vorgelegt werden (aktuell ${orderRow.status}).`);
   }
-  transitionStatus(db, orderRow, "READY_FOR_JAMAL_APPROVAL", options);
+  applyStatusTransition(db, orderRow, "READY_FOR_JAMAL_APPROVAL", options);
   return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
 }
 
+// Statusübergang UND die zugehörige Ausführungsfreigabe-Auditierung
+// laufen in einer gemeinsamen Transaktion (Phase 3, Auftrag Abschnitt 3):
+// niemals eine Freigabe ohne erreichten Status, niemals ein erreichter
+// Status ohne dokumentierte Freigabe.
 function approveForExecution(db, options = {}) {
   if (options.confirmed !== true) {
     throw badRequest("Die Freigabe zur Ausführung erfordert confirmed === true (Jamals ausdrückliche Bestätigung).");
   }
   const orderId = resolveOrderId(options);
-  const orderRow = authDb.getPilotWorkOrderById(db, orderId);
-  assertOrderIsMutable(orderRow, orderId);
+  const orderRow = loadMutableOrder(db, orderId, options);
   if (orderRow.status !== "READY_FOR_JAMAL_APPROVAL") {
     throw conflict(`Eine Ausführungsfreigabe ist nur aus READY_FOR_JAMAL_APPROVAL möglich (aktuell ${orderRow.status}).`);
   }
-  transitionStatus(db, orderRow, "APPROVED_FOR_EXECUTION", options);
-  try {
+  authDb.withAuthTransaction(db, () => {
+    applyStatusTransition(db, orderRow, "APPROVED_FOR_EXECUTION", options);
     authAudit.recordAuditEvent(db, {
       eventType: "PILOT_EXECUTION_APPROVAL_RECORDED",
       result: "OK",
@@ -551,20 +665,17 @@ function approveForExecution(db, options = {}) {
       timestamp: nowIso(options.now),
       metadata: { pilotOrderId: orderId },
     });
-  } catch (_error) {
-    /* Audit-Fehler dürfen die bereits gültige Freigabe nicht rückgängig machen. */
-  }
+  });
   return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
 }
 
 function startExecution(db, options = {}) {
   const orderId = resolveOrderId(options);
-  const orderRow = authDb.getPilotWorkOrderById(db, orderId);
-  assertOrderIsMutable(orderRow, orderId);
+  const orderRow = loadMutableOrder(db, orderId, options);
   if (orderRow.status !== "APPROVED_FOR_EXECUTION") {
     throw conflict(`Die Ausführung kann nur nach Freigabe (APPROVED_FOR_EXECUTION) gestartet werden (aktuell ${orderRow.status}).`);
   }
-  transitionStatus(db, orderRow, "IN_EXECUTION", options);
+  applyStatusTransition(db, orderRow, "IN_EXECUTION", options);
   return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
 }
 
@@ -628,10 +739,18 @@ function runProjectManagerFilter(order, handoffInput = {}) {
 // Läuft automatisch durch den Projektmanager-Filter, bevor sie als
 // angenommen gilt.
 // ---------------------------------------------------------------------------
+// Phase 3 (Auftrag Abschnitt 3/11): Rollenübergabe-Anlage, ihr
+// PILOT_HANDOFF_SUBMITTED-Audit und der ggf. daraus folgende
+// Statusübergang (samt dessen Audit-Ereignissen) laufen als EINE
+// gemeinsame Transaktion. Weder darf eine Übergabe gespeichert bleiben,
+// obwohl der zugehörige Statusübergang scheiterte, noch darf ein
+// Statusübergang stehen bleiben, obwohl die zugrunde liegende Übergabe
+// selbst nicht dauerhaft gespeichert wurde. Die Sequenznummer wird nicht
+// mehr aus einer separat gelesenen Liste berechnet, sondern atomar in
+// auth-db.js#insertPilotHandoff per SQL-Unterabfrage vergeben.
 function submitHandoff(db, options = {}) {
   const orderId = resolveOrderId(options);
-  const orderRow = authDb.getPilotWorkOrderById(db, orderId);
-  assertOrderIsMutable(orderRow, orderId);
+  const orderRow = loadMutableOrder(db, orderId, options);
   if (orderRow.status !== "IN_EXECUTION") {
     throw conflict(`Rollenübergaben sind nur während IN_EXECUTION möglich (aktuell ${orderRow.status}).`);
   }
@@ -658,30 +777,27 @@ function submitHandoff(db, options = {}) {
   };
   const filterResult = runProjectManagerFilter(order, filterInput);
   const pmFilterStatus = filterResult.passed ? "PASSED" : "REJECTED";
+  const handoffId = crypto.randomUUID();
 
-  const existingHandoffs = authDb.listPilotHandoffs(db, orderId);
-  const sequence = existingHandoffs.length + 1;
+  return authDb.withAuthTransaction(db, () => {
+    const handoffRow = authDb.insertPilotHandoff(db, {
+      id: handoffId,
+      pilotOrderId: orderId,
+      fromPilotRole,
+      toPilotRole,
+      shortFinding: truncate(options.shortFinding, 1000),
+      resultOrRecommendation: truncate(options.resultOrRecommendation, 4000),
+      basisUsed: truncate(options.basisUsed, 2000),
+      riskOrLimit: truncate(options.riskOrLimit, 2000),
+      nextStep: truncate(options.nextStep, 1000),
+      decisionNeeded: options.decisionNeeded ? truncate(options.decisionNeeded, 1000) : null,
+      forbiddenActionOccurred: Boolean(options.forbiddenActionOccurred),
+      autonomyBoundaryRespected: options.autonomyBoundaryRespected !== false,
+      pmFilterStatus,
+      pmFilterReasonsJson: JSON.stringify(filterResult.reasons),
+      createdAt: nowIso(now),
+    });
 
-  const handoffRow = authDb.insertPilotHandoff(db, {
-    id: crypto.randomUUID(),
-    pilotOrderId: orderId,
-    sequence,
-    fromPilotRole,
-    toPilotRole,
-    shortFinding: truncate(options.shortFinding, 1000),
-    resultOrRecommendation: truncate(options.resultOrRecommendation, 4000),
-    basisUsed: truncate(options.basisUsed, 2000),
-    riskOrLimit: truncate(options.riskOrLimit, 2000),
-    nextStep: truncate(options.nextStep, 1000),
-    decisionNeeded: options.decisionNeeded ? truncate(options.decisionNeeded, 1000) : null,
-    forbiddenActionOccurred: Boolean(options.forbiddenActionOccurred),
-    autonomyBoundaryRespected: options.autonomyBoundaryRespected !== false,
-    pmFilterStatus,
-    pmFilterReasonsJson: JSON.stringify(filterResult.reasons),
-    createdAt: nowIso(now),
-  });
-
-  try {
     authAudit.recordAuditEvent(db, {
       eventType: "PILOT_HANDOFF_SUBMITTED",
       result: "OK",
@@ -690,13 +806,9 @@ function submitHandoff(db, options = {}) {
       timestamp: nowIso(now),
       metadata: { pilotOrderId: orderId, pilotHandoffId: handoffRow.id, pilotRole: toPilotRole },
     });
-  } catch (_error) {
-    /* Audit-Fehler dürfen die bereits gültige Einreichung nicht rückgängig machen. */
-  }
 
-  if (options.forbiddenActionOccurred === true) {
-    transitionStatus(db, orderRow, "BLOCKED", options);
-    try {
+    if (options.forbiddenActionOccurred === true) {
+      applyStatusTransition(db, orderRow, "BLOCKED", options);
       authAudit.recordAuditEvent(db, {
         eventType: "PILOT_HANDOFF_BLOCKED_BY_FORBIDDEN_ACTION",
         result: "DENIED",
@@ -705,12 +817,8 @@ function submitHandoff(db, options = {}) {
         timestamp: nowIso(now),
         metadata: { pilotOrderId: orderId, pilotHandoffId: handoffRow.id },
       });
-    } catch (_error) {
-      /* Audit-Fehler dürfen die Blockierung nicht rückgängig machen. */
-    }
-  } else if (!filterResult.passed) {
-    transitionStatus(db, orderRow, "RETURNED", options);
-    try {
+    } else if (!filterResult.passed) {
+      applyStatusTransition(db, orderRow, "RETURNED", options);
       authAudit.recordAuditEvent(db, {
         eventType: "PILOT_HANDOFF_REJECTED_BY_PM_FILTER",
         result: "DENIED",
@@ -719,11 +827,7 @@ function submitHandoff(db, options = {}) {
         timestamp: nowIso(now),
         metadata: { pilotOrderId: orderId, pilotHandoffId: handoffRow.id, pmFilterStatus },
       });
-    } catch (_error) {
-      /* Audit-Fehler dürfen die Ablehnung nicht rückgängig machen. */
-    }
-  } else {
-    try {
+    } else {
       authAudit.recordAuditEvent(db, {
         eventType: "PILOT_HANDOFF_ACCEPTED_BY_PM_FILTER",
         result: "OK",
@@ -732,18 +836,15 @@ function submitHandoff(db, options = {}) {
         timestamp: nowIso(now),
         metadata: { pilotOrderId: orderId, pilotHandoffId: handoffRow.id, pmFilterStatus },
       });
-    } catch (_error) {
-      /* Audit-Fehler dürfen die Annahme nicht rückgängig machen. */
     }
-  }
 
-  return { handoff: rowToHandoffView(handoffRow), filterResult };
+    return { handoff: rowToHandoffView(handoffRow), filterResult };
+  });
 }
 
 function submitForReview(db, options = {}) {
   const orderId = resolveOrderId(options);
-  const orderRow = authDb.getPilotWorkOrderById(db, orderId);
-  assertOrderIsMutable(orderRow, orderId);
+  const orderRow = loadMutableOrder(db, orderId, options);
   if (orderRow.status !== "IN_EXECUTION") {
     throw conflict(`Nur ein Auftrag in IN_EXECUTION kann zur Abschlussprüfung vorgelegt werden (aktuell ${orderRow.status}).`);
   }
@@ -754,22 +855,25 @@ function submitForReview(db, options = {}) {
   if (!hasPassedDocumentationHandoff) {
     throw badRequest("Es liegt noch kein vom Projektmanager-Filter angenommenes Dokumentations-Ergebnis vor.");
   }
-  transitionStatus(db, orderRow, "READY_FOR_REVIEW", options);
+  applyStatusTransition(db, orderRow, "READY_FOR_REVIEW", options);
   return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
 }
 
+// Statusübergang UND die zugehörige Abschluss-Auditierung laufen in einer
+// gemeinsamen Transaktion (Phase 3, Auftrag Abschnitt 3): niemals eine
+// dokumentierte Abnahme ohne erreichten COMPLETED-Status, niemals ein
+// COMPLETED-Status ohne dokumentierte Abnahme.
 function approveCompletion(db, options = {}) {
   if (options.confirmed !== true) {
     throw badRequest("Der Abschluss erfordert confirmed === true (Jamals ausdrückliche Bestätigung).");
   }
   const orderId = resolveOrderId(options);
-  const orderRow = authDb.getPilotWorkOrderById(db, orderId);
-  assertOrderIsMutable(orderRow, orderId);
+  const orderRow = loadMutableOrder(db, orderId, options);
   if (orderRow.status !== "READY_FOR_REVIEW") {
     throw conflict(`Ein Abschluss ist nur aus READY_FOR_REVIEW möglich (aktuell ${orderRow.status}).`);
   }
-  transitionStatus(db, orderRow, "COMPLETED", options);
-  try {
+  authDb.withAuthTransaction(db, () => {
+    applyStatusTransition(db, orderRow, "COMPLETED", options);
     authAudit.recordAuditEvent(db, {
       eventType: "PILOT_COMPLETION_APPROVAL_RECORDED",
       result: "OK",
@@ -778,52 +882,46 @@ function approveCompletion(db, options = {}) {
       timestamp: nowIso(options.now),
       metadata: { pilotOrderId: orderId },
     });
-  } catch (_error) {
-    /* Audit-Fehler dürfen die bereits gültige Abnahme nicht rückgängig machen. */
-  }
+  });
   return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
 }
 
 function returnOrder(db, options = {}) {
   if (!isNonEmptyString(options.note)) throw badRequest("note ist erforderlich (Grund der Rückgabe).");
   const orderId = resolveOrderId(options);
-  const orderRow = authDb.getPilotWorkOrderById(db, orderId);
-  assertOrderIsMutable(orderRow, orderId);
+  const orderRow = loadMutableOrder(db, orderId, options);
   if (!["READY_FOR_JAMAL_APPROVAL", "READY_FOR_REVIEW", "IN_EXECUTION"].includes(orderRow.status)) {
     throw conflict(`Eine Rückgabe ist aus ${orderRow.status} nicht möglich.`);
   }
-  transitionStatus(db, orderRow, "RETURNED", options);
+  applyStatusTransition(db, orderRow, "RETURNED", options);
   return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
 }
 
 function reopenFromReturned(db, options = {}) {
   const orderId = resolveOrderId(options);
-  const orderRow = authDb.getPilotWorkOrderById(db, orderId);
-  assertOrderIsMutable(orderRow, orderId);
+  const orderRow = loadMutableOrder(db, orderId, options);
   if (orderRow.status !== "RETURNED") {
     throw conflict(`Nur ein zurückgegebener Auftrag (RETURNED) kann neu gestartet werden (aktuell ${orderRow.status}).`);
   }
-  transitionStatus(db, orderRow, "DRAFT", options);
+  applyStatusTransition(db, orderRow, "DRAFT", options);
   return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
 }
 
 function blockOrder(db, options = {}) {
   if (!isNonEmptyString(options.reason)) throw badRequest("reason ist erforderlich.");
   const orderId = resolveOrderId(options);
-  const orderRow = authDb.getPilotWorkOrderById(db, orderId);
-  assertOrderIsMutable(orderRow, orderId);
-  transitionStatus(db, orderRow, "BLOCKED", options);
+  const orderRow = loadMutableOrder(db, orderId, options);
+  applyStatusTransition(db, orderRow, "BLOCKED", options);
   return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
 }
 
 function unblockOrder(db, options = {}) {
   const orderId = resolveOrderId(options);
-  const orderRow = authDb.getPilotWorkOrderById(db, orderId);
-  assertOrderIsMutable(orderRow, orderId);
+  const orderRow = loadMutableOrder(db, orderId, options);
   if (orderRow.status !== "BLOCKED") {
     throw conflict(`Nur ein blockierter Auftrag (BLOCKED) kann entsperrt werden (aktuell ${orderRow.status}).`);
   }
-  transitionStatus(db, orderRow, "RETURNED", options);
+  applyStatusTransition(db, orderRow, "RETURNED", options);
   return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
 }
 

@@ -2452,6 +2452,38 @@ const MIGRATIONS = Object.freeze([
       CREATE INDEX idx_auth_audit_events_timestamp ON auth_audit_events(timestamp);
     `,
   }),
+  // KI-Unternehmenszentrale-Pilotbetrieb – Phase 3 ("kontrollierte
+  // Nebenläufigkeit und Konfliktsicherheit"). Rein additiv: eine einzelne
+  // neue Spalte auf der bereits bestehenden pilot_work_orders-Tabelle
+  // (Migration 18), keine neue Tabelle, kein Löschen/Neuaufbau einer
+  // bestehenden Tabelle, keine Änderung der bestehenden CHECK-Aufzählung
+  // für `status`. `revision` ist ein pro Auftrag streng monoton
+  // steigender Zähler für optimistische Nebenläufigkeitskontrolle
+  // (Compare-and-Set zusammen mit `status` in
+  // auth-db.js#updatePilotWorkOrderStatusConditional): ein Statusübergang
+  // wird nur angewendet, wenn der Auftrag zum Schreibzeitpunkt noch exakt
+  // den Status UND die Revision besitzt, auf deren Grundlage die
+  // Entscheidung getroffen wurde. Eine reine Statusprüfung (wie beim
+  // bereits bestehenden Compare-and-Set-Muster für work_orders, siehe
+  // auth-db.js#transitionWorkOrder) reicht hier nicht aus, weil die
+  // Pilot-Statusmaschine in einen bereits durchlaufenen Status
+  // zurückkehren kann (z. B. BLOCKED → RETURNED → DRAFT → … → erneut
+  // BLOCKED) – ein reiner Statusvergleich könnte eine "ABA"-Situation
+  // (derselbe Status, aber zwischenzeitlich mehrfach verändert) nicht
+  // erkennen, ein monoton steigender Revisionszähler hingegen schon.
+  // ADD COLUMN mit einem konstanten DEFAULT ist in SQLite eine
+  // gewöhnliche, sofortige Schemaänderung (kein Tabellen-Neuaufbau
+  // nötig); jeder bestehende Auftrag (inklusive des kanonischen
+  // Pilotauftrags) erhält automatisch und rückwirkend den sicheren
+  // Ausgangswert 0, ohne dass ein bestehender Datensatz sonst verändert
+  // wird. Bestehende Audit-Daten bleiben vollständig unverändert.
+  Object.freeze({
+    version: 19,
+    name: "add_pilot_work_order_revision_column",
+    sql: `
+      ALTER TABLE pilot_work_orders ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;
+    `,
+  }),
 ]);
 
 function ensureMigrationsTable(db) {

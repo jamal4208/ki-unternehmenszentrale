@@ -344,6 +344,16 @@ const METADATA_ALLOWLIST = Object.freeze([
   "pilotHandoffId",
   "pilotRole",
   "pmFilterStatus",
+  // KI-Unternehmenszentrale-Pilotbetrieb Phase 3 ("kontrollierte
+  // Nebenläufigkeit und Konfliktsicherheit"): "previousRevision" und
+  // "nextRevision" sind ausschließlich die reinen, nicht-negativen
+  // Revisionszähler eines Pilotauftrags vor/nach einem erfolgreichen
+  // Statusübergang (siehe auth-db-migrations.js Migration 19) – keine
+  // Freitext, kein Ergebnisinhalt. Sie machen jeden Statuswechsel-Audit
+  // eindeutig einer bestimmten Revision zuordenbar, ohne sich allein auf
+  // Zeitstempel verlassen zu müssen.
+  "previousRevision",
+  "nextRevision",
 ]);
 
 // Verbotene Inhalte, unabhängig vom Feldnamen (Verteidigung in der Tiefe:

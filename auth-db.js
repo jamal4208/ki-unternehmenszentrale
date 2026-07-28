@@ -1938,31 +1938,43 @@ function listHealthReferenceResults(db, runId) {
 // pilot-work-order-service.js#Kopfkommentar). Genau ein kanonischer
 // Pilotauftrag; Eindeutigkeit der festen id wird fachlich vom Service
 // sichergestellt (INSERT OR IGNORE hier zusätzlich defensiv).
+//
+// Phase 3 ("kontrollierte Nebenläufigkeit und Konfliktsicherheit"):
+// insertPilotWorkOrderIfMissing prüft die Existenz NICHT mehr über ein
+// vorgelagertes SELECT (TOCTOU-Lücke zwischen Prüfen und Schreiben,
+// siehe Phase-2-Dokumentation), sondern ausschließlich über das
+// Rückgabefeld `created` eines einzigen atomaren INSERT OR IGNORE-
+// Statements: `changes === 1` bedeutet "von diesem Aufruf neu angelegt",
+// `changes === 0` bedeutet "existierte bereits, unverändert gelassen".
+// Ein gleichzeitiger zweiter Anlageversuch derselben ID erzeugt dadurch
+// nachweisbar nie einen zweiten oder unvollständigen Datensatz.
 // ---------------------------------------------------------------------------
 function insertPilotWorkOrderIfMissing(db, input = {}) {
-  db.prepare(
-    `INSERT OR IGNORE INTO pilot_work_orders
+  const info = db
+    .prepare(
+      `INSERT OR IGNORE INTO pilot_work_orders
       (id, title, desiredOutcome, requestedBy, involvedAgentsJson, status, qualityCriteriaJson,
        allowedToolsJson, forbiddenActionsJson, requiredApprovalsJson, timeframe, createdAt, updatedAt)
      VALUES
       (@id, @title, @desiredOutcome, @requestedBy, @involvedAgentsJson, @status, @qualityCriteriaJson,
        @allowedToolsJson, @forbiddenActionsJson, @requiredApprovalsJson, @timeframe, @createdAt, @updatedAt)`,
-  ).run({
-    id: input.id,
-    title: input.title,
-    desiredOutcome: input.desiredOutcome,
-    requestedBy: input.requestedBy,
-    involvedAgentsJson: input.involvedAgentsJson,
-    status: input.status,
-    qualityCriteriaJson: input.qualityCriteriaJson,
-    allowedToolsJson: input.allowedToolsJson,
-    forbiddenActionsJson: input.forbiddenActionsJson,
-    requiredApprovalsJson: input.requiredApprovalsJson,
-    timeframe: input.timeframe,
-    createdAt: input.createdAt,
-    updatedAt: input.updatedAt,
-  });
-  return getPilotWorkOrderById(db, input.id);
+    )
+    .run({
+      id: input.id,
+      title: input.title,
+      desiredOutcome: input.desiredOutcome,
+      requestedBy: input.requestedBy,
+      involvedAgentsJson: input.involvedAgentsJson,
+      status: input.status,
+      qualityCriteriaJson: input.qualityCriteriaJson,
+      allowedToolsJson: input.allowedToolsJson,
+      forbiddenActionsJson: input.forbiddenActionsJson,
+      requiredApprovalsJson: input.requiredApprovalsJson,
+      timeframe: input.timeframe,
+      createdAt: input.createdAt,
+      updatedAt: input.updatedAt,
+    });
+  return { row: getPilotWorkOrderById(db, input.id), created: info.changes === 1 };
 }
 
 function getPilotWorkOrderById(db, id) {
@@ -1976,15 +1988,36 @@ function listPilotWorkOrders(db) {
   return db.prepare("SELECT * FROM pilot_work_orders ORDER BY createdAt ASC, id ASC").all();
 }
 
-function updatePilotWorkOrderStatus(db, input = {}) {
-  db.prepare(`UPDATE pilot_work_orders SET status = @status, updatedAt = @updatedAt WHERE id = @id`).run({
-    id: input.id,
-    status: input.status,
-    updatedAt: input.updatedAt,
-  });
-  return getPilotWorkOrderById(db, input.id);
+// Phase 3: atomares Compare-and-Set über `status` UND `revision` in einem
+// einzigen UPDATE-Statement (gleiches Grundmuster wie
+// transitionWorkOrder/transitionWorkOrderRun oben, hier zusätzlich um die
+// Revision erweitert, siehe Migration 19 in auth-db-migrations.js für die
+// Begründung). `changes === 0` bedeutet: der Auftrag besitzt zum
+// Schreibzeitpunkt nicht mehr den Status/die Revision, auf deren
+// Grundlage die Entscheidung getroffen wurde – der Aufrufer MUSS dies als
+// Konflikt behandeln, niemals als stillen Erfolg oder Fallback.
+function updatePilotWorkOrderStatusConditional(db, input = {}) {
+  const info = db
+    .prepare(
+      `UPDATE pilot_work_orders
+       SET status = @nextStatus, revision = revision + 1, updatedAt = @updatedAt
+       WHERE id = @id AND status = @expectedStatus AND revision = @expectedRevision`,
+    )
+    .run({
+      id: input.id,
+      nextStatus: input.nextStatus,
+      updatedAt: input.updatedAt,
+      expectedStatus: input.expectedStatus,
+      expectedRevision: input.expectedRevision,
+    });
+  return info.changes === 1;
 }
 
+// Phase 3: die Sequenznummer einer Rollenübergabe wird nicht mehr in der
+// Serviceschicht aus einer separat gelesenen Liste ("bisherige Anzahl + 1")
+// berechnet, sondern innerhalb desselben atomaren INSERT-Statements per
+// Unterabfrage (COALESCE(MAX(sequence), 0) + 1) – kein getrenntes Lesen
+// und Zurückschreiben, keine Lücke für doppelt vergebene Sequenznummern.
 function insertPilotHandoff(db, input = {}) {
   db.prepare(
     `INSERT INTO pilot_handoffs
@@ -1992,13 +2025,14 @@ function insertPilotHandoff(db, input = {}) {
        basisUsed, riskOrLimit, nextStep, decisionNeeded, forbiddenActionOccurred, autonomyBoundaryRespected,
        pmFilterStatus, pmFilterReasonsJson, createdAt)
      VALUES
-      (@id, @pilotOrderId, @sequence, @fromPilotRole, @toPilotRole, @shortFinding, @resultOrRecommendation,
+      (@id, @pilotOrderId,
+       (SELECT COALESCE(MAX(sequence), 0) + 1 FROM pilot_handoffs WHERE pilotOrderId = @pilotOrderId),
+       @fromPilotRole, @toPilotRole, @shortFinding, @resultOrRecommendation,
        @basisUsed, @riskOrLimit, @nextStep, @decisionNeeded, @forbiddenActionOccurred, @autonomyBoundaryRespected,
        @pmFilterStatus, @pmFilterReasonsJson, @createdAt)`,
   ).run({
     id: input.id,
     pilotOrderId: input.pilotOrderId,
-    sequence: input.sequence,
     fromPilotRole: input.fromPilotRole,
     toPilotRole: input.toPilotRole,
     shortFinding: input.shortFinding,
@@ -2168,7 +2202,7 @@ module.exports = {
   insertPilotWorkOrderIfMissing,
   getPilotWorkOrderById,
   listPilotWorkOrders,
-  updatePilotWorkOrderStatus,
+  updatePilotWorkOrderStatusConditional,
   insertPilotHandoff,
   listPilotHandoffs,
 };
