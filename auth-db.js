@@ -1969,6 +1969,13 @@ function getPilotWorkOrderById(db, id) {
   return db.prepare("SELECT * FROM pilot_work_orders WHERE id = ?").get(id) || null;
 }
 
+// Phase 2 (Mehrfachlauf-Grundlage): Auflistung aller Pilotaufträge, damit die
+// Auftragsverwaltung mehrere, voneinander getrennte Aufträge technisch
+// unterscheiden kann. Reine Leseoperation, keine Statusänderung.
+function listPilotWorkOrders(db) {
+  return db.prepare("SELECT * FROM pilot_work_orders ORDER BY createdAt ASC, id ASC").all();
+}
+
 function updatePilotWorkOrderStatus(db, input = {}) {
   db.prepare(`UPDATE pilot_work_orders SET status = @status, updatedAt = @updatedAt WHERE id = @id`).run({
     id: input.id,
@@ -2160,6 +2167,7 @@ module.exports = {
   listHealthReferenceResults,
   insertPilotWorkOrderIfMissing,
   getPilotWorkOrderById,
+  listPilotWorkOrders,
   updatePilotWorkOrderStatus,
   insertPilotHandoff,
   listPilotHandoffs,

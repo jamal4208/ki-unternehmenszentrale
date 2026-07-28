@@ -38,6 +38,27 @@
 // bestehende Rolle) – eine bewusste, offen dokumentierte Pilotentscheidung,
 // KEINE Änderung des 25er-Registers und KEIN Agent 26. Jamal sollte diese
 // Zuordnung bestätigen oder korrigieren (siehe Abschlussbericht).
+//
+// Phase 2 – Mehrfachlauf-Grundlage (Auftrag "beliebig viele Pilotaufträge
+// nacheinander verwalten und ausführen"): Dieses Modul war ursprünglich auf
+// GENAU EINEN kanonischen Pilotauftrag (CANONICAL_PILOT_ORDER_ID) verdrahtet.
+// Die Datenschicht (pilot_work_orders/pilot_handoffs, siehe auth-db.js) war
+// bereits pro Auftrags-ID ausgelegt (id TEXT PRIMARY KEY bzw.
+// pilotOrderId-Fremdschlüssel) – nur die Serviceschicht hat bislang immer
+// dieselbe feste ID verwendet. Deshalb ist KEINE Schemamigration nötig.
+// Jede statusverändernde Funktion (markReadyForApproval, approveForExecution,
+// startExecution, submitHandoff, submitForReview, approveCompletion,
+// returnOrder, reopenFromReturned, blockOrder, unblockOrder) akzeptiert jetzt
+// ein optionales `options.pilotOrderId`; fehlt es, wird weiterhin exakt der
+// bisherige kanonische Auftrag adressiert (resolveOrderId) – vollständig
+// rückwärtskompatibel zu allen bestehenden Aufrufern (Routen, UI, Tests).
+// Neue, zusätzliche Pilotaufträge werden ausschließlich über createPilotOrder
+// angelegt (eigene, kollisionssichere ID; niemals ein Überschreiben einer
+// bestehenden ID). Die Statusmaschine selbst (PILOT_WORK_ORDER_STATUS_VALUES,
+// Übergangsregeln, Freigabegrenzen) bleibt unverändert und generisch; ihr
+// wird lediglich der jeweils adressierte Auftrag als Kontext übergeben. Noch
+// KEINE echte Parallelverarbeitung, keine Worker/Queues – Aufträge werden
+// weiterhin ausschließlich nacheinander bearbeitet.
 
 const crypto = require("crypto");
 const agentRegistry = require("./agent-registry");
@@ -164,8 +185,16 @@ const AUTONOMY_BOUNDARIES_NOTICE = Object.freeze({
     "kein Commit, kein Push und kein Deployment.",
 });
 
-function assertOrderIsMutable(order) {
-  if (!order) throw notFound("Der Pilotauftrag wurde noch nicht angelegt.");
+// Auftragsisolation (Phase 2): jede schreibende Aktion adressiert genau
+// einen Auftrag über seine ID. Fehlt options.pilotOrderId, bleibt exakt das
+// bisherige Verhalten erhalten (kanonischer Pilotauftrag) – kein impliziter
+// Zugriff auf einen anderen als den ausdrücklich adressierten Auftrag.
+function resolveOrderId(options = {}) {
+  return isNonEmptyString(options.pilotOrderId) ? options.pilotOrderId.trim() : CANONICAL_PILOT_ORDER_ID;
+}
+
+function assertOrderIsMutable(order, orderId) {
+  if (!order) throw notFound(`Der Pilotauftrag "${orderId || ""}" wurde nicht gefunden.`);
   if (order.status === "COMPLETED") {
     throw conflict("Der Pilotauftrag ist bereits abgeschlossen (COMPLETED) und kann nicht mehr verändert werden.");
   }
@@ -331,6 +360,87 @@ function getOrCreateCanonicalPilotOrder(db, options = {}) {
   return orderRow ? buildOverview(db, authDb.getPilotWorkOrderById(db, CANONICAL_PILOT_ORDER_ID)) : null;
 }
 
+const PILOT_ORDER_ID_PREFIX = "pilot-order-";
+
+function generatePilotOrderId() {
+  return `${PILOT_ORDER_ID_PREFIX}${crypto.randomUUID()}`;
+}
+
+// ---------------------------------------------------------------------------
+// Mehrfachlauf-Grundlage (Phase 2, Auftrag Abschnitt 1/"Auftragsverwaltung"):
+// Anlage eines weiteren, eigenständigen Pilotauftrags zusätzlich zum
+// unveränderten kanonischen Pilotauftrag. Anders als
+// getOrCreateCanonicalPilotOrder (idempotent, fester Inhalt, feste ID) ist
+// createPilotOrder ein striktes "Anlegen" mit frei wählbarem Inhalt: eine
+// bereits vergebene ID (inklusive der kanonischen) wird abgewiesen statt
+// stillschweigend übernommen oder überschrieben – kein "Überschreiben des
+// aktiven Auftrags" möglich. Ohne options.id wird eine kollisionsarme,
+// zufällige ID erzeugt (crypto.randomUUID(), gleiches Verfahren wie bei
+// Rollenübergabe- und Audit-Event-IDs); mit options.id bleibt die ID in
+// Tests deterministisch kontrollierbar.
+// ---------------------------------------------------------------------------
+function createPilotOrder(db, input = {}, options = {}) {
+  validatePilotOrderInput(input);
+  const now = options.now || new Date();
+  const requestedId = isNonEmptyString(options.id) ? options.id.trim() : null;
+  const orderId = requestedId || generatePilotOrderId();
+  // Die kanonische ID ist immer reserviert, unabhängig davon, ob der
+  // kanonische Auftrag in dieser Datenbank bereits materialisiert wurde
+  // (getOrCreateCanonicalPilotOrder legt ihn erst bei Bedarf an). Ohne diese
+  // Prüfung könnte createPilotOrder der kanonischen ID vor ihrer ersten
+  // Nutzung beliebigen Inhalt zuweisen und damit den kanonischen Pilotauftrag
+  // faktisch überschreiben.
+  if (orderId === CANONICAL_PILOT_ORDER_ID || authDb.getPilotWorkOrderById(db, orderId)) {
+    throw conflict(`Ein Pilotauftrag mit der ID "${orderId}" existiert bereits und wird nicht überschrieben.`);
+  }
+  const orderRow = authDb.insertPilotWorkOrderIfMissing(db, {
+    id: orderId,
+    title: input.title,
+    desiredOutcome: input.desiredOutcome,
+    requestedBy: input.requestedBy,
+    involvedAgentsJson: JSON.stringify(PILOT_TEAM.map((agent) => ({ pilotRole: agent.pilotRole, canonicalName: agent.canonicalName }))),
+    status: "DRAFT",
+    qualityCriteriaJson: JSON.stringify(input.qualityCriteria),
+    allowedToolsJson: JSON.stringify(input.allowedTools),
+    forbiddenActionsJson: JSON.stringify(input.forbiddenActions),
+    requiredApprovalsJson: JSON.stringify(input.requiredApprovals),
+    timeframe: input.timeframe,
+    createdAt: nowIso(now),
+    updatedAt: nowIso(now),
+  });
+  try {
+    authAudit.recordAuditEvent(db, {
+      eventType: "PILOT_WORK_ORDER_CREATED",
+      result: "OK",
+      actorUserId: options.actorUserId ?? null,
+      tenantId: null,
+      timestamp: nowIso(now),
+      metadata: { pilotOrderId: orderId },
+    });
+  } catch (_error) {
+    /* Audit-Fehler dürfen die bereits gültige Anlage nicht rückgängig machen. */
+  }
+  return buildOverview(db, orderRow);
+}
+
+// Liest genau einen, ausdrücklich benannten Pilotauftrag – im Unterschied zu
+// getPilotOverview()/getOrCreateCanonicalPilotOrder() KEIN automatisches
+// Anlegen. Ein unbekannter/ungültiger orderId führt zu einem Fehler statt zu
+// einem stillschweigenden Fallback auf den kanonischen Auftrag.
+function getPilotOrderOverview(db, orderId) {
+  if (!isNonEmptyString(orderId)) throw badRequest("pilotOrderId ist erforderlich.");
+  const orderRow = authDb.getPilotWorkOrderById(db, orderId.trim());
+  if (!orderRow) throw notFound(`Der Pilotauftrag "${orderId}" wurde nicht gefunden.`);
+  return buildOverview(db, orderRow);
+}
+
+// Auflistung aller bisher angelegten Pilotaufträge (kanonischer Auftrag plus
+// alle über createPilotOrder angelegten). Reine Leseoperation für
+// Auftragsverwaltung/Tests, keine Statusänderung.
+function listPilotOrders(db) {
+  return authDb.listPilotWorkOrders(db).map(rowToOrderView);
+}
+
 function buildOverview(db, orderRow) {
   if (!orderRow) return null;
   const order = rowToOrderView(orderRow);
@@ -368,12 +478,19 @@ function buildOverview(db, orderRow) {
   };
 }
 
-function getPilotOverview(db) {
-  return getOrCreateCanonicalPilotOrder(db);
+// Rückwärtskompatibler Standardeinstieg: ohne pilotOrderId exakt das
+// bisherige Verhalten (kanonischer Auftrag, automatisch angelegt, falls
+// noch nicht vorhanden). Mit ausdrücklich übergebener pilotOrderId wird
+// stattdessen genau dieser Auftrag gelesen (kein automatisches Anlegen für
+// nicht-kanonische Aufträge).
+function getPilotOverview(db, options = {}) {
+  const orderId = resolveOrderId(options);
+  if (orderId === CANONICAL_PILOT_ORDER_ID) return getOrCreateCanonicalPilotOrder(db, options);
+  return getPilotOrderOverview(db, orderId);
 }
 
 function auditStatusChanged(db, options = {}) {
-  const { previousStatus, nextStatus, actorUserId, now } = options;
+  const { orderId, previousStatus, nextStatus, actorUserId, now } = options;
   if (previousStatus === nextStatus) return;
   try {
     authAudit.recordAuditEvent(db, {
@@ -382,17 +499,21 @@ function auditStatusChanged(db, options = {}) {
       actorUserId: actorUserId ?? null,
       tenantId: null,
       timestamp: nowIso(now),
-      metadata: { pilotOrderId: CANONICAL_PILOT_ORDER_ID, previousStatus, nextStatus },
+      metadata: { pilotOrderId: orderId, previousStatus, nextStatus },
     });
   } catch (_error) {
     /* Audit-Fehler dürfen die bereits gültige Statusänderung nicht rückgängig machen. */
   }
 }
 
+// Generische Statusmaschinen-Anwendung: `order` (der bereits geladene
+// Auftragszustand) wird als Kontext übergeben, der Übergang verändert
+// ausschließlich diesen einen, ausdrücklich adressierten Auftrag
+// (order.id) – niemals einen anderen.
 function transitionStatus(db, order, nextStatus, options) {
   const previousStatus = order.status;
   authDb.updatePilotWorkOrderStatus(db, { id: order.id, status: nextStatus, updatedAt: nowIso(options.now) });
-  auditStatusChanged(db, { previousStatus, nextStatus, actorUserId: options.actorUserId, now: options.now });
+  auditStatusChanged(db, { orderId: order.id, previousStatus, nextStatus, actorUserId: options.actorUserId, now: options.now });
 }
 
 // ---------------------------------------------------------------------------
@@ -400,21 +521,23 @@ function transitionStatus(db, order, nextStatus, options) {
 // Agenten: APPROVED_FOR_EXECUTION und COMPLETED erfordern `confirmed: true`.
 // ---------------------------------------------------------------------------
 function markReadyForApproval(db, options = {}) {
-  const orderRow = authDb.getPilotWorkOrderById(db, CANONICAL_PILOT_ORDER_ID);
-  assertOrderIsMutable(orderRow);
+  const orderId = resolveOrderId(options);
+  const orderRow = authDb.getPilotWorkOrderById(db, orderId);
+  assertOrderIsMutable(orderRow, orderId);
   if (orderRow.status !== "DRAFT") {
     throw conflict(`Der Pilotauftrag kann nur aus DRAFT heraus zur Freigabe vorgelegt werden (aktuell ${orderRow.status}).`);
   }
   transitionStatus(db, orderRow, "READY_FOR_JAMAL_APPROVAL", options);
-  return buildOverview(db, authDb.getPilotWorkOrderById(db, CANONICAL_PILOT_ORDER_ID));
+  return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
 }
 
 function approveForExecution(db, options = {}) {
   if (options.confirmed !== true) {
     throw badRequest("Die Freigabe zur Ausführung erfordert confirmed === true (Jamals ausdrückliche Bestätigung).");
   }
-  const orderRow = authDb.getPilotWorkOrderById(db, CANONICAL_PILOT_ORDER_ID);
-  assertOrderIsMutable(orderRow);
+  const orderId = resolveOrderId(options);
+  const orderRow = authDb.getPilotWorkOrderById(db, orderId);
+  assertOrderIsMutable(orderRow, orderId);
   if (orderRow.status !== "READY_FOR_JAMAL_APPROVAL") {
     throw conflict(`Eine Ausführungsfreigabe ist nur aus READY_FOR_JAMAL_APPROVAL möglich (aktuell ${orderRow.status}).`);
   }
@@ -426,22 +549,23 @@ function approveForExecution(db, options = {}) {
       actorUserId: options.actorUserId ?? null,
       tenantId: null,
       timestamp: nowIso(options.now),
-      metadata: { pilotOrderId: CANONICAL_PILOT_ORDER_ID },
+      metadata: { pilotOrderId: orderId },
     });
   } catch (_error) {
     /* Audit-Fehler dürfen die bereits gültige Freigabe nicht rückgängig machen. */
   }
-  return buildOverview(db, authDb.getPilotWorkOrderById(db, CANONICAL_PILOT_ORDER_ID));
+  return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
 }
 
 function startExecution(db, options = {}) {
-  const orderRow = authDb.getPilotWorkOrderById(db, CANONICAL_PILOT_ORDER_ID);
-  assertOrderIsMutable(orderRow);
+  const orderId = resolveOrderId(options);
+  const orderRow = authDb.getPilotWorkOrderById(db, orderId);
+  assertOrderIsMutable(orderRow, orderId);
   if (orderRow.status !== "APPROVED_FOR_EXECUTION") {
     throw conflict(`Die Ausführung kann nur nach Freigabe (APPROVED_FOR_EXECUTION) gestartet werden (aktuell ${orderRow.status}).`);
   }
   transitionStatus(db, orderRow, "IN_EXECUTION", options);
-  return buildOverview(db, authDb.getPilotWorkOrderById(db, CANONICAL_PILOT_ORDER_ID));
+  return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
 }
 
 // ---------------------------------------------------------------------------
@@ -505,8 +629,9 @@ function runProjectManagerFilter(order, handoffInput = {}) {
 // angenommen gilt.
 // ---------------------------------------------------------------------------
 function submitHandoff(db, options = {}) {
-  const orderRow = authDb.getPilotWorkOrderById(db, CANONICAL_PILOT_ORDER_ID);
-  assertOrderIsMutable(orderRow);
+  const orderId = resolveOrderId(options);
+  const orderRow = authDb.getPilotWorkOrderById(db, orderId);
+  assertOrderIsMutable(orderRow, orderId);
   if (orderRow.status !== "IN_EXECUTION") {
     throw conflict(`Rollenübergaben sind nur während IN_EXECUTION möglich (aktuell ${orderRow.status}).`);
   }
@@ -524,7 +649,7 @@ function submitHandoff(db, options = {}) {
   const now = options.now || new Date();
   const order = rowToOrderView(orderRow);
   const filterInput = {
-    pilotOrderId: CANONICAL_PILOT_ORDER_ID,
+    pilotOrderId: orderId,
     resultOrRecommendation: options.resultOrRecommendation,
     basisUsed: options.basisUsed,
     riskOrLimit: options.riskOrLimit,
@@ -534,12 +659,12 @@ function submitHandoff(db, options = {}) {
   const filterResult = runProjectManagerFilter(order, filterInput);
   const pmFilterStatus = filterResult.passed ? "PASSED" : "REJECTED";
 
-  const existingHandoffs = authDb.listPilotHandoffs(db, CANONICAL_PILOT_ORDER_ID);
+  const existingHandoffs = authDb.listPilotHandoffs(db, orderId);
   const sequence = existingHandoffs.length + 1;
 
   const handoffRow = authDb.insertPilotHandoff(db, {
     id: crypto.randomUUID(),
-    pilotOrderId: CANONICAL_PILOT_ORDER_ID,
+    pilotOrderId: orderId,
     sequence,
     fromPilotRole,
     toPilotRole,
@@ -563,7 +688,7 @@ function submitHandoff(db, options = {}) {
       actorUserId: options.actorUserId ?? null,
       tenantId: null,
       timestamp: nowIso(now),
-      metadata: { pilotOrderId: CANONICAL_PILOT_ORDER_ID, pilotHandoffId: handoffRow.id, pilotRole: toPilotRole },
+      metadata: { pilotOrderId: orderId, pilotHandoffId: handoffRow.id, pilotRole: toPilotRole },
     });
   } catch (_error) {
     /* Audit-Fehler dürfen die bereits gültige Einreichung nicht rückgängig machen. */
@@ -578,7 +703,7 @@ function submitHandoff(db, options = {}) {
         actorUserId: options.actorUserId ?? null,
         tenantId: null,
         timestamp: nowIso(now),
-        metadata: { pilotOrderId: CANONICAL_PILOT_ORDER_ID, pilotHandoffId: handoffRow.id },
+        metadata: { pilotOrderId: orderId, pilotHandoffId: handoffRow.id },
       });
     } catch (_error) {
       /* Audit-Fehler dürfen die Blockierung nicht rückgängig machen. */
@@ -592,7 +717,7 @@ function submitHandoff(db, options = {}) {
         actorUserId: options.actorUserId ?? null,
         tenantId: null,
         timestamp: nowIso(now),
-        metadata: { pilotOrderId: CANONICAL_PILOT_ORDER_ID, pilotHandoffId: handoffRow.id, pmFilterStatus },
+        metadata: { pilotOrderId: orderId, pilotHandoffId: handoffRow.id, pmFilterStatus },
       });
     } catch (_error) {
       /* Audit-Fehler dürfen die Ablehnung nicht rückgängig machen. */
@@ -605,7 +730,7 @@ function submitHandoff(db, options = {}) {
         actorUserId: options.actorUserId ?? null,
         tenantId: null,
         timestamp: nowIso(now),
-        metadata: { pilotOrderId: CANONICAL_PILOT_ORDER_ID, pilotHandoffId: handoffRow.id, pmFilterStatus },
+        metadata: { pilotOrderId: orderId, pilotHandoffId: handoffRow.id, pmFilterStatus },
       });
     } catch (_error) {
       /* Audit-Fehler dürfen die Annahme nicht rückgängig machen. */
@@ -616,12 +741,13 @@ function submitHandoff(db, options = {}) {
 }
 
 function submitForReview(db, options = {}) {
-  const orderRow = authDb.getPilotWorkOrderById(db, CANONICAL_PILOT_ORDER_ID);
-  assertOrderIsMutable(orderRow);
+  const orderId = resolveOrderId(options);
+  const orderRow = authDb.getPilotWorkOrderById(db, orderId);
+  assertOrderIsMutable(orderRow, orderId);
   if (orderRow.status !== "IN_EXECUTION") {
     throw conflict(`Nur ein Auftrag in IN_EXECUTION kann zur Abschlussprüfung vorgelegt werden (aktuell ${orderRow.status}).`);
   }
-  const handoffs = authDb.listPilotHandoffs(db, CANONICAL_PILOT_ORDER_ID).map(rowToHandoffView);
+  const handoffs = authDb.listPilotHandoffs(db, orderId).map(rowToHandoffView);
   const hasPassedDocumentationHandoff = handoffs.some(
     (handoff) => handoff.toPilotRole === "DOKUMENTATION" && handoff.pmFilterStatus === "PASSED",
   );
@@ -629,15 +755,16 @@ function submitForReview(db, options = {}) {
     throw badRequest("Es liegt noch kein vom Projektmanager-Filter angenommenes Dokumentations-Ergebnis vor.");
   }
   transitionStatus(db, orderRow, "READY_FOR_REVIEW", options);
-  return buildOverview(db, authDb.getPilotWorkOrderById(db, CANONICAL_PILOT_ORDER_ID));
+  return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
 }
 
 function approveCompletion(db, options = {}) {
   if (options.confirmed !== true) {
     throw badRequest("Der Abschluss erfordert confirmed === true (Jamals ausdrückliche Bestätigung).");
   }
-  const orderRow = authDb.getPilotWorkOrderById(db, CANONICAL_PILOT_ORDER_ID);
-  assertOrderIsMutable(orderRow);
+  const orderId = resolveOrderId(options);
+  const orderRow = authDb.getPilotWorkOrderById(db, orderId);
+  assertOrderIsMutable(orderRow, orderId);
   if (orderRow.status !== "READY_FOR_REVIEW") {
     throw conflict(`Ein Abschluss ist nur aus READY_FOR_REVIEW möglich (aktuell ${orderRow.status}).`);
   }
@@ -649,51 +776,55 @@ function approveCompletion(db, options = {}) {
       actorUserId: options.actorUserId ?? null,
       tenantId: null,
       timestamp: nowIso(options.now),
-      metadata: { pilotOrderId: CANONICAL_PILOT_ORDER_ID },
+      metadata: { pilotOrderId: orderId },
     });
   } catch (_error) {
     /* Audit-Fehler dürfen die bereits gültige Abnahme nicht rückgängig machen. */
   }
-  return buildOverview(db, authDb.getPilotWorkOrderById(db, CANONICAL_PILOT_ORDER_ID));
+  return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
 }
 
 function returnOrder(db, options = {}) {
   if (!isNonEmptyString(options.note)) throw badRequest("note ist erforderlich (Grund der Rückgabe).");
-  const orderRow = authDb.getPilotWorkOrderById(db, CANONICAL_PILOT_ORDER_ID);
-  assertOrderIsMutable(orderRow);
+  const orderId = resolveOrderId(options);
+  const orderRow = authDb.getPilotWorkOrderById(db, orderId);
+  assertOrderIsMutable(orderRow, orderId);
   if (!["READY_FOR_JAMAL_APPROVAL", "READY_FOR_REVIEW", "IN_EXECUTION"].includes(orderRow.status)) {
     throw conflict(`Eine Rückgabe ist aus ${orderRow.status} nicht möglich.`);
   }
   transitionStatus(db, orderRow, "RETURNED", options);
-  return buildOverview(db, authDb.getPilotWorkOrderById(db, CANONICAL_PILOT_ORDER_ID));
+  return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
 }
 
 function reopenFromReturned(db, options = {}) {
-  const orderRow = authDb.getPilotWorkOrderById(db, CANONICAL_PILOT_ORDER_ID);
-  assertOrderIsMutable(orderRow);
+  const orderId = resolveOrderId(options);
+  const orderRow = authDb.getPilotWorkOrderById(db, orderId);
+  assertOrderIsMutable(orderRow, orderId);
   if (orderRow.status !== "RETURNED") {
     throw conflict(`Nur ein zurückgegebener Auftrag (RETURNED) kann neu gestartet werden (aktuell ${orderRow.status}).`);
   }
   transitionStatus(db, orderRow, "DRAFT", options);
-  return buildOverview(db, authDb.getPilotWorkOrderById(db, CANONICAL_PILOT_ORDER_ID));
+  return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
 }
 
 function blockOrder(db, options = {}) {
   if (!isNonEmptyString(options.reason)) throw badRequest("reason ist erforderlich.");
-  const orderRow = authDb.getPilotWorkOrderById(db, CANONICAL_PILOT_ORDER_ID);
-  assertOrderIsMutable(orderRow);
+  const orderId = resolveOrderId(options);
+  const orderRow = authDb.getPilotWorkOrderById(db, orderId);
+  assertOrderIsMutable(orderRow, orderId);
   transitionStatus(db, orderRow, "BLOCKED", options);
-  return buildOverview(db, authDb.getPilotWorkOrderById(db, CANONICAL_PILOT_ORDER_ID));
+  return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
 }
 
 function unblockOrder(db, options = {}) {
-  const orderRow = authDb.getPilotWorkOrderById(db, CANONICAL_PILOT_ORDER_ID);
-  assertOrderIsMutable(orderRow);
+  const orderId = resolveOrderId(options);
+  const orderRow = authDb.getPilotWorkOrderById(db, orderId);
+  assertOrderIsMutable(orderRow, orderId);
   if (orderRow.status !== "BLOCKED") {
     throw conflict(`Nur ein blockierter Auftrag (BLOCKED) kann entsperrt werden (aktuell ${orderRow.status}).`);
   }
   transitionStatus(db, orderRow, "RETURNED", options);
-  return buildOverview(db, authDb.getPilotWorkOrderById(db, CANONICAL_PILOT_ORDER_ID));
+  return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
 }
 
 module.exports = {
@@ -715,6 +846,9 @@ module.exports = {
   assertToolOrActionAllowed,
   runProjectManagerFilter,
   getOrCreateCanonicalPilotOrder,
+  createPilotOrder,
+  getPilotOrderOverview,
+  listPilotOrders,
   getPilotOverview,
   markReadyForApproval,
   approveForExecution,

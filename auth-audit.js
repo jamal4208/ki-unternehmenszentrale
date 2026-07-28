@@ -332,8 +332,10 @@ const METADATA_ALLOWLIST = Object.freeze([
   // Gesundheitsdaten.
   "previousStatus",
   "nextStatus",
-  // KI-Unternehmenszentrale-Pilotbetrieb: "pilotOrderId" (feste kanonische
-  // Pilotauftrags-ID), "pilotHandoffId" (interne Übergabe-ID), "pilotRole"
+  // KI-Unternehmenszentrale-Pilotbetrieb: "pilotOrderId" (ID des jeweiligen
+  // Pilotauftrags – seit Phase 2/Mehrfachlauf-Grundlage nicht mehr nur die
+  // eine kanonische ID, sondern jede angelegte Pilotauftrags-ID),
+  // "pilotHandoffId" (interne Übergabe-ID), "pilotRole"
   // (einer der drei festen Pilotrollen-Codes) und "pmFilterStatus" (einer
   // der drei festen Filterergebnis-Codes) – ausschließlich
   // Steuerungsmetadaten des Pilotlaufs selbst, niemals Auftrags- oder
