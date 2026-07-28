@@ -47,15 +47,21 @@
 // KI-Unternehmenszentrale-Pilotbetrieb: +1 GET Pilotauftrags-Status, +1 neuer
 //   POST-Prefix (/api/pilot-work-order/), +1 statisches Asset
 //   (pilot-work-order-ui.js)
+// Phase 4 – erster kontrollierter Parallel-Pilot über die API-Schicht: +1 GET
+//   Pilotauftragsliste (/api/pilot-work-order/orders), +1 neue exakte
+//   POST-Route (Pilotauftrag anlegen, /api/pilot-work-order/orders), +1 neuer
+//   GET-Prefix (Pilotauftrag-Einzelabruf, /api/pilot-work-order/orders/),
+//   +1 neuer POST-Prefix (adressierte Aktion je Auftrag,
+//   /api/pilot-work-order/orders/), kein neues statisches Asset.
 //
 // Alle Einzelabruf-/Feedback-GET-Routen laufen wie bei bestehenden
 // Einzelressourcen über routePrefixHandlers und werden hier konventionsgemäß
 // nicht mitgezählt.
 const EXPECTED_ROUTE_INVENTORY = Object.freeze({
-  getRoutes: 90,
-  postRoutes: 52,
-  getRoutePrefixes: 8,
-  postRoutePrefixes: 9,
+  getRoutes: 91,
+  postRoutes: 53,
+  getRoutePrefixes: 9,
+  postRoutePrefixes: 10,
   staticAssets: 33,
 });
 

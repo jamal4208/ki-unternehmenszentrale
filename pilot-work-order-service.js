@@ -110,21 +110,30 @@ const PILOT_HANDOFF_FROM_VALUES = migrations.PILOT_HANDOFF_FROM_VALUES;
 
 const CANONICAL_PILOT_ORDER_ID = "pilot-three-agent-work-order-v1";
 
+// Phase 4 (Auftrag Abschnitt 4 "HTTP-Konfliktbehandlung"): `details` ist ein
+// rein additives, optionales Feld mit einer kleinen, festen Menge sicherer,
+// nicht-sensibler Zusatzangaben (pilotOrderId/Status/Revision) – NIEMALS ein
+// Stacktrace oder ein internes Objekt. Die HTTP-Schicht
+// (pilot-work-order-routes.js#sendServiceError) entscheidet whitelist-basiert,
+// welche dieser Felder tatsächlich in eine Antwort übernommen werden. Die
+// Fehlermeldung selbst (`message`) bleibt in jedem bestehenden Fall exakt
+// unverändert (bestehende Tests prüfen den Wortlaut per Regex).
 class PilotWorkOrderError extends Error {
-  constructor(message, statusCode = 400) {
+  constructor(message, statusCode = 400, details = null) {
     super(message);
     this.name = "PilotWorkOrderError";
     this.statusCode = statusCode;
+    this.details = details && typeof details === "object" ? details : null;
   }
 }
-function badRequest(message) {
-  return new PilotWorkOrderError(message, 400);
+function badRequest(message, details) {
+  return new PilotWorkOrderError(message, 400, details);
 }
-function notFound(message) {
-  return new PilotWorkOrderError(message, 404);
+function notFound(message, details) {
+  return new PilotWorkOrderError(message, 404, details);
 }
-function conflict(message) {
-  return new PilotWorkOrderError(message, 409);
+function conflict(message, details) {
+  return new PilotWorkOrderError(message, 409, details);
 }
 
 function nowIso(value) {
@@ -232,9 +241,12 @@ function resolveOrderId(options = {}) {
 }
 
 function assertOrderIsMutable(order, orderId) {
-  if (!order) throw notFound(`Der Pilotauftrag "${orderId || ""}" wurde nicht gefunden.`);
+  if (!order) throw notFound(`Der Pilotauftrag "${orderId || ""}" wurde nicht gefunden.`, { pilotOrderId: orderId || null });
   if (order.status === "COMPLETED") {
-    throw conflict("Der Pilotauftrag ist bereits abgeschlossen (COMPLETED) und kann nicht mehr verändert werden.");
+    throw conflict("Der Pilotauftrag ist bereits abgeschlossen (COMPLETED) und kann nicht mehr verändert werden.", {
+      pilotOrderId: order.id,
+      currentStatus: order.status,
+    });
   }
 }
 
@@ -254,6 +266,12 @@ function assertExpectedRevision(order, options = {}) {
       `Der Pilotauftrag "${order.id}" hat sich seit dem zuletzt gelesenen Zustand geändert ` +
         `(erwartete Revision ${options.expectedRevision}, aktuell ${order.revision}). ` +
         "Bitte den aktuellen Zustand erneut laden und die Entscheidung erneut treffen.",
+      {
+        pilotOrderId: order.id,
+        expectedRevision: options.expectedRevision,
+        currentRevision: order.revision,
+        currentStatus: order.status,
+      },
     );
   }
 }
@@ -469,7 +487,9 @@ function createPilotOrder(db, input = {}, options = {}) {
   // Wertevergleich, kein DB-Zugriff nötig, also keine Race-Betrachtung
   // erforderlich.
   if (orderId === CANONICAL_PILOT_ORDER_ID) {
-    throw conflict(`Ein Pilotauftrag mit der ID "${orderId}" existiert bereits und wird nicht überschrieben.`);
+    throw conflict(`Ein Pilotauftrag mit der ID "${orderId}" existiert bereits und wird nicht überschrieben.`, {
+      pilotOrderId: orderId,
+    });
   }
   const orderRow = authDb.withAuthTransaction(db, () => {
     const { row, created } = authDb.insertPilotWorkOrderIfMissing(db, {
@@ -488,7 +508,9 @@ function createPilotOrder(db, input = {}, options = {}) {
       updatedAt: nowIso(now),
     });
     if (!created) {
-      throw conflict(`Ein Pilotauftrag mit der ID "${orderId}" existiert bereits und wird nicht überschrieben.`);
+      throw conflict(`Ein Pilotauftrag mit der ID "${orderId}" existiert bereits und wird nicht überschrieben.`, {
+        pilotOrderId: orderId,
+      });
     }
     authAudit.recordAuditEvent(db, {
       eventType: "PILOT_WORK_ORDER_CREATED",
@@ -510,7 +532,7 @@ function createPilotOrder(db, input = {}, options = {}) {
 function getPilotOrderOverview(db, orderId) {
   if (!isNonEmptyString(orderId)) throw badRequest("pilotOrderId ist erforderlich.");
   const orderRow = authDb.getPilotWorkOrderById(db, orderId.trim());
-  if (!orderRow) throw notFound(`Der Pilotauftrag "${orderId}" wurde nicht gefunden.`);
+  if (!orderRow) throw notFound(`Der Pilotauftrag "${orderId}" wurde nicht gefunden.`, { pilotOrderId: orderId });
   return buildOverview(db, orderRow);
 }
 
@@ -609,10 +631,22 @@ function applyStatusTransition(db, order, nextStatus, options) {
       updatedAt: nowIso(options.now),
     });
     if (!applied) {
+      // Zusatzangabe für die HTTP-Antwort (Auftrag Abschnitt 4): ein
+      // zusätzlicher Lesevorgang innerhalb derselben, bereits offenen
+      // Transaktion, ausschließlich um den tatsächlich aktuellen Stand in
+      // die Fehlerantwort aufzunehmen – ändert nichts, prüft nichts erneut.
+      const currentRow = authDb.getPilotWorkOrderById(db, order.id);
       throw conflict(
         `Der Pilotauftrag "${order.id}" wurde zwischenzeitlich verändert (erwarteter Status "${previousStatus}" ` +
           `mit Revision ${previousRevision} stimmt nicht mehr mit dem gespeicherten Zustand überein). ` +
           "Bitte den aktuellen Zustand erneut laden und die Aktion wiederholen.",
+        {
+          pilotOrderId: order.id,
+          expectedStatus: previousStatus,
+          expectedRevision: previousRevision,
+          currentStatus: currentRow ? currentRow.status : null,
+          currentRevision: currentRow ? currentRow.revision : null,
+        },
       );
     }
     const nextRevision = previousRevision + 1;
@@ -636,7 +670,10 @@ function markReadyForApproval(db, options = {}) {
   const orderId = resolveOrderId(options);
   const orderRow = loadMutableOrder(db, orderId, options);
   if (orderRow.status !== "DRAFT") {
-    throw conflict(`Der Pilotauftrag kann nur aus DRAFT heraus zur Freigabe vorgelegt werden (aktuell ${orderRow.status}).`);
+    throw conflict(`Der Pilotauftrag kann nur aus DRAFT heraus zur Freigabe vorgelegt werden (aktuell ${orderRow.status}).`, {
+      pilotOrderId: orderId,
+      currentStatus: orderRow.status,
+    });
   }
   applyStatusTransition(db, orderRow, "READY_FOR_JAMAL_APPROVAL", options);
   return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
@@ -653,7 +690,10 @@ function approveForExecution(db, options = {}) {
   const orderId = resolveOrderId(options);
   const orderRow = loadMutableOrder(db, orderId, options);
   if (orderRow.status !== "READY_FOR_JAMAL_APPROVAL") {
-    throw conflict(`Eine Ausführungsfreigabe ist nur aus READY_FOR_JAMAL_APPROVAL möglich (aktuell ${orderRow.status}).`);
+    throw conflict(`Eine Ausführungsfreigabe ist nur aus READY_FOR_JAMAL_APPROVAL möglich (aktuell ${orderRow.status}).`, {
+      pilotOrderId: orderId,
+      currentStatus: orderRow.status,
+    });
   }
   authDb.withAuthTransaction(db, () => {
     applyStatusTransition(db, orderRow, "APPROVED_FOR_EXECUTION", options);
@@ -673,7 +713,10 @@ function startExecution(db, options = {}) {
   const orderId = resolveOrderId(options);
   const orderRow = loadMutableOrder(db, orderId, options);
   if (orderRow.status !== "APPROVED_FOR_EXECUTION") {
-    throw conflict(`Die Ausführung kann nur nach Freigabe (APPROVED_FOR_EXECUTION) gestartet werden (aktuell ${orderRow.status}).`);
+    throw conflict(`Die Ausführung kann nur nach Freigabe (APPROVED_FOR_EXECUTION) gestartet werden (aktuell ${orderRow.status}).`, {
+      pilotOrderId: orderId,
+      currentStatus: orderRow.status,
+    });
   }
   applyStatusTransition(db, orderRow, "IN_EXECUTION", options);
   return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
@@ -752,7 +795,10 @@ function submitHandoff(db, options = {}) {
   const orderId = resolveOrderId(options);
   const orderRow = loadMutableOrder(db, orderId, options);
   if (orderRow.status !== "IN_EXECUTION") {
-    throw conflict(`Rollenübergaben sind nur während IN_EXECUTION möglich (aktuell ${orderRow.status}).`);
+    throw conflict(`Rollenübergaben sind nur während IN_EXECUTION möglich (aktuell ${orderRow.status}).`, {
+      pilotOrderId: orderId,
+      currentStatus: orderRow.status,
+    });
   }
   const fromPilotRole = options.fromPilotRole || "JAMAL";
   const toPilotRole = options.toPilotRole;
@@ -846,7 +892,10 @@ function submitForReview(db, options = {}) {
   const orderId = resolveOrderId(options);
   const orderRow = loadMutableOrder(db, orderId, options);
   if (orderRow.status !== "IN_EXECUTION") {
-    throw conflict(`Nur ein Auftrag in IN_EXECUTION kann zur Abschlussprüfung vorgelegt werden (aktuell ${orderRow.status}).`);
+    throw conflict(`Nur ein Auftrag in IN_EXECUTION kann zur Abschlussprüfung vorgelegt werden (aktuell ${orderRow.status}).`, {
+      pilotOrderId: orderId,
+      currentStatus: orderRow.status,
+    });
   }
   const handoffs = authDb.listPilotHandoffs(db, orderId).map(rowToHandoffView);
   const hasPassedDocumentationHandoff = handoffs.some(
@@ -870,7 +919,10 @@ function approveCompletion(db, options = {}) {
   const orderId = resolveOrderId(options);
   const orderRow = loadMutableOrder(db, orderId, options);
   if (orderRow.status !== "READY_FOR_REVIEW") {
-    throw conflict(`Ein Abschluss ist nur aus READY_FOR_REVIEW möglich (aktuell ${orderRow.status}).`);
+    throw conflict(`Ein Abschluss ist nur aus READY_FOR_REVIEW möglich (aktuell ${orderRow.status}).`, {
+      pilotOrderId: orderId,
+      currentStatus: orderRow.status,
+    });
   }
   authDb.withAuthTransaction(db, () => {
     applyStatusTransition(db, orderRow, "COMPLETED", options);
@@ -891,7 +943,10 @@ function returnOrder(db, options = {}) {
   const orderId = resolveOrderId(options);
   const orderRow = loadMutableOrder(db, orderId, options);
   if (!["READY_FOR_JAMAL_APPROVAL", "READY_FOR_REVIEW", "IN_EXECUTION"].includes(orderRow.status)) {
-    throw conflict(`Eine Rückgabe ist aus ${orderRow.status} nicht möglich.`);
+    throw conflict(`Eine Rückgabe ist aus ${orderRow.status} nicht möglich.`, {
+      pilotOrderId: orderId,
+      currentStatus: orderRow.status,
+    });
   }
   applyStatusTransition(db, orderRow, "RETURNED", options);
   return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
@@ -901,7 +956,10 @@ function reopenFromReturned(db, options = {}) {
   const orderId = resolveOrderId(options);
   const orderRow = loadMutableOrder(db, orderId, options);
   if (orderRow.status !== "RETURNED") {
-    throw conflict(`Nur ein zurückgegebener Auftrag (RETURNED) kann neu gestartet werden (aktuell ${orderRow.status}).`);
+    throw conflict(`Nur ein zurückgegebener Auftrag (RETURNED) kann neu gestartet werden (aktuell ${orderRow.status}).`, {
+      pilotOrderId: orderId,
+      currentStatus: orderRow.status,
+    });
   }
   applyStatusTransition(db, orderRow, "DRAFT", options);
   return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
@@ -919,7 +977,10 @@ function unblockOrder(db, options = {}) {
   const orderId = resolveOrderId(options);
   const orderRow = loadMutableOrder(db, orderId, options);
   if (orderRow.status !== "BLOCKED") {
-    throw conflict(`Nur ein blockierter Auftrag (BLOCKED) kann entsperrt werden (aktuell ${orderRow.status}).`);
+    throw conflict(`Nur ein blockierter Auftrag (BLOCKED) kann entsperrt werden (aktuell ${orderRow.status}).`, {
+      pilotOrderId: orderId,
+      currentStatus: orderRow.status,
+    });
   }
   applyStatusTransition(db, orderRow, "RETURNED", options);
   return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));

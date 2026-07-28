@@ -366,6 +366,10 @@ const GET_POLICIES = [
   // Pilotauftrag (Auftrag, Team, Rollenübergaben, offene Entscheidung,
   // Risiken/Grenzen, nächster Schritt).
   ownerGet("/api/pilot-work-order/status", "Pilotauftrag Kompaktübersicht und Details"),
+  // Phase 4 – erster kontrollierter Parallel-Pilot über die API-Schicht:
+  // Auftragsliste aller bisher angelegten Pilotaufträge (kanonisch plus
+  // zusätzliche), rein lesend.
+  ownerGet("/api/pilot-work-order/orders", "Pilotauftragsliste (alle Pilotaufträge)"),
 ];
 
 const POST_POLICIES = [
@@ -441,6 +445,10 @@ const POST_POLICIES = [
   // innerhalb derselben Anfrage über READY_FOR_PROCESSING/
   // NEEDS_CLARIFICATION – kein Owner dazwischen.
   customerTenantPost("/api/portal/work-orders", "Kundenportal Arbeitsauftrag anlegen (automatische Vollständigkeitsprüfung)"),
+  // Phase 4 – erster kontrollierter Parallel-Pilot über die API-Schicht:
+  // einen neuen, zusätzlichen Pilotauftrag anlegen (die ID wird
+  // ausschließlich serverseitig erzeugt, nie vom Aufrufer vorgegeben).
+  ownerPost("/api/pilot-work-order/orders", "Pilotauftrag anlegen (zusätzlich zum kanonischen Auftrag)"),
 ];
 
 const PREFIX_POLICIES = [
@@ -505,6 +513,14 @@ const PREFIX_POLICIES = [
   // Abnahme, Rückgabe, Blockierung). Keine Aktion führt eine externe
   // Aktion aus, committet, pusht oder deployt.
   ownerPostPrefix("/api/pilot-work-order/", "Pilotauftrag Aktion (Status/Rollenübergabe/Freigabe, keine externe Aktion)"),
+  // Phase 4 – erster kontrollierter Parallel-Pilot über die API-Schicht:
+  // Einzelabruf eines bestimmten Pilotauftrags (GET .../:pilotOrderId) und
+  // eine dafür adressierte Aktion (POST .../:pilotOrderId/:action, dieselbe
+  // PILOT_ACTIONS-Tabelle wie oben). resolvePolicyForRequest bevorzugt den
+  // längeren, spezifischeren Prefix automatisch (siehe Kommentar dort) –
+  // unabhängig von der Reihenfolge in diesem Array.
+  ownerPrefix("/api/pilot-work-order/orders/", "Pilotauftrag-Einzelabruf (pilotOrderId, inkl. revision)"),
+  ownerPostPrefix("/api/pilot-work-order/orders/", "Pilotauftrag Aktion für einen bestimmten Auftrag (pilotOrderId/expectedRevision)"),
 ];
 
 const STATIC_POLICIES = [

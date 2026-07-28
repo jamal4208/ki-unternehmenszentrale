@@ -23718,6 +23718,36 @@ async function dispatchPilotWorkOrderActionPostPrefix(res, context, remainder) {
   await pilotWorkOrderRoutesModule.dispatchPilotAction(res, context, { getDb: ensureAuthDbReady, sendJson }, actionName);
 }
 
+// Phase 4 (KI-Unternehmenszentrale-Pilotbetrieb – erster kontrollierter
+// Parallel-Pilot über die API-Schicht, Auftrag Abschnitt 2/3): additive
+// Auftragsverwaltungsressource (/api/pilot-work-order/orders...) zusätzlich
+// zur unveränderten kanonischen Route oben. Liste/Einzelabruf bleiben reine
+// Lesezugriffe; Anlage und adressierte Aktionen laufen über denselben
+// Loopback-/Origin-Schutz wie jede andere Pilotauftrags-Mutation.
+function handlePilotWorkOrdersList(res) {
+  pilotWorkOrderRoutesModule.handlePilotOrdersList(res, { getDb: ensureAuthDbReady, sendJson });
+}
+
+async function handlePilotWorkOrderCreate(res, context) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert." });
+    return;
+  }
+  await pilotWorkOrderRoutesModule.handlePilotOrderCreate(res, context, { getDb: ensureAuthDbReady, sendJson });
+}
+
+function dispatchPilotWorkOrdersGetPrefix(res, context, remainder) {
+  pilotWorkOrderRoutesModule.dispatchPilotOrdersGetPrefix(res, context, { getDb: ensureAuthDbReady, sendJson }, remainder);
+}
+
+async function dispatchPilotWorkOrdersActionPostPrefix(res, context, remainder) {
+  if (!isExecutionRequestOriginAllowed(context.req)) {
+    sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert." });
+    return;
+  }
+  await pilotWorkOrderRoutesModule.dispatchPilotOrdersPostPrefix(res, context, { getDb: ensureAuthDbReady, sendJson }, remainder);
+}
+
 async function dispatchHealthReferenceActionPostPrefix(res, context, remainder) {
   if (!isExecutionRequestOriginAllowed(context.req)) {
     sendJson(res, 403, { ok: false, message: "Origin oder Host wird nicht akzeptiert." });
@@ -23971,6 +24001,10 @@ const getRoutes = buildRouteMap([
   // KI-Unternehmenszentrale-Pilotbetrieb – erster produktiver
   // Drei-Agenten-Pilot – Ansicht "Pilotauftrag".
   ["/api/pilot-work-order/status", (res) => handlePilotWorkOrderStatus(res)],
+  // Phase 4 – erster kontrollierter Parallel-Pilot über die API-Schicht:
+  // Auftragsliste (alle bisher angelegten Pilotaufträge, kanonisch plus
+  // zusätzliche).
+  ["/api/pilot-work-order/orders", (res) => handlePilotWorkOrdersList(res)],
   ["/api/office-finance/capabilities", (res, context) => handleOfficeFinanceCapabilities(res, context)],
   ["/api/office-finance/approval-matrix", (res) => handleOfficeFinanceApprovalMatrix(res)],
   ["/api/office-finance/work-items", (res, context) => handleOfficeFinanceWorkItems(res, context)],
@@ -24047,6 +24081,10 @@ const postRoutes = buildRouteMap([
   ["/api/auth/invitation/accept", (res, context) => authHttpRoutesModule.handleAuthInvitationAccept(res, context, authRouteDeps())],
   // V7.2 Phase B Schritt 1 (Auftrag Abschnitt G) – Arbeitsauftrag anlegen.
   ["/api/portal/work-orders", (res, context) => workOrderRoutesModule.handlePortalWorkOrderCreate(res, context, authRouteDeps())],
+  // Phase 4 – erster kontrollierter Parallel-Pilot über die API-Schicht:
+  // einen neuen, zusätzlichen Pilotauftrag anlegen (der kanonische Auftrag
+  // bleibt über die bestehende Route unverändert erreichbar).
+  ["/api/pilot-work-order/orders", (res, context) => handlePilotWorkOrderCreate(res, context)],
 ]);
 
 // V7.2 Phase A Schritt 2 (Auftrag Abschnitt N) – als benannte Konstante
@@ -24140,6 +24178,16 @@ const routePrefixHandlers = [
         workOrderRoutesModule.dispatchOwnerWorkOrdersGetPrefix(res, context, authRouteDeps(), remainder);
       },
     },
+    {
+      // Phase 4 – erster kontrollierter Parallel-Pilot über die
+      // API-Schicht: Einzelabruf eines bestimmten Pilotauftrags
+      // (GET .../:pilotOrderId), inklusive revision.
+      prefix: "/api/pilot-work-order/orders/",
+      handler: (res, context) => {
+        const remainder = decodeURIComponent(context.pathname.slice("/api/pilot-work-order/orders/".length));
+        dispatchPilotWorkOrdersGetPrefix(res, context, remainder);
+      },
+    },
   ];
 
 // V7.2 Phase A Schritt 3 (Auftrag Abschnitt H) – POST-Prefix-Handler für
@@ -24221,6 +24269,23 @@ const postRoutePrefixHandlers = [
     handler: (res, context) => {
       const remainder = decodeURIComponent(context.pathname.slice("/api/health-reference/".length));
       dispatchHealthReferenceActionPostPrefix(res, context, remainder);
+    },
+  },
+  {
+    // Phase 4 – erster kontrollierter Parallel-Pilot über die API-Schicht:
+    // adressierte Aktion für einen bestimmten Pilotauftrag
+    // (POST .../orders/:pilotOrderId/:action, dieselbe PILOT_ACTIONS-Tabelle
+    // wie die kanonische Route unten). MUSS in diesem Array VOR dem
+    // allgemeinen "/api/pilot-work-order/"-Prefix stehen, weil
+    // server-http-router.js#postRoutePrefixHandlers den ERSTEN passenden
+    // Prefix verwendet (kein Longest-Prefix-Match wie
+    // route-access-policy.js) – andernfalls würde jede Anfrage unter
+    // .../orders/... fälschlich vom allgemeinen kanonischen
+    // Aktions-Dispatcher (unten) als unbekannte Aktion mit "/" abgewiesen.
+    prefix: "/api/pilot-work-order/orders/",
+    handler: (res, context) => {
+      const remainder = decodeURIComponent(context.pathname.slice("/api/pilot-work-order/orders/".length));
+      dispatchPilotWorkOrdersActionPostPrefix(res, context, remainder);
     },
   },
   {
