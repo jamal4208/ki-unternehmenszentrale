@@ -542,6 +542,84 @@
     );
   }
 
+  // Phase 6 ("technische Agentenlauf-Infrastruktur mit lokalem deterministischem Read-Only-Runner"): kleine, additive
+  // Ausführungssektion. Zeigt Agent/Rolle, Runner, Start-/Endzeit,
+  // Ausführungsstatus, das tatsächliche Ergebnis nach Abschluss und einen
+  // verständlichen technischen Fehler. Die Startschaltfläche ist nur
+  // während IN_EXECUTION sichtbar und wird – wie jede andere Aktion – über
+  // das bestehende actionInFlight-Muster vor Mehrfachauslösung geschützt.
+  // Kein automatischer nächster Lauf, keine automatische Freigabe.
+  //
+  // Ehrliche Einordnung für den Nutzer (Korrekturlauf vor Commit): die
+  // Überschrift "Agentenlauf (lokaler deterministischer Runner)" macht
+  // bewusst sichtbar, dass dies ein technisch echter, tatsächlich
+  // ausgeführter und dauerhaft persistierter Lauf ist – aber KEIN
+  // KI-Agentenaufruf (kein Modellaufruf, kein Codex, kein Netzwerk). Ein
+  // Handoff-Fehlschlag (siehe renderAgentExecutionRun) wird deutlich vom
+  // technischen Runner-Erfolg unterschieden, niemals als Runner-Fehler
+  // dargestellt.
+  var AGENT_EXECUTION_PRESET_ID = "analyze-pilot-structure";
+
+  function renderAgentExecutionStatusLabel(status) {
+    if (status === "RUNNING") return "L\u00e4uft\u2026";
+    if (status === "SUCCEEDED") return "Erfolgreich abgeschlossen";
+    if (status === "FAILED") return "Fehlgeschlagen";
+    return escapeHtml(String(status || ""));
+  }
+
+  function renderAgentExecutionRun(run) {
+    var lines = [
+      "<li>",
+      "<strong>" + escapeHtml(run.taskTitle) + "</strong> \u2013 " + escapeHtml(run.pilotRoleLabel || run.pilotRole),
+      "<br>Status: " + renderAgentExecutionStatusLabel(run.status),
+      "<br>Runner: " + escapeHtml(run.runnerLabel || run.runnerId),
+      "<br>Gestartet: " + escapeHtml(formatTimestamp(run.startedAt)) + " \u00b7 Beendet: " + escapeHtml(formatTimestamp(run.finishedAt)),
+    ];
+    if (run.status === "SUCCEEDED" && run.resultRawText) {
+      lines.push("<br>Ergebnis:<br><pre class=\"pilot-agent-execution-result\">" + escapeHtml(run.resultRawText) + "</pre>");
+    }
+    if (run.status === "FAILED" && run.errorMessage) {
+      lines.push('<br><span class="pilot-work-order-action-error">Technischer Fehler: ' + escapeHtml(run.errorMessage) + "</span>");
+    }
+    // Korrekturlauf vor Commit ("Ergebnis darf bei Handoff-Konflikt nicht
+    // verloren gehen"): Stufe B (fachliche Rollenübergabe) wird bewusst
+    // getrennt vom Runstatus dargestellt. Ein Handoff-Fehlschlag ist NIEMALS
+    // ein technischer Runner-Fehler – der Runner-Erfolg (Status oben,
+    // Ergebnis) bleibt davon unberührt sichtbar.
+    if (run.status === "SUCCEEDED" && run.handoffStatus === "FAILED") {
+      lines.push(
+        '<br><span class="pilot-work-order-action-error">Rollen\u00fcbergabe fehlgeschlagen (technischer Runner-Lauf bleibt erfolgreich): ' +
+          escapeHtml(run.handoffErrorMessage || "unbekannter Grund") +
+          "</span>",
+      );
+    }
+    lines.push("</li>");
+    return lines.join("");
+  }
+
+  function renderAgentExecutionSection(overview) {
+    var runs = overview.agentExecutionRuns || [];
+    var hasActiveRun = runs.some(function (run) {
+      return run.status === "RUNNING";
+    });
+    var html = "<h4>Agentenlauf (lokaler deterministischer Runner)</h4>";
+    if (overview.status === "IN_EXECUTION") {
+      var disabled = state.actionInFlight || hasActiveRun;
+      html +=
+        '<button type="button" data-action="start-agent-execution"' +
+        (disabled ? " disabled" : "") +
+        ">Agentenlauf starten (Technische Pilotstruktur analysieren)</button>";
+    } else {
+      html += "<p>Ein Agentenlauf ist nur w\u00e4hrend \u201eIn Ausf\u00fchrung\u201c m\u00f6glich.</p>";
+    }
+    if (runs.length === 0) {
+      html += "<p>Noch kein Agentenlauf gestartet.</p>";
+    } else {
+      html += "<ol>" + runs.map(renderAgentExecutionRun).join("") + "</ol>";
+    }
+    return html;
+  }
+
   function renderHandoffs(overview) {
     if (!overview.handoffs || overview.handoffs.length === 0) {
       return "<h4>Rollen\u00fcbergaben</h4><p>Noch keine Rollen\u00fcbergabe eingereicht.</p>";
@@ -628,6 +706,7 @@
         diagnostics.innerHTML =
           renderTeam(state.overview) +
           renderOrderDetails(state.overview) +
+          renderAgentExecutionSection(state.overview) +
           renderHandoffs(state.overview) +
           renderAuditTrail(state.overview) +
           renderMeta(state.overview);
@@ -669,6 +748,8 @@
           "Diese Freigabe erfordert eine ausdr\u00fcckliche Best\u00e4tigung durch Jamal au\u00dferhalb dieser Schaltfl\u00e4che " +
           "(keine automatische Freigabe durch einen Agenten).";
         render();
+      } else if (action === "start-agent-execution") {
+        runOrderAction("start-agent-execution", { presetId: AGENT_EXECUTION_PRESET_ID });
       } else if (isKnownPrimaryAction(action)) {
         runOrderAction(action, {});
       }

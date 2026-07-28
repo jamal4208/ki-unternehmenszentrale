@@ -206,6 +206,24 @@ const EVENT_TYPES = Object.freeze([
   "PILOT_HANDOFF_BLOCKED_BY_FORBIDDEN_ACTION",
   "PILOT_EXECUTION_APPROVAL_RECORDED",
   "PILOT_COMPLETION_APPROVAL_RECORDED",
+  // Phase 6 ("technische Agentenlauf-Infrastruktur mit lokalem deterministischem Read-Only-Runner"). Muss exakt der in
+  // auth-db-migrations.js#AUDIT_EVENT_TYPES_AT_MIGRATION_20 erweiterten
+  // CHECK-Aufzählung (Migration 20) entsprechen. Deckt Start, erfolgreichen
+  // Abschluss und Fehlschlag eines einzelnen technischen Agentenlaufs ab;
+  // keines davon ist eine externe Aktion, kein Commit/Push/Deployment,
+  // keine automatische Freigabe durch einen Agenten.
+  "PILOT_AGENT_EXECUTION_RUN_STARTED",
+  "PILOT_AGENT_EXECUTION_RUN_SUCCEEDED",
+  "PILOT_AGENT_EXECUTION_RUN_FAILED",
+  // Korrekturlauf vor Commit (unabhängiges Opus-Review, "Ergebnis darf bei
+  // Handoff-Konflikt nicht verloren gehen"). Muss exakt der in
+  // auth-db-migrations.js#AUDIT_EVENT_TYPES_AT_MIGRATION_21 erweiterten
+  // CHECK-Aufzählung (Migration 21) entsprechen. Markiert AUSSCHLIESSLICH
+  // das Scheitern der fachlichen Rollenübergabe (Stufe B) nach einem bereits
+  // technisch erfolgreichen Agentenlauf (Stufe A bleibt SUCCEEDED und
+  // vollständig gespeichert) – niemals ein technischer Runner-Fehler
+  // (dafür bleibt PILOT_AGENT_EXECUTION_RUN_FAILED zuständig).
+  "PILOT_AGENT_EXECUTION_RUN_HANDOFF_FAILED",
 ]);
 
 const RESULTS = Object.freeze(["OK", "DENIED", "ERROR"]);
@@ -354,6 +372,16 @@ const METADATA_ALLOWLIST = Object.freeze([
   // Zeitstempel verlassen zu müssen.
   "previousRevision",
   "nextRevision",
+  // Phase 6 ("technische Agentenlauf-Infrastruktur mit lokalem deterministischem Read-Only-Runner"): "pilotExecutionRunId"
+  // (interne ID des jeweiligen Agentenlaufs), "runnerId" (fester Code des
+  // verwendeten Runners, z. B. "local-read-only-repo-analysis" – niemals ein
+  // Dateipfad oder Prozessdetail) und "presetId" (fester Code des
+  // verwendeten, serverseitig definierten Aufgaben-Presets) – ausschließlich
+  // Steuerungsmetadaten des Agentenlaufs selbst, niemals das tatsächliche
+  // Ergebnis, keine Dateiinhalte, kein Freitext.
+  "pilotExecutionRunId",
+  "runnerId",
+  "presetId",
 ]);
 
 // Verbotene Inhalte, unabhängig vom Feldnamen (Verteidigung in der Tiefe:

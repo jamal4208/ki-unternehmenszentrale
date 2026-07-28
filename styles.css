@@ -9806,6 +9806,20 @@ details.local-agent-assignment-details > summary {
   font-style: italic;
 }
 
+/* Phase 6 ("technische Agentenlauf-Infrastruktur mit lokalem deterministischem Read-Only-Runner") – kompakte Ausgabe des
+   tatsächlichen, persistierten Agentenlauf-Ergebnisses. */
+.pilot-agent-execution-result {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--card-border-soft, var(--line));
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface-muted, #f7f7f8);
+  font-family: inherit;
+  font-size: var(--text-xs, 12px);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .pilot-work-order-details summary {
   cursor: pointer;
   font-weight: var(--font-medium);

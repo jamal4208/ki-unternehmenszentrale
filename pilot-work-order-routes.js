@@ -14,6 +14,7 @@
 // server.js). Keine Route dieses Moduls führt eine externe Aktion aus.
 
 const service = require("./pilot-work-order-service");
+const agentExecutionService = require("./pilot-agent-execution-service");
 
 const PILOT_API_MAX_BODY_BYTES = 8 * 1024;
 
@@ -105,7 +106,11 @@ function genericErrorPayloadWithDetails(message, details) {
 }
 
 function sendServiceError(res, sendJson, error) {
-  if (error && error.name === "PilotWorkOrderError") {
+  // Phase 6: pilot-agent-execution-service.js#PilotAgentExecutionError folgt
+  // demselben Muster (statusCode + optionale, whitelist-geprüfte details) wie
+  // service.js#PilotWorkOrderError – gleiche Behandlung, keine zweite
+  // Fehlerabbildung nötig.
+  if (error && (error.name === "PilotWorkOrderError" || error.name === "PilotAgentExecutionError")) {
     sendJson(res, error.statusCode, genericErrorPayloadWithDetails(error.message, error.details));
     return;
   }
@@ -363,6 +368,32 @@ const PILOT_ACTIONS = Object.freeze({
         expectedRevision: body.expectedRevision,
       }),
     }),
+  },
+  // Phase 6 ("technische Agentenlauf-Infrastruktur mit lokalem deterministischem Read-Only-Runner"): startet einen
+  // tatsächlichen, technischen Agentenlauf für ein serverseitig festes
+  // Preset (presetId) – niemals frei wählbare Dateien/Werkzeuge/Aktionen aus
+  // dem Body. Nur möglich während IN_EXECUTION (siehe
+  // pilot-agent-execution-service.js#startAgentExecutionRun). Erzeugt bei
+  // Erfolg automatisch die reale Rollenübergabe (referenziert die
+  // executionRunId), niemals eine automatische Freigabe oder einen
+  // automatischen Abschluss.
+  "start-agent-execution": {
+    fields: ["presetId", "expectedRevision"],
+    run: async (db, body, meta) => {
+      const result = await agentExecutionService.startAgentExecutionRun(db, {
+        pilotOrderId: meta.pilotOrderId,
+        presetId: body.presetId,
+        expectedRevision: body.expectedRevision,
+        now: meta.now,
+        actorUserId: meta.actorUserId,
+      });
+      return {
+        agentExecutionRun: result.run,
+        handoff: result.handoff,
+        filterResult: result.filterResult || null,
+        overview: service.getPilotOverview(db, { pilotOrderId: meta.pilotOrderId }),
+      };
+    },
   },
 });
 

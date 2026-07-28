@@ -1014,6 +1014,24 @@ const PILOT_WORK_ORDER_STATUS_VALUES = Object.freeze([
 const PILOT_ROLE_VALUES = Object.freeze(["PROJEKTMANAGER", "RECHERCHE_ANALYSE", "DOKUMENTATION"]);
 const PILOT_HANDOFF_FROM_VALUES = Object.freeze(["JAMAL", ...PILOT_ROLE_VALUES]);
 const PILOT_PM_FILTER_STATUS_VALUES = Object.freeze(["PENDING", "PASSED", "REJECTED"]);
+// Phase 6 ("technische Agentenlauf-Infrastruktur mit lokalem deterministischem Read-Only-Runner"): Status eines einzelnen,
+// technisch tatsächlich ausgeführten Agentenlaufs (pilot_agent_execution_runs).
+// Bewusst getrennt von PILOT_WORK_ORDER_STATUS_VALUES – ein Agentenlauf ist
+// eine technische Ausführungseinheit, kein fachlicher Auftragsstatus. Genau
+// drei Werte: RUNNING (unmittelbar nach Anlage, dient zugleich als
+// Nebenläufigkeitssperre über den partiellen Unique-Index unten),
+// SUCCEEDED und FAILED (beide terminal, siehe updatePilotAgentExecutionRunTerminal).
+const PILOT_AGENT_EXECUTION_RUN_STATUS_VALUES = Object.freeze(["RUNNING", "SUCCEEDED", "FAILED"]);
+
+// Korrekturlauf vor Commit (Trennung von technischem Runner-Abschluss und
+// fachlicher Rollenübergabe, Migration 21): Status der Stufe B
+// (Handoff-Versuch) eines bereits SUCCEEDED Agentenlaufs – bewusst getrennt
+// vom Runstatus selbst. PENDING (Ausgangswert, Stufe B noch nicht versucht
+// oder Lauf nicht SUCCEEDED), SUCCEEDED (Handoff tatsächlich angelegt und
+// vom Projektmanager-Filter geprüft) und FAILED (Stufe B ist gescheitert,
+// z. B. weil sich der Pilotauftragsstatus während des Runs geändert hat –
+// das bereits gespeicherte SUCCEEDED-Ergebnis bleibt davon unberührt).
+const PILOT_AGENT_EXECUTION_HANDOFF_STATUS_VALUES = Object.freeze(["PENDING", "SUCCEEDED", "FAILED"]);
 
 // Genau acht zusätzliche Ereignistypen, zusätzlich zur vollständigen,
 // bereits bestehenden AUDIT_EVENT_TYPES_AT_MIGRATION_17-Menge oben.
@@ -1028,6 +1046,32 @@ const AUDIT_EVENT_TYPES_AT_MIGRATION_18 = Object.freeze([
   "PILOT_HANDOFF_BLOCKED_BY_FORBIDDEN_ACTION",
   "PILOT_EXECUTION_APPROVAL_RECORDED",
   "PILOT_COMPLETION_APPROVAL_RECORDED",
+]);
+
+// Phase 6 ("technische Agentenlauf-Infrastruktur mit lokalem deterministischem Read-Only-Runner"): genau drei zusätzliche
+// Ereignistypen, zusätzlich zur vollständigen, bereits bestehenden
+// AUDIT_EVENT_TYPES_AT_MIGRATION_18-Menge oben. auth-audit.js#EVENT_TYPES
+// muss exakt dieser Aufzählung entsprechen. Deckt Start, erfolgreichen
+// Abschluss und Fehlschlag eines einzelnen technischen Agentenlaufs ab –
+// unabhängig von den bereits bestehenden PILOT_HANDOFF_*-Ereignissen, die
+// weiterhin ausschließlich die fachliche Rollenübergabe selbst auditieren.
+const AUDIT_EVENT_TYPES_AT_MIGRATION_20 = Object.freeze([
+  ...AUDIT_EVENT_TYPES_AT_MIGRATION_18,
+  "PILOT_AGENT_EXECUTION_RUN_STARTED",
+  "PILOT_AGENT_EXECUTION_RUN_SUCCEEDED",
+  "PILOT_AGENT_EXECUTION_RUN_FAILED",
+]);
+
+// Korrekturlauf vor Commit (Migration 21): genau EIN zusätzlicher
+// Ereignistyp, zusätzlich zur vollständigen, bereits bestehenden
+// AUDIT_EVENT_TYPES_AT_MIGRATION_20-Menge oben. auth-audit.js#EVENT_TYPES
+// muss exakt dieser Aufzählung entsprechen. Deckt ausschließlich das
+// Scheitern der fachlichen Rollenübergabe (Stufe B) nach einem bereits
+// technisch erfolgreichen Agentenlauf ab – niemals einen Runner-Fehler
+// (dafür bleibt PILOT_AGENT_EXECUTION_RUN_FAILED zuständig).
+const AUDIT_EVENT_TYPES_AT_MIGRATION_21 = Object.freeze([
+  ...AUDIT_EVENT_TYPES_AT_MIGRATION_20,
+  "PILOT_AGENT_EXECUTION_RUN_HANDOFF_FAILED",
 ]);
 
 function sqlEnum(values) {
@@ -2484,6 +2528,175 @@ const MIGRATIONS = Object.freeze([
       ALTER TABLE pilot_work_orders ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;
     `,
   }),
+  // Phase 6 ("technische Agentenlauf-Infrastruktur mit lokalem deterministischem Read-Only-Runner") – rein additiv gegenüber
+  // Migration 19: eine neue Tabelle (pilot_agent_execution_runs) für die
+  // technische Ausführungseinheit eines einzelnen Agentenlaufs, eine
+  // zusätzliche, nullable Spalte auf der bereits bestehenden
+  // pilot_handoffs-Tabelle (executionRunId – verknüpft eine Rollenübergabe
+  // optional mit dem Agentenlauf, aus dem sie tatsächlich hervorgegangen
+  // ist; bestehende Rollenübergaben ohne Agentenlauf bleiben NULL und damit
+  // unverändert gültig) sowie die erneute, etablierte
+  // Audit-Ereignistyp-Erweiterung. Migrationen 1–19 bleiben dabei
+  // byteidentisch unverändert. Kein Löschen oder Neuaufbau einer
+  // bestehenden Tabelle außer dem bereits etablierten Rename-Muster für die
+  // CHECK-Erweiterung von auth_audit_events selbst.
+  //
+  // Der Agentenlauf ist bewusst NICHT Teil der pilot_work_orders-Statusmaschine:
+  // ein Agentenlauf ist eine rein technische Ausführungseinheit (siehe
+  // PILOT_AGENT_EXECUTION_RUN_STATUS_VALUES), der fachliche Auftragsstatus
+  // (pilot_work_orders.status) bleibt davon unberührt und wird ausschließlich
+  // über die bereits bestehenden, unveränderten Übergänge
+  // (markReadyForApproval/approveForExecution/startExecution/submitHandoff/
+  // submitForReview/approveCompletion/...) gesteuert.
+  //
+  // Der partielle Unique-Index idx_pilot_agent_execution_runs_running_per_order
+  // erzwingt direkt in der Datenbank, dass pro Pilotauftrag höchstens EIN
+  // Agentenlauf gleichzeitig den Status RUNNING tragen kann – ein zweiter
+  // Startversuch (Doppelklick, paralleler zweiter Start) schlägt dadurch
+  // atomar mit einem UNIQUE-Constraint-Fehler fehl, bevor irgendein Runner
+  // aufgerufen wird; kein zweiter aktiver Lauf kann jemals entstehen.
+  Object.freeze({
+    version: 20,
+    name: "create_pilot_agent_execution_run_table_and_widen_audit_event_types_v13",
+    sql: `
+      CREATE TABLE pilot_agent_execution_runs (
+        id TEXT PRIMARY KEY,
+        pilotOrderId TEXT NOT NULL REFERENCES pilot_work_orders(id) ON DELETE CASCADE,
+        pilotOrderRevisionAtStart INTEGER NOT NULL CHECK (pilotOrderRevisionAtStart >= 0),
+        presetId TEXT NOT NULL CHECK (length(presetId) BETWEEN 1 AND 100),
+        pilotRole TEXT NOT NULL CHECK (pilotRole IN (${sqlEnum(PILOT_ROLE_VALUES)})),
+        agentKey TEXT NOT NULL CHECK (length(agentKey) BETWEEN 1 AND 100),
+        taskTitle TEXT NOT NULL CHECK (length(taskTitle) BETWEEN 1 AND 200),
+        taskInstructions TEXT NOT NULL CHECK (length(taskInstructions) BETWEEN 1 AND 2000),
+        allowedFilesJson TEXT NOT NULL,
+        allowedToolsJson TEXT NOT NULL,
+        forbiddenActionsJson TEXT NOT NULL,
+        expectedResultFormat TEXT NOT NULL CHECK (length(expectedResultFormat) BETWEEN 1 AND 500),
+        runnerId TEXT NOT NULL CHECK (length(runnerId) BETWEEN 1 AND 100),
+        runnerLabel TEXT NOT NULL CHECK (length(runnerLabel) BETWEEN 1 AND 300),
+        status TEXT NOT NULL DEFAULT 'RUNNING' CHECK (status IN (${sqlEnum(PILOT_AGENT_EXECUTION_RUN_STATUS_VALUES)})),
+        resultSummaryJson TEXT,
+        resultRawText TEXT CHECK (resultRawText IS NULL OR length(resultRawText) <= 8000),
+        errorMessage TEXT CHECK (errorMessage IS NULL OR length(errorMessage) <= 2000),
+        startedAt TEXT NOT NULL,
+        finishedAt TEXT,
+        createdAt TEXT NOT NULL
+      );
+
+      CREATE INDEX idx_pilot_agent_execution_runs_pilotOrderId ON pilot_agent_execution_runs(pilotOrderId);
+
+      CREATE UNIQUE INDEX idx_pilot_agent_execution_runs_running_per_order
+        ON pilot_agent_execution_runs(pilotOrderId)
+        WHERE status = 'RUNNING';
+
+      ALTER TABLE pilot_handoffs ADD COLUMN executionRunId TEXT;
+
+      CREATE TABLE auth_audit_events_v13 (
+        eventId TEXT PRIMARY KEY,
+        actorUserId TEXT,
+        tenantId TEXT,
+        eventType TEXT NOT NULL CHECK (eventType IN (${sqlEnum(AUDIT_EVENT_TYPES_AT_MIGRATION_20)})),
+        result TEXT NOT NULL CHECK (result IN (${sqlEnum(AUDIT_RESULT_VALUES)})),
+        timestamp TEXT NOT NULL,
+        metadata TEXT
+      );
+
+      INSERT INTO auth_audit_events_v13 (eventId, actorUserId, tenantId, eventType, result, timestamp, metadata)
+      SELECT eventId, actorUserId, tenantId, eventType, result, timestamp, metadata FROM auth_audit_events;
+
+      DROP TABLE auth_audit_events;
+      ALTER TABLE auth_audit_events_v13 RENAME TO auth_audit_events;
+
+      CREATE TRIGGER trg_auth_audit_events_no_update
+      BEFORE UPDATE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: UPDATE ist nicht erlaubt.');
+      END;
+
+      CREATE TRIGGER trg_auth_audit_events_no_delete
+      BEFORE DELETE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: DELETE ist nicht erlaubt.');
+      END;
+
+      CREATE INDEX idx_auth_audit_events_timestamp ON auth_audit_events(timestamp);
+    `,
+  }),
+  // Korrekturlauf vor Commit (unabhängiges Opus-Review, "Ergebnis darf bei
+  // Handoff-Konflikt nicht verloren gehen") – rein additiv gegenüber
+  // Migration 20: drei zusätzliche, nullable Spalten auf der bereits
+  // bestehenden pilot_agent_execution_runs-Tabelle sowie die erneute,
+  // etablierte Audit-Ereignistyp-Erweiterung. Migrationen 1–20 bleiben dabei
+  // byteidentisch unverändert. Kein Löschen oder Neuaufbau von
+  // pilot_agent_execution_runs selbst.
+  //
+  // Hintergrund: Vor dieser Migration liefen der technische Runner-Abschluss
+  // (Runstatus SUCCEEDED, Ergebnisdaten, Erfolgs-Audit) und die fachliche
+  // Rollenübergabe (submitHandoff inkl. Projektmanager-Filter) in EINER
+  // gemeinsamen Transaktion (siehe pilot-agent-execution-service.js vor
+  // diesem Korrekturlauf). Änderte sich der Pilotauftragsstatus während des
+  // Runs (z. B. durch einen unabhängigen blockOrder-Aufruf), scheiterte
+  // submitHandoff – und die Transaktion rollte dabei auch das bereits
+  // tatsächlich erzeugte, technisch erfolgreiche Ergebnis zurück. Ab dieser
+  // Migration ist Stufe A (Runstatus SUCCEEDED + Ergebnis + Erfolgs-Audit)
+  // strikt von Stufe B (Handoff-Versuch) getrennt: Stufe B läuft in einer
+  // eigenen, späteren Transaktion, deren Scheitern Stufe A niemals mehr
+  // rückgängig macht (siehe pilot-agent-execution-service.js#
+  // attemptHandoffForSucceededRun).
+  //
+  // ADD COLUMN mit konstantem DEFAULT ist in SQLite eine gewöhnliche,
+  // sofortige Schemaänderung (kein Tabellen-Neuaufbau nötig); jeder bereits
+  // bestehende Agentenlauf (RUNNING, SUCCEEDED oder FAILED) erhält
+  // automatisch und rückwirkend handoffStatus = 'PENDING' (bedeutet für
+  // bereits bestehende, vor diesem Korrekturlauf erfolgreich abgeschlossene
+  // Läufe lediglich: "Stufe B wurde vor dieser Migration nicht getrennt
+  // nachverfolgt" – ihr fachliches Ergebnis, z. B. ein bereits bestehendes
+  // Handoff, bleibt davon vollständig unberührt, siehe pilot_handoffs).
+  Object.freeze({
+    version: 21,
+    name: "add_pilot_agent_execution_run_handoff_status_and_widen_audit_event_types_v14",
+    sql: `
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN handoffStatus TEXT NOT NULL DEFAULT 'PENDING'
+        CHECK (handoffStatus IN (${sqlEnum(PILOT_AGENT_EXECUTION_HANDOFF_STATUS_VALUES)}));
+
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN handoffErrorMessage TEXT
+        CHECK (handoffErrorMessage IS NULL OR length(handoffErrorMessage) <= 2000);
+
+      ALTER TABLE pilot_agent_execution_runs ADD COLUMN handoffCompletedAt TEXT;
+
+      CREATE TABLE auth_audit_events_v14 (
+        eventId TEXT PRIMARY KEY,
+        actorUserId TEXT,
+        tenantId TEXT,
+        eventType TEXT NOT NULL CHECK (eventType IN (${sqlEnum(AUDIT_EVENT_TYPES_AT_MIGRATION_21)})),
+        result TEXT NOT NULL CHECK (result IN (${sqlEnum(AUDIT_RESULT_VALUES)})),
+        timestamp TEXT NOT NULL,
+        metadata TEXT
+      );
+
+      INSERT INTO auth_audit_events_v14 (eventId, actorUserId, tenantId, eventType, result, timestamp, metadata)
+      SELECT eventId, actorUserId, tenantId, eventType, result, timestamp, metadata FROM auth_audit_events;
+
+      DROP TABLE auth_audit_events;
+      ALTER TABLE auth_audit_events_v14 RENAME TO auth_audit_events;
+
+      CREATE TRIGGER trg_auth_audit_events_no_update
+      BEFORE UPDATE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: UPDATE ist nicht erlaubt.');
+      END;
+
+      CREATE TRIGGER trg_auth_audit_events_no_delete
+      BEFORE DELETE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: DELETE ist nicht erlaubt.');
+      END;
+
+      CREATE INDEX idx_auth_audit_events_timestamp ON auth_audit_events(timestamp);
+    `,
+  }),
 ]);
 
 function ensureMigrationsTable(db) {
@@ -2598,6 +2811,11 @@ module.exports = {
   PILOT_HANDOFF_FROM_VALUES,
   PILOT_PM_FILTER_STATUS_VALUES,
   AUDIT_EVENT_TYPES_AT_MIGRATION_18,
+  // Phase 6 – technische Agentenlauf-Infrastruktur mit lokalem deterministischem Read-Only-Runner
+  PILOT_AGENT_EXECUTION_RUN_STATUS_VALUES,
+  PILOT_AGENT_EXECUTION_HANDOFF_STATUS_VALUES,
+  AUDIT_EVENT_TYPES_AT_MIGRATION_20,
+  AUDIT_EVENT_TYPES_AT_MIGRATION_21,
   MIGRATIONS,
   ensureMigrationsTable,
   getAppliedVersions,

@@ -2018,18 +2018,23 @@ function updatePilotWorkOrderStatusConditional(db, input = {}) {
 // berechnet, sondern innerhalb desselben atomaren INSERT-Statements per
 // Unterabfrage (COALESCE(MAX(sequence), 0) + 1) – kein getrenntes Lesen
 // und Zurückschreiben, keine Lücke für doppelt vergebene Sequenznummern.
+// Phase 6 ("technische Agentenlauf-Infrastruktur mit lokalem deterministischem Read-Only-Runner"): `executionRunId` ist ein
+// rein additives, optionales Feld (siehe Migration 20 – nullable Spalte auf
+// einer bereits bestehenden Tabelle). Bleibt es unbesetzt, ist eine
+// Rollenübergabe weiterhin exakt wie vor Phase 6 gespeichert (NULL,
+// unverändertes Verhalten für alle bestehenden Aufrufer).
 function insertPilotHandoff(db, input = {}) {
   db.prepare(
     `INSERT INTO pilot_handoffs
       (id, pilotOrderId, sequence, fromPilotRole, toPilotRole, shortFinding, resultOrRecommendation,
        basisUsed, riskOrLimit, nextStep, decisionNeeded, forbiddenActionOccurred, autonomyBoundaryRespected,
-       pmFilterStatus, pmFilterReasonsJson, createdAt)
+       pmFilterStatus, pmFilterReasonsJson, executionRunId, createdAt)
      VALUES
       (@id, @pilotOrderId,
        (SELECT COALESCE(MAX(sequence), 0) + 1 FROM pilot_handoffs WHERE pilotOrderId = @pilotOrderId),
        @fromPilotRole, @toPilotRole, @shortFinding, @resultOrRecommendation,
        @basisUsed, @riskOrLimit, @nextStep, @decisionNeeded, @forbiddenActionOccurred, @autonomyBoundaryRespected,
-       @pmFilterStatus, @pmFilterReasonsJson, @createdAt)`,
+       @pmFilterStatus, @pmFilterReasonsJson, @executionRunId, @createdAt)`,
   ).run({
     id: input.id,
     pilotOrderId: input.pilotOrderId,
@@ -2045,6 +2050,7 @@ function insertPilotHandoff(db, input = {}) {
     autonomyBoundaryRespected: input.autonomyBoundaryRespected === false ? 0 : 1,
     pmFilterStatus: input.pmFilterStatus,
     pmFilterReasonsJson: input.pmFilterReasonsJson ?? null,
+    executionRunId: input.executionRunId ?? null,
     createdAt: input.createdAt,
   });
   return db.prepare("SELECT * FROM pilot_handoffs WHERE id = ?").get(input.id) || null;
@@ -2054,6 +2060,116 @@ function listPilotHandoffs(db, pilotOrderId) {
   return db
     .prepare("SELECT * FROM pilot_handoffs WHERE pilotOrderId = ? ORDER BY sequence ASC, createdAt ASC")
     .all(pilotOrderId);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 6 ("technische Agentenlauf-Infrastruktur mit lokalem deterministischem Read-Only-Runner") – pilot_agent_execution_runs
+// (Migration 20). Ein Agentenlauf ist eine rein technische Ausführungseinheit
+// (siehe PILOT_AGENT_EXECUTION_RUN_STATUS_VALUES), getrennt von der
+// fachlichen Pilotauftrags-Statusmaschine.
+//
+// insertPilotAgentExecutionRunAsRunning ist bewusst ein einfaches INSERT
+// (kein INSERT OR IGNORE): der partielle Unique-Index
+// idx_pilot_agent_execution_runs_running_per_order (Migration 20) lässt pro
+// pilotOrderId höchstens eine Zeile mit status='RUNNING' zu. Ein zweiter
+// gleichzeitiger Startversuch für denselben Pilotauftrag löst dadurch einen
+// SQLITE_CONSTRAINT-Fehler aus, den die Serviceschicht
+// (pilot-agent-execution-service.js) als eindeutigen Konflikt abfängt – nie
+// ein stiller zweiter aktiver Lauf.
+// ---------------------------------------------------------------------------
+function insertPilotAgentExecutionRunAsRunning(db, input = {}) {
+  db.prepare(
+    `INSERT INTO pilot_agent_execution_runs
+      (id, pilotOrderId, pilotOrderRevisionAtStart, presetId, pilotRole, agentKey, taskTitle, taskInstructions,
+       allowedFilesJson, allowedToolsJson, forbiddenActionsJson, expectedResultFormat, runnerId, runnerLabel,
+       status, startedAt, createdAt)
+     VALUES
+      (@id, @pilotOrderId, @pilotOrderRevisionAtStart, @presetId, @pilotRole, @agentKey, @taskTitle, @taskInstructions,
+       @allowedFilesJson, @allowedToolsJson, @forbiddenActionsJson, @expectedResultFormat, @runnerId, @runnerLabel,
+       'RUNNING', @startedAt, @createdAt)`,
+  ).run({
+    id: input.id,
+    pilotOrderId: input.pilotOrderId,
+    pilotOrderRevisionAtStart: input.pilotOrderRevisionAtStart,
+    presetId: input.presetId,
+    pilotRole: input.pilotRole,
+    agentKey: input.agentKey,
+    taskTitle: input.taskTitle,
+    taskInstructions: input.taskInstructions,
+    allowedFilesJson: input.allowedFilesJson,
+    allowedToolsJson: input.allowedToolsJson,
+    forbiddenActionsJson: input.forbiddenActionsJson,
+    expectedResultFormat: input.expectedResultFormat,
+    runnerId: input.runnerId,
+    runnerLabel: input.runnerLabel,
+    startedAt: input.startedAt,
+    createdAt: input.createdAt,
+  });
+  return getPilotAgentExecutionRunById(db, input.id);
+}
+
+function getPilotAgentExecutionRunById(db, id) {
+  return db.prepare("SELECT * FROM pilot_agent_execution_runs WHERE id = ?").get(id) || null;
+}
+
+function listPilotAgentExecutionRunsForOrder(db, pilotOrderId) {
+  return db
+    .prepare("SELECT * FROM pilot_agent_execution_runs WHERE pilotOrderId = ? ORDER BY createdAt ASC, id ASC")
+    .all(pilotOrderId);
+}
+
+// Compare-and-set: greift ausschließlich, wenn der Lauf zum Schreibzeitpunkt
+// noch RUNNING ist. `changes === 0` bedeutet: der Lauf wurde bereits
+// terminal beschrieben (z. B. durch einen parallelen Abschluss) – der
+// Aufrufer darf dies niemals als stillen Erfolg werten.
+//
+// Dieser Aufruf betrifft AUSSCHLIESSLICH Stufe A (technischer
+// Runner-Abschluss: Runstatus, Ergebnisdaten, Fehlermeldung). Stufe B (die
+// fachliche Rollenübergabe) wird davon getrennt über
+// updatePilotAgentExecutionRunHandoffOutcome() nachgetragen – siehe
+// Korrekturlauf vor Commit / Migration 21.
+function updatePilotAgentExecutionRunTerminal(db, input = {}) {
+  const info = db
+    .prepare(
+      `UPDATE pilot_agent_execution_runs
+       SET status = @status, finishedAt = @finishedAt, resultSummaryJson = @resultSummaryJson,
+           resultRawText = @resultRawText, errorMessage = @errorMessage
+       WHERE id = @id AND status = 'RUNNING'`,
+    )
+    .run({
+      id: input.id,
+      status: input.status,
+      finishedAt: input.finishedAt,
+      resultSummaryJson: input.resultSummaryJson ?? null,
+      resultRawText: input.resultRawText ?? null,
+      errorMessage: input.errorMessage ?? null,
+    });
+  return info.changes === 1;
+}
+
+// Korrekturlauf vor Commit (Migration 21) – Stufe B: trägt AUSSCHLIESSLICH
+// das Ergebnis des (separat versuchten) Handoffs nach, NIEMALS den
+// Runstatus oder das Runner-Ergebnis selbst. Compare-and-set: greift nur,
+// wenn der Lauf bereits SUCCEEDED ist UND handoffStatus zum
+// Schreibzeitpunkt noch PENDING ist (kein doppeltes Überschreiben eines
+// bereits festgeschriebenen Handoff-Ergebnisses). `changes === 0` bedeutet:
+// entweder war der Lauf nicht SUCCEEDED, oder das Handoff-Ergebnis wurde
+// bereits einmal festgeschrieben – niemals als stiller Erfolg werten.
+function updatePilotAgentExecutionRunHandoffOutcome(db, input = {}) {
+  const info = db
+    .prepare(
+      `UPDATE pilot_agent_execution_runs
+       SET handoffStatus = @handoffStatus, handoffErrorMessage = @handoffErrorMessage,
+           handoffCompletedAt = @handoffCompletedAt
+       WHERE id = @id AND status = 'SUCCEEDED' AND handoffStatus = 'PENDING'`,
+    )
+    .run({
+      id: input.id,
+      handoffStatus: input.handoffStatus,
+      handoffErrorMessage: input.handoffErrorMessage ?? null,
+      handoffCompletedAt: input.handoffCompletedAt ?? null,
+    });
+  return info.changes === 1;
 }
 
 module.exports = {
@@ -2205,4 +2321,10 @@ module.exports = {
   updatePilotWorkOrderStatusConditional,
   insertPilotHandoff,
   listPilotHandoffs,
+  // Phase 6 – technische Agentenlauf-Infrastruktur mit lokalem deterministischem Read-Only-Runner
+  insertPilotAgentExecutionRunAsRunning,
+  getPilotAgentExecutionRunById,
+  listPilotAgentExecutionRunsForOrder,
+  updatePilotAgentExecutionRunTerminal,
+  updatePilotAgentExecutionRunHandoffOutcome,
 };

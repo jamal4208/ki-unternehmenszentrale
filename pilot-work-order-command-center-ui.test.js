@@ -93,10 +93,18 @@ const TRANSITIONS = {
 };
 
 let idCounter = 0;
+let agentRunCounter = 0;
 function makeFakeBackend() {
   const orders = new Map();
   let networkCallCount = 0;
   let writeCallCount = 0;
+  let nextAgentExecutionOutcome = "SUCCEEDED";
+  // Korrekturlauf vor Commit ("Ergebnis darf bei Handoff-Konflikt nicht
+  // verloren gehen"): bildet Stufe B (Handoff-Status) unabhängig vom
+  // Runstatus (Stufe A) nach, damit die UI-Unterscheidung "Runner-Erfolg,
+  // aber Handoff fehlgeschlagen" getestet werden kann.
+  let nextAgentExecutionHandoffStatus = "SUCCEEDED";
+  let nextAgentExecutionHandoffErrorMessage = null;
 
   function nowIso() {
     return new Date().toISOString();
@@ -119,6 +127,7 @@ function makeFakeBackend() {
         requiredApprovals: ["Freigabe vor Ausführungsstart"],
         timeframe: "ohne festes Enddatum",
         handoffs: [],
+        agentExecutionRuns: [],
         createdAt: nowIso(),
         updatedAt: nowIso(),
       },
@@ -150,6 +159,7 @@ function makeFakeBackend() {
       status: order.status,
       statusLabel: order.statusLabel,
       handoffs: order.handoffs,
+      agentExecutionRuns: order.agentExecutionRuns || [],
       openDecision: null,
       risksAndLimits: [],
       nextStep: "Weiter im Ablauf.",
@@ -213,6 +223,45 @@ function makeFakeBackend() {
       if (order.status === "COMPLETED") {
         return respond(409, { ok: false, message: "Der Pilotauftrag ist bereits abgeschlossen.", pilotOrderId: orderId, currentStatus: "COMPLETED" });
       }
+      // Phase 6 ("technische Agentenlauf-Infrastruktur mit lokalem deterministischem Read-Only-Runner"): bildet den
+      // HTTP-Vertrag von pilot-work-order-routes.js#PILOT_ACTIONS
+      // ["start-agent-execution"] nach – verändert NIEMALS order.status
+      // (rein additive technische Ausführungseinheit) und erzeugt keine
+      // automatische Freigabe.
+      if (action === "start-agent-execution") {
+        if (order.status !== "IN_EXECUTION") {
+          return respond(409, { ok: false, message: "Ein Agentenlauf ist nur während IN_EXECUTION möglich.", pilotOrderId: orderId, currentStatus: order.status });
+        }
+        if (body.expectedRevision !== undefined && body.expectedRevision !== order.revision) {
+          return respond(409, {
+            ok: false,
+            message: `Der Pilotauftrag "${orderId}" wurde zwischenzeitlich verändert.`,
+            pilotOrderId: orderId,
+            expectedRevision: body.expectedRevision,
+            currentRevision: order.revision,
+          });
+        }
+        agentRunCounter += 1;
+        const outcome = nextAgentExecutionOutcome;
+        const run = {
+          id: `pilot-agent-run-test-${agentRunCounter}`,
+          presetId: body.presetId,
+          pilotRole: "RECHERCHE_ANALYSE",
+          pilotRoleLabel: "Recherche-/Analyse-Agent",
+          taskTitle: "Technische Pilotstruktur analysieren",
+          runnerId: "local-read-only-repo-analysis",
+          runnerLabel: "Lokaler deterministischer Read-Only-Repository-Analyse-Runner",
+          status: outcome,
+          resultRawText: outcome === "SUCCEEDED" ? "# Bestandsaufnahme\n\nBeobachtung 1: Testergebnis." : null,
+          errorMessage: outcome === "FAILED" ? "Simulierter technischer Runner-Fehler (Testfixtur)." : null,
+          handoffStatus: outcome === "SUCCEEDED" ? nextAgentExecutionHandoffStatus : "PENDING",
+          handoffErrorMessage: outcome === "SUCCEEDED" ? nextAgentExecutionHandoffErrorMessage : null,
+          startedAt: nowIso(),
+          finishedAt: nowIso(),
+        };
+        order.agentExecutionRuns = (order.agentExecutionRuns || []).concat([run]);
+        return respond(200, { ok: true, agentExecutionRun: run, overview: overviewFor(order) });
+      }
       const transition = TRANSITIONS[action];
       if (!transition) return respond(404, { ok: false, message: "Nicht gefunden." });
       if (body.expectedRevision !== undefined && body.expectedRevision !== order.revision) {
@@ -244,6 +293,13 @@ function makeFakeBackend() {
     orders,
     getNetworkCallCount: () => networkCallCount,
     getWriteCallCount: () => writeCallCount,
+    setNextAgentExecutionOutcome: (value) => {
+      nextAgentExecutionOutcome = value;
+    },
+    setNextAgentExecutionHandoffOutcome: (status, errorMessage) => {
+      nextAgentExecutionHandoffStatus = status;
+      nextAgentExecutionHandoffErrorMessage = errorMessage || null;
+    },
   };
 }
 
@@ -539,6 +595,123 @@ async function run() {
     ui.getState();
     ui.getState();
     assert.strictEqual(backend.getNetworkCallCount(), before);
+  });
+
+  // -------------------------------------------------------------------
+  // Phase 6 ("technische Agentenlauf-Infrastruktur mit lokalem deterministischem Read-Only-Runner"): Ausführungssektion.
+  // Ein neuer, eigenständiger Testauftrag wird bis IN_EXECUTION geführt,
+  // damit die Startschaltfläche sichtbar ist und ein echter Rundlauf über
+  // ui.runOrderAction("start-agent-execution", ...) geprüft werden kann.
+  // -------------------------------------------------------------------
+
+  let runOrderId;
+
+  await check("31. die Agentenlauf-Sektion zeigt vor Ausführungsbeginn keine Startschaltfläche", async () => {
+    idCounter += 1;
+    runOrderId = `pilot-order-test-run-${idCounter}`;
+    backend.orders.set(runOrderId, {
+      id: runOrderId,
+      title: "Auftrag R: Agentenlauf-Testauftrag",
+      desiredOutcome: "Nachweis der Ausführungssektion.",
+      requestedBy: "Jamal",
+      status: "DRAFT",
+      statusLabel: STATUS_LABELS.DRAFT,
+      revision: 0,
+      involvedAgents: [{ pilotRoleLabel: "Projektmanager-Agent", canonicalName: "Projektmanager-Agent", focus: "x" }],
+      qualityCriteria: ["a"],
+      allowedTools: ["a"],
+      forbiddenActions: ["a"],
+      requiredApprovals: ["a"],
+      timeframe: "x",
+      handoffs: [],
+      agentExecutionRuns: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    await ui.selectOrder(runOrderId);
+    assert.doesNotMatch(domElements["pilot-work-order-diagnostics-output"].innerHTML, /data-action="start-agent-execution"/);
+    assert.match(domElements["pilot-work-order-diagnostics-output"].innerHTML, /Noch kein Agentenlauf gestartet/);
+  });
+
+  await check("32. sobald der Auftrag IN_EXECUTION ist, erscheint die Startschaltfläche für den Agentenlauf", async () => {
+    await ui.runOrderAction("mark-ready-for-approval", {});
+    fetchCalls.length = 0;
+    // approve-for-execution erfordert confirmed:true – wird hier direkt am
+    // Fake-Backend simuliert (kein Umweg über die UI, die confirmed:true nie
+    // automatisch sendet, siehe Prüfpunkt 21).
+    const order = backend.orders.get(runOrderId);
+    order.status = "APPROVED_FOR_EXECUTION";
+    order.statusLabel = STATUS_LABELS.APPROVED_FOR_EXECUTION;
+    order.revision += 1;
+    await ui.reloadSelectedOrder();
+    await ui.runOrderAction("start-execution", {});
+    const state = ui.getState();
+    assert.strictEqual(state.overview.status, "IN_EXECUTION");
+    assert.match(domElements["pilot-work-order-diagnostics-output"].innerHTML, /data-action="start-agent-execution"/);
+  });
+
+  await check("33./28. ein erfolgreicher Agentenlauf wird gestartet, zeigt Status/Ergebnis und erzeugt keine automatische Freigabe/keinen Abschluss", async () => {
+    backend.setNextAgentExecutionOutcome("SUCCEEDED");
+    fetchCalls.length = 0;
+    await ui.runOrderAction("start-agent-execution", { presetId: "analyze-pilot-structure" });
+    const call = fetchCalls.find((c) => c.url.includes("start-agent-execution"));
+    assert.ok(call, "der Agentenlauf muss über die adressierte Route gestartet werden");
+    assert.strictEqual(call.body.presetId, "analyze-pilot-structure");
+    const state = ui.getState();
+    assert.strictEqual(state.overview.status, "IN_EXECUTION", "kein automatischer Abschluss/Statuswechsel durch den Agentenlauf");
+    const diagnostics = domElements["pilot-work-order-diagnostics-output"].innerHTML;
+    assert.match(diagnostics, /Erfolgreich abgeschlossen/);
+    assert.match(diagnostics, /Bestandsaufnahme/);
+  });
+
+  await check("34. ein zweiter Klick auf „Agentenlauf starten“, während der erste noch läuft, löst keinen zweiten Request aus", async () => {
+    fetchCalls.length = 0;
+    const first = ui.runOrderAction("start-agent-execution", { presetId: "analyze-pilot-structure" });
+    assert.strictEqual(ui.getState().actionInFlight, true);
+    assert.match(domElements["pilot-work-order-diagnostics-output"].innerHTML, /data-action="start-agent-execution" disabled/);
+    const second = ui.runOrderAction("start-agent-execution", { presetId: "analyze-pilot-structure" });
+    await Promise.all([first, second]);
+    const postCalls = fetchCalls.filter((call) => call.method === "POST" && call.url.includes("start-agent-execution"));
+    assert.strictEqual(postCalls.length, 1, "ein zweiter, gleichzeitig ausgelöster Start darf keinen zweiten Request senden");
+  });
+
+  await check("35. ein fehlgeschlagener Agentenlauf zeigt einen verständlichen technischen Fehler an, statt einen Erfolg vorzutäuschen", async () => {
+    backend.setNextAgentExecutionOutcome("FAILED");
+    fetchCalls.length = 0;
+    await ui.runOrderAction("start-agent-execution", { presetId: "analyze-pilot-structure" });
+    const state = ui.getState();
+    assert.strictEqual(state.overview.status, "IN_EXECUTION");
+    const diagnostics = domElements["pilot-work-order-diagnostics-output"].innerHTML;
+    assert.match(diagnostics, /Fehlgeschlagen/);
+    assert.match(diagnostics, /Simulierter technischer Runner-Fehler/);
+  });
+
+  // -------------------------------------------------------------------
+  // Korrekturlauf vor Commit: Überschrift benennt den Runner ehrlich (kein
+  // "echter" KI-Agentenlauf) und ein Handoff-Fehlschlag wird sichtbar vom
+  // Runner-Erfolg unterschieden dargestellt (18./19.).
+  // -------------------------------------------------------------------
+
+  await check("18. die Agentenlauf-Sektion bezeichnet den Runner ehrlich (kein 'echter'/agentischer KI-Anspruch)", () => {
+    const diagnostics = domElements["pilot-work-order-diagnostics-output"].innerHTML;
+    assert.match(diagnostics, /Agentenlauf \(lokaler deterministischer Runner\)/);
+    assert.doesNotMatch(diagnostics, /echte Ausführung/);
+  });
+
+  await check("19. ein technisch erfolgreicher Runner-Lauf mit gescheitertem Handoff wird unterscheidbar dargestellt (Runner-Erfolg bleibt sichtbar, Handoff-Fehler separat)", async () => {
+    backend.setNextAgentExecutionOutcome("SUCCEEDED");
+    backend.setNextAgentExecutionHandoffOutcome("FAILED", "Rollenübergaben sind nur während IN_EXECUTION möglich (aktuell BLOCKED).");
+    fetchCalls.length = 0;
+    await ui.runOrderAction("start-agent-execution", { presetId: "analyze-pilot-structure" });
+    const diagnostics = domElements["pilot-work-order-diagnostics-output"].innerHTML;
+    // Der technische Runner-Erfolg bleibt klar sichtbar ...
+    assert.match(diagnostics, /Erfolgreich abgeschlossen/);
+    assert.match(diagnostics, /Bestandsaufnahme/);
+    // ... UND der Handoff-Fehler wird separat und unterscheidbar angezeigt,
+    // niemals als technischer Runner-Fehler bezeichnet.
+    assert.match(diagnostics, /Rollenübergabe fehlgeschlagen/);
+    assert.match(diagnostics, /Rollenübergaben sind nur während IN_EXECUTION möglich/);
+    backend.setNextAgentExecutionHandoffOutcome("SUCCEEDED", null);
   });
 
   console.log(`pilot-work-order-command-center-ui.test.js: ${passed} Prüfpunkte erfolgreich`);

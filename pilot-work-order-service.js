@@ -401,6 +401,12 @@ function rowToHandoffView(row) {
     autonomyBoundaryRespected: Boolean(row.autonomyBoundaryRespected),
     pmFilterStatus: row.pmFilterStatus,
     pmFilterReasons,
+    // Phase 6 ("technische Agentenlauf-Infrastruktur mit lokalem deterministischem Read-Only-Runner"): verweist – sofern
+    // gesetzt – auf den technischen Agentenlauf (pilot_agent_execution_runs),
+    // aus dessen tatsächlichem Ergebnis diese Rollenübergabe hervorgegangen
+    // ist. Bleibt bei allen bisherigen, manuell eingereichten Übergaben
+    // unverändert null.
+    executionRunId: row.executionRunId || null,
     createdAt: row.createdAt,
   };
 }
@@ -543,10 +549,53 @@ function listPilotOrders(db) {
   return authDb.listPilotWorkOrders(db).map(rowToOrderView);
 }
 
+// Phase 6 ("technische Agentenlauf-Infrastruktur mit lokalem deterministischem Read-Only-Runner"): kompakte,
+// auftragsbezogene Sicht auf jeden bisherigen technischen Agentenlauf.
+// Bewusst hier (nicht in pilot-agent-execution-service.js) implementiert,
+// damit die bestehende, bereits überall verwendete Overview-Struktur
+// (buildOverview) die einzige Quelle für den Ausführungsstatus bleibt –
+// keine zweite, separat abzufragende Ressource nötig. Reine Lesefunktion,
+// keine Abhängigkeit von pilot-agent-execution-service.js (verhindert einen
+// Zirkelbezug, da dieses Modul umgekehrt pilot-work-order-service.js
+// verwendet).
+function rowToAgentExecutionRunSummary(row) {
+  let resultSummary = null;
+  try {
+    resultSummary = row.resultSummaryJson ? JSON.parse(row.resultSummaryJson) : null;
+  } catch (_error) {
+    resultSummary = null;
+  }
+  return {
+    id: row.id,
+    presetId: row.presetId,
+    pilotRole: row.pilotRole,
+    pilotRoleLabel: (PILOT_TEAM_BY_ROLE.get(row.pilotRole) || {}).pilotRoleLabel || row.pilotRole,
+    taskTitle: row.taskTitle,
+    runnerId: row.runnerId,
+    runnerLabel: row.runnerLabel,
+    status: row.status,
+    resultSummary,
+    resultRawText: row.resultRawText,
+    errorMessage: row.errorMessage,
+    // Korrekturlauf vor Commit (Migration 21): Stufe B (fachliche
+    // Rollenübergabe) getrennt vom Runstatus sichtbar machen, damit die UI
+    // einen technischen Runner-Erfolg und einen davon unabhängigen
+    // Handoff-Fehlschlag unterscheidbar darstellen kann (niemals als
+    // Runner-Fehler).
+    handoffStatus: row.handoffStatus || "PENDING",
+    handoffErrorMessage: row.handoffErrorMessage || null,
+    startedAt: row.startedAt,
+    finishedAt: row.finishedAt,
+  };
+}
+
 function buildOverview(db, orderRow) {
   if (!orderRow) return null;
   const order = rowToOrderView(orderRow);
   const handoffs = authDb.listPilotHandoffs(db, orderRow.id).map(rowToHandoffView);
+  const agentExecutionRuns = authDb
+    .listPilotAgentExecutionRunsForOrder(db, orderRow.id)
+    .map(rowToAgentExecutionRunSummary);
 
   const lastHandoff = handoffs.length > 0 ? handoffs[handoffs.length - 1] : null;
   let openDecision = null;
@@ -570,6 +619,7 @@ function buildOverview(db, orderRow) {
     status: order.status,
     statusLabel: order.statusLabel,
     handoffs,
+    agentExecutionRuns,
     openDecision,
     risksAndLimits,
     nextStep: NEXT_STEP_BY_STATUS[order.status] || NEXT_STEP_BY_STATUS.DRAFT,
@@ -841,6 +891,12 @@ function submitHandoff(db, options = {}) {
       autonomyBoundaryRespected: options.autonomyBoundaryRespected !== false,
       pmFilterStatus,
       pmFilterReasonsJson: JSON.stringify(filterResult.reasons),
+      // Phase 6: optional, nur gesetzt, wenn diese Übergabe tatsächlich aus
+      // einem technischen Agentenlauf (lokaler deterministischer
+      // Read-Only-Runner, kein KI-Modellaufruf) hervorgegangen ist (siehe
+      // pilot-agent-execution-service.js). Fehlt es, bleibt das Verhalten
+      // exakt wie vor Phase 6 (null, manuell eingereichte Übergabe).
+      executionRunId: isNonEmptyString(options.executionRunId) ? options.executionRunId.trim() : null,
       createdAt: nowIso(now),
     });
 
