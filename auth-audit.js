@@ -236,6 +236,22 @@ const EVENT_TYPES = Object.freeze([
   // technischer Runner-Fehler nach einem tatsächlichen Codex-Aufruf.
   "PILOT_AGENT_EXECUTION_CODEX_APPROVAL_REQUESTED",
   "PILOT_AGENT_EXECUTION_CODEX_START_BLOCKED",
+  // Phase 8 ("vollständige, kontrollierte Drei-Agenten-Kette als
+  // kontrollierter Nachtlauf"). Muss exakt der in
+  // auth-db-migrations.js#AUDIT_EVENT_TYPES_AT_MIGRATION_23 erweiterten
+  // CHECK-Aufzählung (Migration 23) entsprechen. Deckt ausschließlich die
+  // Kettenorchestrierung selbst ab (Vorbereitung, Freigabeanforderung je
+  // Stufe, Start je Stufe, Erfolg/Fehlschlag je Stufe, Übergang in die
+  // nächste Warteposition, Gesamtabschluss, Blockierung) – niemals einen
+  // Prompttext, niemals ein Ergebnis, niemals einen Freigabe-Token.
+  "CHAIN_PREPARED",
+  "CHAIN_STEP_APPROVAL_REQUESTED",
+  "CHAIN_STEP_STARTED",
+  "CHAIN_STEP_SUCCEEDED",
+  "CHAIN_STEP_FAILED",
+  "CHAIN_WAITING_FOR_NEXT_APPROVAL",
+  "CHAIN_COMPLETED",
+  "CHAIN_BLOCKED",
 ]);
 
 const RESULTS = Object.freeze(["OK", "DENIED", "ERROR"]);
@@ -415,6 +431,42 @@ const METADATA_ALLOWLIST = Object.freeze([
   "exitCode",
   "timedOut",
   "cancelled",
+  // Phase 8 ("vollständige, kontrollierte Drei-Agenten-Kette als
+  // kontrollierter Nachtlauf", siehe pilot-agent-execution-chain-service.js):
+  // "chainId" (interne Ketten-ID), "chainStep" (reine Zahl 1–3),
+  // "executionRunId"/"predecessorExecutionRunId" (interne Lauf-IDs, bereits
+  // an anderer Stelle als "pilotExecutionRunId" bezeichnet – hier bewusst
+  // unter dem im Auftrag vorgegebenen Namen zusätzlich geführt, weil ein
+  // Kettenereignis sowohl den eigenen als auch den Vorgängerlauf gleichzeitig
+  // referenzieren kann), "resultDigest" (reiner Hashwert des tatsächlich als
+  // Eingabe verwendeten Vorgängerergebnisses, kein Ergebnistext),
+  // "status" (einer der festen PILOT_AGENT_EXECUTION_CHAIN_STATUS_VALUES-
+  // Codes, gemäß Auftrag unter dem generischen Namen "status" geführt).
+  // "agentKey"/"runnerKind"/"reasonCode" existierten bereits und werden hier
+  // zusätzlich für die Kettenschritte verwendet. Weiterhin niemals ein
+  // Prompttext, niemals ein Ergebnis, niemals ein Freigabe-Token, kein
+  // Secret.
+  "chainId",
+  "chainStep",
+  "executionRunId",
+  "predecessorExecutionRunId",
+  "resultDigest",
+  "status",
+  // V7.7.0 Korrektur 2 ("chainManaged-Presets nur über Chain-Service
+  // erlauben", Audit-Wahrheit): "approvalSource" markiert AUSSCHLIESSLICH
+  // den bereits bestehenden PILOT_AGENT_EXECUTION_CODEX_APPROVAL_REQUESTED-
+  // Ereignistyp, wenn dieser NICHT durch einen normalen Einzellaufaufrufer,
+  // sondern automatisch/intern durch pilot-agent-execution-chain-service.js
+  // als Konsequenz einer bereits bewusst durch Jamal erteilten
+  // KETTEN-Freigabe ausgelöst wurde. Einziger erlaubter Wert:
+  // "CHAIN_INTERNAL_BRIDGE" (siehe pilot-agent-execution-service.js#
+  // requestCodexRunApprovalForChainInternal). Macht den Unterschied
+  // zwischen "Jamal hat bewusst freigegeben" (CHAIN_STEP_APPROVAL_REQUESTED,
+  // ausgelöst durch Jamal) und "das System hat diese bereits erteilte
+  // Freigabe intern technisch weitergereicht" (dieses Feld) im Audit-Trail
+  // eindeutig unterscheidbar – niemals eine zweite, eigenständige
+  // Jamal-Freigabe.
+  "approvalSource",
 ]);
 
 // Verbotene Inhalte, unabhängig vom Feldnamen (Verteidigung in der Tiefe:

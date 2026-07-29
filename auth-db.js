@@ -139,6 +139,35 @@ function closeAuthDatabase(db) {
   }
 }
 
+// V7.7.0 – ausschließlich für Regressionstests bestimmt (siehe
+// pilot-agent-execution-chain.test.js, "Migration 23 auf echter
+// Version-22-Struktur"): öffnet eine isolierte Datenbankdatei exakt wie
+// openAuthDatabase oben, wendet dabei aber NUR die Migrationen bis
+// einschließlich `targetVersion` an (statt immer aller Migrationen). Damit
+// bleibt auth-db.js weiterhin das EINZIGE Modul im Projekt, das
+// better-sqlite3 importiert (siehe Kopfkommentar dieser Datei und
+// auth-db.test.js#"kein anderes Modul im Projekt importiert
+// better-sqlite3") – ein Testmodul kann dadurch eine echte, ältere
+// Datenbankstruktur nachbauen, ohne selbst better-sqlite3 zu importieren
+// oder runMigrations() zu duplizieren. Niemals im Produktivpfad verwendet.
+function openAuthDatabaseAtMigrationVersionForTests(targetVersion, options = {}) {
+  const paths = resolveAuthDbPaths(options);
+  ensureDirSecure(paths.authDir);
+  const db = new Database(paths.dbPath);
+  ensureFileSecure(paths.dbPath);
+  configurePragmas(db);
+  db.exec("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, appliedAt TEXT NOT NULL);");
+  const now = options.now || new Date().toISOString();
+  migrations.MIGRATIONS.filter((migration) => migration.version <= targetVersion).forEach((migration) => {
+    const applyOne = db.transaction(() => {
+      db.exec(migration.sql);
+      db.prepare("INSERT INTO schema_migrations (version, appliedAt) VALUES (?, ?)").run(migration.version, now);
+    });
+    applyOne();
+  });
+  return { db, paths };
+}
+
 function runAuthMigrations(db) {
   return migrations.runMigrations(db);
 }
@@ -2233,10 +2262,196 @@ function updatePilotAgentExecutionRunHandoffOutcome(db, input = {}) {
   return info.changes === 1;
 }
 
+// ---------------------------------------------------------------------------
+// Phase 8 ("vollständige, kontrollierte Drei-Agenten-Kette als kontrollierter
+// Nachtlauf"): pilot_agent_execution_chains / pilot_agent_execution_chain_steps
+// (Migration 23). Genau dieselben, bereits etablierten Muster wie oben
+// (INSERT OR IGNORE für idempotente Anlage, Compare-and-Set-UPDATEs mit
+// WHERE-Bindung an den zuletzt gelesenen Zustand, `changes === 0` bedeutet
+// immer Konflikt, niemals stiller Erfolg). Diese Funktionen fassen niemals
+// mehrere Schreibvorgänge in einer eigenen impliziten Transaktion zusammen –
+// das bleibt Aufgabe der aufrufenden Serviceschicht
+// (pilot-agent-execution-chain-service.js), die dafür authDb.withAuthTransaction
+// verwendet (gleiches Muster wie pilot-work-order-service.js).
+// ---------------------------------------------------------------------------
+
+function insertPilotAgentExecutionChain(db, input = {}) {
+  db.prepare(
+    `INSERT INTO pilot_agent_execution_chains
+      (id, pilotOrderId, chainStatus, currentStep, revision, waitingForJamal, createdByUserId, createdAt, updatedAt)
+     VALUES
+      (@id, @pilotOrderId, @chainStatus, @currentStep, @revision, @waitingForJamal, @createdByUserId, @createdAt, @updatedAt)`,
+  ).run({
+    id: input.id,
+    pilotOrderId: input.pilotOrderId,
+    chainStatus: input.chainStatus,
+    currentStep: input.currentStep,
+    revision: input.revision,
+    waitingForJamal: input.waitingForJamal ? 1 : 0,
+    createdByUserId: input.createdByUserId ?? null,
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
+  });
+  return getPilotAgentExecutionChainById(db, input.id);
+}
+
+function insertPilotAgentExecutionChainStep(db, input = {}) {
+  db.prepare(
+    `INSERT INTO pilot_agent_execution_chain_steps
+      (id, chainId, stepNumber, agentKey, presetId, stepStatus, approvalStatus, createdAt)
+     VALUES
+      (@id, @chainId, @stepNumber, @agentKey, @presetId, @stepStatus, @approvalStatus, @createdAt)`,
+  ).run({
+    id: input.id,
+    chainId: input.chainId,
+    stepNumber: input.stepNumber,
+    agentKey: input.agentKey,
+    presetId: input.presetId ?? null,
+    stepStatus: input.stepStatus || "PENDING",
+    approvalStatus: input.approvalStatus || "NOT_REQUESTED",
+    createdAt: input.createdAt,
+  });
+  return getPilotAgentExecutionChainStepById(db, input.id);
+}
+
+function getPilotAgentExecutionChainById(db, id) {
+  return db.prepare("SELECT * FROM pilot_agent_execution_chains WHERE id = ?").get(id) || null;
+}
+
+function listPilotAgentExecutionChainsForOrder(db, pilotOrderId) {
+  return db
+    .prepare("SELECT * FROM pilot_agent_execution_chains WHERE pilotOrderId = ? ORDER BY createdAt ASC, id ASC")
+    .all(pilotOrderId);
+}
+
+function getPilotAgentExecutionChainStepById(db, id) {
+  return db.prepare("SELECT * FROM pilot_agent_execution_chain_steps WHERE id = ?").get(id) || null;
+}
+
+function listPilotAgentExecutionChainStepsForChain(db, chainId) {
+  return db
+    .prepare("SELECT * FROM pilot_agent_execution_chain_steps WHERE chainId = ? ORDER BY stepNumber ASC")
+    .all(chainId);
+}
+
+function getPilotAgentExecutionChainStepByNumber(db, chainId, stepNumber) {
+  return (
+    db
+      .prepare("SELECT * FROM pilot_agent_execution_chain_steps WHERE chainId = ? AND stepNumber = ?")
+      .get(chainId, stepNumber) || null
+  );
+}
+
+// Compare-and-set: greift ausschließlich, wenn die Kette zum Schreibzeitpunkt
+// noch exakt den erwarteten Status UND die erwartete Revision trägt.
+// `changes === 0` bedeutet Konflikt (paralleler Schreiber oder veralteter
+// Aufrufer-Zustand) – der Aufrufer MUSS dies als Konflikt behandeln, niemals
+// als stillen Erfolg.
+function updatePilotAgentExecutionChainStatusConditional(db, input = {}) {
+  const assignments = [
+    "chainStatus = @nextStatus",
+    "revision = revision + 1",
+    "waitingForJamal = @waitingForJamal",
+    "updatedAt = @updatedAt",
+  ];
+  const values = {
+    id: input.id,
+    nextStatus: input.nextStatus,
+    waitingForJamal: input.waitingForJamal ? 1 : 0,
+    updatedAt: input.updatedAt,
+    expectedStatus: input.expectedStatus,
+    expectedRevision: input.expectedRevision,
+  };
+  if (input.nextCurrentStep !== undefined) {
+    assignments.push("currentStep = @nextCurrentStep");
+    values.nextCurrentStep = input.nextCurrentStep;
+  }
+  if (input.blockReason !== undefined) {
+    assignments.push("blockReason = @blockReason");
+    values.blockReason = input.blockReason;
+  }
+  if (input.completedAt !== undefined) {
+    assignments.push("completedAt = @completedAt");
+    values.completedAt = input.completedAt;
+  }
+  const info = db
+    .prepare(
+      `UPDATE pilot_agent_execution_chains
+       SET ${assignments.join(", ")}
+       WHERE id = @id AND chainStatus = @expectedStatus AND revision = @expectedRevision`,
+    )
+    .run(values);
+  return info.changes === 1;
+}
+
+// Stufe: Freigabe für genau diesen Schritt angefordert (mintet noch keinen
+// Token – der Token lebt ausschließlich RAM-only in der Serviceschicht,
+// gleiches Muster wie requestCodexRunApproval in
+// pilot-agent-execution-service.js). Greift nur, wenn der Schritt zum
+// Schreibzeitpunkt noch PENDING ist.
+function updatePilotAgentExecutionChainStepApprovalRequested(db, input = {}) {
+  const info = db
+    .prepare(
+      `UPDATE pilot_agent_execution_chain_steps
+       SET approvalStatus = 'REQUESTED', approvalRequestedAt = @approvalRequestedAt
+       WHERE id = @id AND stepStatus = 'PENDING'`,
+    )
+    .run({ id: input.id, approvalRequestedAt: input.approvalRequestedAt });
+  return info.changes === 1;
+}
+
+// Stufe: Schritt wird tatsächlich gestartet – Freigabe wird dabei als
+// GRANTED (verbraucht) festgehalten, der Status wechselt auf RUNNING, und
+// (sofern vorhanden) die Vorgängerbeziehung samt geprüftem Digest wird
+// festgeschrieben. Greift nur, wenn der Schritt zum Schreibzeitpunkt noch
+// PENDING mit REQUESTED-Freigabe ist.
+function updatePilotAgentExecutionChainStepStarted(db, input = {}) {
+  const info = db
+    .prepare(
+      `UPDATE pilot_agent_execution_chain_steps
+       SET stepStatus = 'RUNNING', approvalStatus = 'GRANTED', startedAt = @startedAt,
+           chainedFromExecutionRunId = @chainedFromExecutionRunId,
+           predecessorResultDigest = @predecessorResultDigest
+       WHERE id = @id AND stepStatus = 'PENDING' AND approvalStatus = 'REQUESTED'`,
+    )
+    .run({
+      id: input.id,
+      startedAt: input.startedAt,
+      chainedFromExecutionRunId: input.chainedFromExecutionRunId ?? null,
+      predecessorResultDigest: input.predecessorResultDigest ?? null,
+    });
+  return info.changes === 1;
+}
+
+// Stufe: technischer Abschluss eines Schritts (SUCCEEDED/FAILED). Greift nur,
+// wenn der Schritt zum Schreibzeitpunkt noch RUNNING ist. `executionRunId`
+// wird HIER (und ausschließlich hier) einmalig gesetzt, niemals überschrieben
+// (kein zweiter Aufruf kann greifen, weil stepStatus dann nicht mehr RUNNING
+// ist).
+function updatePilotAgentExecutionChainStepTerminal(db, input = {}) {
+  const info = db
+    .prepare(
+      `UPDATE pilot_agent_execution_chain_steps
+       SET stepStatus = @stepStatus, executionRunId = @executionRunId, resultDigest = @resultDigest,
+           failureReasonCode = @failureReasonCode, completedAt = @completedAt
+       WHERE id = @id AND stepStatus = 'RUNNING'`,
+    )
+    .run({
+      id: input.id,
+      stepStatus: input.stepStatus,
+      executionRunId: input.executionRunId ?? null,
+      resultDigest: input.resultDigest ?? null,
+      failureReasonCode: input.failureReasonCode ?? null,
+      completedAt: input.completedAt,
+    });
+  return info.changes === 1;
+}
+
 module.exports = {
   AuthDatabaseStartupError,
   resolveAuthDbPaths,
   openAuthDatabase,
+  openAuthDatabaseAtMigrationVersionForTests,
   closeAuthDatabase,
   runAuthMigrations,
   withAuthTransaction,
@@ -2388,4 +2603,16 @@ module.exports = {
   listPilotAgentExecutionRunsForOrder,
   updatePilotAgentExecutionRunTerminal,
   updatePilotAgentExecutionRunHandoffOutcome,
+  // Phase 8 – vollständige, kontrollierte Drei-Agenten-Kette
+  insertPilotAgentExecutionChain,
+  insertPilotAgentExecutionChainStep,
+  getPilotAgentExecutionChainById,
+  listPilotAgentExecutionChainsForOrder,
+  getPilotAgentExecutionChainStepById,
+  listPilotAgentExecutionChainStepsForChain,
+  getPilotAgentExecutionChainStepByNumber,
+  updatePilotAgentExecutionChainStatusConditional,
+  updatePilotAgentExecutionChainStepApprovalRequested,
+  updatePilotAgentExecutionChainStepStarted,
+  updatePilotAgentExecutionChainStepTerminal,
 };

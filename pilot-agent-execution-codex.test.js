@@ -32,6 +32,7 @@ const migrations = require("./auth-db-migrations");
 const healthService = require("./health-reference-work-run-service");
 const pilotService = require("./pilot-work-order-service");
 const agentExecutionService = require("./pilot-agent-execution-service");
+const chainService = require("./pilot-agent-execution-chain-service");
 const codexRunnerModule = require("./pilot-agent-codex-runner");
 const codexReadOnlyAdapter = require("./execution-codex-adapter-readonly");
 
@@ -1060,6 +1061,146 @@ async function run() {
     });
     assert.strictEqual(postMigrationCodexRun.run.status, "SUCCEEDED");
     assert.strictEqual(postMigrationCodexRun.run.aiExecuted, true);
+  });
+
+  // -------------------------------------------------------------------
+  // V7.7.0 Korrektur 2 ("chainManaged-Presets nur über Chain-Service
+  // erlauben", unabhängiges Opus-Review, Blocker 2).
+  // -------------------------------------------------------------------
+  const CHAIN_PRESET_IDS = ["codex-chain-research-analysis", "codex-document-chain-result", "codex-pm-evaluate-chain"];
+
+  await check("V7.7.0/1.-3. jedes der drei Kettenpresets kann NICHT über die normale Einzellauf-requestCodexRunApproval gestartet werden", () => {
+    const orderChainIso = pilotService.createPilotOrder(db, orderInput({ title: "Auftrag: Kettenpreset-Isolation (Freigabe)" }));
+    const orderId = orderChainIso.order.id;
+    driveOrderToInExecution(db, orderId);
+    CHAIN_PRESET_IDS.forEach((presetId) => {
+      assert.ok(agentExecutionService.PILOT_AGENT_TASK_PRESETS[presetId].chainManaged, `${presetId} muss chainManaged: true besitzen`);
+      assert.throws(
+        () => agentExecutionService.requestCodexRunApproval(db, { pilotOrderId: orderId, presetId }),
+        (error) => {
+          assert.strictEqual(error.statusCode, 400);
+          assert.match(error.message, /ausschließlich durch die Ketten-Serviceschicht verwaltet/);
+          return true;
+        },
+        `${presetId} darf keine Freigabe über die normale Einzellauf-API erhalten`,
+      );
+    });
+    assert.strictEqual(agentExecutionService.listAgentExecutionRunsForOrder(db, orderId).length, 0, "kein verwaister Lauf darf entstanden sein");
+  });
+
+  await check("V7.7.0/1.-3. jedes der drei Kettenpresets kann NICHT über die normale Einzellauf-startAgentExecutionRun gestartet werden (auch ohne vorherige Freigabe)", async () => {
+    const orderChainIso = pilotService.createPilotOrder(db, orderInput({ title: "Auftrag: Kettenpreset-Isolation (Start)" }));
+    const orderId = orderChainIso.order.id;
+    driveOrderToInExecution(db, orderId);
+    for (const presetId of CHAIN_PRESET_IDS) {
+      await assert.rejects(
+        () =>
+          agentExecutionService.startAgentExecutionRun(db, {
+            pilotOrderId: orderId,
+            presetId,
+            approvalToken: "beliebiger-nicht-existenter-token",
+            codexAvailabilityOptions: { execFileSyncImpl: AVAILABLE_AUTHENTICATED_EXEC, forceRefresh: true },
+            codexAdapterImpl: fakeSuccessfulCodexAdapter(REALISTIC_RESULT_TEXT),
+          }),
+        (error) => {
+          assert.strictEqual(error.statusCode, 400);
+          assert.match(error.message, /ausschließlich durch die Ketten-Serviceschicht verwaltet/);
+          return true;
+        },
+        `${presetId} darf über startAgentExecutionRun nicht direkt gestartet werden`,
+      );
+    }
+    assert.strictEqual(agentExecutionService.listAgentExecutionRunsForOrder(db, orderId).length, 0, "kein verwaister, als chainManaged markierter Lauf darf entstanden sein");
+  });
+
+  await check("V7.7.0/4./10. ein normales (nicht chainManaged) Phase-7-Preset bleibt über die Einzellauf-API unverändert startbar", async () => {
+    const orderNormal = pilotService.createPilotOrder(db, orderInput({ title: "Auftrag: normales Preset bleibt startbar" }));
+    const orderId = orderNormal.order.id;
+    driveOrderToInExecution(db, orderId);
+    assert.strictEqual(agentExecutionService.PILOT_AGENT_TASK_PRESETS[CODEX_PRESET_ID].chainManaged, undefined);
+    const revision = pilotService.getPilotOrderOverview(db, orderId).order.revision;
+    const result = await startCodexRun(db, { pilotOrderId: orderId, expectedRevision: revision, adapter: fakeSuccessfulCodexAdapter(REALISTIC_RESULT_TEXT) });
+    assert.strictEqual(result.run.status, "SUCCEEDED");
+  });
+
+  await check("V7.7.0/6. ein HTTP-artiger Aufruf kann die interne Kennzeichnung nicht erraten oder nachbauen (String/Boolean statt Symbol)", () => {
+    const orderChainIso = pilotService.createPilotOrder(db, orderInput({ title: "Auftrag: interne Kennzeichnung nicht faelschbar" }));
+    const orderId = orderChainIso.order.id;
+    driveOrderToInExecution(db, orderId);
+    // Simuliert die realistischsten Fälschungsversuche eines HTTP-Clients:
+    // ein aus JSON stammendes Feld kann niemals ein echtes Symbol sein,
+    // ausschließlich String/Boolean/Objekt-Literale sind über JSON möglich.
+    const forgeryAttempts = [
+      { __chainInternalBridge: "CHAIN_INTERNAL_BRIDGE_CAPABILITY" },
+      { __chainInternalBridge: true },
+      { __chainInternalBridge: Symbol("pilot-agent-execution-chain-internal-bridge") },
+      { chainInternal: true },
+      { isChainInternalBridge: true },
+    ];
+    forgeryAttempts.forEach((forgedOptions) => {
+      assert.throws(
+        () => agentExecutionService.requestCodexRunApproval(db, { pilotOrderId: orderId, presetId: "codex-chain-research-analysis", ...forgedOptions }),
+        /ausschließlich durch die Ketten-Serviceschicht verwaltet/,
+        `Fälschungsversuch ${JSON.stringify(Object.keys(forgedOptions))} darf nicht funktionieren`,
+      );
+    });
+  });
+
+  await check("V7.7.0/5. der Chain-Service kann jedes der drei Kettenpresets tatsächlich intern starten (Gegenprobe zur Sperre oben)", () => {
+    // Reines Gegenprobe: die internen ...ForChainInternal-Einstiegspunkte
+    // existieren und geben tatsächlich einen Freigabe-Token zurück (der
+    // eigentliche End-zu-End-Nachweis über den vollständigen Kettenablauf
+    // läuft bereits in pilot-agent-execution-chain.test.js/-api.test.js).
+    const orderForChain = pilotService.createPilotOrder(db, orderInput({ title: "Auftrag: interner Chain-Start funktioniert" }));
+    driveOrderToInExecution(db, orderForChain.order.id);
+    const innerApproval = agentExecutionService.requestCodexRunApprovalForChainInternal(db, {
+      pilotOrderId: orderForChain.order.id,
+      presetId: "codex-chain-research-analysis",
+    });
+    assert.ok(typeof innerApproval.approvalToken === "string" && innerApproval.approvalToken.length > 0);
+  });
+
+  await check("V7.7.0/7./8. Audit unterscheidet Jamal-Kettenfreigabe (normale Weitergabe) von interner technischer Weitergabe; niemals Token/Prompt/Ergebnis im Audit", () => {
+    const orderAuditNormal = pilotService.createPilotOrder(db, orderInput({ title: "Auftrag: Audit normale Freigabe" }));
+    driveOrderToInExecution(db, orderAuditNormal.order.id);
+    agentExecutionService.requestCodexRunApproval(db, { pilotOrderId: orderAuditNormal.order.id, presetId: CODEX_PRESET_ID, actorUserId: "owner-1" });
+    const normalEvents = authDb
+      .listAuditEvents(db)
+      .filter((e) => e.eventType === "PILOT_AGENT_EXECUTION_CODEX_APPROVAL_REQUESTED" && JSON.parse(e.metadata || "{}").pilotOrderId === orderAuditNormal.order.id);
+    assert.strictEqual(normalEvents.length, 1);
+    const normalMetadata = JSON.parse(normalEvents[0].metadata);
+    assert.strictEqual(normalMetadata.approvalSource, undefined, "eine normale Freigabe darf NICHT als CHAIN_INTERNAL_BRIDGE markiert sein");
+
+    const orderAuditChain = pilotService.createPilotOrder(db, orderInput({ title: "Auftrag: Audit interne Weitergabe" }));
+    driveOrderToInExecution(db, orderAuditChain.order.id);
+    agentExecutionService.requestCodexRunApprovalForChainInternal(db, {
+      pilotOrderId: orderAuditChain.order.id,
+      presetId: "codex-chain-research-analysis",
+      actorUserId: "owner-1",
+    });
+    const chainEvents = authDb
+      .listAuditEvents(db)
+      .filter((e) => e.eventType === "PILOT_AGENT_EXECUTION_CODEX_APPROVAL_REQUESTED" && JSON.parse(e.metadata || "{}").pilotOrderId === orderAuditChain.order.id);
+    assert.strictEqual(chainEvents.length, 1);
+    const chainMetadata = JSON.parse(chainEvents[0].metadata);
+    assert.strictEqual(chainMetadata.approvalSource, "CHAIN_INTERNAL_BRIDGE", "die interne Weitergabe muss eindeutig als solche markiert sein, niemals als zweite Jamal-Freigabe");
+
+    // Kein Token, Prompt oder Ergebnistext in irgendeinem der beiden Audit-Metadatenobjekte.
+    [normalMetadata, chainMetadata].forEach((metadata) => {
+      const serialized = JSON.stringify(metadata);
+      assert.ok(!/[0-9a-f]{48}/i.test(serialized), "Audit-Metadaten dürfen keinen tokenartigen Hex-String enthalten");
+      assert.ok(!serialized.toLowerCase().includes("prompt"));
+      assert.ok(!serialized.toLowerCase().includes("resulttext"));
+    });
+  });
+
+  await check("V7.7.0/9. kein Kettenlauf ohne chainId: chainService.startStep/requestStepApproval verlangen zwingend eine gültige chainId", async () => {
+    assert.throws(() => chainService.requestStepApproval(db, { chainStep: 1, actorUserId: "owner-1" }), /chainId fehlt oder ist ungültig/);
+    assert.throws(() => chainService.requestStepApproval(db, { chainId: "", chainStep: 1, actorUserId: "owner-1" }), /chainId fehlt oder ist ungültig/);
+    await assert.rejects(
+      () => chainService.startStep(db, { chainStep: 1, actorUserId: "owner-1", approvalToken: "x" }),
+      /chainId fehlt oder ist ungültig/,
+    );
   });
 
   // -------------------------------------------------------------------

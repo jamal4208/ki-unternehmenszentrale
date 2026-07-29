@@ -175,6 +175,150 @@ const PILOT_AGENT_TASK_PRESETS = Object.freeze({
     ]),
     expectedResultFormat: "Titel, drei konkrete Beobachtungen, zwei Risiken, eine priorisierte Empfehlung – strukturierter Text.",
   }),
+  // Phase 8 ("vollständige, kontrollierte Drei-Agenten-Kette") – Schritt 1
+  // (Recherche-/Analyse-Agent) EIGENES, dediziertes Kettenpreset – bewusst
+  // NICHT eine Wiederverwendung des obigen "codex-analyze-pilot-structure"
+  // (dieses bleibt für den bestehenden Phase-7-Einzellauf byteidentisch
+  // unangetastet, siehe Abschlussbericht Abschnitt 2). agentKeyOverride
+  // "review-agent" entspricht exakt der im Auftrag bevorzugten Identität.
+  // chainManaged: true (siehe finalizeAgentExecutionRun unten) – ein
+  // Kettenschritt löst NIEMALS automatisch die klassische, bestehende
+  // Rollenübergabe (submitHandoff/PM-Filter) auf dem zugrunde liegenden
+  // Pilotauftrag aus; das bleibt ausschließlich der eigenständigen
+  // Kettenlogik (pilot-agent-execution-chain-service.js) vorbehalten, die
+  // Ergebnisse ausschließlich über die Kettentabellen selbst weiterreicht.
+  "codex-chain-research-analysis": Object.freeze({
+    presetId: "codex-chain-research-analysis",
+    runnerKind: RUNNER_KINDS.CODEX,
+    pilotRole: "RECHERCHE_ANALYSE",
+    agentKeyOverride: "review-agent",
+    chainManaged: true,
+    title: "Kettenschritt 1 – Quellmaterial strukturiert analysieren",
+    instructions:
+      "Lies das dir zugewiesene Quellmaterial, strukturiere deine Beobachtungen, benenne Risiken und formuliere " +
+      "eine priorisierte Empfehlung. Täusche keine abschließende Dokumentation vor. Erteile keine " +
+      "Projektmanager-Freigabe.",
+    allowedFiles: Object.freeze([
+      "pilot-agent-execution-chain-service.js",
+      "pilot-work-order-service.js",
+      "pilot-agent-runner.js",
+    ]),
+    allowedTools: Object.freeze(["Lesen (read-only Workspace-Zugriff)", "Strukturierte Textantwort über Codex"]),
+    forbiddenActions: Object.freeze([
+      "Dateien ändern",
+      "Git-Befehle mit Schreibwirkung",
+      "Commit",
+      "Push",
+      "Deployment",
+      "Diff erzeugen oder anwenden",
+      "externe Netzwerkanfragen außer dem einen freigegebenen Codex-Roundtrip",
+      "Health-Projekt lesen oder verändern",
+      "Secrets oder Zugangsdaten ausgeben",
+      "neue Abhängigkeiten installieren",
+      "weitere, nicht genannte Dateien lesen",
+      "Projektmanager-Freigabe erteilen",
+    ]),
+    expectedResultFormat:
+      "Kurzbefund, drei konkrete Beobachtungen, zwei konkrete Risiken oder Grenzen, eine priorisierte " +
+      "Empfehlung, verwendete Grundlagen, offene Punkte – strukturierter Text.",
+  }),
+  // Phase 8 – Schritt 2 (Dokumentations-Agent). Eigenständiges Preset, KEINE
+  // Variante des obigen Recherche-Presets: andere Aufgabe, anderer
+  // erwarteter Ergebnisrahmen, andere Agentenidentität. agentKeyOverride
+  // "documentation-agent" ist die im kanonischen 25-Agenten-Register
+  // bereits bestehende, fachlich passendste Identität ("Wissens-/
+  // Archiv-Agent", AGENTS.md Nr. 11, ROLE_NAME_MAPPING["Wissens-/Archiv-Agent"]
+  // -> "documentation-agent") – keine neue Agentenidentität. chainManaged:
+  // true, siehe Kommentar oben. Wird ausschließlich über
+  // pilot-agent-execution-chain-service.js gestartet (niemals direkt über die
+  // bereits bestehende start-agent-execution-Einzelauftragsroute), weil nur
+  // die Chain-Service-Schicht das tatsächliche, geprüfte Vorgängerergebnis
+  // (predecessorContext) beschafft und übergibt.
+  "codex-document-chain-result": Object.freeze({
+    presetId: "codex-document-chain-result",
+    runnerKind: RUNNER_KINDS.CODEX,
+    pilotRole: "DOKUMENTATION",
+    agentKeyOverride: "documentation-agent",
+    chainManaged: true,
+    title: "Kettenschritt 2 – Rechercheergebnis in ein prüfbares Dokumentationsresultat überführen",
+    instructions:
+      "Überführe das dir als Vorgängerergebnis vorgelegte Rechercheergebnis in ein klares, prüfbares " +
+      "Dokumentationsresultat. Gib nichts als selbst recherchiert aus, was ausschließlich vom Vorgänger stammt. " +
+      "Kennzeichne Quellen und Herkunft transparent. Mache Widersprüche und fehlende Informationen sichtbar. " +
+      "Erteile keine Projektmanager-Freigabe.",
+    allowedFiles: Object.freeze([
+      "pilot-agent-execution-chain-service.js",
+      "pilot-work-order-service.js",
+      "auth-db-migrations.js",
+    ]),
+    allowedTools: Object.freeze(["Lesen (read-only Workspace-Zugriff)", "Strukturierte Textantwort über Codex"]),
+    forbiddenActions: Object.freeze([
+      "Dateien ändern",
+      "Git-Befehle mit Schreibwirkung",
+      "Commit",
+      "Push",
+      "Deployment",
+      "Diff erzeugen oder anwenden",
+      "externe Netzwerkanfragen außer dem einen freigegebenen Codex-Roundtrip",
+      "Health-Projekt lesen oder verändern",
+      "Secrets oder Zugangsdaten ausgeben",
+      "neue Abhängigkeiten installieren",
+      "weitere, nicht genannte Dateien lesen",
+      "Projektmanager-Freigabe erteilen",
+    ]),
+    expectedResultFormat:
+      "Titel, Ausgangslage, bestätigte Erkenntnisse, übernommene Aussagen des Vorgängers, offene oder " +
+      "widersprüchliche Punkte, Risiken, empfohlener nächster Schritt, Herkunfts-/Quellenhinweis – strukturierter Text.",
+  }),
+  // Phase 8 – Schritt 3 (Projektmanager-/PM-Bewertung). agentKeyOverride
+  // "orchestrator-agent" ist die im kanonischen Register bereits bestehende
+  // Identität für den Projektmanager-Agenten (ROLE_NAME_MAPPING[
+  // "Projektmanager-Agent"] -> "orchestrator-agent") – keine neue
+  // Agentenidentität, keine Registry-Änderung. Bewusst ein ECHTER,
+  // getrennter CODEX_READ_ONLY-Lauf (siehe Abschlussbericht Abschnitt 2 zur
+  // Architekturentscheidung) statt einer bloßen Erweiterung des bereits
+  // bestehenden, rein regelbasierten PM-Filters
+  // (pilot-work-order-service.js#runProjectManagerFilter) – dieser bleibt
+  // unverändert und läuft für die reguläre Rollenübergabe weiterhin
+  // ausschließlich regelbasiert. chainManaged: true, siehe Kommentar oben –
+  // die PM-Bewertung erteilt dadurch strukturell keine automatische
+  // Freigabe und löst keinen automatischen Statuswechsel des zugrunde
+  // liegenden Pilotauftrags aus.
+  "codex-pm-evaluate-chain": Object.freeze({
+    presetId: "codex-pm-evaluate-chain",
+    runnerKind: RUNNER_KINDS.CODEX,
+    pilotRole: "PROJEKTMANAGER",
+    agentKeyOverride: "orchestrator-agent",
+    chainManaged: true,
+    title: "Kettenschritt 3 – Recherche- und Dokumentationsergebnis bewerten",
+    instructions:
+      "Bewerte die Ergebnisse der vorangegangenen zwei Kettenschritte (Recherche und Dokumentation) auf " +
+      "inhaltliche Konsistenz, belegte versus abgeleitete Aussagen, offene Risiken und Entscheidungsreife für " +
+      "Jamal. Erteile selbst keine automatische Freigabe.",
+    allowedFiles: Object.freeze([
+      "pilot-agent-execution-chain-service.js",
+      "pilot-work-order-service.js",
+      "auth-db-migrations.js",
+    ]),
+    allowedTools: Object.freeze(["Lesen (read-only Workspace-Zugriff)", "Strukturierte Textantwort über Codex"]),
+    forbiddenActions: Object.freeze([
+      "Dateien ändern",
+      "Git-Befehle mit Schreibwirkung",
+      "Commit",
+      "Push",
+      "Deployment",
+      "Diff erzeugen oder anwenden",
+      "externe Netzwerkanfragen außer dem einen freigegebenen Codex-Roundtrip",
+      "Health-Projekt lesen oder verändern",
+      "Secrets oder Zugangsdaten ausgeben",
+      "neue Abhängigkeiten installieren",
+      "weitere, nicht genannte Dateien lesen",
+      "automatische Freigabe erteilen",
+    ]),
+    expectedResultFormat:
+      "Gesamturteil, geprüfte Vorgängerläufe, Konsistenzprüfung, Qualitätsmängel, Risiken und Grenzen, " +
+      "Empfehlung, benötigte Entscheidung durch Jamal – strukturierter Text.",
+  }),
 });
 
 function requireKnownPreset(presetId) {
@@ -183,6 +327,41 @@ function requireKnownPreset(presetId) {
     throw badRequest("Unbekannte oder fehlende Agentenauftrags-Preset-ID.");
   }
   return preset;
+}
+
+// ---------------------------------------------------------------------------
+// V7.7.0 Korrektur 2 ("chainManaged-Presets nur über Chain-Service
+// erlauben", unabhängiges Opus-Review, Blocker 2): ein chainManaged-Preset
+// (siehe PILOT_AGENT_TASK_PRESETS oben) darf NIEMALS über die normale
+// Phase-7-Einzellauf-API/-Route oder einen normalen direkten Serviceaufruf
+// gestartet oder freigegeben werden – ausschließlich
+// pilot-agent-execution-chain-service.js darf das (mit bereits geprüftem
+// chainId/Vorgänger-/Digest-/Ketten-Kontext).
+//
+// CHAIN_INTERNAL_BRIDGE_CAPABILITY ist ein modulprivates, NICHT
+// exportiertes Symbol. Ein Symbol lässt sich (anders als ein Boolean/String)
+// nicht aus JSON rekonstruieren und nicht über ein API-Feld setzen – ein
+// Aufrufer außerhalb dieser Datei kann diesen exakten Wert weder erraten
+// noch nachbauen (`Symbol("gleicher Text")` erzeugt ein ANDERES, per `===`
+// niemals gleiches Symbol). Die einzigen beiden Stellen, die dieses Symbol
+// tatsächlich mitgeben, sind requestCodexRunApprovalForChainInternal/
+// startAgentExecutionRunForChainInternal unten – beide ausschließlich für
+// pilot-agent-execution-chain-service.js bestimmt (siehe dortige
+// Verwendung). Das Symbol wird niemals in Audit-Metadaten oder einer
+// HTTP-Antwort ausgegeben.
+const CHAIN_INTERNAL_BRIDGE_CAPABILITY = Symbol("pilot-agent-execution-chain-internal-bridge");
+
+function isChainInternalBridgeCall(options) {
+  return Boolean(options) && options.__chainInternalBridge === CHAIN_INTERNAL_BRIDGE_CAPABILITY;
+}
+
+function assertChainManagedPresetHasInternalBridge(preset, options) {
+  if (preset.chainManaged && !isChainInternalBridgeCall(options)) {
+    throw badRequest(
+      "Dieses Preset wird ausschließlich durch die Ketten-Serviceschicht verwaltet (chainManaged) und kann nicht " +
+        "über die normale Phase-7-Einzellauf-API oder einen direkten Serviceaufruf gestartet oder freigegeben werden.",
+    );
+  }
 }
 
 // Korrekturlauf vor Commit (Korrektur 4, "Agentenidentität ehrlich
@@ -279,6 +458,7 @@ const DEFAULT_CODEX_APPROVAL_NOW_PROVIDER = () => Date.now();
 function requestCodexRunApproval(db, options = {}) {
   const presetId = String(options.presetId || "").trim();
   const preset = requireKnownPreset(presetId);
+  assertChainManagedPresetHasInternalBridge(preset, options);
   if (preset.runnerKind !== RUNNER_KINDS.CODEX) {
     throw badRequest("Eine Freigabeanforderung ist ausschließlich für ein Codex-Preset möglich.");
   }
@@ -304,6 +484,13 @@ function requestCodexRunApproval(db, options = {}) {
     expiresAt: issuedAtMs + CODEX_APPROVAL_TOKEN_TTL_MS,
     consumed: false,
   });
+  // V7.7.0 Korrektur 2 ("Audit-Wahrheit"): ist dieser Aufruf die interne,
+  // automatische Weitergabe einer bereits durch Jamal bewusst erteilten
+  // KETTEN-Freigabe (siehe pilot-agent-execution-chain-service.js#startStep),
+  // wird das Audit-Ereignis zusätzlich mit `approvalSource:
+  // CHAIN_INTERNAL_BRIDGE` markiert – NIEMALS als zweite, eigenständige
+  // Jamal-Freigabe. Für jeden normalen (nicht chainManaged) Einzellauf
+  // bleibt das Metadatenobjekt exakt wie vor diesem Korrekturlauf.
   authAudit.recordAuditEvent(db, {
     eventType: "PILOT_AGENT_EXECUTION_CODEX_APPROVAL_REQUESTED",
     result: "OK",
@@ -312,7 +499,11 @@ function requestCodexRunApproval(db, options = {}) {
     timestamp: nowIso(now),
     // Niemals der Tokenwert selbst (siehe Kopfkommentar) – ausschließlich
     // bereits unkritische Bindungsmetadaten.
-    metadata: { pilotOrderId, presetId },
+    metadata: {
+      pilotOrderId,
+      presetId,
+      ...(isChainInternalBridgeCall(options) ? { approvalSource: "CHAIN_INTERNAL_BRIDGE" } : {}),
+    },
   });
   return { approvalToken: token, expiresInMs: CODEX_APPROVAL_TOKEN_TTL_MS };
 }
@@ -476,6 +667,7 @@ function getAgentExecutionRunById(db, pilotOrderId, runId) {
 async function startAgentExecutionRun(db, options = {}) {
   const presetId = String(options.presetId || "").trim();
   const preset = requireKnownPreset(presetId);
+  assertChainManagedPresetHasInternalBridge(preset, options);
   const agent = resolveAgentForPreset(preset);
   const isCodexRun = preset.runnerKind === RUNNER_KINDS.CODEX;
 
@@ -679,6 +871,13 @@ async function startAgentExecutionRun(db, options = {}) {
         attemptTimeoutMs: options.attemptTimeoutMs,
         shouldAbort: options.shouldAbort,
         codexAvailability,
+        // Phase 8: ausschließlich von pilot-agent-execution-chain-service.js
+        // gesetzt – das tatsächliche, geprüfte Ergebnis des Vorgängerschritts
+        // einer Kette (niemals eine freie Nutzereingabe). Für jeden
+        // bestehenden Aufrufer (Phase 6/7, kein Kettenschritt) bleibt dies
+        // undefined, wodurch buildAgentSpecificCodexPrompt exakt denselben
+        // Prompt wie vor Phase 8 erzeugt (siehe pilot-agent-codex-runner.js).
+        predecessorContext: options.predecessorContext,
         // Ausschließlich für Tests: injizierte Ersatzimplementierungen für
         // den echten Codex-Kindprozess/Dateisystemzugriff (siehe
         // pilot-agent-codex-runner.js/execution-codex-adapter.js). Im
@@ -993,6 +1192,27 @@ function finalizeAgentExecutionRun(db, { runId, pilotOrderId, preset, execResult
     const succeededRun = persistSucceededAgentExecutionRun(db, { runId, pilotOrderId, preset, execResult, now, actorUserId, isCodexRun });
     // Ab hier ist Stufe A unumkehrbar abgeschlossen: succeededRun.status ist
     // dauerhaft SUCCEEDED, unabhängig vom Ausgang von Stufe B unten.
+    //
+    // Phase 8 ("vollständige, kontrollierte Drei-Agenten-Kette"): ein
+    // chainManaged-Preset (siehe PILOT_AGENT_TASK_PRESETS oben) löst NIEMALS
+    // Stufe B (die klassische Rollenübergabe/PM-Filter auf dem zugrunde
+    // liegenden Pilotauftrag) aus – ein Kettenschritt-Erfolg wird
+    // ausschließlich über die eigenständige, getrennte Kettenlogik
+    // (pilot-agent-execution-chain-service.js) weiterverarbeitet. handoffStatus
+    // der Laufzeile bleibt dadurch bewusst auf dem bereits bestehenden
+    // Default "PENDING" stehen (kein neuer Enum-Wert, keine zusätzliche
+    // Migration nötig) – für einen Kettenschritt bedeutet das: "Stufe B ist
+    // für diesen Lauf strukturell nicht vorgesehen", niemals "es wurde
+    // vergessen".
+    if (preset.chainManaged) {
+      return {
+        run: succeededRun,
+        handoff: null,
+        filterResult: null,
+        handoffStatus: "PENDING",
+        handoffErrorMessage: null,
+      };
+    }
     const handoffOutcome = attemptHandoffForSucceededRun(db, {
       runId,
       pilotOrderId,
@@ -1032,6 +1252,22 @@ function finalizeAgentExecutionRun(db, { runId, pilotOrderId, preset, execResult
   }
 }
 
+// V7.7.0 Korrektur 2: die BEIDEN EINZIGEN legitimen internen Einstiegspunkte
+// für ein chainManaged-Preset – ausschließlich für
+// pilot-agent-execution-chain-service.js bestimmt (siehe dessen
+// startStep()). Geben das modulprivate CHAIN_INTERNAL_BRIDGE_CAPABILITY-
+// Symbol an die jeweilige Funktion weiter; ein Aufrufer außerhalb dieser
+// Datei kann dieses Symbol nicht selbst erzeugen oder erraten (siehe
+// Kopfkommentar oben an der Konstante). Jeder normale Aufruf von
+// requestCodexRunApproval/startAgentExecutionRun mit einem chainManaged-
+// Preset bleibt weiterhin abgewiesen (assertChainManagedPresetHasInternalBridge).
+function requestCodexRunApprovalForChainInternal(db, options = {}) {
+  return requestCodexRunApproval(db, { ...options, __chainInternalBridge: CHAIN_INTERNAL_BRIDGE_CAPABILITY });
+}
+function startAgentExecutionRunForChainInternal(db, options = {}) {
+  return startAgentExecutionRun(db, { ...options, __chainInternalBridge: CHAIN_INTERNAL_BRIDGE_CAPABILITY });
+}
+
 module.exports = {
   PilotAgentExecutionError,
   PILOT_AGENT_TASK_PRESETS,
@@ -1042,6 +1278,13 @@ module.exports = {
   getAgentExecutionRunById,
   startAgentExecutionRun,
   requestCodexRunApproval,
+  // V7.7.0 Korrektur 2: ausschließlich für pilot-agent-execution-chain-service.js
+  // bestimmt – siehe Kopfkommentar oben. Kein normaler Aufrufer (HTTP-Route,
+  // direkter Serviceaufruf) kann ein chainManaged-Preset stattdessen über
+  // die beiden Funktionen darüber oder über requestCodexRunApproval/
+  // startAgentExecutionRun direkt starten (dort fest abgewiesen).
+  requestCodexRunApprovalForChainInternal,
+  startAgentExecutionRunForChainInternal,
   // Ausschließlich für gezielte Bindungs-/TTL-Unit-Tests exportiert (siehe
   // pilot-agent-execution-codex.test.js) – der produktive Aufrufpfad läuft
   // ausschließlich über startAgentExecutionRun oben.

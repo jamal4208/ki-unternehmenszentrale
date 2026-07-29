@@ -63,6 +63,16 @@
     codexApprovalToken: null,
     codexApprovalInFlight: false,
     codexApprovalError: null,
+    // Phase 8 ("vollständige echte Drei-Agenten-Kette als kontrollierter
+    // Nachtlauf"): exakt dasselbe Muster wie codexApprovalToken oben, nur
+    // je Kettenschritt (Schlüssel "<chainId>::<chainStep>"), da mehrere
+    // Ketten je Auftrag existieren können und jede Stufe eine eigene,
+    // kurzlebige Einzelfreigabe benötigt. Wird bei jedem Auftragswechsel
+    // und nach jedem Startversuch verworfen – kein dauerhaftes
+    // Wiederverwenden eines bereits ausgestellten Tokens.
+    chainStepApprovalTokens: {},
+    chainActionInFlight: false,
+    chainActionError: null,
   };
 
   function byId(id) {
@@ -183,6 +193,8 @@
     state.conflict = null;
     state.codexApprovalToken = null;
     state.codexApprovalError = null;
+    state.chainStepApprovalTokens = {};
+    state.chainActionError = null;
     render();
     return fetchJson("/api/pilot-work-order/orders/" + encodeURIComponent(orderId)).then(function (response) {
       if (state.selectedPilotOrderId !== orderId) return;
@@ -388,6 +400,83 @@
     if (!tokenUsed) return Promise.resolve();
     state.codexApprovalToken = null;
     return runOrderAction("start-agent-execution", { presetId: CODEX_AGENT_EXECUTION_PRESET_ID, approvalToken: tokenUsed });
+  }
+
+  // -----------------------------------------------------------------------
+  // Phase 8 ("vollständige echte Drei-Agenten-Kette als kontrollierter
+  // Nachtlauf"): drei getrennte Aktionen, exakt gespiegelt zum
+  // zweistufigen Codex-Ablauf oben (requestCodexApproval/
+  // runCodexAgentExecution), nur zusätzlich an chainId+chainStep gebunden.
+  // Bewusst KEIN "gesamte Kette starten"-Aufruf: jede Schaltfläche startet
+  // ausschließlich genau eine Stufe, niemals automatisch die nächste.
+  // -----------------------------------------------------------------------
+
+  function chainStepTokenKey(chainId, chainStep) {
+    return chainId + "::" + chainStep;
+  }
+
+  function prepareAgentChain() {
+    if (state.chainActionInFlight || !state.selectedPilotOrderId) return Promise.resolve();
+    var pilotOrderId = state.selectedPilotOrderId;
+    state.chainActionInFlight = true;
+    state.chainActionError = null;
+    render();
+    return postAction(pilotOrderId, "prepare-agent-chain", {}).then(function (response) {
+      state.chainActionInFlight = false;
+      if (state.selectedPilotOrderId !== pilotOrderId) return;
+      if (response.statusCode === 200 && response.data && response.data.ok) {
+        state.chainActionError = null;
+        return reloadSelectedOrder();
+      }
+      state.chainActionError = (response.data && response.data.message) || "Die Agentenkette konnte nicht vorbereitet werden.";
+      render();
+    });
+  }
+
+  function requestChainStepApproval(chainId, chainStep) {
+    if (state.chainActionInFlight || !state.selectedPilotOrderId) return Promise.resolve();
+    var pilotOrderId = state.selectedPilotOrderId;
+    var tokenKey = chainStepTokenKey(chainId, chainStep);
+    state.chainActionInFlight = true;
+    state.chainActionError = null;
+    render();
+    return postAction(pilotOrderId, "request-chain-step-approval", { chainId: chainId, chainStep: chainStep }).then(function (response) {
+      state.chainActionInFlight = false;
+      if (state.selectedPilotOrderId !== pilotOrderId) return;
+      if (response.statusCode === 200 && response.data && response.data.ok && response.data.approvalToken) {
+        state.chainStepApprovalTokens[tokenKey] = response.data.approvalToken;
+        state.chainActionError = null;
+        return reloadSelectedOrder();
+      }
+      delete state.chainStepApprovalTokens[tokenKey];
+      state.chainActionError = (response.data && response.data.message) || "Die Freigabe für diesen Kettenschritt konnte nicht angefordert werden.";
+      render();
+    });
+  }
+
+  // Der Freigabe-Token ist per Definition genau einmal verwendbar (siehe
+  // pilot-agent-execution-chain-service.js#consumeChainApprovalToken) –
+  // nach JEDEM Startversuch (Erfolg oder Fehlschlag) wird er lokal
+  // verworfen, niemals erneut angezeigt oder automatisch nachgefordert.
+  function startChainStep(chainId, chainStep) {
+    var tokenKey = chainStepTokenKey(chainId, chainStep);
+    var tokenUsed = state.chainStepApprovalTokens[tokenKey];
+    if (!tokenUsed || state.chainActionInFlight || !state.selectedPilotOrderId) return Promise.resolve();
+    var pilotOrderId = state.selectedPilotOrderId;
+    delete state.chainStepApprovalTokens[tokenKey];
+    state.chainActionInFlight = true;
+    state.chainActionError = null;
+    render();
+    return postAction(pilotOrderId, "start-chain-step", { chainId: chainId, chainStep: chainStep, approvalToken: tokenUsed }).then(function (response) {
+      state.chainActionInFlight = false;
+      if (state.selectedPilotOrderId !== pilotOrderId) return;
+      if (response.statusCode === 200 && response.data && response.data.ok) {
+        state.chainActionError = null;
+        return reloadSelectedOrder();
+      }
+      state.chainActionError = (response.data && response.data.message) || "Der Kettenschritt konnte nicht gestartet werden.";
+      render();
+    });
   }
 
   var PRIMARY_ACTIONS_WITHOUT_CONFIRMATION = ["mark-ready-for-approval", "start-execution", "submit-for-review", "reopen-from-returned", "unblock-order"];
@@ -612,6 +701,189 @@
   // ausschließlich lesenden Codex-Agentenlauf (siehe
   // pilot-agent-execution-service.js#PILOT_AGENT_TASK_PRESETS).
   var CODEX_AGENT_EXECUTION_PRESET_ID = "codex-analyze-pilot-structure";
+
+  // Phase 8 ("vollständige echte Drei-Agenten-Kette als kontrollierter
+  // Nachtlauf"): rein informative Anzeige-Labels, keine Fachlogik. Die
+  // Agentenidentitäten selbst stammen ausschließlich aus dem bestehenden
+  // Register (agent-registry.js) und werden hier nur benannt, niemals neu
+  // erfunden.
+  var CHAIN_AGENT_LABELS = {
+    "review-agent": "Review-/Recherche-Agent",
+    "documentation-agent": "Dokumentations-Agent",
+    "orchestrator-agent": "Orchestrator-/Projektmanager-Agent",
+  };
+  var CHAIN_STEP_TITLES = {
+    1: "Schritt 1 \u2013 Recherche/Analyse",
+    2: "Schritt 2 \u2013 Dokumentation",
+    3: "Schritt 3 \u2013 Projektmanager-Bewertung",
+  };
+  // V7.7.0 ("Reservierte Zustände dokumentieren"): CANCELLED ist Stand
+  // dieses Korrekturlaufs ausschließlich eine reservierte, von der Backend-
+  // Kettenlogik (pilot-agent-execution-chain-service.js) NIEMALS tatsächlich
+  // geschriebene Vokabel – es existiert kein Cancel-Endpunkt und keine
+  // Abbrechen-Schaltfläche in diesem UI. Das Label bleibt rein defensiv
+  // (falls der Wert einmal auftritt) und impliziert an keiner Stelle, dass
+  // Abbrechen bereits verfügbar ist.
+  var CHAIN_STATUS_LABELS = {
+    PREPARED: "Vorbereitet",
+    WAITING_FOR_RESEARCH_APPROVAL: "Wartet auf Freigabe: Recherche",
+    RESEARCH_RUNNING: "Recherche l\u00e4uft\u2026",
+    WAITING_FOR_DOCUMENTATION_APPROVAL: "Wartet auf Freigabe: Dokumentation",
+    DOCUMENTATION_RUNNING: "Dokumentation l\u00e4uft\u2026",
+    WAITING_FOR_PM_APPROVAL: "Wartet auf Freigabe: PM-Bewertung",
+    PM_RUNNING: "PM-Bewertung l\u00e4uft\u2026",
+    COMPLETED: "Abgeschlossen",
+    FAILED: "Fehlgeschlagen",
+    BLOCKED: "Blockiert",
+    CANCELLED: "Abgebrochen (reserviert, derzeit nicht ausl\u00f6sbar)",
+  };
+  var CHAIN_STEP_STATUS_LABELS = { PENDING: "Offen", RUNNING: "L\u00e4uft\u2026", SUCCEEDED: "Erfolgreich", FAILED: "Fehlgeschlagen" };
+  var CHAIN_APPROVAL_STATUS_LABELS = { NOT_REQUESTED: "keine Freigabe angefordert", REQUESTED: "Freigabe angefordert", GRANTED: "freigegeben und gestartet" };
+
+  function chainStatusLabel(status) {
+    return CHAIN_STATUS_LABELS[status] || escapeHtml(String(status || ""));
+  }
+
+  function findAgentExecutionRunById(overview, executionRunId) {
+    if (!executionRunId) return null;
+    var runs = overview.agentExecutionRuns || [];
+    for (var i = 0; i < runs.length; i += 1) {
+      if (runs[i].id === executionRunId) return runs[i];
+    }
+    return null;
+  }
+
+  // Eine Schaltfläche für genau eine Stufe. `kind` ist "approve" oder
+  // "start". Deaktiviert, sobald: falscher Kettenstatus, Vorgänger fehlt,
+  // Freigabe fehlt, Codex nicht verfügbar/authentifiziert, eine andere
+  // Stufe läuft, oder eine Aktion bereits läuft (siehe Auftrag Abschnitt
+  // "Cockpit"/"Buttons müssen deaktiviert sein").
+  function renderChainStepCard(overview, chain, step) {
+    var availability = overview.codexAvailability || { available: false, authenticated: false };
+    var isCurrentStep = chain.currentStep === step.stepNumber;
+    var chainIsOpen = ["PREPARED", "WAITING_FOR_RESEARCH_APPROVAL", "WAITING_FOR_DOCUMENTATION_APPROVAL", "WAITING_FOR_PM_APPROVAL"].indexOf(chain.chainStatus) !== -1;
+    var anyStepRunning = chain.steps.some(function (entry) {
+      return entry.stepStatus === "RUNNING";
+    });
+    var tokenKey = chainStepTokenKey(chain.id, step.stepNumber);
+    var hasToken = Boolean(state.chainStepApprovalTokens[tokenKey]);
+
+    var canRequestApproval =
+      isCurrentStep &&
+      chainIsOpen &&
+      !anyStepRunning &&
+      step.stepStatus === "PENDING" &&
+      step.approvalStatus === "NOT_REQUESTED" &&
+      availability.available &&
+      availability.authenticated &&
+      !state.chainActionInFlight;
+    var canStart =
+      isCurrentStep &&
+      chainIsOpen &&
+      !anyStepRunning &&
+      step.stepStatus === "PENDING" &&
+      step.approvalStatus === "REQUESTED" &&
+      hasToken &&
+      availability.available &&
+      availability.authenticated &&
+      !state.chainActionInFlight;
+
+    var html = '<li class="pilot-agent-chain-step">';
+    html += "<strong>" + escapeHtml(CHAIN_STEP_TITLES[step.stepNumber] || "Schritt " + step.stepNumber) + "</strong>";
+    html += "<br>Agent: " + escapeHtml(CHAIN_AGENT_LABELS[step.agentKey] || step.agentKey) + " (" + escapeHtml(step.agentKey) + ")";
+    html += "<br>Status: " + (CHAIN_STEP_STATUS_LABELS[step.stepStatus] || escapeHtml(step.stepStatus)) + " \u00b7 Freigabe: " + (CHAIN_APPROVAL_STATUS_LABELS[step.approvalStatus] || escapeHtml(step.approvalStatus));
+    if (step.executionRunId) {
+      html += "<br>executionRunId: " + escapeHtml(step.executionRunId);
+    }
+    if (step.chainedFromExecutionRunId) {
+      html += "<br>Vorg\u00e4nger-executionRunId: " + escapeHtml(step.chainedFromExecutionRunId);
+    }
+    html +=
+      ' <button type="button" data-action="request-chain-step-approval" data-chain-id="' +
+      escapeHtml(chain.id) +
+      '" data-chain-step="' +
+      step.stepNumber +
+      '"' +
+      (canRequestApproval ? "" : " disabled") +
+      ">Freigabe f\u00fcr diese Stufe anfordern</button>";
+    html +=
+      ' <button type="button" data-action="start-chain-step" data-chain-id="' +
+      escapeHtml(chain.id) +
+      '" data-chain-step="' +
+      step.stepNumber +
+      '"' +
+      (canStart ? "" : " disabled") +
+      ">Genau diese Stufe starten</button>";
+    if (hasToken) {
+      html += "<p>Freigabe liegt vor \u2013 gilt ausschlie\u00dflich f\u00fcr genau diese eine Stufe.</p>";
+    }
+    var run = findAgentExecutionRunById(overview, step.executionRunId);
+    if (step.stepStatus === "SUCCEEDED" && run) {
+      html +=
+        "<br>Tats\u00e4chlicher Runner: " +
+        escapeHtml(run.actualRunnerKind || "") +
+        " \u00b7 KI ausgef\u00fchrt: " +
+        (run.aiExecuted ? "ja" : "nein");
+      if (run.resultRawText) {
+        html += "<br>Ergebnis:<br><pre class=\"pilot-agent-execution-result\">" + escapeHtml(run.resultRawText) + "</pre>";
+      }
+    }
+    if (step.stepStatus === "FAILED") {
+      html +=
+        '<br><span class="pilot-work-order-action-error">Dieser Kettenschritt ist fehlgeschlagen' +
+        (step.failureReasonCode ? " (" + escapeHtml(step.failureReasonCode) + ")" : "") +
+        ". Die Kette wird dadurch nicht automatisch fortgesetzt.</span>";
+    }
+    html += "</li>";
+    return html;
+  }
+
+  function renderAgentChainCard(overview, chain) {
+    var html = '<div class="pilot-agent-chain-card">';
+    html += "<p><strong>Kette " + escapeHtml(chain.id) + "</strong> \u2013 " + chainStatusLabel(chain.chainStatus) + " (Revision " + escapeHtml(String(chain.revision)) + ")</p>";
+    if (chain.chainStatus === "BLOCKED" && chain.blockReason) {
+      html += '<p class="pilot-work-order-action-error">Blockiert: ' + escapeHtml(chain.blockReason) + ". Kein automatischer weiterer Schritt m\u00f6glich.</p>";
+    }
+    if (chain.chainStatus === "FAILED") {
+      html += '<p class="pilot-work-order-action-error">Diese Kette ist fehlgeschlagen und wird nicht automatisch fortgesetzt.</p>';
+    }
+    html += "<ol>" + chain.steps.map(function (step) { return renderChainStepCard(overview, chain, step); }).join("") + "</ol>";
+    if (chain.chainStatus === "COMPLETED") {
+      var pmStep = chain.steps[2];
+      var pmRun = pmStep ? findAgentExecutionRunById(overview, pmStep.executionRunId) : null;
+      if (pmRun && pmRun.resultRawText) {
+        html += "<h5>PM-Gesamturteil</h5><pre class=\"pilot-agent-execution-result\">" + escapeHtml(pmRun.resultRawText) + "</pre>";
+      }
+    }
+    html += "</div>";
+    return html;
+  }
+
+  function renderAgentChainSection(overview) {
+    var chains = overview.agentChains || [];
+    var html = "<h4>Drei-Agenten-Kette (Recherche \u2192 Dokumentation \u2192 PM-Bewertung)</h4>";
+    html +=
+      "<p>Jede Stufe verwendet einen echten, isolierten Codex-Agentenlauf mit eigener executionRunId und ben\u00f6tigt eine eigene, " +
+      "kurzlebige Einzelfreigabe. Ein erfolgreicher Schritt startet den n\u00e4chsten niemals automatisch.</p>";
+    if (overview.status !== "IN_EXECUTION") {
+      html += "<p>Eine Agentenkette kann nur w\u00e4hrend \u201eIn Ausf\u00fchrung\u201c vorbereitet werden.</p>";
+      return html;
+    }
+    var canPrepare = !state.chainActionInFlight;
+    html +=
+      '<button type="button" data-action="prepare-agent-chain"' +
+      (canPrepare ? "" : " disabled") +
+      ">Neue Agentenkette vorbereiten (Recherche/Dokumentation/PM)</button>";
+    if (state.chainActionError) {
+      html += '<p class="pilot-work-order-action-error">' + escapeHtml(state.chainActionError) + "</p>";
+    }
+    if (chains.length === 0) {
+      html += "<p>Noch keine Agentenkette vorbereitet.</p>";
+    } else {
+      html += chains.map(function (chain) { return renderAgentChainCard(overview, chain); }).join("");
+    }
+    return html;
+  }
 
   function renderAgentExecutionStatusLabel(status) {
     if (status === "RUNNING") return "L\u00e4uft\u2026";
@@ -873,6 +1145,7 @@
           renderTeam(state.overview) +
           renderOrderDetails(state.overview) +
           renderAgentExecutionSection(state.overview) +
+          renderAgentChainSection(state.overview) +
           renderHandoffs(state.overview) +
           renderAuditTrail(state.overview) +
           renderMeta(state.overview);
@@ -920,6 +1193,12 @@
         requestCodexApproval();
       } else if (action === "start-codex-agent-execution") {
         runCodexAgentExecution();
+      } else if (action === "prepare-agent-chain") {
+        prepareAgentChain();
+      } else if (action === "request-chain-step-approval") {
+        requestChainStepApproval(target.getAttribute("data-chain-id"), Number(target.getAttribute("data-chain-step")));
+      } else if (action === "start-chain-step") {
+        startChainStep(target.getAttribute("data-chain-id"), Number(target.getAttribute("data-chain-step")));
       } else if (isKnownPrimaryAction(action)) {
         runOrderAction(action, {});
       }
@@ -962,6 +1241,9 @@
       runOrderAction: runOrderAction,
       requestCodexApproval: requestCodexApproval,
       runCodexAgentExecution: runCodexAgentExecution,
+      prepareAgentChain: prepareAgentChain,
+      requestChainStepApproval: requestChainStepApproval,
+      startChainStep: startChainStep,
       render: render,
       escapeHtml: escapeHtml,
       CODEX_AGENT_EXECUTION_PRESET_ID: CODEX_AGENT_EXECUTION_PRESET_ID,

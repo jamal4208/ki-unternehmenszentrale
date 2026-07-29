@@ -15,6 +15,14 @@
 
 const service = require("./pilot-work-order-service");
 const agentExecutionService = require("./pilot-agent-execution-service");
+// Phase 8 ("vollständige echte Drei-Agenten-Kette als kontrollierter
+// Nachtlauf"): bewusst nur in DIESEM Routen-Modul verdrahtet, niemals in
+// pilot-work-order-service.js selbst – dieser Service wird umgekehrt von
+// pilot-agent-execution-chain-service.js (über pilot-agent-execution-service.js)
+// verwendet; ein Require in die Gegenrichtung würde einen Zirkelbezug
+// erzeugen. Das Routen-Modul steht oberhalb aller drei Services und kann
+// daher gefahrlos beide zusammenführen.
+const chainService = require("./pilot-agent-execution-chain-service");
 
 const PILOT_API_MAX_BODY_BYTES = 8 * 1024;
 
@@ -92,6 +100,14 @@ const ERROR_DETAIL_FIELDS = Object.freeze([
   "currentRevision",
   "expectedStatus",
   "currentStatus",
+  // Phase 8: dieselben, bereits geprüften Grundsätze (keine Prompttexte,
+  // keine Ergebnisse, keine Tokens) – chainId/chainStep/chainStatus/
+  // reasonCode sind reine, nicht-sensible Identifikatoren/Statuscodes.
+  "chainId",
+  "chainStep",
+  "currentStep",
+  "chainStatus",
+  "reasonCode",
 ]);
 
 function genericErrorPayloadWithDetails(message, details) {
@@ -110,7 +126,12 @@ function sendServiceError(res, sendJson, error) {
   // demselben Muster (statusCode + optionale, whitelist-geprüfte details) wie
   // service.js#PilotWorkOrderError – gleiche Behandlung, keine zweite
   // Fehlerabbildung nötig.
-  if (error && (error.name === "PilotWorkOrderError" || error.name === "PilotAgentExecutionError")) {
+  if (
+    error &&
+    (error.name === "PilotWorkOrderError" ||
+      error.name === "PilotAgentExecutionError" ||
+      error.name === "PilotAgentExecutionChainError")
+  ) {
     sendJson(res, error.statusCode, genericErrorPayloadWithDetails(error.message, error.details));
     return;
   }
@@ -131,11 +152,22 @@ function assertValidExpectedRevision(body) {
   }
 }
 
+// Phase 8: reichert eine bestehende Overview-Antwort ausschließlich lesend
+// um `agentChains` an (jede bisher für diesen Auftrag vorbereitete Kette,
+// inklusive aller drei Schritte). Verändert niemals die bestehende
+// Overview-Struktur selbst – rein additiv, byteidentisch für jeden
+// Aufrufer, der das neue Feld ignoriert.
+function withAgentChains(db, overview) {
+  if (!overview || !overview.order || !overview.order.id) return overview;
+  return { ...overview, agentChains: chainService.listChainsForOrder(db, overview.order.id) };
+}
+
 function handlePilotOverview(res, deps) {
   const { getDb, sendJson } = deps;
   try {
-    const overview = service.getPilotOverview(getDb());
-    sendJson(res, 200, { ok: true, overview });
+    const db = getDb();
+    const overview = service.getPilotOverview(db);
+    sendJson(res, 200, { ok: true, overview: withAgentChains(db, overview) });
   } catch (error) {
     sendServiceError(res, sendJson, error);
   }
@@ -188,7 +220,7 @@ async function handlePilotOrderCreate(res, context, deps) {
     const db = getDb();
     const actorUserId = actorUserIdFromContext(context);
     const overview = service.createPilotOrder(db, body, { now: new Date(), actorUserId });
-    sendJson(res, 200, { ok: true, overview });
+    sendJson(res, 200, { ok: true, overview: withAgentChains(db, overview) });
   } catch (error) {
     sendServiceError(res, sendJson, error);
   }
@@ -197,8 +229,9 @@ async function handlePilotOrderCreate(res, context, deps) {
 function handlePilotOrderDetail(res, deps, orderId) {
   const { getDb, sendJson } = deps;
   try {
-    const overview = service.getPilotOrderOverview(getDb(), orderId);
-    sendJson(res, 200, { ok: true, overview });
+    const db = getDb();
+    const overview = service.getPilotOrderOverview(db, orderId);
+    sendJson(res, 200, { ok: true, overview: withAgentChains(db, overview) });
   } catch (error) {
     sendServiceError(res, sendJson, error);
   }
@@ -418,6 +451,57 @@ const PILOT_ACTIONS = Object.freeze({
         now: meta.now,
         actorUserId: meta.actorUserId,
       }),
+  },
+  // ---------------------------------------------------------------------
+  // Phase 8 ("vollständige echte Drei-Agenten-Kette als kontrollierter
+  // Nachtlauf"): genau drei neue, minimale Aktionen – kein generischer
+  // "gesamte Kette starten"-Endpunkt. Jede Aktion bleibt strikt an EINE
+  // Kette und EINEN Schritt gebunden (siehe
+  // pilot-agent-execution-chain-service.js). `pilotOrderId` kommt
+  // ausschließlich aus dem URL-Pfadsegment (meta), niemals aus dem Body;
+  // die Serviceschicht prüft zusätzlich, dass die angegebene `chainId`
+  // tatsächlich zu diesem Auftrag gehört (expectedPilotOrderId).
+  // ---------------------------------------------------------------------
+  "prepare-agent-chain": {
+    fields: [],
+    run: async (db, body, meta) => ({
+      chain: chainService.prepareChain(db, {
+        pilotOrderId: meta.pilotOrderId,
+        actorUserId: meta.actorUserId,
+        now: meta.now,
+      }),
+      overview: withAgentChains(db, service.getPilotOverview(db, { pilotOrderId: meta.pilotOrderId })),
+    }),
+  },
+  "request-chain-step-approval": {
+    fields: ["chainId", "chainStep"],
+    run: async (db, body, meta) => {
+      const result = chainService.requestStepApproval(db, {
+        chainId: body.chainId,
+        chainStep: body.chainStep,
+        actorUserId: meta.actorUserId,
+        now: meta.now,
+        expectedPilotOrderId: meta.pilotOrderId,
+      });
+      return { approvalToken: result.approvalToken, expiresInMs: result.expiresInMs, chain: result.chain };
+    },
+  },
+  "start-chain-step": {
+    fields: ["chainId", "chainStep", "approvalToken"],
+    run: async (db, body, meta) => {
+      const chain = await chainService.startStep(db, {
+        chainId: body.chainId,
+        chainStep: body.chainStep,
+        approvalToken: body.approvalToken,
+        actorUserId: meta.actorUserId,
+        now: meta.now,
+        expectedPilotOrderId: meta.pilotOrderId,
+      });
+      return {
+        chain,
+        overview: withAgentChains(db, service.getPilotOverview(db, { pilotOrderId: meta.pilotOrderId })),
+      };
+    },
   },
 });
 

@@ -1109,6 +1109,67 @@ const AUDIT_EVENT_TYPES_AT_MIGRATION_22 = Object.freeze([
   "PILOT_AGENT_EXECUTION_CODEX_START_BLOCKED",
 ]);
 
+// Phase 8 ("vollständige, kontrollierte Drei-Agenten-Kette"): Status der
+// gesamten Kette (pilot_agent_execution_chains.chainStatus). Eine Kette
+// bindet exakt drei bereits bestehende Pilotrollen (PILOT_ROLE_VALUES) an
+// drei getrennte, echte Agentenläufe (jeweils ein eigener Datensatz in der
+// bereits bestehenden pilot_agent_execution_runs-Tabelle, referenziert über
+// pilot_agent_execution_chain_steps.executionRunId – KEINE Verdopplung des
+// Ergebnisses). *_SUCCEEDED-Werte sind bewusst Teil der Aufzählung
+// (Nachvollziehbarkeit/Audit), werden als tatsächlich GESPEICHERTER
+// chainStatus-Wert aber übersprungen: ein erfolgreicher Schritt bereitet
+// ausschließlich den nächsten vor und springt direkt auf den zugehörigen
+// WAITING_FOR_*_APPROVAL-Wert (siehe pilot-agent-execution-chain-service.js) –
+// niemals eine automatische Freigabe oder einen automatischen Start des
+// nächsten Schritts. CANCELLED ist Stand V7.7.0 ausschließlich eine
+// RESERVIERTE, in dieser CHECK-Aufzählung bereits zulässige Vokabel für eine
+// künftige, bewusste Jamal-Abbruchentscheidung (gedacht aus PREPARED oder
+// einem WAITING_FOR_*_APPROVAL-Zustand heraus, niemals aus einem laufenden
+// technischen Schritt) – pilot-agent-execution-chain-service.js schreibt
+// diesen Wert AKTUELL an KEINER Stelle tatsächlich (kein Cancel-Endpunkt,
+// keine Cancel-Funktion implementiert). Ein laufender technischer Schritt
+// bleibt weiterhin ausschließlich FAILED/BLOCKED vorbehalten.
+const PILOT_AGENT_EXECUTION_CHAIN_STATUS_VALUES = Object.freeze([
+  "PREPARED",
+  "WAITING_FOR_RESEARCH_APPROVAL",
+  "RESEARCH_RUNNING",
+  "RESEARCH_SUCCEEDED",
+  "WAITING_FOR_DOCUMENTATION_APPROVAL",
+  "DOCUMENTATION_RUNNING",
+  "DOCUMENTATION_SUCCEEDED",
+  "WAITING_FOR_PM_APPROVAL",
+  "PM_RUNNING",
+  "COMPLETED",
+  "FAILED",
+  "BLOCKED",
+  "CANCELLED",
+]);
+
+// Ergebnis EINES einzelnen Kettenschritts (pilot_agent_execution_chain_steps.outcome)
+// – bewusst nur zwei terminale Werte plus NULL ("noch kein Ergebnis").
+// Getrennt vom chainStatus oben: chainStatus beschreibt die GESAMTE Kette,
+// outcome ausschließlich den EINEN Schritt, dessen Zeile das trägt.
+const PILOT_AGENT_EXECUTION_CHAIN_STEP_OUTCOME_VALUES = Object.freeze(["SUCCEEDED", "FAILED"]);
+
+// Acht zusätzliche Ereignistypen, zusätzlich zur vollständigen, bereits
+// bestehenden AUDIT_EVENT_TYPES_AT_MIGRATION_22-Menge oben. auth-audit.js#
+// EVENT_TYPES muss exakt dieser Aufzählung entsprechen. Deckt ausschließlich
+// die Kettenorchestrierung selbst ab (Vorbereitung, Freigabeanforderung je
+// Stufe, Start je Stufe, Erfolg/Fehlschlag je Stufe, Übergang in die
+// nächste Warteposition, Gesamtabschluss, Blockierung) – niemals einen
+// Prompttext, niemals ein Ergebnis, niemals einen Freigabe-Token.
+const AUDIT_EVENT_TYPES_AT_MIGRATION_23 = Object.freeze([
+  ...AUDIT_EVENT_TYPES_AT_MIGRATION_22,
+  "CHAIN_PREPARED",
+  "CHAIN_STEP_APPROVAL_REQUESTED",
+  "CHAIN_STEP_STARTED",
+  "CHAIN_STEP_SUCCEEDED",
+  "CHAIN_STEP_FAILED",
+  "CHAIN_WAITING_FOR_NEXT_APPROVAL",
+  "CHAIN_COMPLETED",
+  "CHAIN_BLOCKED",
+]);
+
 function sqlEnum(values) {
   return values.map((value) => `'${value}'`).join(",");
 }
@@ -2837,6 +2898,160 @@ const MIGRATIONS = Object.freeze([
       CREATE INDEX idx_auth_audit_events_timestamp ON auth_audit_events(timestamp);
     `,
   }),
+  // Phase 8 ("vollständige, kontrollierte Drei-Agenten-Kette als
+  // kontrollierter Nachtlauf") – rein additiv gegenüber Migration 22: zwei
+  // NEUE, separate Tabellen (pilot_agent_execution_chains und
+  // pilot_agent_execution_chain_steps) plus die erneute, etablierte
+  // Audit-Ereignistyp-Erweiterung. Migrationen 1–22 bleiben dabei
+  // byteidentisch unverändert; die bereits bestehende
+  // pilot_agent_execution_runs-Tabelle (Phase 6/7) wird durch diese
+  // Migration NICHT verändert – jeder bereits bestehende Einzellauf (u. a.
+  // der Phase-7-Referenzlauf pilot-agent-run-938928d0-…) bleibt unverändert
+  // lesbar und unverändert ausführbar.
+  //
+  // Architekturentscheidung (siehe Abschlussbericht Abschnitt 2): zwei
+  // separate, kleine Tabellen statt zusätzlicher Spalten direkt auf
+  // pilot_agent_execution_runs. Begründung: eine Kette ist ein EIGENES
+  // Konzept mit eigenem Lebenszyklus (chainId, chainStatus, currentStep,
+  // revision), das UNABHÄNGIG von einem einzelnen Lauf existiert – z. B.
+  // bevor überhaupt ein erster Lauf gestartet wurde (Status PREPARED /
+  // WAITING_FOR_RESEARCH_APPROVAL). Ein einzelner Lauf (Zeile in
+  // pilot_agent_execution_runs) kann dadurch weiterhin komplett OHNE Kette
+  // existieren (Phase 6/7-Einzelaufträge) – die Zuordnung läuft
+  // ausschließlich über die referenzierende Fremdspalte executionRunId auf
+  // pilot_agent_execution_chain_steps, niemals umgekehrt. Kein Ergebnis wird
+  // dadurch verdoppelt: resultRawText/resultSummaryJson bleiben
+  // ausschließlich auf pilot_agent_execution_runs gespeichert; ein
+  // Kettenschritt referenziert sein Ergebnis ausschließlich über
+  // executionRunId und hält höchstens einen Digest
+  // (predecessorResultDigest) des tatsächlich als Eingabe verwendeten
+  // Vorgängerergebnisses zur nachträglichen Manipulationserkennung.
+  //
+  // pilot_agent_execution_chains: genau eine Zeile je Kette.
+  // - chainStatus trägt AUSSCHLIESSLICH einen der oben in
+  //   PILOT_AGENT_EXECUTION_CHAIN_STATUS_VALUES aufgezählten Werte (die
+  //   *_SUCCEEDED-Zwischenwerte werden dabei bewusst NICHT als dauerhaft
+  //   gespeicherter Zustand verwendet, siehe Kommentar oben an der
+  //   Konstante) – ein CHECK-Constraint verhindert einen ungültigen Wert
+  //   bereits auf Datenbankebene.
+  // - revision ist ein einfacher, monoton steigender Zähler (KEINE eigene
+  //   Nebenläufigkeitsinfrastruktur): jede schreibende Kettenoperation
+  //   (Freigabeanforderung, Start, Erfolg, Fehlschlag, Blockierung) erhöht
+  //   revision und jede schreibende Operation bindet sich per WHERE-Klausel
+  //   an die zuvor gelesene revision – ein paralleler zweiter Schreiber
+  //   verliert dadurch immer (changes === 0), ohne einen zusätzlichen Lock
+  //   oder Worker-Prozess zu benötigen.
+  // - waitingForJamal ist redundant zu chainStatus (jeder
+  //   WAITING_FOR_*_APPROVAL-Wert bedeutet automatisch waitingForJamal = 1),
+  //   aber als eigene, explizit abfragbare Spalte hinterlegt, weil die
+  //   Vorgabe dies ausdrücklich als eigenständig darzustellenden Fakt
+  //   verlangt ("ob die Kette auf Jamal wartet").
+  //
+  // pilot_agent_execution_chain_steps: genau drei Zeilen je Kette (Schritt
+  // 1–3), von der vorbereitenden Kettenerstellung an bereits vollständig
+  // angelegt (stepStatus = 'PENDING', executionRunId = NULL) – damit ist ab
+  // dem ersten Moment "wie viele Stufen gibt es und mit welcher
+  // Agentenidentität" bekannt, ohne dass bereits ein Lauf gestartet wurde.
+  // - agentKey ist die kanonische, bereits bestehende Agentenidentität aus
+  //   agent-registry.js (keine neue Agentenidentität, siehe
+  //   pilot-agent-execution-chain-service.js).
+  // - executionRunId bleibt NULL, bis der jeweilige Lauf tatsächlich
+  //   gestartet wurde; UNIQUE (chainId, stepNumber) verhindert, dass eine
+  //   Kette denselben Schritt doppelt anlegt.
+  // - chainedFromExecutionRunId verweist auf die executionRunId des
+  //   VORGÄNGERSCHRITTS (NULL bei Schritt 1) – getrennt von executionRunId,
+  //   damit die Vorgänger-/Nachfolgerbeziehung auch dann eindeutig bleibt,
+  //   wenn ein Schritt selbst noch nicht gestartet wurde.
+  // - approvalStatus ist bewusst von stepStatus getrennt ("Freigabestatus
+  //   jeder Stufe" versus "Status jeder Stufe" laut Vorgabe): ein Schritt
+  //   kann eine angeforderte Freigabe (REQUESTED) haben, ohne dass der Lauf
+  //   selbst schon begonnen hat; nach Start ist approvalStatus stets
+  //   GRANTED (der zugehörige Freigabetoken wurde einmalig verbraucht,
+  //   siehe pilot-agent-execution-chain-service.js).
+  Object.freeze({
+    version: 23,
+    name: "add_pilot_agent_execution_chains_and_widen_audit_event_types_v16",
+    sql: `
+      CREATE TABLE pilot_agent_execution_chains (
+        id TEXT PRIMARY KEY,
+        pilotOrderId TEXT NOT NULL REFERENCES pilot_work_orders(id) ON DELETE CASCADE,
+        chainStatus TEXT NOT NULL CHECK (chainStatus IN (${sqlEnum(PILOT_AGENT_EXECUTION_CHAIN_STATUS_VALUES)})),
+        currentStep INTEGER NOT NULL DEFAULT 1 CHECK (currentStep IN (1, 2, 3)),
+        revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+        waitingForJamal INTEGER NOT NULL DEFAULT 0 CHECK (waitingForJamal IN (0, 1)),
+        blockReason TEXT CHECK (blockReason IS NULL OR length(blockReason) <= 500),
+        createdByUserId TEXT CHECK (createdByUserId IS NULL OR length(createdByUserId) <= 100),
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        completedAt TEXT
+      );
+
+      CREATE INDEX idx_pilot_agent_execution_chains_pilot_order
+        ON pilot_agent_execution_chains(pilotOrderId);
+
+      CREATE TABLE pilot_agent_execution_chain_steps (
+        id TEXT PRIMARY KEY,
+        chainId TEXT NOT NULL REFERENCES pilot_agent_execution_chains(id) ON DELETE CASCADE,
+        stepNumber INTEGER NOT NULL CHECK (stepNumber IN (1, 2, 3)),
+        agentKey TEXT NOT NULL CHECK (length(agentKey) BETWEEN 1 AND 100),
+        presetId TEXT CHECK (presetId IS NULL OR length(presetId) <= 100),
+        stepStatus TEXT NOT NULL DEFAULT 'PENDING'
+          CHECK (stepStatus IN ('PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED')),
+        approvalStatus TEXT NOT NULL DEFAULT 'NOT_REQUESTED'
+          CHECK (approvalStatus IN ('NOT_REQUESTED', 'REQUESTED', 'GRANTED')),
+        executionRunId TEXT REFERENCES pilot_agent_execution_runs(id),
+        chainedFromExecutionRunId TEXT REFERENCES pilot_agent_execution_runs(id),
+        -- predecessorResultDigest: Digest des Vorgängerergebnisses, wie es
+        -- dieser Schritt beim eigenen Start tatsächlich als Eingabe erhalten
+        -- hat (NULL bei Schritt 1). resultDigest: Digest des EIGENEN,
+        -- tatsächlich persistierten Ergebnisses dieses Schritts, gesetzt bei
+        -- eigenem Erfolg -- Referenzwert für den Nachfolger beim eigenen
+        -- Start (Erkennung nachträglicher Manipulation, siehe
+        -- pilot-agent-execution-chain-service.js).
+        predecessorResultDigest TEXT CHECK (predecessorResultDigest IS NULL OR length(predecessorResultDigest) <= 128),
+        resultDigest TEXT CHECK (resultDigest IS NULL OR length(resultDigest) <= 128),
+        failureReasonCode TEXT CHECK (failureReasonCode IS NULL OR length(failureReasonCode) <= 100),
+        approvalRequestedAt TEXT,
+        startedAt TEXT,
+        completedAt TEXT,
+        createdAt TEXT NOT NULL,
+        UNIQUE (chainId, stepNumber)
+      );
+
+      CREATE INDEX idx_pilot_agent_execution_chain_steps_chain
+        ON pilot_agent_execution_chain_steps(chainId);
+
+      CREATE TABLE auth_audit_events_v16 (
+        eventId TEXT PRIMARY KEY,
+        actorUserId TEXT,
+        tenantId TEXT,
+        eventType TEXT NOT NULL CHECK (eventType IN (${sqlEnum(AUDIT_EVENT_TYPES_AT_MIGRATION_23)})),
+        result TEXT NOT NULL CHECK (result IN (${sqlEnum(AUDIT_RESULT_VALUES)})),
+        timestamp TEXT NOT NULL,
+        metadata TEXT
+      );
+
+      INSERT INTO auth_audit_events_v16 (eventId, actorUserId, tenantId, eventType, result, timestamp, metadata)
+      SELECT eventId, actorUserId, tenantId, eventType, result, timestamp, metadata FROM auth_audit_events;
+
+      DROP TABLE auth_audit_events;
+      ALTER TABLE auth_audit_events_v16 RENAME TO auth_audit_events;
+
+      CREATE TRIGGER trg_auth_audit_events_no_update
+      BEFORE UPDATE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: UPDATE ist nicht erlaubt.');
+      END;
+
+      CREATE TRIGGER trg_auth_audit_events_no_delete
+      BEFORE DELETE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: DELETE ist nicht erlaubt.');
+      END;
+
+      CREATE INDEX idx_auth_audit_events_timestamp ON auth_audit_events(timestamp);
+    `,
+  }),
 ]);
 
 function ensureMigrationsTable(db) {
@@ -2960,6 +3175,10 @@ module.exports = {
   PILOT_AGENT_RUNNER_KIND_VALUES,
   PILOT_AGENT_APPROVAL_STATUS_VALUES,
   AUDIT_EVENT_TYPES_AT_MIGRATION_22,
+  // Phase 8 – vollständige, kontrollierte Drei-Agenten-Kette
+  PILOT_AGENT_EXECUTION_CHAIN_STATUS_VALUES,
+  PILOT_AGENT_EXECUTION_CHAIN_STEP_OUTCOME_VALUES,
+  AUDIT_EVENT_TYPES_AT_MIGRATION_23,
   MIGRATIONS,
   ensureMigrationsTable,
   getAppliedVersions,
