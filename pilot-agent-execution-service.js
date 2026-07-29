@@ -35,8 +35,26 @@ const crypto = require("crypto");
 
 const authDb = require("./auth-db");
 const authAudit = require("./auth-audit");
+const authDbMigrations = require("./auth-db-migrations");
 const pilotWorkOrderService = require("./pilot-work-order-service");
+const agentRegistry = require("./agent-registry");
 const runner = require("./pilot-agent-runner");
+const codexRunner = require("./pilot-agent-codex-runner");
+const codexAdapter = require("./execution-codex-adapter");
+
+// Phase 7 ("erste echte KI-Agentenausführung über die bestehende
+// Codex-Anbindung"): die beiden einzigen erlaubten Runner-Arten. Bewusst
+// direkt aus der Migration abgeleitet (auth-db-migrations.js#
+// PILOT_AGENT_RUNNER_KIND_VALUES) statt als eigene, potenziell driftende
+// Literale – ein Abweichen der beiden Listen wäre sofort ein Laufzeitfehler
+// (Zugriff auf ein undefined-Element unten), nicht erst ein stiller Bug.
+const RUNNER_KINDS = Object.freeze({
+  LOCAL: authDbMigrations.PILOT_AGENT_RUNNER_KIND_VALUES[0],
+  CODEX: authDbMigrations.PILOT_AGENT_RUNNER_KIND_VALUES[1],
+});
+if (RUNNER_KINDS.LOCAL !== "LOCAL_DETERMINISTIC_READ_ONLY" || RUNNER_KINDS.CODEX !== "CODEX_READ_ONLY") {
+  throw new Error("pilot-agent-execution-service: PILOT_AGENT_RUNNER_KIND_VALUES weicht von der erwarteten Reihenfolge ab.");
+}
 
 class PilotAgentExecutionError extends Error {
   constructor(message, statusCode = 400, details = null) {
@@ -76,6 +94,7 @@ const REPO_ROOT = __dirname;
 const PILOT_AGENT_TASK_PRESETS = Object.freeze({
   "analyze-pilot-structure": Object.freeze({
     presetId: "analyze-pilot-structure",
+    runnerKind: RUNNER_KINDS.LOCAL,
     pilotRole: "RECHERCHE_ANALYSE",
     // Rollenübergabe-Richtung nach erfolgreichem Lauf: entspricht exakt dem
     // bereits bestehenden, etablierten Muster "Recherche/Analyse liefert an
@@ -101,6 +120,60 @@ const PILOT_AGENT_TASK_PRESETS = Object.freeze({
       "Prozesse außerhalb des Projekts verändern",
     ]),
     expectedResultFormat: "Titel, drei belegbare Beobachtungen, eine Empfehlung – strukturierter Text.",
+  }),
+  // Phase 7 ("erste echte KI-Agentenausführung über die bestehende
+  // Codex-Anbindung") – ausschließlich lesender Codex-Analyseauftrag,
+  // identisch zum "Kontrollierten Referenzlauf" des Phase-7-Auftrags.
+  // Bewusst ein EIGENES, striktes Preset statt einer bloßen Runner-Variante
+  // des obigen lokalen Presets:
+  //   - engere allowedFiles (genau die vier im Auftrag genannten Dateien),
+  //   - agentKeyOverride "review-agent" statt der Standardzuordnung
+  //     RECHERCHE_ANALYSE -> product-agent (siehe resolveAgentForPreset
+  //     unten). "review-agent" ("Führt read-only Qualitätsreview durch",
+  //     agent-registry.js) ist die fachlich am besten passende bereits
+  //     bestehende Identität für einen neutralen, ausschließlich lesenden
+  //     Analyseauftrag über eine reale KI – deutlich passender als
+  //     project-status-agent (verdichtet Fortschritt, kein Review) oder der
+  //     bereits für den lokalen Runner verwendete product-agent (sonst
+  //     bekäme dieselbe Rolle zwei technisch unterschiedliche Runner ohne
+  //     erkennbaren Unterschied in der Kennzeichnung). pilotRole bleibt
+  //     bewusst RECHERCHE_ANALYSE (siehe handoffFromPilotRole/
+  //     handoffToPilotRole unten) – ausschließlich für die
+  //     Handoff-Semantik/-Richtung, NICHT für die Agentenidentität im
+  //     Codex-Prompt. Keine neue Pilotrolle, keine Registry-Änderung.
+  "codex-analyze-pilot-structure": Object.freeze({
+    presetId: "codex-analyze-pilot-structure",
+    runnerKind: RUNNER_KINDS.CODEX,
+    pilotRole: "RECHERCHE_ANALYSE",
+    agentKeyOverride: "review-agent",
+    handoffFromPilotRole: "RECHERCHE_ANALYSE",
+    handoffToPilotRole: "DOKUMENTATION",
+    title: "Phase-7-Pilotstruktur semantisch prüfen",
+    instructions:
+      "Erstelle eine kurze, inhaltliche Analyse der technischen Agentenlauf-Infrastruktur mit drei konkreten " +
+      "Beobachtungen, zwei Risiken und einer priorisierten Empfehlung. Ausschließlich lesender Zugriff auf die " +
+      "unten genannten, bereits vorhandenen Projektdateien.",
+    allowedFiles: Object.freeze([
+      "pilot-agent-execution-service.js",
+      "pilot-agent-runner.js",
+      "execution-codex-adapter.js",
+      "auth-db-migrations.js",
+    ]),
+    allowedTools: Object.freeze(["Lesen (read-only Workspace-Zugriff)", "Strukturierte Textantwort über Codex"]),
+    forbiddenActions: Object.freeze([
+      "Dateien ändern",
+      "Git-Befehle mit Schreibwirkung",
+      "Commit",
+      "Push",
+      "Deployment",
+      "Diff erzeugen oder anwenden",
+      "externe Netzwerkanfragen außer dem einen freigegebenen Codex-Roundtrip",
+      "Health-Projekt lesen oder verändern",
+      "Secrets oder Zugangsdaten ausgeben",
+      "neue Abhängigkeiten installieren",
+      "weitere, nicht genannte Dateien lesen",
+    ]),
+    expectedResultFormat: "Titel, drei konkrete Beobachtungen, zwei Risiken, eine priorisierte Empfehlung – strukturierter Text.",
   }),
 });
 
@@ -132,6 +205,178 @@ function resolveAgentForRole(pilotRole) {
     throw new Error(`pilot-agent-execution-service: unbekannte Pilotrolle "${pilotRole}".`);
   }
   return agent;
+}
+
+// Phase 7 (Schwerpunkt 4, "Agentenidentität gegen das bestehende
+// 25-Agenten-Register prüfen"): löst die für einen Lauf tatsächlich
+// verantwortlich gezeichnete Agentenidentität auf. Für den lokalen
+// deterministischen Runner unverändert die bestehende
+// RECHERCHE_ANALYSE -> product-agent-Zuordnung (resolveAgentForRole). Für
+// ein Preset mit explizitem agentKeyOverride (ausschließlich das
+// Codex-Preset) wird STATTDESSEN diese Identität verwendet – ausschließlich
+// wenn sie tatsächlich im kanonischen 25-Agenten-Register existiert. Eine
+// unbekannte agentKeyOverride-ID wäre ein Programmierfehler im Preset
+// selbst (nicht behebbar durch einen Aufrufer) und wirft deshalb hart.
+function resolveAgentForPreset(preset) {
+  if (preset.agentKeyOverride) {
+    if (!agentRegistry.hasAgentId(preset.agentKeyOverride)) {
+      throw new Error(
+        `pilot-agent-execution-service: agentKeyOverride "${preset.agentKeyOverride}" ist keine bekannte Agenten-ID im kanonischen Register.`,
+      );
+    }
+    const entry = agentRegistry.getAgentById(preset.agentKeyOverride);
+    return { agentKey: entry.id, technicalName: entry.name, technicalRole: entry.role };
+  }
+  return resolveAgentForRole(preset.pilotRole);
+}
+
+function pilotRoleLabelFor(pilotRole) {
+  const agent = pilotWorkOrderService.PILOT_TEAM.find((entry) => entry.pilotRole === pilotRole);
+  return (agent && agent.pilotRoleLabel) || pilotRole;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7 (Schwerpunkt 6, "Netzwerk- und Freigabeentscheidung") –
+// One-Time-Freigabe für genau einen Codex-Lauf.
+//
+// Bewusst dasselbe, bereits bestehende und geprüfte Muster wie
+// execution-bridge.js#mintToken/consumeToken (RAM-only, kurzlebig, einmalig,
+// an konkrete IDs gebunden) – kein neues Konzept, keine dauerhafte globale
+// Freigabe, kein Speichern auf Platte, kein Protokollieren des Tokenwerts
+// selbst (nur das AUSSTELLEN wird auditiert, siehe
+// PILOT_AGENT_EXECUTION_CODEX_APPROVAL_REQUESTED).
+//
+// Korrekturlauf vor dem echten Referenzlauf (unabhängiges Review,
+// Kategorie B, Korrekturen 4/5/6): der Token ist an pilotOrderId, presetId,
+// runnerKind, den AUSSTELLENDEN Nutzer (actorUserId) UND die zum
+// Ausstellungszeitpunkt tatsächlich gelesene Auftragsrevision gebunden.
+//   - Nutzerbindung (Korrektur 4): ein Token von Nutzer A kann durch
+//     Nutzer B niemals verbraucht werden, selbst mit identischen OWNER-
+//     Rechten. Ein Fehlversuch mit falschem Nutzer LÖSCHT den Token NICHT
+//     (siehe pilotOrderId/presetId-Bindung unten – ein fremder Fehlversuch
+//     darf den echten, noch gültigen Token des Ausstellers nicht
+//     vernichten können).
+//   - Revisionsbindung (Korrektur 5): beim Verbrauch wird die tatsächliche,
+//     serverseitig frisch gelesene AKTUELLE Auftragsrevision verglichen,
+//     NIEMALS ein vom Client zusätzlich gesendetes `expectedRevision` (das
+//     bleibt ausschließlich für die bereits bestehende, allgemeine
+//     Optimistic-Concurrency-Prüfung in startAgentExecutionRun zuständig).
+//     Bei jeder Abweichung wird der Token kontrolliert VERBRAUCHT/entfernt,
+//     damit er nicht später erneut eingesetzt werden kann (bewusst anders
+//     als die übrigen Bindungsfehler – eine veraltete Revision ist ein
+//     Frische-Problem, kein reiner Fremdzugriffsversuch: auch der
+//     rechtmäßige Aussteller muss danach eine neue, bewusste Freigabe für
+//     den aktuellen Auftragsstand anfordern).
+//   - Zeitquelle (Korrektur 6): `nowProvider` ist ausschließlich für Tests
+//     injizierbar (liefert Millisekunden wie Date.now()); produktiv bleibt
+//     stets Date.now(). Kein globaler Testzustand, keine produktive
+//     Request-Feld-Uhr.
+// ---------------------------------------------------------------------------
+const CODEX_APPROVAL_TOKEN_TTL_MS = 5 * 60 * 1000;
+const CODEX_APPROVAL_TOKENS = new Map();
+const DEFAULT_CODEX_APPROVAL_NOW_PROVIDER = () => Date.now();
+
+function requestCodexRunApproval(db, options = {}) {
+  const presetId = String(options.presetId || "").trim();
+  const preset = requireKnownPreset(presetId);
+  if (preset.runnerKind !== RUNNER_KINDS.CODEX) {
+    throw badRequest("Eine Freigabeanforderung ist ausschließlich für ein Codex-Preset möglich.");
+  }
+  const pilotOrderId = String(options.pilotOrderId || pilotWorkOrderService.CANONICAL_PILOT_ORDER_ID).trim();
+  const orderRow = authDb.getPilotWorkOrderById(db, pilotOrderId);
+  if (!orderRow) {
+    throw notFound(`Der Pilotauftrag "${pilotOrderId}" wurde nicht gefunden.`, { pilotOrderId });
+  }
+  const now = options.now || new Date();
+  const nowProvider = typeof options.nowProvider === "function" ? options.nowProvider : DEFAULT_CODEX_APPROVAL_NOW_PROVIDER;
+  const issuedAtMs = nowProvider();
+  const actorUserId = options.actorUserId ?? null;
+  const token = crypto.randomBytes(24).toString("hex");
+  CODEX_APPROVAL_TOKENS.set(token, {
+    pilotOrderId,
+    presetId,
+    runnerKind: preset.runnerKind,
+    actorUserId,
+    // Korrektur 5: die tatsächliche, serverseitig zum Ausstellungszeitpunkt
+    // gelesene Revision – niemals ein vom Client behaupteter Wert.
+    boundRevision: orderRow.revision,
+    createdAt: issuedAtMs,
+    expiresAt: issuedAtMs + CODEX_APPROVAL_TOKEN_TTL_MS,
+    consumed: false,
+  });
+  authAudit.recordAuditEvent(db, {
+    eventType: "PILOT_AGENT_EXECUTION_CODEX_APPROVAL_REQUESTED",
+    result: "OK",
+    actorUserId,
+    tenantId: null,
+    timestamp: nowIso(now),
+    // Niemals der Tokenwert selbst (siehe Kopfkommentar) – ausschließlich
+    // bereits unkritische Bindungsmetadaten.
+    metadata: { pilotOrderId, presetId },
+  });
+  return { approvalToken: token, expiresInMs: CODEX_APPROVAL_TOKEN_TTL_MS };
+}
+
+function consumeCodexRunApproval(token, expectedBinding = {}, options = {}) {
+  const nowProvider = typeof options.nowProvider === "function" ? options.nowProvider : DEFAULT_CODEX_APPROVAL_NOW_PROVIDER;
+  if (typeof token !== "string" || !token) {
+    return { ok: false, reason: "TOKEN_MISSING" };
+  }
+  const record = CODEX_APPROVAL_TOKENS.get(token);
+  if (!record) {
+    return { ok: false, reason: "TOKEN_UNKNOWN" };
+  }
+  if (record.consumed) {
+    CODEX_APPROVAL_TOKENS.delete(token);
+    return { ok: false, reason: "TOKEN_ALREADY_USED" };
+  }
+  if (nowProvider() > record.expiresAt) {
+    CODEX_APPROVAL_TOKENS.delete(token);
+    return { ok: false, reason: "TOKEN_EXPIRED" };
+  }
+  if (expectedBinding.pilotOrderId !== undefined && record.pilotOrderId !== expectedBinding.pilotOrderId) {
+    return { ok: false, reason: "TOKEN_BINDING_MISMATCH" };
+  }
+  if (expectedBinding.presetId !== undefined && record.presetId !== expectedBinding.presetId) {
+    return { ok: false, reason: "TOKEN_BINDING_MISMATCH" };
+  }
+  if (expectedBinding.runnerKind !== undefined && record.runnerKind !== expectedBinding.runnerKind) {
+    return { ok: false, reason: "TOKEN_BINDING_MISMATCH" };
+  }
+  // Korrektur 4: Nutzerbindung. Bewusst KEIN Löschen bei Fehlschlag (siehe
+  // Kopfkommentar) – ein Fehlversuch mit falschem Nutzer darf den echten,
+  // noch gültigen Token des Ausstellers nicht vernichten.
+  if ((expectedBinding.actorUserId ?? null) !== record.actorUserId) {
+    return { ok: false, reason: "TOKEN_USER_MISMATCH" };
+  }
+  // Korrektur 5: Revisionsbindung. Bei Abweichung wird der Token bewusst
+  // sofort verbraucht/entfernt (siehe Kopfkommentar) – anders als bei den
+  // übrigen Bindungsfehlern oben.
+  if (expectedBinding.currentRevision !== undefined && record.boundRevision !== expectedBinding.currentRevision) {
+    CODEX_APPROVAL_TOKENS.delete(token);
+    return { ok: false, reason: "TOKEN_REVISION_MISMATCH" };
+  }
+  record.consumed = true;
+  CODEX_APPROVAL_TOKENS.delete(token);
+  return { ok: true };
+}
+
+function clearCodexApprovalTokensForTests() {
+  CODEX_APPROVAL_TOKENS.clear();
+}
+
+// Nur für Tests/UI-Anzeige: liest ausschließlich lesende CLI-Aufrufe
+// (--version, login status) – niemals einen Login-Vorgang startend, niemals
+// eine Freigabe. Siehe execution-codex-adapter.js#detectCodexAvailability.
+function getCodexAvailabilitySummary(options = {}) {
+  const availability = codexAdapter.detectCodexAvailability(options);
+  return {
+    available: Boolean(availability.available),
+    authenticated: Boolean(availability.authenticated),
+    version: availability.version || null,
+    authLabel: availability.authLabel || null,
+    reason: availability.reason || null,
+  };
 }
 
 function isUniqueConstraintViolation(error) {
@@ -178,6 +423,26 @@ function rowToAgentExecutionRunView(row) {
     handoffStatus: row.handoffStatus || "PENDING",
     handoffErrorMessage: row.handoffErrorMessage || null,
     handoffCompletedAt: row.handoffCompletedAt || null,
+    // Phase 7 – Runner-/KI-Metadaten (Migration 22). Für jeden Lauf, der VOR
+    // Phase 7 angelegt wurde bzw. über den unveränderten lokalen
+    // deterministischen Pfad läuft, liefern die Spalten-Defaults bereits die
+    // ehrlichen Phase-6-Werte (requestedRunnerKind/actualRunnerKind =
+    // LOCAL_DETERMINISTIC_READ_ONLY, aiExecuted = false, approvalStatus =
+    // NOT_REQUIRED, networkRequired/externalAiRequired = false) – siehe
+    // auth-db-migrations.js Migration 22 ADD COLUMN ... DEFAULT.
+    requestedRunnerKind: row.requestedRunnerKind || RUNNER_KINDS.LOCAL,
+    actualRunnerKind: row.actualRunnerKind || RUNNER_KINDS.LOCAL,
+    runnerVersion: row.runnerVersion || null,
+    modelLabel: row.modelLabel || null,
+    aiExecuted: Boolean(row.aiExecuted),
+    fallbackUsed: Boolean(row.fallbackUsed),
+    fallbackReason: row.fallbackReason || null,
+    networkRequired: Boolean(row.networkRequired),
+    externalAiRequired: Boolean(row.externalAiRequired),
+    approvalStatus: row.approvalStatus || "NOT_REQUIRED",
+    workspaceId: row.workspaceId || null,
+    timedOut: Boolean(row.timedOut),
+    cancelledRun: Boolean(row.cancelledRun),
     startedAt: row.startedAt,
     finishedAt: row.finishedAt,
     createdAt: row.createdAt,
@@ -199,13 +464,20 @@ function getAgentExecutionRunById(db, pilotOrderId, runId) {
 }
 
 // ---------------------------------------------------------------------------
-// Start eines technischen Agentenlaufs (lokaler deterministischer
-// Read-Only-Runner, kein KI-Modellaufruf).
-// ---------------------------------------------------------------------------
+// Start eines technischen Agentenlaufs. Runner-Auswahl (Phase 7) ist
+// bewusst 1:1 an das Preset gekoppelt (preset.runnerKind), nicht ein
+// zusätzlicher, frei kombinierbarer Parameter: jedes Preset legt bereits
+// abschließend fest, welche Dateien/Werkzeuge/Grenzen gelten UND für welchen
+// Runner es geschrieben ist (z. B. hat nur das Codex-Preset einen
+// agentKeyOverride und die für einen echten Modellaufruf geeigneten
+// allowedFiles). Eine Entkopplung würde erlauben, ein für den lokalen
+// Runner geschriebenes Preset versehentlich mit dem Codex-Runner zu
+// kombinieren (oder umgekehrt) – ausdrücklich nicht gewünscht.
 async function startAgentExecutionRun(db, options = {}) {
   const presetId = String(options.presetId || "").trim();
   const preset = requireKnownPreset(presetId);
-  const agent = resolveAgentForRole(preset.pilotRole);
+  const agent = resolveAgentForPreset(preset);
+  const isCodexRun = preset.runnerKind === RUNNER_KINDS.CODEX;
 
   const pilotOrderId = String(options.pilotOrderId || pilotWorkOrderService.CANONICAL_PILOT_ORDER_ID).trim();
   const orderRow = authDb.getPilotWorkOrderById(db, pilotOrderId);
@@ -237,7 +509,81 @@ async function startAgentExecutionRun(db, options = {}) {
   }
 
   const now = options.now || new Date();
+
+  // Phase 7 (Schwerpunkt 6/10): "fehlende Authentifizierung/Verfügbarkeit/
+  // Freigabe blockiert VOR dem Codex-Aufruf" – bewusst VOR jeder
+  // Zeilenanlage. Ein derart blockierter Versuch erzeugt ABSICHTLICH KEINEN
+  // Agentenlaufdatensatz (kein RUNNING/FAILED-Eintrag): es wurde technisch
+  // nichts "versucht", sondern eine reine Vorbedingung war nicht erfüllt.
+  // Das bleibt vollständig auditierbar über
+  // PILOT_AGENT_EXECUTION_CODEX_START_BLOCKED. Niemals eine automatische
+  // Freigabe, niemals ein automatischer Rückfall auf den lokalen Runner.
+  let codexAvailability = null;
+  if (isCodexRun) {
+    codexAvailability = codexAdapter.detectCodexAvailability(options.codexAvailabilityOptions);
+    const blockAndThrow = (reasonCode, message) => {
+      authAudit.recordAuditEvent(db, {
+        eventType: "PILOT_AGENT_EXECUTION_CODEX_START_BLOCKED",
+        // "DENIED" statt eines eigenen "BLOCKED"-Ergebniswerts: auth-audit.js
+        // RESULTS/auth-db-migrations.js AUDIT_RESULT_VALUES kennen
+        // ausschließlich OK/DENIED/ERROR (siehe bereits bestehende Verwendung
+        // in pilot-work-order-service.js für andere Ablehnungsfälle) – der
+        // Ereignistyp selbst (PILOT_AGENT_EXECUTION_CODEX_START_BLOCKED)
+        // macht die eigentliche Bedeutung "vor dem Codex-Aufruf blockiert"
+        // bereits eindeutig.
+        result: "DENIED",
+        actorUserId: options.actorUserId ?? null,
+        tenantId: null,
+        timestamp: nowIso(now),
+        metadata: { pilotOrderId, presetId: preset.presetId, reasonCode },
+      });
+      throw conflict(message, { pilotOrderId });
+    };
+    if (!codexAvailability.available) {
+      blockAndThrow(
+        "CODEX_NOT_AVAILABLE",
+        "Codex ist auf diesem System nicht verfügbar oder nicht installiert. Kein Codex-Lauf möglich, " +
+          "kein automatischer Rückfall auf den lokalen Runner.",
+      );
+    }
+    if (!codexAvailability.authenticated) {
+      blockAndThrow(
+        "CODEX_NOT_AUTHENTICATED",
+        "Codex ist auf diesem System nicht authentifiziert. Kein Codex-Lauf möglich, " +
+          "kein automatischer Rückfall auf den lokalen Runner.",
+      );
+    }
+    // Korrektur 4/5 (unabhängiges Review, Kategorie B): Nutzer- und
+    // Revisionsbindung werden HIER mit serverseitig frisch gelesenen Werten
+    // geprüft (options.actorUserId aus dem Auth-Kontext, orderRow.revision
+    // aus der soeben gelesenen Zeile) – niemals mit einem vom Client
+    // behaupteten Wert. Ein optional vom Client zusätzlich gesendetes
+    // `expectedRevision` (siehe Optimistic-Concurrency-Prüfung oben) ersetzt
+    // diese eigenständige Tokenbindung an keiner Stelle.
+    const approvalOutcome = consumeCodexRunApproval(
+      options.approvalToken,
+      {
+        pilotOrderId,
+        presetId: preset.presetId,
+        runnerKind: preset.runnerKind,
+        actorUserId: options.actorUserId ?? null,
+        currentRevision: orderRow.revision,
+      },
+      { nowProvider: options.codexApprovalNowProvider },
+    );
+    if (!approvalOutcome.ok) {
+      blockAndThrow(
+        `MISSING_APPROVAL_${approvalOutcome.reason}`,
+        "Für diesen Codex-Lauf liegt keine gültige, frische Freigabe vor (request-codex-run-approval zuerst " +
+          "aufrufen; jeder Freigabe-Token ist kurzlebig und genau einmal verwendbar). Kein automatischer Codex-Lauf " +
+          "ohne ausdrückliche Freigabe.",
+      );
+    }
+  }
+
   const runId = `pilot-agent-run-${crypto.randomUUID()}`;
+  const runnerId = isCodexRun ? codexRunner.RUNNER_ID : runner.RUNNER_ID;
+  const runnerLabel = isCodexRun ? codexRunner.RUNNER_LABEL : runner.RUNNER_LABEL;
 
   // Anlage als RUNNING + Start-Audit in einer gemeinsamen Transaktion. Der
   // partielle Unique-Index (Migration 20) erzwingt dabei atomar: höchstens
@@ -260,10 +606,26 @@ async function startAgentExecutionRun(db, options = {}) {
         allowedToolsJson: JSON.stringify(preset.allowedTools),
         forbiddenActionsJson: JSON.stringify(preset.forbiddenActions),
         expectedResultFormat: preset.expectedResultFormat,
-        runnerId: runner.RUNNER_ID,
-        runnerLabel: runner.RUNNER_LABEL,
+        runnerId,
+        runnerLabel,
         startedAt: nowIso(now),
         createdAt: nowIso(now),
+        // Phase 7: nur für den Codex-Pfad tatsächlich befüllt (siehe
+        // auth-db.js#insertPilotAgentExecutionRunAsRunning,
+        // OPTIONAL_RUNNER_FIELDS). Der lokale Pfad lässt diese Felder
+        // vollständig weg – die additiven Spalten-Defaults (Migration 22)
+        // liefern dafür bereits die korrekten, ehrlichen Phase-6-Werte.
+        ...(isCodexRun
+          ? {
+              requestedRunnerKind: RUNNER_KINDS.CODEX,
+              actualRunnerKind: RUNNER_KINDS.CODEX,
+              runnerVersion: codexAvailability.version || null,
+              modelLabel: codexAvailability.authLabel ? `Codex (${codexAvailability.authLabel})` : "Codex",
+              networkRequired: 1,
+              externalAiRequired: 1,
+              approvalStatus: "GRANTED",
+            }
+          : {}),
       });
       authAudit.recordAuditEvent(db, {
         eventType: "PILOT_AGENT_EXECUTION_RUN_STARTED",
@@ -271,7 +633,14 @@ async function startAgentExecutionRun(db, options = {}) {
         actorUserId: options.actorUserId ?? null,
         tenantId: null,
         timestamp: nowIso(now),
-        metadata: { pilotOrderId, pilotExecutionRunId: runId, pilotRole: preset.pilotRole, presetId: preset.presetId, runnerId: runner.RUNNER_ID },
+        metadata: {
+          pilotOrderId,
+          pilotExecutionRunId: runId,
+          pilotRole: preset.pilotRole,
+          presetId: preset.presetId,
+          runnerId,
+          runnerKind: preset.runnerKind,
+        },
       });
       return inserted;
     });
@@ -287,16 +656,47 @@ async function startAgentExecutionRun(db, options = {}) {
   }
 
   // Runner-Aufruf außerhalb jeder Transaktion (I/O-gebunden, kann bei
-  // größeren Dateien messbar dauern) – die RUNNING-Zeile ist zu diesem
-  // Zeitpunkt bereits sicher committet und wirkt als Sperre.
+  // größeren Dateien bzw. einem echten Codex-Roundtrip messbar dauern) –
+  // die RUNNING-Zeile ist zu diesem Zeitpunkt bereits sicher committet und
+  // wirkt als Sperre.
   let execResult;
   try {
-    execResult = await runner.runPilotAgentAnalysisTask({
-      repoRoot: REPO_ROOT,
-      allowedFiles: preset.allowedFiles,
-      taskTitle: preset.title,
-      taskInstructions: preset.instructions,
-    });
+    if (isCodexRun) {
+      execResult = await codexRunner.runPilotAgentCodexAnalysisTask({
+        repoRoot: REPO_ROOT,
+        allowedFiles: preset.allowedFiles,
+        allowedTools: preset.allowedTools,
+        forbiddenActions: preset.forbiddenActions,
+        taskTitle: preset.title,
+        taskInstructions: preset.instructions,
+        expectedResultFormat: preset.expectedResultFormat,
+        agentKey: agent.agentKey,
+        agentDisplayName: agent.technicalName,
+        agentRole: agent.technicalRole,
+        pilotRole: preset.pilotRole,
+        pilotRoleLabel: pilotRoleLabelFor(preset.pilotRole),
+        executionRunId: runId,
+        attemptTimeoutMs: options.attemptTimeoutMs,
+        shouldAbort: options.shouldAbort,
+        codexAvailability,
+        // Ausschließlich für Tests: injizierte Ersatzimplementierungen für
+        // den echten Codex-Kindprozess/Dateisystemzugriff (siehe
+        // pilot-agent-codex-runner.js/execution-codex-adapter.js). Im
+        // Produktivbetrieb bleiben all diese Felder undefined, wodurch
+        // ausschließlich die echten Node-/Codex-CLI-Implementierungen
+        // verwendet werden.
+        execFileImpl: options.codexExecFileImpl,
+        codexAdapterImpl: options.codexAdapterImpl,
+        workspaceModuleImpl: options.codexWorkspaceModuleImpl,
+      });
+    } else {
+      execResult = await runner.runPilotAgentAnalysisTask({
+        repoRoot: REPO_ROOT,
+        allowedFiles: preset.allowedFiles,
+        taskTitle: preset.title,
+        taskInstructions: preset.instructions,
+      });
+    }
   } catch (error) {
     execResult = { ok: false, failed: true, errorMessage: String((error && error.message) || error) };
   }
@@ -308,6 +708,7 @@ async function startAgentExecutionRun(db, options = {}) {
     execResult,
     now,
     actorUserId: options.actorUserId ?? null,
+    isCodexRun,
   });
 }
 
@@ -344,25 +745,98 @@ async function startAgentExecutionRun(db, options = {}) {
 
 // Stufe A, Fehlerfall: ein technischer Ausführungsfehler erzeugt
 // AUSDRÜCKLICH keine Rollenübergabe (Stufe B entfällt vollständig).
-function persistFailedAgentExecutionRun(db, { runId, pilotOrderId, preset, execResult, now, actorUserId }) {
+// Phase 7, Korrekturlauf ("Codex-Fehlerdiagnose gezielt verbessern"): die
+// kleinste saubere Lösung für die Persistenz der sicheren Diagnosefelder
+// (exitCode/signal/reasonCode/stderrSample/stdoutSample/runnerPhase) ist die
+// bereits bestehende, bislang für fehlgeschlagene Läufe ungenutzte
+// resultSummaryJson-Spalte (siehe auth-db-migrations.js Migration 20/
+// updatePilotAgentExecutionRunTerminal, das dieses Feld bereits generisch für
+// JEDEN Status persistiert, sowie rowToAgentExecutionRunView, das
+// resultSummaryJson bereits für JEDEN Status als `resultSummary` zurückgibt).
+// Keine neue Spalte, keine neue Migration, keine neue Tabelle nötig – ein
+// bestehender fehlgeschlagener Lauf ohne diese Diagnose (resultSummaryJson
+// bleibt NULL) bleibt dadurch unverändert lesbar (rowToAgentExecutionRunView
+// liefert dafür weiterhin resultSummary: null).
+const DIAGNOSTIC_NOTICE_TEXT = "Sichere technische Diagnose – möglicherweise gekürzt und redigiert.";
+
+function buildFailedRunResultSummary(execResult) {
+  const diagnostics = execResult && execResult.diagnostics;
+  if (!diagnostics || typeof diagnostics !== "object") return null;
+  return {
+    diagnostics: {
+      reasonCode: diagnostics.reasonCode || null,
+      runnerPhase: diagnostics.runnerPhase || null,
+      exitCode: diagnostics.exitCode === undefined ? null : diagnostics.exitCode,
+      signal: diagnostics.signal || null,
+      stderrSample: diagnostics.stderrSample || null,
+      stdoutSample: diagnostics.stdoutSample || null,
+      timedOut: Boolean(diagnostics.timedOut),
+      cancelled: Boolean(diagnostics.cancelled),
+    },
+    diagnosticNotice: DIAGNOSTIC_NOTICE_TEXT,
+  };
+}
+
+function persistFailedAgentExecutionRun(db, { runId, pilotOrderId, preset, execResult, now, actorUserId, isCodexRun }) {
   return authDb.withAuthTransaction(db, () => {
     const errorMessage = String((execResult && execResult.errorMessage) || "Agentenlauf ist technisch fehlgeschlagen.");
+    // Nur für den Codex-Pfad befüllt – der lokale deterministische Runner
+    // liefert kein execResult.diagnostics und bleibt dadurch byteidentisch
+    // zu Phase 6 (resultSummaryJson weiterhin ungesetzt/null).
+    const failedResultSummary = isCodexRun ? buildFailedRunResultSummary(execResult) : null;
     const applied = authDb.updatePilotAgentExecutionRunTerminal(db, {
       id: runId,
       status: "FAILED",
       finishedAt: nowIso(now),
       errorMessage: errorMessage.slice(0, 2000),
+      ...(failedResultSummary ? { resultSummaryJson: JSON.stringify(failedResultSummary) } : {}),
+      // Phase 7: ausschließlich für den Codex-Pfad gesetzt (siehe
+      // auth-db.js#updatePilotAgentExecutionRunTerminal – dynamische
+      // SET-Klausel, der lokale Pfad bleibt dadurch byteidentisch zu
+      // Phase 6). aiExecuted bleibt hier IMMER false (Default): ein
+      // fehlgeschlagener/abgebrochener Codex-Lauf ist per Wahrheitsregel
+      // niemals "ein KI-/Codex-Agentenlauf" im Erfolgssinn, unabhängig
+      // davon, ob Codex technisch aufgerufen wurde.
+      ...(isCodexRun
+        ? {
+            workspaceId: (execResult && execResult.workspaceId) || null,
+            timedOut: Boolean(execResult && execResult.timedOut),
+            cancelledRun: Boolean(execResult && execResult.cancelled),
+          }
+        : {}),
     });
     if (!applied) {
       throw new Error("Agentenlauf konnte nicht als fehlgeschlagen markiert werden (unerwarteter Zustand).");
     }
+    // Korrekturlauf ("Codex-Fehlerdiagnose gezielt verbessern"), Abschnitt 4:
+    // Audit erhält für einen Codex-Lauf zusätzlich runnerKind sowie die
+    // sicheren, kurzen technischen Kategoriewerte (exitCode/reasonCode/
+    // Timeout-/Cancel-Flag) – AUSDRÜCKLICH NIEMALS stderrSample/stdoutSample,
+    // Prompttext, Token oder Freigabetoken (siehe buildFailedRunResultSummary
+    // oben für die vollständigere, aber weiterhin sichere Diagnosekopie in
+    // resultSummaryJson).
+    const diagnosticsForAudit = isCodexRun && execResult && execResult.diagnostics ? execResult.diagnostics : null;
     authAudit.recordAuditEvent(db, {
       eventType: "PILOT_AGENT_EXECUTION_RUN_FAILED",
       result: "ERROR",
       actorUserId,
       tenantId: null,
       timestamp: nowIso(now),
-      metadata: { pilotOrderId, pilotExecutionRunId: runId, pilotRole: preset.pilotRole, presetId: preset.presetId },
+      metadata: {
+        pilotOrderId,
+        pilotExecutionRunId: runId,
+        pilotRole: preset.pilotRole,
+        presetId: preset.presetId,
+        runnerKind: preset.runnerKind,
+        ...(diagnosticsForAudit
+          ? {
+              exitCode: diagnosticsForAudit.exitCode === undefined ? null : diagnosticsForAudit.exitCode,
+              reasonCode: diagnosticsForAudit.reasonCode || null,
+              timedOut: Boolean(diagnosticsForAudit.timedOut),
+              cancelled: Boolean(diagnosticsForAudit.cancelled),
+            }
+          : {}),
+      },
     });
     return rowToAgentExecutionRunView(authDb.getPilotAgentExecutionRunById(db, runId));
   });
@@ -373,24 +847,50 @@ function persistFailedAgentExecutionRun(db, { runId, pilotOrderId, preset, execR
 // attemptHandoffForSucceededRun) – dieses Ergebnis ist bereits nach dieser
 // Funktion dauerhaft gespeichert und bleibt es unabhängig vom weiteren
 // Verlauf.
-function persistSucceededAgentExecutionRun(db, { runId, pilotOrderId, preset, execResult, now, actorUserId }) {
+function persistSucceededAgentExecutionRun(db, { runId, pilotOrderId, preset, execResult, now, actorUserId, isCodexRun }) {
   return authDb.withAuthTransaction(db, () => {
-    const resultSummary = {
-      observations: execResult.observations,
-      recommendation: execResult.recommendation,
-      analyzedFiles: (execResult.facts || []).filter((fact) => fact.exists).map((fact) => ({
-        path: fact.path,
-        byteLength: fact.byteLength,
-        lineCount: fact.lineCount,
-        sha256: fact.sha256,
-      })),
-    };
+    const resultSummary = isCodexRun
+      ? {
+          analyzedFiles: execResult.analyzedFiles || [],
+          runnerLabel: codexRunner.RUNNER_LABEL,
+          secretRedactionApplied: Boolean(execResult.secretRedactionApplied),
+          // Korrektur 2 (unabhängiges Review, Kategorie B): fester
+          // Hinweistext, ausschließlich gesetzt, wenn tatsächlich redigiert
+          // wurde – wird unverändert in Cockpit/API angezeigt (siehe
+          // pilot-work-order-ui.js#renderAgentExecutionRun). Niemals ein
+          // Secret- oder Tokenwert, ausschließlich der fixe Hinweissatz.
+          secretRedactionNotice: execResult.secretRedactionApplied ? execResult.secretRedactionNotice || null : null,
+        }
+      : {
+          observations: execResult.observations,
+          recommendation: execResult.recommendation,
+          analyzedFiles: (execResult.facts || []).filter((fact) => fact.exists).map((fact) => ({
+            path: fact.path,
+            byteLength: fact.byteLength,
+            lineCount: fact.lineCount,
+            sha256: fact.sha256,
+          })),
+        };
     const applied = authDb.updatePilotAgentExecutionRunTerminal(db, {
       id: runId,
       status: "SUCCEEDED",
       finishedAt: nowIso(now),
       resultSummaryJson: JSON.stringify(resultSummary),
       resultRawText: execResult.resultText.slice(0, 8000),
+      // Phase 7 – siehe Kommentar in persistFailedAgentExecutionRun oben.
+      // aiExecuted = true ist HIER (und ausschließlich hier) korrekt: dieser
+      // Zweig wird nur erreicht, wenn execResult.ok === true (siehe
+      // finalizeAgentExecutionRun) – also eine tatsächliche, nichtleere,
+      // bereits inhaltlich geprüfte Codex-Antwort vorliegt (siehe
+      // pilot-agent-codex-runner.js).
+      ...(isCodexRun
+        ? {
+            workspaceId: execResult.workspaceId || null,
+            aiExecuted: true,
+            timedOut: false,
+            cancelledRun: false,
+          }
+        : {}),
     });
     if (!applied) {
       throw new Error("Agentenlauf konnte nicht als erfolgreich markiert werden (unerwarteter Zustand).");
@@ -401,7 +901,13 @@ function persistSucceededAgentExecutionRun(db, { runId, pilotOrderId, preset, ex
       actorUserId,
       tenantId: null,
       timestamp: nowIso(now),
-      metadata: { pilotOrderId, pilotExecutionRunId: runId, pilotRole: preset.pilotRole, presetId: preset.presetId, runnerId: runner.RUNNER_ID },
+      metadata: {
+        pilotOrderId,
+        pilotExecutionRunId: runId,
+        pilotRole: preset.pilotRole,
+        presetId: preset.presetId,
+        runnerId: isCodexRun ? codexRunner.RUNNER_ID : runner.RUNNER_ID,
+      },
     });
     return rowToAgentExecutionRunView(authDb.getPilotAgentExecutionRunById(db, runId));
   });
@@ -415,13 +921,17 @@ function persistSucceededAgentExecutionRun(db, { runId, pilotOrderId, preset, ex
 // gespeicherte SUCCEEDED-Ergebnis NIEMALS zurückrollen oder überschreiben.
 // Kein automatischer Retry, keine automatische Freigabe, kein automatischer
 // Statuswechsel des Pilotauftrags durch diese Funktion selbst.
-function attemptHandoffForSucceededRun(db, { runId, pilotOrderId, preset, execResult, resultSummary, now, actorUserId }) {
-  const basisUsed = `Lokal gelesene Projektdateien (${resultSummary.analyzedFiles
-    .map((entry) => `${entry.path}, ${entry.byteLength} Bytes, SHA-256 ${entry.sha256.slice(0, 12)}…`)
-    .join("; ")}), Runner: ${runner.RUNNER_LABEL}`;
-  const riskOrLimit =
-    "Analyse beschränkt auf die im Preset festgelegten Dateien; keine Aussage über den Rest des Repositories. " +
-    "Kein KI-Modellaufruf, keine externe Netzwerkanfrage.";
+function attemptHandoffForSucceededRun(db, { runId, pilotOrderId, preset, execResult, resultSummary, now, actorUserId, isCodexRun }) {
+  const basisUsed = isCodexRun
+    ? `Echter Codex-Read-Only-Agentenlauf (${codexRunner.RUNNER_LABEL}), analysierte Dateien: ${(resultSummary.analyzedFiles || []).join(", ")}.`
+    : `Lokal gelesene Projektdateien (${resultSummary.analyzedFiles
+        .map((entry) => `${entry.path}, ${entry.byteLength} Bytes, SHA-256 ${entry.sha256.slice(0, 12)}…`)
+        .join("; ")}), Runner: ${runner.RUNNER_LABEL}`;
+  const riskOrLimit = isCodexRun
+    ? "Analyse beschränkt auf die im Preset festgelegten Dateien; keine Aussage über den Rest des Repositories. " +
+      "Echter externer Modell-Roundtrip über die lokale Codex-CLI (networkRequired/externalAiRequired)."
+    : "Analyse beschränkt auf die im Preset festgelegten Dateien; keine Aussage über den Rest des Repositories. " +
+      "Kein KI-Modellaufruf, keine externe Netzwerkanfrage.";
 
   try {
     const handoffResult = pilotWorkOrderService.submitHandoff(db, {
@@ -473,14 +983,14 @@ function attemptHandoffForSucceededRun(db, { runId, pilotOrderId, preset, execRe
   }
 }
 
-function finalizeAgentExecutionRun(db, { runId, pilotOrderId, preset, execResult, now, actorUserId }) {
+function finalizeAgentExecutionRun(db, { runId, pilotOrderId, preset, execResult, now, actorUserId, isCodexRun = false }) {
   const isSuccess = Boolean(execResult && execResult.ok === true);
   try {
     if (!isSuccess) {
-      const run = persistFailedAgentExecutionRun(db, { runId, pilotOrderId, preset, execResult, now, actorUserId });
+      const run = persistFailedAgentExecutionRun(db, { runId, pilotOrderId, preset, execResult, now, actorUserId, isCodexRun });
       return { run, handoff: null };
     }
-    const succeededRun = persistSucceededAgentExecutionRun(db, { runId, pilotOrderId, preset, execResult, now, actorUserId });
+    const succeededRun = persistSucceededAgentExecutionRun(db, { runId, pilotOrderId, preset, execResult, now, actorUserId, isCodexRun });
     // Ab hier ist Stufe A unumkehrbar abgeschlossen: succeededRun.status ist
     // dauerhaft SUCCEEDED, unabhängig vom Ausgang von Stufe B unten.
     const handoffOutcome = attemptHandoffForSucceededRun(db, {
@@ -491,6 +1001,7 @@ function finalizeAgentExecutionRun(db, { runId, pilotOrderId, preset, execResult
       resultSummary: succeededRun.resultSummary,
       now,
       actorUserId,
+      isCodexRun,
     });
     return {
       run: rowToAgentExecutionRunView(authDb.getPilotAgentExecutionRunById(db, runId)),
@@ -524,9 +1035,18 @@ function finalizeAgentExecutionRun(db, { runId, pilotOrderId, preset, execResult
 module.exports = {
   PilotAgentExecutionError,
   PILOT_AGENT_TASK_PRESETS,
+  RUNNER_KINDS,
   REPO_ROOT,
   rowToAgentExecutionRunView,
   listAgentExecutionRunsForOrder,
   getAgentExecutionRunById,
   startAgentExecutionRun,
+  requestCodexRunApproval,
+  // Ausschließlich für gezielte Bindungs-/TTL-Unit-Tests exportiert (siehe
+  // pilot-agent-execution-codex.test.js) – der produktive Aufrufpfad läuft
+  // ausschließlich über startAgentExecutionRun oben.
+  consumeCodexRunApproval,
+  clearCodexApprovalTokensForTests,
+  getCodexAvailabilitySummary,
+  resolveAgentForPreset,
 };

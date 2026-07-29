@@ -54,6 +54,15 @@
     createOpen: false,
     createError: null,
     creating: false,
+    // Phase 7 ("erste echte KI-Agentenausführung über die bestehende
+    // Codex-Anbindung"): der Freigabe-Token lebt AUSSCHLIESSLICH kurz im
+    // Client-Zustand (niemals in localStorage, niemals in der URL) und wird
+    // bei jedem Auftragswechsel sowie nach jedem Start-Versuch verworfen
+    // (siehe selectOrder/requestCodexApproval/starten unten) – kein
+    // dauerhaftes Wiederverwenden eines bereits ausgestellten Tokens.
+    codexApprovalToken: null,
+    codexApprovalInFlight: false,
+    codexApprovalError: null,
   };
 
   function byId(id) {
@@ -172,6 +181,8 @@
     state.overviewError = null;
     state.actionError = null;
     state.conflict = null;
+    state.codexApprovalToken = null;
+    state.codexApprovalError = null;
     render();
     return fetchJson("/api/pilot-work-order/orders/" + encodeURIComponent(orderId)).then(function (response) {
       if (state.selectedPilotOrderId !== orderId) return;
@@ -340,6 +351,43 @@
       state.actionError = (response.data && response.data.message) || "Aktion ist im aktuellen Zustand nicht m\u00f6glich.";
       render();
     });
+  }
+
+  // Phase 7 (Schwerpunkt 6/9, "keine Codex-Ausführung durch einen unklaren
+  // Ein-Klick-Start ohne notwendige Freigabe"): zwei ausdrücklich getrennte
+  // Schritte. Schritt 1 fordert einen kurzlebigen, einmaligen
+  // Freigabe-Token an (kein Agentenlauf, keine Auftragsänderung). Erst wenn
+  // dieser Token vorliegt, wird die zweite Schaltfläche ("Codex-Agentenlauf
+  // jetzt starten") überhaupt aktiv.
+  function requestCodexApproval() {
+    if (state.codexApprovalInFlight || !state.selectedPilotOrderId) return Promise.resolve();
+    var pilotOrderId = state.selectedPilotOrderId;
+    state.codexApprovalInFlight = true;
+    state.codexApprovalError = null;
+    render();
+    return postAction(pilotOrderId, "request-codex-run-approval", { presetId: CODEX_AGENT_EXECUTION_PRESET_ID }).then(function (response) {
+      state.codexApprovalInFlight = false;
+      if (state.selectedPilotOrderId !== pilotOrderId) return;
+      if (response.statusCode === 200 && response.data && response.data.ok && response.data.approvalToken) {
+        state.codexApprovalToken = response.data.approvalToken;
+        state.codexApprovalError = null;
+      } else {
+        state.codexApprovalToken = null;
+        state.codexApprovalError = (response.data && response.data.message) || "Freigabe konnte nicht angefordert werden.";
+      }
+      render();
+    });
+  }
+
+  // Der Freigabe-Token ist per Definition genau einmal verwendbar (siehe
+  // pilot-agent-execution-service.js#consumeCodexRunApproval) – nach JEDEM
+  // Startversuch (Erfolg oder Fehlschlag) wird er lokal verworfen, niemals
+  // erneut angezeigt oder automatisch nachgefordert.
+  function runCodexAgentExecution() {
+    var tokenUsed = state.codexApprovalToken;
+    if (!tokenUsed) return Promise.resolve();
+    state.codexApprovalToken = null;
+    return runOrderAction("start-agent-execution", { presetId: CODEX_AGENT_EXECUTION_PRESET_ID, approvalToken: tokenUsed });
   }
 
   var PRIMARY_ACTIONS_WITHOUT_CONFIRMATION = ["mark-ready-for-approval", "start-execution", "submit-for-review", "reopen-from-returned", "unblock-order"];
@@ -559,6 +607,11 @@
   // technischen Runner-Erfolg unterschieden, niemals als Runner-Fehler
   // dargestellt.
   var AGENT_EXECUTION_PRESET_ID = "analyze-pilot-structure";
+  // Phase 7 ("erste echte KI-Agentenausführung über die bestehende
+  // Codex-Anbindung"): eigenes, striktes Preset für den echten,
+  // ausschließlich lesenden Codex-Agentenlauf (siehe
+  // pilot-agent-execution-service.js#PILOT_AGENT_TASK_PRESETS).
+  var CODEX_AGENT_EXECUTION_PRESET_ID = "codex-analyze-pilot-structure";
 
   function renderAgentExecutionStatusLabel(status) {
     if (status === "RUNNING") return "L\u00e4uft\u2026";
@@ -567,19 +620,69 @@
     return escapeHtml(String(status || ""));
   }
 
+  // Phase 7 – wahrheitsgemäße Runner-/KI-Anzeige (Schwerpunkt 9), für JEDEN
+  // Lauf (lokal oder Codex): tatsächlicher Runner, ob KI ausgeführt wurde,
+  // ob ein Fallback verwendet wurde, Timeout/Abbruch. Für den bestehenden
+  // lokalen Runner ändert sich dadurch nur die sichtbare Zeile, niemals das
+  // zugrunde liegende Verhalten.
   function renderAgentExecutionRun(run) {
     var lines = [
       "<li>",
       "<strong>" + escapeHtml(run.taskTitle) + "</strong> \u2013 " + escapeHtml(run.pilotRoleLabel || run.pilotRole),
       "<br>Status: " + renderAgentExecutionStatusLabel(run.status),
+      "<br>Angeforderter Runner: " + escapeHtml(run.requestedRunnerKind || "") + " \u00b7 Tats\u00e4chlicher Runner: " + escapeHtml(run.actualRunnerKind || ""),
       "<br>Runner: " + escapeHtml(run.runnerLabel || run.runnerId),
+      "<br>KI ausgef\u00fchrt: " + (run.aiExecuted ? "ja" : "nein") + " \u00b7 Fallback verwendet: " + (run.fallbackUsed ? "ja" : "nein"),
+      run.modelLabel ? "<br>Modell: " + escapeHtml(run.modelLabel) + (run.runnerVersion ? " (" + escapeHtml(run.runnerVersion) + ")" : "") : "",
+      run.timedOut ? '<br><span class="pilot-work-order-action-error">Lauf wurde durch Timeout beendet.</span>' : "",
+      run.cancelledRun ? '<br><span class="pilot-work-order-action-error">Lauf wurde abgebrochen (Cancel).</span>' : "",
       "<br>Gestartet: " + escapeHtml(formatTimestamp(run.startedAt)) + " \u00b7 Beendet: " + escapeHtml(formatTimestamp(run.finishedAt)),
     ];
+    // Korrektur 2 (unabhängiges Review, Kategorie B, "Secret-Redaktion
+    // fachlich nachvollziehbar machen"): der feste Hinweistext muss überall
+    // sichtbar sein, wo eine tatsächlich redigierte Codex-Antwort angezeigt
+    // wird. Enthält niemals einen Secret- oder Tokenwert, ausschließlich
+    // den serverseitig festgelegten Hinweissatz.
+    if (run.status === "SUCCEEDED" && run.resultSummary && run.resultSummary.secretRedactionApplied) {
+      lines.push(
+        '<br><span class="pilot-work-order-action-error">' +
+          escapeHtml(run.resultSummary.secretRedactionNotice || "Ergebnis wurde aus Sicherheitsgründen redigiert und kann fachlich verkürzt sein.") +
+          "</span>",
+      );
+    }
     if (run.status === "SUCCEEDED" && run.resultRawText) {
       lines.push("<br>Ergebnis:<br><pre class=\"pilot-agent-execution-result\">" + escapeHtml(run.resultRawText) + "</pre>");
     }
     if (run.status === "FAILED" && run.errorMessage) {
       lines.push('<br><span class="pilot-work-order-action-error">Technischer Fehler: ' + escapeHtml(run.errorMessage) + "</span>");
+    }
+    // Phase 7, Korrekturlauf ("Codex-Fehlerdiagnose gezielt verbessern"):
+    // zusätzlich zum bereits oben angezeigten errorMessage-Fließtext werden
+    // die strukturierten, bereits sicher redigierten/begrenzten
+    // Diagnosefelder eines fehlgeschlagenen CODEX_READ_ONLY-Laufs sichtbar
+    // gemacht (siehe pilot-agent-execution-service.js#
+    // buildFailedRunResultSummary) – ausschließlich lesend, kein
+    // UI-Redesign, keine neue Aktion.
+    if (run.status === "FAILED" && run.resultSummary && run.resultSummary.diagnostics) {
+      var diag = run.resultSummary.diagnostics;
+      var diagFacts = [];
+      if (diag.exitCode !== null && diag.exitCode !== undefined) {
+        diagFacts.push("Exit-Code: " + escapeHtml(String(diag.exitCode)));
+      }
+      if (diag.signal) {
+        diagFacts.push("Signal: " + escapeHtml(String(diag.signal)));
+      }
+      if (diag.reasonCode) {
+        diagFacts.push("Ursache: " + escapeHtml(String(diag.reasonCode)));
+      }
+      if (diagFacts.length > 0) {
+        lines.push("<br>" + diagFacts.join(" \u00b7 "));
+      }
+      lines.push(
+        '<br><span class="pilot-work-order-action-error">' +
+          escapeHtml(run.resultSummary.diagnosticNotice || "Sichere technische Diagnose \u2013 m\u00f6glicherweise gek\u00fcrzt und redigiert.") +
+          "</span>",
+      );
     }
     // Korrekturlauf vor Commit ("Ergebnis darf bei Handoff-Konflikt nicht
     // verloren gehen"): Stufe B (fachliche Rollenübergabe) wird bewusst
@@ -597,6 +700,68 @@
     return lines.join("");
   }
 
+  // Phase 7 (Schwerpunkt 9, "API und Cockpit") – additive Codex-Sektion:
+  // zeigt Codex-Verfügbarkeit, den ausdrücklichen Hinweis auf externen
+  // KI-/Netzwerkzugriff und den zweistufigen Freigabeablauf. Bewusst KEIN
+  // Ein-Klick-Start: die Start-Schaltfläche bleibt so lange deaktiviert,
+  // bis ein frischer Freigabe-Token vorliegt (siehe requestCodexApproval/
+  // runCodexAgentExecution oben).
+  function renderCodexAgentExecutionSection(overview) {
+    var runs = overview.agentExecutionRuns || [];
+    var hasActiveRun = runs.some(function (run) {
+      return run.status === "RUNNING";
+    });
+    var availability = overview.codexAvailability || { available: false, authenticated: false };
+    var html = "<h4>Codex-Agentenlauf (echter, isolierter Read-Only-KI-Lauf)</h4>";
+    html +=
+      "<p>Codex verf\u00fcgbar: " +
+      (availability.available ? "ja" : "nein") +
+      " \u00b7 authentifiziert: " +
+      (availability.authenticated ? "ja" : "nein") +
+      (availability.version ? " \u00b7 Version: " + escapeHtml(String(availability.version).split("\n")[0]) : "") +
+      "</p>";
+    html += "<p>Dieser Lauf erfordert externen KI-/Netzwerkzugriff (networkRequired/externalAiRequired) und Jamals ausdr\u00fcckliche, einmalige Freigabe.</p>";
+    // Verbindliche Sicherheitsinformation f\u00fcr Jamal (Korrekturlauf vor dem
+    // echten Referenzlauf, unabh\u00e4ngiges Review Kategorie B): der isolierte
+    // Workspace und "--sandbox read-only" verhindern nachweislich \u00c4nderungen
+    // am echten Repository (siehe execution-codex-adapter-readonly.js/
+    // pilot-agent-codex-workspace.js), sind aber KEINE vollst\u00e4ndige
+    // Betriebssystem-Leseisolation \u2013 die Codex-CLI bzw. der Modellkanal
+    // k\u00f6nnte technisch m\u00f6glicherweise weitere lokale, lesbare Dateien
+    // erreichen. Die Dateiallowlist ist deshalb zus\u00e4tzlich eine verbindliche
+    // AUFTRAGSANWEISUNG an das Modell, kein technisch erzwungener Schutzwall
+    // gegen jeden denkbaren Lesezugriff. Deshalb bleibt jeder Codex-Lauf an
+    // eine bewusste Einzelfreigabe durch Jamal gebunden \u2013 niemals `.env`,
+    // `.env.local` oder andere Secrets bewusst in eine Allowlist aufnehmen.
+    html +=
+      '<p class="pilot-work-order-action-error">Sicherheitshinweis: Der isolierte Workspace und der Read-Only-Sandboxmodus verhindern ' +
+      "nachweislich \u00c4nderungen am echten Repository. Sie sind jedoch KEINE vollst\u00e4ndige Betriebssystem-Leseisolation \u2013 die Codex-CLI " +
+      "k\u00f6nnte technisch m\u00f6glicherweise weitere lokale, lesbare Dateien erreichen. Die Dateiallowlist ist deshalb zus\u00e4tzlich eine " +
+      "verbindliche Auftragsanweisung, kein vollst\u00e4ndiger technischer Leseschutz. Deshalb erfordert jeder Codex-Lauf weiterhin eine " +
+      "bewusste Einzelfreigabe durch Jamal \u2013 niemals .env, .env.local oder andere Secrets bewusst als erlaubte Dateien aufnehmen.</p>";
+    if (overview.status !== "IN_EXECUTION") {
+      html += "<p>Ein Codex-Agentenlauf ist nur w\u00e4hrend \u201eIn Ausf\u00fchrung\u201c m\u00f6glich.</p>";
+      return html;
+    }
+    var canRequestApproval = availability.available && availability.authenticated && !hasActiveRun && !state.codexApprovalInFlight;
+    html +=
+      '<button type="button" data-action="request-codex-run-approval"' +
+      (canRequestApproval ? "" : " disabled") +
+      ">Freigabe f\u00fcr Codex-Lauf anfordern (einmalig, kurzlebig)</button>";
+    if (state.codexApprovalError) {
+      html += '<p class="pilot-work-order-action-error">' + escapeHtml(state.codexApprovalError) + "</p>";
+    }
+    var canStart = Boolean(state.codexApprovalToken) && !state.actionInFlight && !hasActiveRun;
+    html +=
+      ' <button type="button" data-action="start-codex-agent-execution"' +
+      (canStart ? "" : " disabled") +
+      ">Codex-Agentenlauf jetzt starten (mit Freigabe)</button>";
+    if (state.codexApprovalToken) {
+      html += "<p>Freigabe liegt vor \u2013 gilt ausschlie\u00dflich f\u00fcr genau diesen einen Start.</p>";
+    }
+    return html;
+  }
+
   function renderAgentExecutionSection(overview) {
     var runs = overview.agentExecutionRuns || [];
     var hasActiveRun = runs.some(function (run) {
@@ -612,6 +777,7 @@
     } else {
       html += "<p>Ein Agentenlauf ist nur w\u00e4hrend \u201eIn Ausf\u00fchrung\u201c m\u00f6glich.</p>";
     }
+    html += renderCodexAgentExecutionSection(overview);
     if (runs.length === 0) {
       html += "<p>Noch kein Agentenlauf gestartet.</p>";
     } else {
@@ -750,6 +916,10 @@
         render();
       } else if (action === "start-agent-execution") {
         runOrderAction("start-agent-execution", { presetId: AGENT_EXECUTION_PRESET_ID });
+      } else if (action === "request-codex-run-approval") {
+        requestCodexApproval();
+      } else if (action === "start-codex-agent-execution") {
+        runCodexAgentExecution();
       } else if (isKnownPrimaryAction(action)) {
         runOrderAction(action, {});
       }
@@ -790,8 +960,11 @@
       submitCreateOrder: submitCreateOrder,
       validateCreateInput: validateCreateInput,
       runOrderAction: runOrderAction,
+      requestCodexApproval: requestCodexApproval,
+      runCodexAgentExecution: runCodexAgentExecution,
       render: render,
       escapeHtml: escapeHtml,
+      CODEX_AGENT_EXECUTION_PRESET_ID: CODEX_AGENT_EXECUTION_PRESET_ID,
     };
   }
 })();

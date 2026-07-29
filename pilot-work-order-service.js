@@ -103,6 +103,14 @@ const agentRegistry = require("./agent-registry");
 const authDb = require("./auth-db");
 const authAudit = require("./auth-audit");
 const migrations = require("./auth-db-migrations");
+// Phase 7 ("erste echte KI-Agentenausführung über die bestehende
+// Codex-Anbindung"): ausschließlich für eine rein lesende
+// Verfügbarkeits-/Auth-Anzeige im Overview (siehe buildOverview unten,
+// Feld codexAvailability). Bewusst DIREKT dieser Adapter, NICHT
+// pilot-agent-execution-service.js (das umgekehrt bereits dieses Modul
+// hier importiert – ein Import in die andere Richtung wäre ein
+// Zirkelbezug).
+const codexAdapter = require("./execution-codex-adapter");
 
 const PILOT_WORK_ORDER_STATUS_VALUES = migrations.PILOT_WORK_ORDER_STATUS_VALUES;
 const PILOT_ROLE_VALUES = migrations.PILOT_ROLE_VALUES;
@@ -584,6 +592,23 @@ function rowToAgentExecutionRunSummary(row) {
     // Runner-Fehler).
     handoffStatus: row.handoffStatus || "PENDING",
     handoffErrorMessage: row.handoffErrorMessage || null,
+    // Phase 7 ("erste echte KI-Agentenausführung über die bestehende
+    // Codex-Anbindung") – Runner-/KI-Metadaten (Migration 22, additiv). Für
+    // jeden Vor-Phase-7-Lauf bzw. jeden Lauf über den unveränderten lokalen
+    // Pfad liefern die Spalten-Defaults bereits die ehrlichen
+    // Phase-6-Werte.
+    requestedRunnerKind: row.requestedRunnerKind || "LOCAL_DETERMINISTIC_READ_ONLY",
+    actualRunnerKind: row.actualRunnerKind || "LOCAL_DETERMINISTIC_READ_ONLY",
+    runnerVersion: row.runnerVersion || null,
+    modelLabel: row.modelLabel || null,
+    aiExecuted: Boolean(row.aiExecuted),
+    fallbackUsed: Boolean(row.fallbackUsed),
+    fallbackReason: row.fallbackReason || null,
+    networkRequired: Boolean(row.networkRequired),
+    externalAiRequired: Boolean(row.externalAiRequired),
+    approvalStatus: row.approvalStatus || "NOT_REQUIRED",
+    timedOut: Boolean(row.timedOut),
+    cancelledRun: Boolean(row.cancelledRun),
     startedAt: row.startedAt,
     finishedAt: row.finishedAt,
   };
@@ -613,6 +638,23 @@ function buildOverview(db, orderRow) {
 
   const passedRoles = new Set(handoffs.filter((handoff) => handoff.pmFilterStatus === "PASSED").map((handoff) => handoff.toPilotRole));
 
+  // Phase 7 – ausschließlich lesende, gecachte (execution-codex-adapter.js#
+  // DEFAULT_AVAILABILITY_TTL_MS) CLI-Prüfung, niemals ein Login-Vorgang,
+  // niemals eine Freigabe. Ermöglicht dem Cockpit, Codex-Verfügbarkeit
+  // anzuzeigen, ohne dafür einen Agentenlauf zu starten.
+  let codexAvailability;
+  try {
+    const raw = codexAdapter.detectCodexAvailability();
+    codexAvailability = {
+      available: Boolean(raw.available),
+      authenticated: Boolean(raw.authenticated),
+      version: raw.version || null,
+      authLabel: raw.authLabel || null,
+    };
+  } catch (_error) {
+    codexAvailability = { available: false, authenticated: false, version: null, authLabel: null };
+  }
+
   return {
     order,
     involvedAgents: order.involvedAgents,
@@ -620,6 +662,7 @@ function buildOverview(db, orderRow) {
     statusLabel: order.statusLabel,
     handoffs,
     agentExecutionRuns,
+    codexAvailability,
     openDecision,
     risksAndLimits,
     nextStep: NEXT_STEP_BY_STATUS[order.status] || NEXT_STEP_BY_STATUS.DRAFT,

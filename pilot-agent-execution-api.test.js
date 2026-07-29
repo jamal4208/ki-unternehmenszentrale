@@ -37,6 +37,8 @@ const authTenantLink = require("./auth-tenant-link");
 const healthService = require("./health-reference-work-run-service");
 const pilotService = require("./pilot-work-order-service");
 const server = require("./server");
+const codexAvailabilityAdapter = require("./execution-codex-adapter");
+const codexReadOnlyAdapter = require("./execution-codex-adapter-readonly");
 
 let passed = 0;
 async function check(label, assertion) {
@@ -384,6 +386,183 @@ async function run() {
 
     const overviewResult = await invoke({ method: "GET", url: `/api/pilot-work-order/orders/${secondOrderId}`, headers: authedJsonHeaders(ownerSession) });
     assert.strictEqual(overviewResult.json.overview.agentExecutionRuns.length, 1, "es darf nur genau ein Agentenlauf-Datensatz entstanden sein");
+  });
+
+  // -------------------------------------------------------------------
+  // Phase 7 ("erste echte KI-Agentenausführung über die bestehende
+  // Codex-Anbindung") – 37./38. die API zeigt für JEDEN Lauf (auch den
+  // bereits oben real gestarteten lokalen Lauf) wahrheitsgemäß
+  // angeforderten/tatsächlichen Runner sowie KI-/Fallback-/Freigabestatus.
+  // Ein echter Codex-Erfolg über HTTP wird hier bewusst NICHT erzwungen
+  // (siehe Auftrag, "kein realer Lauf ohne echte, bereits vorhandene
+  // Freigabe/Authentifizierung") – das ist Gegenstand des separat
+  // dokumentierten Codex-Referenznachweises, nicht dieser deterministischen
+  // HTTP-Sicherheitsschicht-Suite.
+  // -------------------------------------------------------------------
+
+  await check("37./38. die API zeigt für den bereits erfolgreichen lokalen Lauf wahrheitsgemäß Runner-Auswahl sowie KI-/Fallback-/Freigabestatus", async () => {
+    const result = await invoke({ method: "GET", url: `/api/pilot-work-order/orders/${orderId}`, headers: authedJsonHeaders(ownerSession) });
+    const run = result.json.overview.agentExecutionRuns.find((entry) => entry.id === agentExecutionRunId);
+    assert.ok(run);
+    assert.strictEqual(run.requestedRunnerKind, "LOCAL_DETERMINISTIC_READ_ONLY");
+    assert.strictEqual(run.actualRunnerKind, "LOCAL_DETERMINISTIC_READ_ONLY");
+    assert.strictEqual(run.aiExecuted, false);
+    assert.strictEqual(run.fallbackUsed, false);
+    assert.strictEqual(run.networkRequired, false);
+    assert.strictEqual(run.externalAiRequired, false);
+    assert.strictEqual(run.approvalStatus, "NOT_REQUIRED");
+  });
+
+  await check("die API zeigt die Codex-Verfügbarkeit im Overview (ausschließlich lesend, keine Freigabe)", async () => {
+    const result = await invoke({ method: "GET", url: `/api/pilot-work-order/orders/${orderId}`, headers: authedJsonHeaders(ownerSession) });
+    assert.ok(result.json.overview.codexAvailability);
+    assert.strictEqual(typeof result.json.overview.codexAvailability.available, "boolean");
+    assert.strictEqual(typeof result.json.overview.codexAvailability.authenticated, "boolean");
+  });
+
+  await check("Phase 7 – ein Codex-Agentenlauf ohne vorherige Freigabeanforderung wird über die API immer abgelehnt (409), niemals ein stiller Erfolg", async () => {
+    const result = await invoke({
+      method: "POST",
+      url: `/api/pilot-work-order/orders/${orderId}/start-agent-execution`,
+      headers: authedJsonHeaders(ownerSession),
+      bodyObj: { presetId: "codex-analyze-pilot-structure" },
+    });
+    assert.strictEqual(result.statusCode, 409);
+    assert.strictEqual(result.json.ok, false);
+  });
+
+  await check("Phase 7 – 40. eine Codex-Freigabeanforderung kann über die API angefordert werden und liefert einen einmaligen Token, ohne selbst einen Lauf zu starten", async () => {
+    const before = await invoke({ method: "GET", url: `/api/pilot-work-order/orders/${orderId}`, headers: authedJsonHeaders(ownerSession) });
+    const runsBefore = before.json.overview.agentExecutionRuns.length;
+    const result = await invoke({
+      method: "POST",
+      url: `/api/pilot-work-order/orders/${orderId}/request-codex-run-approval`,
+      headers: authedJsonHeaders(ownerSession),
+      bodyObj: { presetId: "codex-analyze-pilot-structure" },
+    });
+    assert.strictEqual(result.statusCode, 200);
+    assert.strictEqual(result.json.ok, true);
+    assert.ok(typeof result.json.approvalToken === "string" && result.json.approvalToken.length > 0);
+    assert.strictEqual(result.json.overview, undefined, "das reine Ausstellen eines Freigabe-Tokens darf keinen Auftragszustand zurückliefern/verändern");
+    const after = await invoke({ method: "GET", url: `/api/pilot-work-order/orders/${orderId}`, headers: authedJsonHeaders(ownerSession) });
+    assert.strictEqual(after.json.overview.agentExecutionRuns.length, runsBefore, "das reine Ausstellen eines Tokens darf keinen Agentenlauf erzeugen");
+  });
+
+  await check("eine Codex-Freigabeanforderung für ein lokales (nicht-Codex) Preset wird abgewiesen (400)", async () => {
+    const result = await invoke({
+      method: "POST",
+      url: `/api/pilot-work-order/orders/${orderId}/request-codex-run-approval`,
+      headers: authedJsonHeaders(ownerSession),
+      bodyObj: { presetId: "analyze-pilot-structure" },
+    });
+    assert.strictEqual(result.statusCode, 400);
+  });
+
+  await check("CUSTOMER_ADMIN kann keine Codex-Freigabe anfordern (404)", async () => {
+    const result = await invoke({
+      method: "POST",
+      url: `/api/pilot-work-order/orders/${orderId}/request-codex-run-approval`,
+      headers: authedJsonHeaders(customerAdminSession),
+      bodyObj: { presetId: "codex-analyze-pilot-structure" },
+    });
+    assert.strictEqual(result.statusCode, 404);
+  });
+
+  // -------------------------------------------------------------------
+  // Korrekturlauf ("Codex-Fehlerdiagnose gezielt verbessern") – 8. die
+  // Fehlerdiagnose eines fehlgeschlagenen Codex-Laufs muss über die echte
+  // HTTP-API sichtbar sein, nicht nur auf Serviceebene (siehe
+  // pilot-agent-execution-codex.test.js für die Serviceebene). Da diese
+  // Suite ausschließlich gegen den echten server.js#requestHandler läuft
+  // und die Route selbst keine Test-Adapter-Injektion erlaubt, werden hier
+  // ausschließlich die exportierten Funktionen der zwei laut Auftrag
+  // änderbaren Module (execution-codex-adapter.js#detectCodexAvailability,
+  // execution-codex-adapter-readonly.js#runCodexReadOnlyAnalysis)
+  // temporär überschrieben und danach zuverlässig (finally) wiederhergestellt.
+  // Das eingefrorene execution-codex-adapter.js selbst bleibt dabei
+  // unverändert auf der Festplatte – es wird nur seine bereits exportierte
+  // Funktionsreferenz zur Laufzeit ersetzt.
+  // -------------------------------------------------------------------
+
+  await check("Korrekturlauf – 8. die Fehlerdiagnose eines fehlgeschlagenen Codex-Laufs (Exit-Code, redigierte stderr-Kurzfassung, Signal, Timeout/Cancel) ist über die HTTP-API sichtbar", async () => {
+    const originalDetectAvailability = codexAvailabilityAdapter.detectCodexAvailability;
+    const originalRunReadOnly = codexReadOnlyAdapter.runCodexReadOnlyAnalysis;
+    codexAvailabilityAdapter.detectCodexAvailability = () => ({
+      available: true,
+      authenticated: true,
+      version: "codex-cli 0.0.0-test",
+      authLabel: "ChatGPT",
+      reason: null,
+    });
+    codexReadOnlyAdapter.runCodexReadOnlyAnalysis = async () => ({
+      ok: false,
+      cancelled: false,
+      timedOut: false,
+      resultText: null,
+      errors: ["Codex-Prozess endete mit Exit-Code 1. stderr: Fehler beim Zugriff. api_key: [REDACTED] war ungültig."],
+      reasonCode: "CODEX_PROCESS_EXIT_NONZERO",
+      codexRawOutput: {
+        exitCode: 1,
+        signal: null,
+        stdoutSample: "",
+        stderrSample: "Fehler beim Zugriff. api_key: [REDACTED] war ungültig.",
+        timedOutAtProcessLevel: false,
+      },
+    });
+    try {
+      const orderDiag = await invoke({
+        method: "POST",
+        url: "/api/pilot-work-order/orders",
+        headers: authedJsonHeaders(ownerSession),
+        bodyObj: testOrderInput({ title: "Auftrag für Codex-Fehlerdiagnose über HTTP" }),
+      });
+      const diagOrderId = orderDiag.json.overview.order.id;
+      await driveOrderToInExecutionViaHttp(diagOrderId, ownerSession);
+
+      const approvalResult = await invoke({
+        method: "POST",
+        url: `/api/pilot-work-order/orders/${diagOrderId}/request-codex-run-approval`,
+        headers: authedJsonHeaders(ownerSession),
+        bodyObj: { presetId: "codex-analyze-pilot-structure" },
+      });
+      assert.strictEqual(approvalResult.statusCode, 200);
+
+      const startResult = await invoke({
+        method: "POST",
+        url: `/api/pilot-work-order/orders/${diagOrderId}/start-agent-execution`,
+        headers: authedJsonHeaders(ownerSession),
+        bodyObj: { presetId: "codex-analyze-pilot-structure", approvalToken: approvalResult.json.approvalToken },
+      });
+      assert.strictEqual(startResult.statusCode, 200);
+      assert.strictEqual(startResult.json.agentExecutionRun.status, "FAILED");
+      assert.ok(startResult.json.agentExecutionRun.errorMessage.includes("Exit-Code 1"));
+      assert.ok(!startResult.json.agentExecutionRun.errorMessage.includes("api_key: sk-"), "kein Rohsecret im Fehlertext");
+      assert.ok(startResult.json.agentExecutionRun.resultSummary, "resultSummary mit Diagnose muss über die API sichtbar sein");
+      const diagnostics = startResult.json.agentExecutionRun.resultSummary.diagnostics;
+      assert.strictEqual(diagnostics.exitCode, 1);
+      assert.strictEqual(diagnostics.reasonCode, "CODEX_PROCESS_EXIT_NONZERO");
+      assert.ok(diagnostics.stderrSample.includes("[REDACTED]"));
+      assert.strictEqual(diagnostics.timedOut, false);
+      assert.strictEqual(diagnostics.cancelled, false);
+      assert.strictEqual(
+        startResult.json.agentExecutionRun.resultSummary.diagnosticNotice,
+        "Sichere technische Diagnose – möglicherweise gekürzt und redigiert.",
+      );
+      assert.ok(!JSON.stringify(startResult.json).includes("api_key: sk-"), "kein Rohsecret irgendwo in der HTTP-Antwort");
+
+      // Dieselbe Diagnose muss auch über den lesenden Overview-Endpunkt
+      // (GET), nicht nur in der Startantwort selbst, sichtbar bleiben.
+      const overviewResult = await invoke({ method: "GET", url: `/api/pilot-work-order/orders/${diagOrderId}`, headers: authedJsonHeaders(ownerSession) });
+      const runFromOverview = overviewResult.json.overview.agentExecutionRuns.find(
+        (entry) => entry.id === startResult.json.agentExecutionRun.id,
+      );
+      assert.ok(runFromOverview);
+      assert.strictEqual(runFromOverview.resultSummary.diagnostics.exitCode, 1);
+      assert.strictEqual(runFromOverview.resultSummary.diagnostics.reasonCode, "CODEX_PROCESS_EXIT_NONZERO");
+    } finally {
+      codexAvailabilityAdapter.detectCodexAvailability = originalDetectAvailability;
+      codexReadOnlyAdapter.runCodexReadOnlyAnalysis = originalRunReadOnly;
+    }
   });
 
   await check("Audit-Ereignisse für den Agentenlauf sind eindeutig dem richtigen Auftrag zugeordnet (PILOT_AGENT_EXECUTION_RUN_STARTED/SUCCEEDED)", () => {

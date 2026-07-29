@@ -2077,17 +2077,21 @@ function listPilotHandoffs(db, pilotOrderId) {
 // (pilot-agent-execution-service.js) als eindeutigen Konflikt abfängt – nie
 // ein stiller zweiter aktiver Lauf.
 // ---------------------------------------------------------------------------
+// Phase 7 ("erste echte KI-Agentenausführung über die bestehende
+// Codex-Anbindung", Migration 22): sechs zusätzliche Runner-Auswahl-/
+// Freigabefelder, alle mit sicherem, ehrlichem Default (siehe
+// pilot-agent-execution-service.js#startAgentExecutionRun). Rückwärtskompatibel:
+// wird keiner der neuen Werte übergeben (input.requestedRunnerKind
+// undefined), greift exakt der in Migration 22 hinterlegte
+// SQL-Spaltendefault ('LOCAL_DETERMINISTIC_READ_ONLY' bzw. 0/'NOT_REQUIRED'),
+// identisch zum bisherigen, einzigen Phase-6-Verhalten.
 function insertPilotAgentExecutionRunAsRunning(db, input = {}) {
-  db.prepare(
-    `INSERT INTO pilot_agent_execution_runs
-      (id, pilotOrderId, pilotOrderRevisionAtStart, presetId, pilotRole, agentKey, taskTitle, taskInstructions,
-       allowedFilesJson, allowedToolsJson, forbiddenActionsJson, expectedResultFormat, runnerId, runnerLabel,
-       status, startedAt, createdAt)
-     VALUES
-      (@id, @pilotOrderId, @pilotOrderRevisionAtStart, @presetId, @pilotRole, @agentKey, @taskTitle, @taskInstructions,
-       @allowedFilesJson, @allowedToolsJson, @forbiddenActionsJson, @expectedResultFormat, @runnerId, @runnerLabel,
-       'RUNNING', @startedAt, @createdAt)`,
-  ).run({
+  const columns = [
+    "id", "pilotOrderId", "pilotOrderRevisionAtStart", "presetId", "pilotRole", "agentKey", "taskTitle",
+    "taskInstructions", "allowedFilesJson", "allowedToolsJson", "forbiddenActionsJson", "expectedResultFormat",
+    "runnerId", "runnerLabel", "startedAt", "createdAt",
+  ];
+  const values = {
     id: input.id,
     pilotOrderId: input.pilotOrderId,
     pilotOrderRevisionAtStart: input.pilotOrderRevisionAtStart,
@@ -2104,7 +2108,30 @@ function insertPilotAgentExecutionRunAsRunning(db, input = {}) {
     runnerLabel: input.runnerLabel,
     startedAt: input.startedAt,
     createdAt: input.createdAt,
+  };
+  // Additive Runner-Auswahl-/Freigabefelder (Phase 7): nur setzen, wenn der
+  // Aufrufer sie tatsächlich mitgibt – sonst greift der in Migration 22
+  // hinterlegte SQL-Default, damit bestehende Aufrufer (Phase 6) unverändert
+  // funktionieren.
+  const OPTIONAL_RUNNER_FIELDS = [
+    "requestedRunnerKind",
+    "actualRunnerKind",
+    "runnerVersion",
+    "modelLabel",
+    "networkRequired",
+    "externalAiRequired",
+    "approvalStatus",
+  ];
+  OPTIONAL_RUNNER_FIELDS.forEach((field) => {
+    if (input[field] !== undefined) {
+      columns.push(field);
+      values[field] = input[field];
+    }
   });
+  db.prepare(
+    `INSERT INTO pilot_agent_execution_runs (${columns.join(", ")}, status)
+     VALUES (${columns.map((column) => `@${column}`).join(", ")}, 'RUNNING')`,
+  ).run(values);
   return getPilotAgentExecutionRunById(db, input.id);
 }
 
@@ -2128,22 +2155,56 @@ function listPilotAgentExecutionRunsForOrder(db, pilotOrderId) {
 // fachliche Rollenübergabe) wird davon getrennt über
 // updatePilotAgentExecutionRunHandoffOutcome() nachgetragen – siehe
 // Korrekturlauf vor Commit / Migration 21.
+// Phase 7 – zusätzlich zu den bereits bestehenden Feldern (Status, Ergebnis,
+// Fehlermeldung) können jetzt optional die erst nach Laufende bekannten
+// Runner-Fakten nachgetragen werden (workspaceId/aiExecuted/timedOut/
+// cancelledRun). Die SET-Klausel wird bewusst DYNAMISCH aus tatsächlich
+// übergebenen Feldern aufgebaut (kein fest verdrahteter Verweis auf die
+// Migration-22-Spalten): bestehende Aufrufer (Phase 6, lokaler
+// deterministischer Runner) lassen diese Felder weiterhin vollständig weg
+// und erzeugen dadurch exakt dasselbe SQL wie vor Phase 7 – das erhält u. a.
+// pilot-agent-execution.test.js#"34." funktionsfähig, das eine bereits
+// bestehende Datenbank mit nur teilweise nachgerüsteter Migrationshistorie
+// simuliert.
 function updatePilotAgentExecutionRunTerminal(db, input = {}) {
+  const assignments = [
+    "status = @status",
+    "finishedAt = @finishedAt",
+    "resultSummaryJson = @resultSummaryJson",
+    "resultRawText = @resultRawText",
+    "errorMessage = @errorMessage",
+  ];
+  const values = {
+    id: input.id,
+    status: input.status,
+    finishedAt: input.finishedAt,
+    resultSummaryJson: input.resultSummaryJson ?? null,
+    resultRawText: input.resultRawText ?? null,
+    errorMessage: input.errorMessage ?? null,
+  };
+  if (input.workspaceId !== undefined) {
+    assignments.push("workspaceId = @workspaceId");
+    values.workspaceId = input.workspaceId;
+  }
+  if (input.aiExecuted !== undefined) {
+    assignments.push("aiExecuted = @aiExecuted");
+    values.aiExecuted = input.aiExecuted ? 1 : 0;
+  }
+  if (input.timedOut !== undefined) {
+    assignments.push("timedOut = @timedOut");
+    values.timedOut = input.timedOut ? 1 : 0;
+  }
+  if (input.cancelledRun !== undefined) {
+    assignments.push("cancelledRun = @cancelledRun");
+    values.cancelledRun = input.cancelledRun ? 1 : 0;
+  }
   const info = db
     .prepare(
       `UPDATE pilot_agent_execution_runs
-       SET status = @status, finishedAt = @finishedAt, resultSummaryJson = @resultSummaryJson,
-           resultRawText = @resultRawText, errorMessage = @errorMessage
+       SET ${assignments.join(", ")}
        WHERE id = @id AND status = 'RUNNING'`,
     )
-    .run({
-      id: input.id,
-      status: input.status,
-      finishedAt: input.finishedAt,
-      resultSummaryJson: input.resultSummaryJson ?? null,
-      resultRawText: input.resultRawText ?? null,
-      errorMessage: input.errorMessage ?? null,
-    });
+    .run(values);
   return info.changes === 1;
 }
 

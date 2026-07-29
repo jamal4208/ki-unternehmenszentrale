@@ -224,6 +224,18 @@ const EVENT_TYPES = Object.freeze([
   // vollständig gespeichert) – niemals ein technischer Runner-Fehler
   // (dafür bleibt PILOT_AGENT_EXECUTION_RUN_FAILED zuständig).
   "PILOT_AGENT_EXECUTION_RUN_HANDOFF_FAILED",
+  // Phase 7 ("erste echte KI-Agentenausführung über die bestehende
+  // Codex-Anbindung"). Muss exakt der in
+  // auth-db-migrations.js#AUDIT_EVENT_TYPES_AT_MIGRATION_22 erweiterten
+  // CHECK-Aufzählung (Migration 22) entsprechen. CODEX_APPROVAL_REQUESTED:
+  // ausschließlich das explizite Anfordern eines frischen, einmaligen
+  // Freigabe-Tokens für einen Codex-Lauf, niemals eine automatische
+  // Freigabe. CODEX_START_BLOCKED: ein Codex-Lauf wurde VOR dem
+  // eigentlichen Codex-Aufruf kontrolliert blockiert (Codex nicht
+  // installiert/authentifiziert oder Freigabe fehlt/ungültig) – niemals ein
+  // technischer Runner-Fehler nach einem tatsächlichen Codex-Aufruf.
+  "PILOT_AGENT_EXECUTION_CODEX_APPROVAL_REQUESTED",
+  "PILOT_AGENT_EXECUTION_CODEX_START_BLOCKED",
 ]);
 
 const RESULTS = Object.freeze(["OK", "DENIED", "ERROR"]);
@@ -382,6 +394,27 @@ const METADATA_ALLOWLIST = Object.freeze([
   "pilotExecutionRunId",
   "runnerId",
   "presetId",
+  // Phase 7 ("erste echte KI-Agentenausführung über die bestehende
+  // Codex-Anbindung"): "runnerKind" ist ausschließlich einer der beiden
+  // festen PILOT_AGENT_RUNNER_KIND_VALUES-Codes (auth-db-migrations.js),
+  // "reasonCode" ausschließlich einer der festen, in
+  // pilot-agent-execution-service.js hart kodierten Blockierungsgründe
+  // (z. B. "CODEX_NOT_AVAILABLE", "CODEX_NOT_AUTHENTICATED",
+  // "MISSING_APPROVAL_TOKEN_..."). Beides reine Steuerungscodes, niemals
+  // Freitext, kein Ergebnisinhalt, kein Tokenwert selbst.
+  "runnerKind",
+  "reasonCode",
+  // Phase 7, Korrekturlauf ("Codex-Fehlerdiagnose gezielt verbessern"):
+  // "exitCode" ist ausschließlich eine ganze Zahl (Prozess-Exitcode) oder
+  // null, "timedOut"/"cancelled" sind ausschließlich boolesch. Alle drei
+  // stammen ausschließlich aus dem bereits eingefrorenen, hier unverändert
+  // genutzten Read-Only-Adapter (execution-codex-adapter-readonly.js#
+  // runCodexReadOnlyAnalysis) bzw. der eigenen Runner-/Service-Auswertung
+  // (pilot-agent-codex-runner.js/pilot-agent-execution-service.js) –
+  // niemals Freitext, niemals stderr-/stdout-Rohdaten, kein Prompttext.
+  "exitCode",
+  "timedOut",
+  "cancelled",
 ]);
 
 // Verbotene Inhalte, unabhängig vom Feldnamen (Verteidigung in der Tiefe:

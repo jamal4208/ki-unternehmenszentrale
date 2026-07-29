@@ -378,12 +378,19 @@ const PILOT_ACTIONS = Object.freeze({
   // executionRunId), niemals eine automatische Freigabe oder einen
   // automatischen Abschluss.
   "start-agent-execution": {
-    fields: ["presetId", "expectedRevision"],
+    // Phase 7 ("erste echte KI-Agentenausführung über die bestehende
+    // Codex-Anbindung"): zusätzlich das rein für ein Codex-Preset benötigte,
+    // ansonsten ignorierte Feld `approvalToken` (siehe
+    // pilot-agent-execution-service.js#consumeCodexRunApproval). Für das
+    // bestehende lokale Preset bleibt der Aufruf byteidentisch zu Phase 6
+    // möglich (approvalToken einfach weglassen).
+    fields: ["presetId", "expectedRevision", "approvalToken"],
     run: async (db, body, meta) => {
       const result = await agentExecutionService.startAgentExecutionRun(db, {
         pilotOrderId: meta.pilotOrderId,
         presetId: body.presetId,
         expectedRevision: body.expectedRevision,
+        approvalToken: body.approvalToken,
         now: meta.now,
         actorUserId: meta.actorUserId,
       });
@@ -394,6 +401,23 @@ const PILOT_ACTIONS = Object.freeze({
         overview: service.getPilotOverview(db, { pilotOrderId: meta.pilotOrderId }),
       };
     },
+  },
+  // Phase 7 (Schwerpunkt 6, "Netzwerk- und Freigabeentscheidung"): stellt
+  // ausschließlich einen kurzlebigen, einmaligen Freigabe-Token für GENAU
+  // EINEN nachfolgenden Codex-Lauf aus (siehe
+  // pilot-agent-execution-service.js#requestCodexRunApproval). Erzeugt
+  // NIEMALS selbst einen Agentenlauf, NIEMALS eine dauerhafte Freigabe.
+  // Antwortet bewusst NICHT mit `overview` (kein Auftragszustand ändert
+  // sich durch das reine Ausstellen eines Tokens).
+  "request-codex-run-approval": {
+    fields: ["presetId"],
+    run: async (db, body, meta) =>
+      agentExecutionService.requestCodexRunApproval(db, {
+        pilotOrderId: meta.pilotOrderId,
+        presetId: body.presetId,
+        now: meta.now,
+        actorUserId: meta.actorUserId,
+      }),
   },
 });
 

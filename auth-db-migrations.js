@@ -1033,6 +1033,23 @@ const PILOT_AGENT_EXECUTION_RUN_STATUS_VALUES = Object.freeze(["RUNNING", "SUCCE
 // das bereits gespeicherte SUCCEEDED-Ergebnis bleibt davon unberührt).
 const PILOT_AGENT_EXECUTION_HANDOFF_STATUS_VALUES = Object.freeze(["PENDING", "SUCCEEDED", "FAILED"]);
 
+// Phase 7 ("erste echte KI-Agentenausführung über die bestehende
+// Codex-Anbindung"): Runner-Auswahl eines Agentenlaufs. Bewusst genau zwei
+// Werte – der bereits bestehende, unverändert ehrliche lokale
+// deterministische Runner (Phase 6) und der neue, echten Codex aufrufende
+// Read-Only-Runner. Kein dritter Runner, keine Erweiterung ohne erneute
+// additive Migration.
+const PILOT_AGENT_RUNNER_KIND_VALUES = Object.freeze(["LOCAL_DETERMINISTIC_READ_ONLY", "CODEX_READ_ONLY"]);
+
+// Phase 7: Freigabestatus eines einzelnen Agentenlaufs. NOT_REQUIRED für den
+// lokalen deterministischen Runner (kein externer KI-/Netzwerkzugriff,
+// keine Freigabe nötig); GRANTED ausschließlich, wenn ein frischer,
+// einmaliger Freigabe-Token (siehe pilot-agent-execution-service.js#
+// requestCodexRunApproval) unmittelbar vor diesem Lauf erfolgreich verbraucht
+// wurde. Es gibt bewusst keinen dritten Wert "AUTO" – eine automatische
+// Freigabe ist an keiner Stelle vorgesehen.
+const PILOT_AGENT_APPROVAL_STATUS_VALUES = Object.freeze(["NOT_REQUIRED", "GRANTED"]);
+
 // Genau acht zusätzliche Ereignistypen, zusätzlich zur vollständigen,
 // bereits bestehenden AUDIT_EVENT_TYPES_AT_MIGRATION_17-Menge oben.
 // auth-audit.js#EVENT_TYPES muss exakt dieser Aufzählung entsprechen.
@@ -1072,6 +1089,24 @@ const AUDIT_EVENT_TYPES_AT_MIGRATION_20 = Object.freeze([
 const AUDIT_EVENT_TYPES_AT_MIGRATION_21 = Object.freeze([
   ...AUDIT_EVENT_TYPES_AT_MIGRATION_20,
   "PILOT_AGENT_EXECUTION_RUN_HANDOFF_FAILED",
+]);
+
+// Phase 7 ("erste echte KI-Agentenausführung über die bestehende
+// Codex-Anbindung"): genau zwei zusätzliche Ereignistypen, zusätzlich zur
+// vollständigen, bereits bestehenden AUDIT_EVENT_TYPES_AT_MIGRATION_21-Menge
+// oben. auth-audit.js#EVENT_TYPES muss exakt dieser Aufzählung entsprechen.
+// CODEX_APPROVAL_REQUESTED deckt AUSSCHLIESSLICH das explizite Anfordern
+// eines frischen, einmaligen Freigabe-Tokens für einen Codex-Lauf ab –
+// niemals eine automatische Freigabe. CODEX_START_BLOCKED deckt jeden Fall
+// ab, in dem ein Codex-Lauf VOR dem eigentlichen Codex-Aufruf kontrolliert
+// blockiert wurde (Codex nicht installiert, nicht authentifiziert oder
+// Freigabe fehlt/ungültig/verbraucht) – niemals einen technischen
+// Runner-Fehler nach einem tatsächlichen Codex-Aufruf (dafür bleibt
+// PILOT_AGENT_EXECUTION_RUN_FAILED zuständig).
+const AUDIT_EVENT_TYPES_AT_MIGRATION_22 = Object.freeze([
+  ...AUDIT_EVENT_TYPES_AT_MIGRATION_21,
+  "PILOT_AGENT_EXECUTION_CODEX_APPROVAL_REQUESTED",
+  "PILOT_AGENT_EXECUTION_CODEX_START_BLOCKED",
 ]);
 
 function sqlEnum(values) {
@@ -2697,6 +2732,111 @@ const MIGRATIONS = Object.freeze([
       CREATE INDEX idx_auth_audit_events_timestamp ON auth_audit_events(timestamp);
     `,
   }),
+  // Phase 7 ("erste echte KI-Agentenausführung über die bestehende
+  // Codex-Anbindung") – rein additiv gegenüber Migration 21: ausschließlich
+  // zusätzliche, NULLable bzw. mit sicherem Default versehene Spalten auf
+  // der bereits bestehenden pilot_agent_execution_runs-Tabelle sowie die
+  // erneute, etablierte Audit-Ereignistyp-Erweiterung. Migrationen 1–21
+  // bleiben dabei byteidentisch unverändert. Kein Löschen oder Neuaufbau
+  // von pilot_agent_execution_runs selbst; jeder bereits bestehende
+  // Agentenlauf (Phase 6) erhält automatisch und rückwirkend die ehrlichen
+  // Ausgangswerte requestedRunnerKind = actualRunnerKind =
+  // 'LOCAL_DETERMINISTIC_READ_ONLY', aiExecuted = 0, fallbackUsed = 0,
+  // networkRequired = 0, externalAiRequired = 0, approvalStatus =
+  // 'NOT_REQUIRED', timedOut = 0, cancelledRun = 0 – exakt das, was für
+  // diese bereits vor Phase 7 gelaufenen, lokalen deterministischen Läufe
+  // tatsächlich zutrifft (kein Modellaufruf, kein Netzwerk, keine
+  // Freigabe nötig).
+  //
+  // requestedRunnerKind/actualRunnerKind sind bewusst getrennte Spalten,
+  // obwohl dieser Korrekturlauf KEINEN automatischen Laufzeit-Fallback
+  // implementiert (ein angeforderter CODEX_READ_ONLY-Lauf wird niemals
+  // automatisch durch den lokalen Runner ersetzt – siehe
+  // pilot-agent-execution-service.js#startAgentExecutionRun): sie halten die
+  // Unterscheidung im Datenmodell bereits jetzt ehrlich und geprüft fest,
+  // für den Fall, dass eine künftige Phase einen ausdrücklich erlaubten
+  // Fallback einführt. Dieser Korrekturlauf setzt fallbackUsed an keiner
+  // Stelle jemals auf 1 (kein Laufzeit-Fallback implementiert) – aiExecuted
+  // und fallbackUsed sind dadurch bereits strukturell niemals gleichzeitig
+  // wahr (siehe pilot-agent-execution-service.js#persistSucceededAgentExecutionRun/
+  // persistFailedAgentExecutionRun, die fallbackUsed nirgends setzen).
+  Object.freeze({
+    version: 22,
+    name: "add_pilot_agent_execution_run_runner_selection_and_widen_audit_event_types_v15",
+    sql: `
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN requestedRunnerKind TEXT NOT NULL DEFAULT 'LOCAL_DETERMINISTIC_READ_ONLY'
+        CHECK (requestedRunnerKind IN (${sqlEnum(PILOT_AGENT_RUNNER_KIND_VALUES)}));
+
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN actualRunnerKind TEXT NOT NULL DEFAULT 'LOCAL_DETERMINISTIC_READ_ONLY'
+        CHECK (actualRunnerKind IN (${sqlEnum(PILOT_AGENT_RUNNER_KIND_VALUES)}));
+
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN runnerVersion TEXT CHECK (runnerVersion IS NULL OR length(runnerVersion) <= 100);
+
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN modelLabel TEXT CHECK (modelLabel IS NULL OR length(modelLabel) <= 200);
+
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN aiExecuted INTEGER NOT NULL DEFAULT 0 CHECK (aiExecuted IN (0, 1));
+
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN fallbackUsed INTEGER NOT NULL DEFAULT 0 CHECK (fallbackUsed IN (0, 1));
+
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN fallbackReason TEXT CHECK (fallbackReason IS NULL OR length(fallbackReason) <= 500);
+
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN networkRequired INTEGER NOT NULL DEFAULT 0 CHECK (networkRequired IN (0, 1));
+
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN externalAiRequired INTEGER NOT NULL DEFAULT 0 CHECK (externalAiRequired IN (0, 1));
+
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN approvalStatus TEXT NOT NULL DEFAULT 'NOT_REQUIRED'
+        CHECK (approvalStatus IN (${sqlEnum(PILOT_AGENT_APPROVAL_STATUS_VALUES)}));
+
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN workspaceId TEXT CHECK (workspaceId IS NULL OR length(workspaceId) <= 100);
+
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN timedOut INTEGER NOT NULL DEFAULT 0 CHECK (timedOut IN (0, 1));
+
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN cancelledRun INTEGER NOT NULL DEFAULT 0 CHECK (cancelledRun IN (0, 1));
+
+      CREATE TABLE auth_audit_events_v15 (
+        eventId TEXT PRIMARY KEY,
+        actorUserId TEXT,
+        tenantId TEXT,
+        eventType TEXT NOT NULL CHECK (eventType IN (${sqlEnum(AUDIT_EVENT_TYPES_AT_MIGRATION_22)})),
+        result TEXT NOT NULL CHECK (result IN (${sqlEnum(AUDIT_RESULT_VALUES)})),
+        timestamp TEXT NOT NULL,
+        metadata TEXT
+      );
+
+      INSERT INTO auth_audit_events_v15 (eventId, actorUserId, tenantId, eventType, result, timestamp, metadata)
+      SELECT eventId, actorUserId, tenantId, eventType, result, timestamp, metadata FROM auth_audit_events;
+
+      DROP TABLE auth_audit_events;
+      ALTER TABLE auth_audit_events_v15 RENAME TO auth_audit_events;
+
+      CREATE TRIGGER trg_auth_audit_events_no_update
+      BEFORE UPDATE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: UPDATE ist nicht erlaubt.');
+      END;
+
+      CREATE TRIGGER trg_auth_audit_events_no_delete
+      BEFORE DELETE ON auth_audit_events
+      BEGIN
+        SELECT RAISE(ABORT, 'auth_audit_events ist append-only: DELETE ist nicht erlaubt.');
+      END;
+
+      CREATE INDEX idx_auth_audit_events_timestamp ON auth_audit_events(timestamp);
+    `,
+  }),
 ]);
 
 function ensureMigrationsTable(db) {
@@ -2816,6 +2956,10 @@ module.exports = {
   PILOT_AGENT_EXECUTION_HANDOFF_STATUS_VALUES,
   AUDIT_EVENT_TYPES_AT_MIGRATION_20,
   AUDIT_EVENT_TYPES_AT_MIGRATION_21,
+  // Phase 7 – echte KI-Agentenausführung über die bestehende Codex-Anbindung
+  PILOT_AGENT_RUNNER_KIND_VALUES,
+  PILOT_AGENT_APPROVAL_STATUS_VALUES,
+  AUDIT_EVENT_TYPES_AT_MIGRATION_22,
   MIGRATIONS,
   ensureMigrationsTable,
   getAppliedVersions,

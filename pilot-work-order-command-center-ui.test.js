@@ -137,8 +137,24 @@ function makeFakeBackend() {
 
   orders.set(CANONICAL_ID, baseOrder(CANONICAL_ID, { title: "Kanonischer Pilotauftrag" }));
 
+  // Phase 7 ("erste echte KI-Agentenausführung über die bestehende
+  // Codex-Anbindung") – additive Fake-Backend-Erweiterung: bildet
+  // ausschließlich den HTTP-Vertrag nach (Verfügbarkeit, Freigabe-Token,
+  // Runner-/KI-Metadaten), startet niemals einen echten Codex-Prozess.
+  let codexAvailable = true;
+  let codexAuthenticated = true;
+  let nextCodexOutcome = "SUCCEEDED";
+  let nextCodexRedactionApplied = false;
+  // Korrekturlauf ("Codex-Fehlerdiagnose gezielt verbessern") – 9. bildet
+  // ausschließlich den bereits über die API sichtbaren HTTP-Vertrag nach
+  // (resultSummary.diagnostics/diagnosticNotice), erzeugt niemals einen
+  // echten Codex-Prozess.
+  let nextCodexDiagnostics = null;
+  const issuedCodexTokens = new Set();
+
   function overviewFor(order) {
     return {
+      codexAvailability: { available: codexAvailable, authenticated: codexAuthenticated, version: "codex-cli 0.999.0-test", authLabel: codexAuthenticated ? "ChatGPT" : null },
       order: {
         id: order.id,
         title: order.title,
@@ -228,6 +244,78 @@ function makeFakeBackend() {
       // ["start-agent-execution"] nach – verändert NIEMALS order.status
       // (rein additive technische Ausführungseinheit) und erzeugt keine
       // automatische Freigabe.
+      // Phase 7 – reine Token-Ausstellung, kein Auftragszustand ändert
+      // sich, kein Agentenlauf entsteht (siehe pilot-agent-execution-service.js
+      // #requestCodexRunApproval).
+      if (action === "request-codex-run-approval") {
+        if (body.presetId !== "codex-analyze-pilot-structure") {
+          return respond(400, { ok: false, message: "Eine Freigabeanforderung ist ausschließlich für ein Codex-Preset möglich." });
+        }
+        idCounter += 1;
+        const token = `codex-approval-test-token-${idCounter}`;
+        issuedCodexTokens.add(token);
+        return respond(200, { ok: true, approvalToken: token, expiresInMs: 300000 });
+      }
+      if (action === "start-agent-execution" && body.presetId === "codex-analyze-pilot-structure") {
+        if (order.status !== "IN_EXECUTION") {
+          return respond(409, { ok: false, message: "Ein Agentenlauf ist nur während IN_EXECUTION möglich.", pilotOrderId: orderId, currentStatus: order.status });
+        }
+        if (!codexAvailable) {
+          return respond(409, { ok: false, message: "Codex ist auf diesem System nicht verfügbar oder nicht installiert." });
+        }
+        if (!codexAuthenticated) {
+          return respond(409, { ok: false, message: "Codex ist auf diesem System nicht authentifiziert." });
+        }
+        if (!body.approvalToken || !issuedCodexTokens.has(body.approvalToken)) {
+          return respond(409, { ok: false, message: "Für diesen Codex-Lauf liegt keine gültige, frische Freigabe vor." });
+        }
+        issuedCodexTokens.delete(body.approvalToken);
+        agentRunCounter += 1;
+        const outcome = nextCodexOutcome;
+        const run = {
+          id: `pilot-agent-run-codex-test-${agentRunCounter}`,
+          presetId: body.presetId,
+          pilotRole: "RECHERCHE_ANALYSE",
+          pilotRoleLabel: "Recherche-/Analyse-Agent",
+          taskTitle: "Phase-7-Pilotstruktur semantisch prüfen",
+          runnerId: "codex-read-only-analysis",
+          runnerLabel: "Codex – echter, isolierter Read-Only-KI-Agentenlauf",
+          requestedRunnerKind: "CODEX_READ_ONLY",
+          actualRunnerKind: "CODEX_READ_ONLY",
+          aiExecuted: outcome === "SUCCEEDED",
+          fallbackUsed: false,
+          modelLabel: "Codex (ChatGPT)",
+          runnerVersion: "codex-cli 0.999.0-test",
+          status: outcome,
+          resultRawText: outcome === "SUCCEEDED" ? "# Analyse\n\nBeobachtung 1: Testergebnis (Codex)." : null,
+          // Korrektur 2 (unabhängiges Review, Kategorie B): der feste
+          // Redaktionshinweis muss auch über die Auftragsübersicht bis in
+          // die gerenderte Cockpit-Ansicht sichtbar sein.
+          resultSummary:
+            outcome === "SUCCEEDED"
+              ? {
+                  secretRedactionApplied: nextCodexRedactionApplied,
+                  secretRedactionNotice: nextCodexRedactionApplied
+                    ? "Ergebnis wurde aus Sicherheitsgründen redigiert und kann fachlich verkürzt sein."
+                    : null,
+                }
+              : nextCodexDiagnostics
+                ? { diagnostics: nextCodexDiagnostics, diagnosticNotice: "Sichere technische Diagnose \u2013 m\u00f6glicherweise gek\u00fcrzt und redigiert." }
+                : null,
+          errorMessage:
+            outcome === "FAILED"
+              ? nextCodexDiagnostics
+                ? "Codex-Prozess endete mit Exit-Code 1. stderr: Fehler beim Zugriff. api_key: [REDACTED] war ung\u00fcltig."
+                : "Simulierter technischer Codex-Fehler (Testfixtur)."
+              : null,
+          handoffStatus: outcome === "SUCCEEDED" ? "SUCCEEDED" : "PENDING",
+          handoffErrorMessage: null,
+          startedAt: nowIso(),
+          finishedAt: nowIso(),
+        };
+        order.agentExecutionRuns = (order.agentExecutionRuns || []).concat([run]);
+        return respond(200, { ok: true, agentExecutionRun: run, overview: overviewFor(order) });
+      }
       if (action === "start-agent-execution") {
         if (order.status !== "IN_EXECUTION") {
           return respond(409, { ok: false, message: "Ein Agentenlauf ist nur während IN_EXECUTION möglich.", pilotOrderId: orderId, currentStatus: order.status });
@@ -251,6 +339,10 @@ function makeFakeBackend() {
           taskTitle: "Technische Pilotstruktur analysieren",
           runnerId: "local-read-only-repo-analysis",
           runnerLabel: "Lokaler deterministischer Read-Only-Repository-Analyse-Runner",
+          requestedRunnerKind: "LOCAL_DETERMINISTIC_READ_ONLY",
+          actualRunnerKind: "LOCAL_DETERMINISTIC_READ_ONLY",
+          aiExecuted: false,
+          fallbackUsed: false,
           status: outcome,
           resultRawText: outcome === "SUCCEEDED" ? "# Bestandsaufnahme\n\nBeobachtung 1: Testergebnis." : null,
           errorMessage: outcome === "FAILED" ? "Simulierter technischer Runner-Fehler (Testfixtur)." : null,
@@ -299,6 +391,19 @@ function makeFakeBackend() {
     setNextAgentExecutionHandoffOutcome: (status, errorMessage) => {
       nextAgentExecutionHandoffStatus = status;
       nextAgentExecutionHandoffErrorMessage = errorMessage || null;
+    },
+    setCodexAvailability: (available, authenticated) => {
+      codexAvailable = available;
+      codexAuthenticated = authenticated;
+    },
+    setNextCodexOutcome: (value) => {
+      nextCodexOutcome = value;
+    },
+    setNextCodexRedactionApplied: (value) => {
+      nextCodexRedactionApplied = value;
+    },
+    setNextCodexDiagnostics: (value) => {
+      nextCodexDiagnostics = value;
     },
   };
 }
@@ -712,6 +817,136 @@ async function run() {
     assert.match(diagnostics, /Rollenübergabe fehlgeschlagen/);
     assert.match(diagnostics, /Rollenübergaben sind nur während IN_EXECUTION möglich/);
     backend.setNextAgentExecutionHandoffOutcome("SUCCEEDED", null);
+  });
+
+  // -------------------------------------------------------------------
+  // Phase 7 ("erste echte KI-Agentenausführung über die bestehende
+  // Codex-Anbindung") – 39./40./41. Codex-Sektion: wahrheitsgemäße
+  // Runner-Anzeige, kein Start ohne vorherige, ausdrückliche Freigabe,
+  // blockierter/erfolgreicher/fehlgeschlagener Zustand.
+  // -------------------------------------------------------------------
+
+  await check("Phase 7 – die Codex-Sektion zeigt Verfügbarkeit sowie den Hinweis auf externen KI-/Netzwerkzugriff und Freigabebedarf", () => {
+    backend.setCodexAvailability(true, true);
+    ui.render();
+    const diagnostics = domElements["pilot-work-order-diagnostics-output"].innerHTML;
+    assert.match(diagnostics, /Codex-Agentenlauf/);
+    assert.match(diagnostics, /Codex verfügbar: ja/);
+    assert.match(diagnostics, /authentifiziert: ja/);
+    assert.match(diagnostics, /externen KI-\/Netzwerkzugriff/);
+  });
+
+  // Verbindliche Sicherheitsinformation für Jamal (Korrekturlauf vor dem
+  // echten Referenzlauf, unabhängiges Review Kategorie B): die Grenzen der
+  // Leseisolation müssen im Cockpit sichtbar sein, unabhängig vom
+  // Auftragsstatus (nicht erst nach Klick auf eine Aktion).
+  await check("Phase 7 – die Codex-Sektion zeigt die verbindliche Sicherheitsinformation zu den Grenzen der Leseisolation (keine vollständige Betriebssystem-Leseisolation, bewusste Einzelfreigabe, keine Secrets in der Allowlist)", () => {
+    backend.setCodexAvailability(true, true);
+    ui.render();
+    const diagnostics = domElements["pilot-work-order-diagnostics-output"].innerHTML;
+    assert.match(diagnostics, /verhindern[\s\S]*Änderungen am echten Repository/);
+    assert.match(diagnostics, /KEINE vollständige Betriebssystem-Leseisolation/);
+    assert.match(diagnostics, /bewusste Einzelfreigabe durch Jamal/);
+    assert.match(diagnostics, /niemals \.env, \.env\.local oder andere Secrets/);
+  });
+
+  await check("Phase 7 – 40. ohne zuvor angeforderte Freigabe ist die Codex-Startschaltfläche deaktiviert (kein Start ohne Freigabe möglich)", async () => {
+    await ui.reloadSelectedOrder();
+    const diagnostics = domElements["pilot-work-order-diagnostics-output"].innerHTML;
+    assert.match(diagnostics, /data-action="request-codex-run-approval"/);
+    assert.match(diagnostics, /data-action="start-codex-agent-execution" disabled/);
+  });
+
+  await check("Phase 7 – eine angeforderte Freigabe schaltet die Codex-Startschaltfläche frei (genau ein Freigabe-Request)", async () => {
+    fetchCalls.length = 0;
+    await ui.requestCodexApproval();
+    const approvalCalls = fetchCalls.filter((call) => call.url.includes("request-codex-run-approval"));
+    assert.strictEqual(approvalCalls.length, 1);
+    assert.strictEqual(approvalCalls[0].body.presetId, "codex-analyze-pilot-structure");
+    assert.ok(ui.getState().codexApprovalToken, "nach erfolgreicher Anforderung muss ein Freigabe-Token im UI-Zustand vorliegen");
+    const diagnostics = domElements["pilot-work-order-diagnostics-output"].innerHTML;
+    assert.doesNotMatch(diagnostics, /data-action="start-codex-agent-execution" disabled/);
+  });
+
+  await check("Phase 7 – 39./41. ein erfolgreicher Codex-Lauf wird mit dem Freigabe-Token gestartet, zeigt Runner/KI-Status wahrheitsgemäß und verbraucht den Token", async () => {
+    backend.setNextCodexOutcome("SUCCEEDED");
+    fetchCalls.length = 0;
+    await ui.runCodexAgentExecution();
+    const call = fetchCalls.find((c) => c.url.includes("start-agent-execution") && c.body.presetId === "codex-analyze-pilot-structure");
+    assert.ok(call, "der Codex-Lauf muss über dieselbe Startroute mit dem Codex-Preset ausgelöst werden");
+    assert.ok(call.body.approvalToken, "der Request muss den zuvor angeforderten Freigabe-Token mitsenden");
+    assert.strictEqual(ui.getState().codexApprovalToken, null, "der Token darf nach dem Startversuch nicht erneut anzeigbar/wiederverwendbar bleiben");
+    const diagnostics = domElements["pilot-work-order-diagnostics-output"].innerHTML;
+    assert.match(diagnostics, /Angeforderter Runner: CODEX_READ_ONLY/);
+    assert.match(diagnostics, /Tatsächlicher Runner: CODEX_READ_ONLY/);
+    assert.match(diagnostics, /KI ausgeführt: ja/);
+    assert.match(diagnostics, /Fallback verwendet: nein/);
+    // Nach dem Verbrauch ist wieder keine gültige Freigabe vorhanden – die
+    // Startschaltfläche ist erneut deaktiviert (kein impliziter Nachschub).
+    assert.match(diagnostics, /data-action="start-codex-agent-execution" disabled/);
+  });
+
+  // Korrektur 2 (unabhängiges Review, Kategorie B) / Sicherheitstest 8.17
+  // (Teil 3, UI-Ebene): der feste Redaktionshinweis muss im Cockpit sichtbar
+  // sein, sobald eine tatsächliche Redaktion stattgefunden hat.
+  await check("Phase 7 – 8.17. der Redaktionshinweis wird im Cockpit angezeigt, sobald eine Codex-Antwort tatsächlich redigiert wurde", async () => {
+    await ui.requestCodexApproval();
+    backend.setNextCodexOutcome("SUCCEEDED");
+    backend.setNextCodexRedactionApplied(true);
+    await ui.runCodexAgentExecution();
+    const diagnostics = domElements["pilot-work-order-diagnostics-output"].innerHTML;
+    assert.match(diagnostics, /aus Sicherheitsgründen redigiert und kann fachlich verkürzt sein/);
+    backend.setNextCodexRedactionApplied(false);
+  });
+
+  await check("Phase 7 – 41. ein fehlgeschlagener Codex-Lauf zeigt einen verständlichen technischen Fehler, KI ausgeführt bleibt ehrlich 'nein'", async () => {
+    await ui.requestCodexApproval();
+    backend.setNextCodexOutcome("FAILED");
+    await ui.runCodexAgentExecution();
+    const diagnostics = domElements["pilot-work-order-diagnostics-output"].innerHTML;
+    assert.match(diagnostics, /Fehlgeschlagen/);
+    assert.match(diagnostics, /Simulierter technischer Codex-Fehler/);
+    assert.match(diagnostics, /KI ausgeführt: nein/);
+  });
+
+  // -------------------------------------------------------------------
+  // Korrekturlauf ("Codex-Fehlerdiagnose gezielt verbessern") – 9. die
+  // strukturierten Diagnosefelder eines fehlgeschlagenen CODEX_READ_ONLY-
+  // Laufs (Exit-Code, Signal, Ursache/reasonCode, Redaktionshinweis) müssen
+  // im Cockpit sichtbar sein, nicht nur der bisherige Fließtext. Kein
+  // Rohsecret darf dabei sichtbar werden.
+  // -------------------------------------------------------------------
+
+  await check("Korrekturlauf – 9. die strukturierte Fehlerdiagnose eines fehlgeschlagenen Codex-Laufs (Exit-Code, Signal, Ursache, Redaktionshinweis) wird im Cockpit angezeigt", async () => {
+    await ui.requestCodexApproval();
+    backend.setNextCodexOutcome("FAILED");
+    backend.setNextCodexDiagnostics({
+      exitCode: 1,
+      signal: "SIGTERM",
+      reasonCode: "CODEX_PROCESS_EXIT_NONZERO",
+      stderrSample: "Fehler beim Zugriff. api_key: [REDACTED] war ung\u00fcltig.",
+      stdoutSample: null,
+      timedOut: false,
+      cancelled: false,
+    });
+    await ui.runCodexAgentExecution();
+    const diagnostics = domElements["pilot-work-order-diagnostics-output"].innerHTML;
+    assert.match(diagnostics, /Exit-Code: 1/);
+    assert.match(diagnostics, /Signal: SIGTERM/);
+    assert.match(diagnostics, /Ursache: CODEX_PROCESS_EXIT_NONZERO/);
+    assert.match(diagnostics, /Sichere technische Diagnose \u2013 m\u00f6glicherweise gek\u00fcrzt und redigiert/);
+    assert.match(diagnostics, /KI ausgef\u00fchrt: nein/);
+    assert.ok(!diagnostics.includes("api_key: sk-"), "kein Rohsecret im Cockpit sichtbar");
+    backend.setNextCodexDiagnostics(null);
+  });
+
+  await check("Phase 7 – 40. wenn Codex nicht verfügbar ist, bleibt die Freigabeanforderung deaktiviert (kein Umgehen der Verfügbarkeitsprüfung über das UI)", async () => {
+    backend.setCodexAvailability(false, false);
+    await ui.reloadSelectedOrder();
+    const diagnostics = domElements["pilot-work-order-diagnostics-output"].innerHTML;
+    assert.match(diagnostics, /Codex verfügbar: nein/);
+    assert.match(diagnostics, /data-action="request-codex-run-approval" disabled/);
+    backend.setCodexAvailability(true, true);
   });
 
   console.log(`pilot-work-order-command-center-ui.test.js: ${passed} Prüfpunkte erfolgreich`);
