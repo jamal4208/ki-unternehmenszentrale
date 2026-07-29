@@ -413,6 +413,24 @@ async function run() {
     });
   });
 
+  // V7.7.1 ("Explizite Jamal-Ausführungsfreigabe bedienbar machen") – 12.:
+  // die Freigabe-Audit-Ereignisse dürfen ausschließlich pilotOrderId
+  // enthalten – niemals das `confirmed`-Flag, eine `note`, einen Token oder
+  // einen Ergebnistext (auch nicht über einen zukünftigen unbedachten
+  // Zusatz, siehe pilot-work-order-service.js#approveForExecution/
+  // #approveCompletion).
+  await check("die Freigabe-Audit-Ereignisse (Ausführung/Abschluss) enthalten ausschließlich pilotOrderId, keine Tokens/Prompts/Ergebnisse", () => {
+    const events = authDb.listAuditEvents(db, { limit: 500 }).filter(
+      (event) => event.eventType === "PILOT_EXECUTION_APPROVAL_RECORDED" || event.eventType === "PILOT_COMPLETION_APPROVAL_RECORDED",
+    );
+    assert.ok(events.length >= 2, "es sollten beide Freigabe-Audit-Ereignisse aus diesem Lauf vorliegen");
+    events.forEach((event) => {
+      const metadata = event.metadata && typeof event.metadata === "string" ? JSON.parse(event.metadata) : event.metadata || {};
+      assert.deepStrictEqual(Object.keys(metadata).sort(), ["pilotOrderId"]);
+      assert.doesNotMatch(JSON.stringify(metadata), /confirmed|token|note|prompt|result/i);
+    });
+  });
+
   console.log(`pilot-work-order.test.js: ${passed} Prüfpunkte erfolgreich`);
 }
 

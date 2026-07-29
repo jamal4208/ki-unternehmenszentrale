@@ -9806,6 +9806,56 @@ details.local-agent-assignment-details > summary {
   font-style: italic;
 }
 
+/* V7.7.1 ("Explizite Jamal-Ausführungsfreigabe bedienbar machen"): die
+   Bestätigungsfläche für approve-for-execution/approve-completion ersetzt
+   an dieser Stelle die normale Primäraktions-Schaltfläche (siehe
+   pilot-work-order-ui.js#renderJamalConfirmationPanel). Bewusst deutlich
+   hervorgehoben (kräftiger Rahmen), damit ein Einzelklick niemals mit einer
+   bereits abgeschlossenen Freigabe verwechselt werden kann. Keine
+   allgemeine Dialog-/Modal-Infrastruktur, ausschließlich diese eine Fläche. */
+.pilot-jamal-confirmation {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 2px solid var(--red, #b3441f);
+  border-radius: var(--radius-card, var(--radius));
+  background: var(--card-bg, #fff);
+}
+
+.pilot-jamal-confirmation-title {
+  margin: 0;
+}
+
+.pilot-jamal-confirmation-facts {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.pilot-jamal-confirmation-facts dt {
+  font-weight: 600;
+}
+
+.pilot-jamal-confirmation-facts dd {
+  margin: 0;
+}
+
+.pilot-jamal-confirmation p {
+  margin: 0;
+}
+
+.pilot-jamal-confirmation-checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.pilot-jamal-confirmation-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 /* Phase 6 ("technische Agentenlauf-Infrastruktur mit lokalem deterministischem Read-Only-Runner") – kompakte Ausgabe des
    tatsächlichen, persistierten Agentenlauf-Ergebnisses. */
 .pilot-agent-execution-result {

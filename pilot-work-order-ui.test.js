@@ -85,10 +85,37 @@ check("bisherige Ergebnisse (Rollenübergaben) sind aufklappbar sichtbar", () =>
 // Freigabe oder ein Commit/Push/Deployment aus.
 // ---------------------------------------------------------------------------
 
-check("die Freigaben (Ausführung/Abschluss) sind nicht als Ein-Klick-confirmed:true-Aktion verdrahtet", () => {
+check("ein Klick auf approve-for-execution/approve-completion sendet niemals direkt confirmed:true, sondern öffnet nur eine lokale Bestätigungsfläche", () => {
+  // Der Klick-Handler selbst darf für diese beiden Aktionen ausschließlich
+  // die lokale Bestätigungsfläche öffnen (kein API-Aufruf beim Öffnen, siehe
+  // V7.7.1/openJamalConfirmationDialog) – kein hartkodierter Ein-Klick-Aufruf
+  // mit `confirmed: true` irgendwo in der Datei.
   assert.doesNotMatch(js, /postAction\(\s*"approve-for-execution"\s*,\s*\{\s*confirmed:\s*true/);
   assert.doesNotMatch(js, /postAction\(\s*"approve-completion"\s*,\s*\{\s*confirmed:\s*true/);
-  assert.match(js, /ausdr\\u00fcckliche Best\\u00e4tigung durch Jamal au\\u00dferhalb dieser Schaltfl\\u00e4che/);
+  assert.match(
+    js,
+    /action === "approve-for-execution" \|\| action === "approve-completion"\) \{[\s\S]{0,200}openJamalConfirmationDialog\(action\)/,
+  );
+});
+
+check("die endgültige Bestätigung erfordert eine aktiv gesetzte Checkbox und sendet confirmed:true erst nach einem eigenen Bestätigungsklick", () => {
+  assert.match(js, /Ich best\\u00e4tige diese Ausf\\u00fchrungsfreigabe ausdr\\u00fccklich\./);
+  assert.match(js, /function confirmJamalConfirmation\(\)/);
+  assert.match(js, /if \(!confirmation \|\| confirmation\.submitting \|\| !confirmation\.checked\) return Promise\.resolve\(\);/);
+  assert.match(js, /postAction\(pilotOrderId, action, \{ confirmed: true, expectedRevision: expectedRevision \}\)/);
+});
+
+check("Abbrechen/Schließen der Bestätigungsfläche löst keinen Request aus (rein lokaler Zustand)", () => {
+  assert.match(js, /function cancelJamalConfirmation\(\)/);
+  const cancelFnMatch = js.match(/function cancelJamalConfirmation\(\)\s*\{[\s\S]*?\n  \}/);
+  assert.ok(cancelFnMatch, "cancelJamalConfirmation muss auffindbar sein");
+  assert.doesNotMatch(cancelFnMatch[0], /fetch|postAction/);
+});
+
+check("das Öffnen der Bestätigungsfläche selbst löst keinen Request aus (kein versteckter API-Aufruf beim Öffnen)", () => {
+  const openFnMatch = js.match(/function openJamalConfirmationDialog\(action\)\s*\{[\s\S]*?\n  \}/);
+  assert.ok(openFnMatch, "openJamalConfirmationDialog muss auffindbar sein");
+  assert.doesNotMatch(openFnMatch[0], /fetch|postAction/);
 });
 
 check("keine Publish-/Send-/Deploy-/Commit-/Push-Aktion wird als data-action/postAction ausgelöst", () => {

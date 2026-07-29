@@ -410,8 +410,17 @@ function makeFakeBackend() {
 
 const backend = makeFakeBackend();
 const fetchCalls = [];
+// V7.7.1 ("Explizite Jamal-Ausführungsfreigabe bedienbar machen") – 8.: ein
+// einmaliger Schalter, um den NÄCHSTEN fetch()-Aufruf als Netzwerkfehler
+// (rejected Promise, kein HTTP-Statuscode) zu simulieren, ohne eine echte
+// Netzwerktrennung zu benötigen.
+let forceNextFetchNetworkFailure = false;
 global.fetch = (url, opts) => {
   fetchCalls.push({ url, method: (opts && opts.method) || "GET", body: opts && opts.body ? JSON.parse(opts.body) : undefined });
+  if (forceNextFetchNetworkFailure) {
+    forceNextFetchNetworkFailure = false;
+    return Promise.reject(new Error("Simulierter Netzwerkfehler (Testfixtur)."));
+  }
   return backend.handle(url, opts);
 };
 
@@ -947,6 +956,183 @@ async function run() {
     assert.match(diagnostics, /Codex verfügbar: nein/);
     assert.match(diagnostics, /data-action="request-codex-run-approval" disabled/);
     backend.setCodexAvailability(true, true);
+  });
+
+  // -------------------------------------------------------------------
+  // V7.7.1 ("Explizite Jamal-Ausführungsfreigabe bedienbar machen"): die
+  // Jamal-Bestätigungsfläche ersetzt die zuvor funktionslose Ein-Klick-
+  // Sperre für approve-for-execution/approve-completion. Diese Prüfpunkte
+  // spiegeln exakt die im Auftrag geforderten Regressionstests 1–11 (12.
+  // ist bereits in pilot-work-order.test.js abgedeckt, audit-seitig).
+  // -------------------------------------------------------------------
+
+  function setRawOrder(id, overrides) {
+    backend.orders.set(
+      id,
+      Object.assign(
+        {
+          id,
+          title: "Titel",
+          desiredOutcome: "Ergebnis",
+          requestedBy: "Jamal",
+          status: "DRAFT",
+          statusLabel: STATUS_LABELS.DRAFT,
+          revision: 0,
+          involvedAgents: [{ pilotRoleLabel: "Projektmanager-Agent", canonicalName: "Projektmanager-Agent", focus: "x" }],
+          qualityCriteria: ["a"],
+          allowedTools: ["a"],
+          forbiddenActions: ["a"],
+          requiredApprovals: ["a"],
+          timeframe: "x",
+          handoffs: [],
+          agentExecutionRuns: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        overrides,
+      ),
+    );
+  }
+
+  let approvalOrderId;
+
+  await check("V7.7.1-1. ein Klick öffnet ausschließlich die Bestätigungsfläche – kein Request, kein Statuswechsel", async () => {
+    idCounter += 1;
+    approvalOrderId = `pilot-order-test-approval-${idCounter}`;
+    setRawOrder(approvalOrderId, {
+      title: "Auftrag J: Jamal-Freigabe-Testauftrag",
+      status: "READY_FOR_JAMAL_APPROVAL",
+      statusLabel: STATUS_LABELS.READY_FOR_JAMAL_APPROVAL,
+      revision: 3,
+    });
+    await ui.selectOrder(approvalOrderId);
+    fetchCalls.length = 0;
+    ui.openJamalConfirmationDialog("approve-for-execution");
+    const state = ui.getState();
+    assert.ok(state.jamalConfirmation, "die Bestätigungsfläche muss lokal geöffnet sein");
+    assert.strictEqual(state.jamalConfirmation.action, "approve-for-execution");
+    assert.strictEqual(state.jamalConfirmation.pilotOrderId, approvalOrderId);
+    assert.strictEqual(state.jamalConfirmation.checked, false, "die Checkbox darf beim Öffnen nicht bereits gesetzt sein");
+    assert.strictEqual(fetchCalls.length, 0, "das reine Öffnen darf keinen Request auslösen");
+    assert.strictEqual(state.overview.status, "READY_FOR_JAMAL_APPROVAL", "kein Statuswechsel durch das Öffnen");
+    assert.match(domElements["pilot-work-order-output"].innerHTML, /Jamal-Best\u00e4tigung erforderlich/);
+    assert.match(domElements["pilot-work-order-output"].innerHTML, /Ich best\u00e4tige diese Ausf\u00fchrungsfreigabe ausdr\u00fccklich\./);
+  });
+
+  await check("V7.7.1-2. eine Bestätigung ohne gesetzte Checkbox ist nicht möglich (kein Request, kein Statuswechsel)", async () => {
+    assert.strictEqual(ui.getState().jamalConfirmation.checked, false);
+    fetchCalls.length = 0;
+    await ui.confirmJamalConfirmation();
+    assert.strictEqual(fetchCalls.length, 0, "ohne Checkbox darf kein Request gesendet werden");
+    assert.ok(ui.getState().jamalConfirmation, "die Fläche muss weiterhin geöffnet sein");
+    assert.strictEqual(ui.getState().overview.status, "READY_FOR_JAMAL_APPROVAL");
+  });
+
+  await check("V7.7.1-3. Abbrechen ändert keinen Status (kein Request)", async () => {
+    ui.setJamalConfirmationChecked(true);
+    assert.strictEqual(ui.getState().jamalConfirmation.checked, true);
+    fetchCalls.length = 0;
+    ui.cancelJamalConfirmation();
+    assert.strictEqual(fetchCalls.length, 0, "Abbrechen darf keinen Request auslösen");
+    assert.strictEqual(ui.getState().jamalConfirmation, null, "die Fläche muss nach Abbrechen geschlossen sein");
+    assert.strictEqual(ui.getState().overview.status, "READY_FOR_JAMAL_APPROVAL", "Abbrechen darf keinen Status verändern");
+  });
+
+  await check("V7.7.1-4./6. ein erneutes Öffnen, Checkbox setzen und der finale Bestätigungsklick sendet confirmed:true und erreicht APPROVED_FOR_EXECUTION", async () => {
+    ui.openJamalConfirmationDialog("approve-for-execution");
+    assert.strictEqual(ui.getState().jamalConfirmation.checked, false, "ein erneutes Öffnen startet wieder mit ungesetzter Checkbox");
+    ui.setJamalConfirmationChecked(true);
+    fetchCalls.length = 0;
+    await ui.confirmJamalConfirmation();
+    const call = fetchCalls.find((c) => c.url.includes("approve-for-execution"));
+    assert.ok(call, "die finale Bestätigung muss über die bestehende Route gesendet werden");
+    assert.strictEqual(call.body.confirmed, true, "confirmed:true darf ausschließlich vom finalen Bestätigungsklick gesendet werden");
+    const state = ui.getState();
+    assert.strictEqual(state.overview.status, "APPROVED_FOR_EXECUTION", "die Freigabe muss den vorgesehenen Status erreichen");
+    assert.strictEqual(state.jamalConfirmation, null, "die Fläche schließt sich nach Erfolg");
+  });
+
+  await check("V7.7.1-10. nach erfolgreicher Freigabe ist der normale Phase-7-Weg (start-execution) erreichbar", async () => {
+    fetchCalls.length = 0;
+    await ui.runOrderAction("start-execution", {});
+    const state = ui.getState();
+    assert.strictEqual(state.overview.status, "IN_EXECUTION", "APPROVED_FOR_EXECUTION -> IN_EXECUTION muss über die UI erreichbar sein");
+  });
+
+  await check("V7.7.1-7. Doppelbetätigung des finalen Bestätigungsklicks erzeugt keine doppelte Freigabe (approve-completion)", async () => {
+    idCounter += 1;
+    const doubleClickOrderId = `pilot-order-test-approval-double-${idCounter}`;
+    setRawOrder(doubleClickOrderId, {
+      title: "Auftrag J2: Doppelklick-Testauftrag",
+      status: "READY_FOR_REVIEW",
+      statusLabel: STATUS_LABELS.READY_FOR_REVIEW,
+      revision: 7,
+    });
+    await ui.selectOrder(doubleClickOrderId);
+    ui.openJamalConfirmationDialog("approve-completion");
+    ui.setJamalConfirmationChecked(true);
+    fetchCalls.length = 0;
+    const first = ui.confirmJamalConfirmation();
+    assert.strictEqual(ui.getState().jamalConfirmation.submitting, true, "ein laufender Bestätigungsversuch muss als 'submitting' erkennbar sein");
+    assert.match(domElements["pilot-work-order-output"].innerHTML, /data-action="jamal-confirmation-confirm" disabled/);
+    const second = ui.confirmJamalConfirmation();
+    await Promise.all([first, second]);
+    const completionCalls = fetchCalls.filter((c) => c.url.includes("approve-completion"));
+    assert.strictEqual(completionCalls.length, 1, "eine zweite, gleichzeitig ausgelöste Bestätigung darf keinen zweiten Request senden");
+    assert.strictEqual(ui.getState().overview.status, "COMPLETED", "V7.7.1-11.: approve-completion nutzt dieselbe Sicherheitslogik und erreicht COMPLETED");
+  });
+
+  await check("V7.7.1-8. ein Netzwerkfehler beim finalen Bestätigungsklick lässt den bisherigen Status bestehen und zeigt eine verständliche Fehlermeldung", async () => {
+    idCounter += 1;
+    const networkFailureOrderId = `pilot-order-test-approval-network-${idCounter}`;
+    setRawOrder(networkFailureOrderId, {
+      title: "Auftrag J3: Netzwerkfehler-Testauftrag",
+      status: "READY_FOR_JAMAL_APPROVAL",
+      statusLabel: STATUS_LABELS.READY_FOR_JAMAL_APPROVAL,
+      revision: 2,
+    });
+    await ui.selectOrder(networkFailureOrderId);
+    ui.openJamalConfirmationDialog("approve-for-execution");
+    ui.setJamalConfirmationChecked(true);
+    forceNextFetchNetworkFailure = true;
+    fetchCalls.length = 0;
+    await ui.confirmJamalConfirmation();
+    const state = ui.getState();
+    assert.strictEqual(state.overview.status, "READY_FOR_JAMAL_APPROVAL", "der bisherige Status muss nach einem Netzwerkfehler unverändert bleiben");
+    assert.ok(state.jamalConfirmation, "die Fläche muss nach einem Netzwerkfehler geöffnet bleiben (kein automatisches Schließen)");
+    assert.strictEqual(state.jamalConfirmation.submitting, false);
+    assert.ok(state.jamalConfirmation.error && state.jamalConfirmation.error.length > 0, "es muss eine verständliche Fehlermeldung angezeigt werden");
+    assert.match(domElements["pilot-work-order-output"].innerHTML, /Netzwerkfehler/);
+    // kein automatischer Retry: genau ein tatsächlich gesendeter Versuch.
+    assert.strictEqual(fetchCalls.length, 1);
+    // ein erneuter, bewusster Klick nach dem Fehler sendet erfolgreich.
+    fetchCalls.length = 0;
+    await ui.confirmJamalConfirmation();
+    const retryCall = fetchCalls.find((c) => c.url.includes("approve-for-execution"));
+    assert.ok(retryCall && retryCall.body.confirmed === true);
+    assert.strictEqual(ui.getState().overview.status, "APPROVED_FOR_EXECUTION");
+  });
+
+  await check("V7.7.1-9. normale Agenten-/Kettenaktionen können die Bestätigungsfläche nicht umgehen (kein confirmed:true über einen anderen Aufrufpfad)", async () => {
+    idCounter += 1;
+    const bypassOrderId = `pilot-order-test-approval-bypass-${idCounter}`;
+    setRawOrder(bypassOrderId, {
+      title: "Auftrag J4: Umgehungs-Testauftrag",
+      status: "READY_FOR_JAMAL_APPROVAL",
+      statusLabel: STATUS_LABELS.READY_FOR_JAMAL_APPROVAL,
+      revision: 0,
+    });
+    await ui.selectOrder(bypassOrderId);
+    fetchCalls.length = 0;
+    // Weder die generische Primäraktions-Funktion noch irgendeine andere
+    // öffentlich exportierte Funktion außer confirmJamalConfirmation sendet
+    // jemals confirmed:true – ein Aufruf ohne den Bestätigungsweg bleibt
+    // exakt so blockiert wie zuvor (siehe bereits bestehender Prüfpunkt 21).
+    await ui.runOrderAction("approve-for-execution", {});
+    const call = fetchCalls.find((c) => c.url.includes("approve-for-execution"));
+    assert.ok(call);
+    assert.notStrictEqual(call.body.confirmed, true, "ein direkter Aufruf ohne die Bestätigungsfläche darf niemals confirmed:true senden");
+    assert.strictEqual(ui.getState().overview.status, "READY_FOR_JAMAL_APPROVAL", "kein Statuswechsel ohne die Bestätigungsfläche");
   });
 
   console.log(`pilot-work-order-command-center-ui.test.js: ${passed} Prüfpunkte erfolgreich`);

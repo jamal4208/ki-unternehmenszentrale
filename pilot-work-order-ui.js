@@ -30,6 +30,19 @@
  * überschreibt niemals lokal angezeigte Daten und wiederholt niemals
  * automatisch eine Aktion – ausschließlich ein ausdrücklicher Klick auf
  * "Aktuellen Stand neu laden" lädt den Auftrag erneut.
+ *
+ * V7.7.1 ("Explizite Jamal-Ausführungsfreigabe bedienbar machen"): die
+ * beiden Freigabegrenzen (approve-for-execution/approve-completion) waren
+ * zuvor über die Oberfläche technisch NICHT erreichbar (ein Klick zeigte
+ * ausschließlich einen Hinweistext, ohne jemals `confirmed: true` zu
+ * senden). Ersetzt wird das durch eine echte, bewusst reibungsbehaftete
+ * Bestätigungsfläche (state.jamalConfirmation): ein Klick auf die
+ * Primäraktion öffnet AUSSCHLIESSLICH lokalen Zustand (kein API-Aufruf),
+ * zeigt Auftrag/Aktion/Tragweite, erfordert eine aktiv gesetzte Checkbox
+ * und sendet `confirmed: true` erst nach einem zusätzlichen, eigenen
+ * Bestätigungsklick (siehe openJamalConfirmationDialog/
+ * confirmJamalConfirmation unten). Abbrechen/Schließen ändert nie einen
+ * Status. Kein anderer Codepfad in dieser Datei setzt `confirmed: true`.
  */
 
 (function () {
@@ -73,6 +86,14 @@
     chainStepApprovalTokens: {},
     chainActionInFlight: false,
     chainActionError: null,
+    // V7.7.1 ("Explizite Jamal-Ausführungsfreigabe bedienbar machen"): die
+    // einzige Stelle, an der `confirmed: true` jemals versendet wird (siehe
+    // confirmJamalConfirmation unten). Ausschließlich lokaler Zustand –
+    // niemals in localStorage, niemals in der URL. Wird bei jedem
+    // Auftragswechsel verworfen (siehe selectOrder) und nach jedem
+    // erfolgreichen Bestätigungsversuch wieder auf null gesetzt.
+    // Form: { action, pilotOrderId, orderTitle, checked, submitting, error }.
+    jamalConfirmation: null,
   };
 
   function byId(id) {
@@ -195,6 +216,10 @@
     state.codexApprovalError = null;
     state.chainStepApprovalTokens = {};
     state.chainActionError = null;
+    // Ein Auftragswechsel verwirft eine ggf. offene Jamal-Bestätigungsfläche
+    // ohne jeden API-Aufruf (kein Status ändert sich dadurch) – dieselbe
+    // Grundregel wie für codexApprovalToken/chainStepApprovalTokens oben.
+    state.jamalConfirmation = null;
     render();
     return fetchJson("/api/pilot-work-order/orders/" + encodeURIComponent(orderId)).then(function (response) {
       if (state.selectedPilotOrderId !== orderId) return;
@@ -283,6 +308,7 @@
         state.overviewError = null;
         state.actionError = null;
         state.conflict = null;
+        state.jamalConfirmation = null;
         render();
         return loadOrdersList();
       }
@@ -363,6 +389,145 @@
       state.actionError = (response.data && response.data.message) || "Aktion ist im aktuellen Zustand nicht m\u00f6glich.";
       render();
     });
+  }
+
+  // ---------------------------------------------------------------------
+  // V7.7.1 ("Explizite Jamal-Ausführungsfreigabe bedienbar machen"): die
+  // beiden Freigabegrenzen (approve-for-execution/approve-completion)
+  // erfordern serverseitig bereits `confirmed: true`
+  // (pilot-work-order-service.js#approveForExecution/#approveCompletion).
+  // Bislang zeigte ein Klick auf die Primäraktion ausschließlich einen
+  // Hinweistext, sendete aber niemals einen Request – APPROVED_FOR_EXECUTION
+  // und COMPLETED waren über die Oberfläche technisch unerreichbar. Ersetzt
+  // wird das durch eine echte, bewusst reibungsbehaftete
+  // Bestätigungsfläche:
+  //   1. Klick auf die Primäraktion → NUR lokaler Zustand wird gesetzt
+  //      (openJamalConfirmationDialog), KEIN API-Aufruf.
+  //   2. Die Fläche zeigt Auftrag, Aktion und die Tragweite der Freigabe.
+  //   3. Der Bestätigungsbutton bleibt deaktiviert, bis die Checkbox aktiv
+  //      gesetzt wurde (setJamalConfirmationChecked) – das Setzen der
+  //      Checkbox selbst löst NIEMALS eine Statusänderung aus.
+  //   4. Erst ein zusätzlicher, eigener Klick auf den Bestätigungsbutton
+  //      (confirmJamalConfirmation) sendet `confirmed: true` – die einzige
+  //      Stelle in dieser Datei, die das jemals tut.
+  //   5. Abbrechen/Schließen (cancelJamalConfirmation) verwirft ausschließ-
+  //      lich lokalen Zustand, niemals einen Request.
+  //   6. Ein laufender Bestätigungsversuch (submitting) blockiert jeden
+  //      weiteren Bestätigungsklick (keine doppelte Freigabe).
+  //   7. Ein Netzwerk-/Serverfehler lässt den bisherigen Status unverändert
+  //      und zeigt eine verständliche Fehlermeldung direkt in der Fläche.
+  // ---------------------------------------------------------------------
+
+  var JAMAL_CONFIRMATION_ACTION_LABELS = {
+    "approve-for-execution": "Ausf\u00fchrung freigeben",
+    "approve-completion": "Ergebnis abnehmen",
+  };
+
+  var JAMAL_CONFIRMATION_SCOPE_NOTE = {
+    "approve-for-execution":
+      "Diese Best\u00e4tigung gibt ausschlie\u00dflich die Ausf\u00fchrung DIESES EINEN Pilotauftrags frei \u2013 " +
+      "NICHT pauschal die gesamte Drei-Agenten-Kette. Jede sp\u00e4tere Kettenstufe (Recherche, Dokumentation, " +
+      "Projektmanager-Bewertung) ben\u00f6tigt weiterhin ihre eigene, gesonderte Jamal-Freigabe.",
+    "approve-completion":
+      "Diese Best\u00e4tigung schlie\u00dft ausschlie\u00dflich diesen einen Pilotauftrag ab und ersetzt keine " +
+      "vorherige oder sp\u00e4tere Einzelfreigabe.",
+  };
+
+  // Öffnet die Bestätigungsfläche für GENAU einen Auftrag/GENAU eine
+  // Aktion. Setzt ausschließlich lokalen Zustand – kein fetch(), keine
+  // Statusänderung, kein versteckter Netzwerkaufruf beim Öffnen.
+  function openJamalConfirmationDialog(action) {
+    if (!state.selectedPilotOrderId || !state.overview) return;
+    state.jamalConfirmation = {
+      action: action,
+      pilotOrderId: state.selectedPilotOrderId,
+      orderTitle: state.overview.order.title,
+      checked: false,
+      submitting: false,
+      error: null,
+    };
+    render();
+  }
+
+  // Setzt ausschließlich die lokal angezeigte Checkbox – löst niemals einen
+  // Request und niemals eine Statusänderung aus (Sicherheitsanforderung
+  // "kein Freigabestatus allein durch Checkbox setzen").
+  function setJamalConfirmationChecked(checked) {
+    if (!state.jamalConfirmation || state.jamalConfirmation.submitting) return;
+    state.jamalConfirmation.checked = Boolean(checked);
+    state.jamalConfirmation.error = null;
+    render();
+  }
+
+  // Abbrechen/Schließen: verwirft ausschließlich lokalen Zustand. Es wurde
+  // zu keinem Zeitpunkt ein Request gesendet, es gibt daher nichts, das
+  // durch das Abbrechen rückgängig gemacht werden müsste – der bisherige
+  // Auftragsstatus bleibt unverändert.
+  function cancelJamalConfirmation() {
+    if (state.jamalConfirmation && state.jamalConfirmation.submitting) return;
+    state.jamalConfirmation = null;
+    render();
+  }
+
+  // Die EINZIGE Stelle in dieser Datei, die jemals `confirmed: true`
+  // versendet. Erfordert eine aktiv gesetzte Checkbox (server- UND
+  // clientseitig sonst niemals aktivierbarer Button) und schützt über
+  // `submitting` gegen Doppelbetätigung (ein zweiter Klick, während der
+  // erste Versuch noch läuft, wird ignoriert statt einen zweiten Request zu
+  // senden). Bei Erfolg wird der Auftrag neu geladen; bei einem
+  // Revisionskonflikt (409) greift dieselbe Konfliktanzeige wie bei jeder
+  // anderen Aktion; bei jedem anderen Fehler (inklusive Netzwerkfehler)
+  // bleibt der bisherige Status unverändert und die Fläche zeigt eine
+  // verständliche Fehlermeldung, bleibt aber geöffnet (kein automatischer
+  // Retry).
+  function confirmJamalConfirmation() {
+    var confirmation = state.jamalConfirmation;
+    if (!confirmation || confirmation.submitting || !confirmation.checked) return Promise.resolve();
+    if (state.selectedPilotOrderId !== confirmation.pilotOrderId || !state.overview) return Promise.resolve();
+    var pilotOrderId = confirmation.pilotOrderId;
+    var action = confirmation.action;
+    var expectedRevision = state.overview.order.revision;
+    confirmation.submitting = true;
+    confirmation.error = null;
+    render();
+    return postAction(pilotOrderId, action, { confirmed: true, expectedRevision: expectedRevision })
+      .then(function (response) {
+        if (state.jamalConfirmation !== confirmation) return;
+        if (state.selectedPilotOrderId !== pilotOrderId) return;
+        if (response.statusCode === 200 && response.data && response.data.ok) {
+          state.jamalConfirmation = null;
+          state.actionError = null;
+          state.conflict = null;
+          return reloadSelectedOrder();
+        }
+        if (response.statusCode === 409) {
+          var details = response.data || {};
+          state.jamalConfirmation = null;
+          state.conflict = {
+            pilotOrderId: details.pilotOrderId || pilotOrderId,
+            expectedRevision: details.expectedRevision,
+            currentRevision: details.currentRevision,
+            message:
+              "Dieser Auftrag wurde zwischenzeitlich ver\u00e4ndert. Der aktuelle Stand wurde noch nicht \u00fcberschrieben. " +
+              "Bitte laden Sie den Auftrag neu und pr\u00fcfen Sie die n\u00e4chste Aktion.",
+          };
+          render();
+          return;
+        }
+        confirmation.submitting = false;
+        confirmation.error =
+          (response.data && response.data.message) ||
+          "Die Freigabe konnte nicht gespeichert werden. Der bisherige Status bleibt unver\u00e4ndert.";
+        render();
+      })
+      .catch(function () {
+        if (state.jamalConfirmation !== confirmation) return;
+        confirmation.submitting = false;
+        confirmation.error =
+          "Netzwerkfehler \u2013 die Freigabe wurde nicht gespeichert, der bisherige Status bleibt unver\u00e4ndert. " +
+          "Bitte Verbindung pr\u00fcfen und erneut versuchen.";
+        render();
+      });
   }
 
   // Phase 7 (Schwerpunkt 6/9, "keine Codex-Ausführung durch einen unklaren
@@ -628,8 +793,68 @@
     );
   }
 
+  // Rendert die Jamal-Bestätigungsfläche für GENAU einen Auftrag/GENAU eine
+  // Aktion (siehe openJamalConfirmationDialog/confirmJamalConfirmation
+  // oben). Ersetzt an dieser Stelle die normale Primäraktions-Schaltfläche,
+  // solange die Fläche für den aktuell angezeigten Auftrag geöffnet ist –
+  // kein doppeltes/verwirrendes Nebeneinander von Button und Fläche.
+  function renderJamalConfirmationPanel(confirmation) {
+    var actionLabel = JAMAL_CONFIRMATION_ACTION_LABELS[confirmation.action] || confirmation.action;
+    var scopeNote = JAMAL_CONFIRMATION_SCOPE_NOTE[confirmation.action] || "";
+    var submitting = confirmation.submitting;
+    var confirmDisabled = submitting || !confirmation.checked;
+    var html = '<div class="pilot-jamal-confirmation" role="alertdialog" aria-modal="true" aria-label="Jamal-Ausf\u00fchrungsfreigabe">';
+    html += '<p class="pilot-jamal-confirmation-title"><strong>Jamal-Best\u00e4tigung erforderlich</strong></p>';
+    html += '<dl class="pilot-jamal-confirmation-facts">';
+    html += "<div><dt>Pilotauftrag</dt><dd>" + escapeHtml(confirmation.orderTitle) + " (" + escapeHtml(confirmation.pilotOrderId) + ")</dd></div>";
+    html += "<div><dt>Freizugebende Aktion</dt><dd>" + escapeHtml(actionLabel) + "</dd></div>";
+    html += "</dl>";
+    html += "<p>Mit dieser Best\u00e4tigung wird eine technische Ausf\u00fchrung grunds\u00e4tzlich erm\u00f6glicht.</p>";
+    html +=
+      "<p>Es erfolgt <strong>keine automatische Freigabe durch einen Agenten</strong> \u2013 ausschlie\u00dflich Jamal " +
+      "best\u00e4tigt dies hier pers\u00f6nlich und ausdr\u00fccklich.</p>";
+    if (scopeNote) {
+      html += "<p>" + escapeHtml(scopeNote) + "</p>";
+    }
+    html += '<label class="pilot-jamal-confirmation-checkbox-row">';
+    html +=
+      '<input type="checkbox" data-action="jamal-confirmation-toggle-checkbox"' +
+      (confirmation.checked ? " checked" : "") +
+      (submitting ? " disabled" : "") +
+      " /> Ich best\u00e4tige diese Ausf\u00fchrungsfreigabe ausdr\u00fccklich.";
+    html += "</label>";
+    if (confirmation.error) {
+      html += '<p class="pilot-work-order-action-error">' + escapeHtml(confirmation.error) + "</p>";
+    }
+    html += '<div class="pilot-jamal-confirmation-buttons">';
+    html += '<button type="button" data-action="jamal-confirmation-cancel"' + (submitting ? " disabled" : "") + ">Abbrechen</button>";
+    html +=
+      '<button type="button" data-action="jamal-confirmation-confirm"' +
+      (confirmDisabled ? " disabled" : "") +
+      ">" +
+      (submitting ? "Wird best\u00e4tigt\u2026" : "Freigabe jetzt best\u00e4tigen") +
+      "</button>";
+    html += "</div>";
+    html += "</div>";
+    return html;
+  }
+
   function renderPrimaryAction(overview) {
     var status = overview.status;
+    var confirmation = state.jamalConfirmation;
+    var confirmationMatchesHere =
+      confirmation &&
+      confirmation.pilotOrderId === overview.order.id &&
+      ((confirmation.action === "approve-for-execution" && status === "READY_FOR_JAMAL_APPROVAL") ||
+        (confirmation.action === "approve-completion" && status === "READY_FOR_REVIEW"));
+    if (confirmationMatchesHere) {
+      return (
+        '<div class="pilot-work-order-primary-action">' +
+        "<p><strong>N\u00e4chster Schritt:</strong> " + escapeHtml(overview.nextStep) + "</p>" +
+        renderJamalConfirmationPanel(confirmation) +
+        "</div>"
+      );
+    }
     var button = "";
     var disabledAttr = state.actionInFlight ? " disabled" : "";
     if (status === "DRAFT") {
@@ -1183,10 +1408,16 @@
       } else if (action === "reload-after-conflict") {
         reloadSelectedOrder();
       } else if (action === "approve-for-execution" || action === "approve-completion") {
-        state.actionError =
-          "Diese Freigabe erfordert eine ausdr\u00fcckliche Best\u00e4tigung durch Jamal au\u00dferhalb dieser Schaltfl\u00e4che " +
-          "(keine automatische Freigabe durch einen Agenten).";
-        render();
+        // V7.7.1: öffnet ausschließlich die lokale Bestätigungsfläche –
+        // niemals ein direkter, unbestätigter Request (siehe
+        // openJamalConfirmationDialog oben).
+        openJamalConfirmationDialog(action);
+      } else if (action === "jamal-confirmation-toggle-checkbox") {
+        setJamalConfirmationChecked(target.checked);
+      } else if (action === "jamal-confirmation-cancel") {
+        cancelJamalConfirmation();
+      } else if (action === "jamal-confirmation-confirm") {
+        confirmJamalConfirmation();
       } else if (action === "start-agent-execution") {
         runOrderAction("start-agent-execution", { presetId: AGENT_EXECUTION_PRESET_ID });
       } else if (action === "request-codex-run-approval") {
@@ -1239,6 +1470,10 @@
       submitCreateOrder: submitCreateOrder,
       validateCreateInput: validateCreateInput,
       runOrderAction: runOrderAction,
+      openJamalConfirmationDialog: openJamalConfirmationDialog,
+      setJamalConfirmationChecked: setJamalConfirmationChecked,
+      cancelJamalConfirmation: cancelJamalConfirmation,
+      confirmJamalConfirmation: confirmJamalConfirmation,
       requestCodexApproval: requestCodexApproval,
       runCodexAgentExecution: runCodexAgentExecution,
       prepareAgentChain: prepareAgentChain,
