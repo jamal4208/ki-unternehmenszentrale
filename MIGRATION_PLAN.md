@@ -1,5 +1,37 @@
 # MIGRATION PLAN
 
+## V7.8.1 – Ergebnisbudget von Schritt 2 technisch erzwingen: **keine neue Migration**
+
+**Ausdrücklich keine neue Migration, keine neue Spalte, keine neue Tabelle, kein neuer CHECK-Wertebereich.** Migrationen 1–24 bleiben unverändert; die höchste Migrationsversion bleibt **24**.
+
+Die Auditmetadaten der deterministischen Budgetdurchsetzung (`documentationNormalization`: Vertragsversion, Rohgröße, gespeicherte Größe, Abschnittsgrößen, weggelassene Punkte/Sätze, verworfene Präambel, `compactionApplied`) werden ausschließlich in der **bereits bestehenden** Spalte `pilot_agent_execution_runs.resultSummaryJson` geführt. Diese Spalte wird von `authDb.updatePilotAgentExecutionRunTerminal` bereits generisch für jeden Status persistiert und von `rowToAgentExecutionRunView` bereits für jeden Status als `resultSummary` zurückgegeben.
+
+- **Rückwärtskompatibilität:** ein vor V7.8.1 gespeicherter Lauf besitzt das Unterobjekt nicht; `resultSummary.documentationNormalization` ist dort `undefined` und das Cockpit zeigt dafür keinen Hinweis. Kein Datenbestand muss nachgezogen werden.
+- **Vorwärtskompatibilität:** das Feld wird ausschließlich für Läufe der Dokumentationsstufe geschrieben (Kettenschritt 2). Läufe von Schritt 1, Schritt 3 und Einzelläufe behalten ihr bisheriges `resultSummary` byteidentisch.
+- **Rollback:** rein codeseitig durch Zurücknehmen der geänderten Dateien. Es gibt keinen Schemaanteil, der zurückgerollt werden müsste; bereits geschriebene `documentationNormalization`-Objekte bleiben als unschädliche Zusatzinformation lesbar.
+
+## V7.8.0 – Drei-Agenten-Kette auftragsfähig machen (Migration 24, additiv, lokal umgesetzt, vor Commit/Push gestoppt)
+
+Dieser Schritt erweitert ausschließlich die bestehende Ketten-/Codex-Infrastruktur; keine neue Datenbankarchitektur, keine destruktive Änderung. Migrationen 1–23 bleiben unverändert.
+
+**Neue Migration 24** (`add_chain_mandate_and_predecessor_integrity_metadata_v17`):
+
+| Tabelle | Additive Änderung |
+|---|---|
+| `pilot_agent_execution_runs` | `promptDigest`, `promptCharCount`, `mandateDigest`, `mandateOrderRevision`, `predecessorCharCount`, `predecessorIncludedCharCount`, `predecessorTruncated`, `resultTruncated` |
+| `pilot_agent_execution_chains` | `selectedFilesJson`, `coreMandateJson`, `mandateDigest`, `mandateOrderRevisionAtPrepare` |
+| `pilot_agent_execution_chain_steps` | `predecessorCharCount`, `predecessorIncludedCharCount`, `predecessorTruncated`, `roleHandoffBooked`, `roleHandoffBookedAt` |
+
+| Bereich | Regel |
+|---|---|
+| `pilot-agent-codex-runner.js` | baut den Kernauftrag als eigenen Block in jeden Stufenprompt ein, liefert Digest-/Prompt-/Vorgänger-Metadaten zurück; Vorgängerlimit an Read-only-Grenze gekoppelt |
+| `pilot-agent-execution-service.js` | fixierte Dateiauswahl für Kettenläufe (`CHAIN_SELECTABLE_FILES`), Persistenz der neuen Prompt-/Mandat-/Truncation-Metadaten |
+| `pilot-agent-execution-chain-service.js` | speichert Ketten-Dateiauswahl/Kernauftrag, prüft Mandat-Digest, blockiert kontrolliert bei zu langem Vorgänger vor Laufstart, bucht Rollenfortschritt je Stufe |
+| `auth-db.js` | Insert-/Update-Funktionen für Runs/Ketten/Schritte um alle Migration-24-Spalten erweitert |
+| `auth-audit.js` | Allowlist um die neuen, nicht-sensiblen Chain-Metadaten ergänzt (`selectedFilesCount`, `mandateDigest`, `predecessorFullyIncluded`, `pilotRole`, `roleHandoffBooked`) |
+
+Ergebnis: kein neuer HTTP-Top-Level-Pfad, keine neue externe Aktion; bestehende Kettenrouten bleiben bestehen und liefern erweiterte Metadaten. `npm run check` und `npm test` sind grün (Exit 0).
+
 ## V7.6.4 – Einzelne Health-Arbeitspakete korrekt abschließen (Migration 17, additiv, lokal umgesetzt, noch nicht committed/gepusht)
 
 Vorheriger Ausgang: HEAD/`origin/main` unverändert `73a6a055414ff4baffa7f8dbf903a6e4a711e37b` (V7.6.3, Working Tree sauber, 89 GET/52 POST/8 GET-Präfixe/8 POST-Präfixe/32 statische Assets, **86 Testdateien, 2454 automatisierte Prüfpunkte grün**, Migration 16). Dieser Schritt ist rein additiv; Migrationen 1–16 byteidentisch unverändert.

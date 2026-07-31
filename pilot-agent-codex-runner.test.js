@@ -14,6 +14,8 @@
 const assert = require("assert");
 const agentRegistry = require("./agent-registry");
 const codexRunner = require("./pilot-agent-codex-runner");
+const codexReadOnlyAdapter = require("./execution-codex-adapter-readonly");
+const docResult = require("./pilot-agent-documentation-result");
 
 let passed = 0;
 async function check(label, fn) {
@@ -35,6 +37,88 @@ function basePromptInput(overrides = {}) {
     allowedTools: ["Lesen"],
     forbiddenActions: ["Dateien ändern"],
     expectedResultFormat: "Titel, Beobachtungen, Empfehlung.",
+    ...overrides,
+  };
+}
+
+function documentationPromptInput(overrides = {}) {
+  return basePromptInput({
+    agentKey: "documentation-agent",
+    agentDisplayName: "Dokumentations-Agent",
+    agentRole: "Dokumentiert nachvollziehbar",
+    pilotRole: "DOKUMENTATION",
+    pilotRoleLabel: "Dokumentation",
+    taskTitle: "Kettenschritt 2 – Dokumentation",
+    taskInstructions: "Erstelle ein strukturiertes Dokumentationsresultat.",
+    expectedResultFormat: "Fünf Abschnitte.",
+    ...overrides,
+  });
+}
+
+function pmPromptInput(overrides = {}) {
+  return basePromptInput({
+    agentKey: "orchestrator-agent",
+    agentDisplayName: "Projektmanager-Agent",
+    agentRole: "Koordiniert Abschlussbewertung",
+    pilotRole: "PROJEKTMANAGER",
+    pilotRoleLabel: "Projektmanagement",
+    taskTitle: "Kettenschritt 3 – PM-Bewertung",
+    taskInstructions: "Bewerte Recherche und Dokumentation.",
+    expectedResultFormat: "Gesamturteil und Entscheidungsvorlage.",
+    ...overrides,
+  });
+}
+
+// V7.8.1: gültige, vertragskonforme Dokumentationsantwort mit den fünf
+// Markerzeilen. Mit `targetRawChars` wird die Rohgröße exakt getroffen; die
+// Auffüllung erfolgt über einen zusätzlichen fünften Punkt in Abschnitt 2,
+// der durch die Item-Deckelung (maximal 4) regelbasiert weggelassen wird.
+function buildDocumentationResultText(targetRawChars) {
+  const base = [
+    "ABSCHNITT 1 KURZERGEBNIS",
+    "Die Kette ist auftragsfähig. Der Vorgängerbefund ist bestätigt.",
+    "",
+    "ABSCHNITT 2 BESTAETIGTE KERNBEFUNDE",
+    "1. Erster Kernbefund ist belegt.",
+    "2. Zweiter Kernbefund ist belegt.",
+    "3. Dritter Kernbefund ist belegt.",
+    "4. Vierter Kernbefund ist belegt.",
+    "",
+    "ABSCHNITT 3 OFFENE PUNKTE UND GRENZEN",
+    "1. Ein offener Punkt bleibt bestehen.",
+    "",
+    "ABSCHNITT 4 PRIORISIERTE EMPFEHLUNGEN",
+    "1. Erste Empfehlung mit Nutzen und hoher Priorität.",
+    "2. Zweite Empfehlung mit Nutzen und mittlerer Priorität.",
+    "",
+    "ABSCHNITT 5 HERKUNFTSHINWEIS",
+    "Grundlage ist ausschließlich das Vorgängerergebnis aus Schritt 1.",
+  ].join("\n");
+  if (!targetRawChars) return base;
+  const marker = "\n5. ";
+  const fillerLength = targetRawChars - base.length - marker.length - 1;
+  assert.ok(fillerLength > 0, `Zielrohgröße ${targetRawChars} ist zu klein für den Basistext`);
+  const insertAt = base.indexOf("\n\nABSCHNITT 3");
+  const text = `${base.slice(0, insertAt)}${marker}${"y".repeat(fillerLength)}.${base.slice(insertAt)}`;
+  assert.strictEqual(text.length, targetRawChars, "Testhelfer muss die Rohgröße exakt treffen");
+  return text;
+}
+
+function documentationRunInput(overrides = {}) {
+  return {
+    repoRoot: "/tmp/fake-repo",
+    allowedFiles: ["a.js"],
+    allowedTools: ["Lesen"],
+    forbiddenActions: ["Dateien ändern"],
+    taskTitle: "Dokumentationsstufe",
+    taskInstructions: "Erstelle eine strukturierte Dokumentation.",
+    expectedResultFormat: "Kompakter strukturierter Text.",
+    agentKey: "documentation-agent",
+    agentDisplayName: "Dokumentations-Agent",
+    agentRole: "Dokumentiert nachvollziehbar",
+    pilotRole: "DOKUMENTATION",
+    pilotRoleLabel: "Dokumentation",
+    executionRunId: "run-doc",
     ...overrides,
   };
 }
@@ -94,22 +178,77 @@ function makeFakeCodexAdapter({
 }
 
 async function run() {
+  await check("V7.8.0: MAX_PREDECESSOR_CONTEXT_CHARS bleibt exakt an MAX_READ_ONLY_RESULT_CHARS gekoppelt", async () => {
+    assert.strictEqual(codexRunner.MAX_PREDECESSOR_CONTEXT_CHARS, codexReadOnlyAdapter.MAX_READ_ONLY_RESULT_CHARS);
+  });
+
+  await check("V7.8.0: technische RESULT_TOO_LARGE-Grenze bleibt exakt bei 6000 Zeichen", async () => {
+    assert.strictEqual(codexReadOnlyAdapter.MAX_READ_ONLY_RESULT_CHARS, 6000);
+  });
+
   await check("Phase 7 – 2. unterschiedliche Agentenidentität/Rolle erzeugt einen inhaltlich unterschiedlichen Codex-Prompt", async () => {
     const promptA = codexRunner.buildAgentSpecificCodexPrompt(basePromptInput());
-    const promptB = codexRunner.buildAgentSpecificCodexPrompt(
-      basePromptInput({
-        agentKey: "product-agent",
-        agentDisplayName: "Produkt-Agent",
-        agentRole: "Ordnet Auftrag produktlogisch ein",
-        pilotRole: "DOKUMENTATION",
-        pilotRoleLabel: "Dokumentation",
-      }),
-    );
+    const promptB = codexRunner.buildAgentSpecificCodexPrompt(documentationPromptInput());
     assert.notStrictEqual(promptA, promptB);
     assert.ok(promptA.includes("review-agent"));
     assert.ok(promptA.includes("Recherche/Analyse"));
-    assert.ok(promptB.includes("product-agent"));
+    assert.ok(promptB.includes("documentation-agent"));
     assert.ok(promptB.includes("Dokumentation"));
+    assert.ok(!promptA.includes("Verbindliche Ausgabeform für diese Dokumentationsstufe (Schritt 2):"));
+    assert.ok(promptB.includes("Verbindliche Ausgabeform für diese Dokumentationsstufe (Schritt 2):"));
+    assert.ok(promptB.includes("Zielgröße des gesamten Ergebnisses: 2200-3000 Zeichen."));
+    assert.ok(promptB.includes("ABSCHNITT 1 KURZERGEBNIS"));
+  });
+
+  // V7.8.1: der Ausgabevertrag der Dokumentationsstufe ist jetzt
+  // maschinenlesbar (Markerzeilen). Die zuvor hier geprüften Prompt-Sätze
+  // ("Zielgröße: 3800-4300 Zeichen.", "Absolute fachliche Obergrenze für
+  // diese Stufe: 5000 Zeichen.") existieren nicht mehr: sie waren in sich
+  // widersprüchlich (die zugelassene Item-/Satzzahl erlaubte formatkonform
+  // über 6000 Zeichen) und wurden durch den technisch erzwungenen Vertrag
+  // ersetzt. Geprüft wird deshalb der NEUE Wortlaut – die Prüfabsicht
+  // (Dokumentationsvertrag vorhanden, exakte Zahlen, nur in Schritt 2)
+  // bleibt unverändert.
+  await check("V7.8.1: Dokumentations-Prompt verlangt die fünf Markerzeilen und die technisch erzwungenen Grenzen", async () => {
+    const prompt = codexRunner.buildAgentSpecificCodexPrompt(documentationPromptInput());
+    [
+      "Verbindliche Ausgabeform für diese Dokumentationsstufe (Schritt 2):",
+      "ABSCHNITT 1 KURZERGEBNIS",
+      "ABSCHNITT 2 BESTAETIGTE KERNBEFUNDE",
+      "ABSCHNITT 3 OFFENE PUNKTE UND GRENZEN",
+      "ABSCHNITT 4 PRIORISIERTE EMPFEHLUNGEN",
+      "ABSCHNITT 5 HERKUNFTSHINWEIS",
+      "- Abschnitt 1: maximal 3 kurze Sätze.",
+      "- Abschnitt 2: maximal 4 nummerierte Kernbefunde.",
+      "- Abschnitt 3: maximal 3 nummerierte offene Punkte oder Grenzen.",
+      "- Abschnitt 4: genau 3 nummerierte Empfehlungen, je Empfehlung Maßnahme, Nutzen und Priorität.",
+      "- Abschnitt 5: maximal 2 Sätze.",
+      "- Maximal 300 Zeichen je nummeriertem Punkt.",
+      "- Zielgröße des gesamten Ergebnisses: 2200-3000 Zeichen.",
+      "Die Zentrale erzwingt die Ergebnisgröße technisch: überzählige Punkte und Sätze werden regelbasiert vollständig weggelassen, niemals innerhalb eines Satzes gekürzt.",
+      "- Beende jeden Satz vollständig. Höre niemals mitten im Satz auf.",
+      "- Wiederhole weder den vollständigen Kernauftrag noch den vollständigen Vorgängertext.",
+      "- Keine zusätzlichen Überschriften, keine Anhänge, keine Tabellen.",
+    ].forEach((mustContain) => assert.ok(prompt.includes(mustContain), `Dokumentations-Prompt fehlt: "${mustContain}"`));
+    // Die alten, widersprüchlichen Zahlen dürfen nicht mehr im Prompt stehen.
+    assert.ok(!prompt.includes("3800-4300"), "die alte Zielgröße darf nicht mehr im Prompt stehen");
+    assert.ok(!prompt.includes("5000 Zeichen"), "die alte 5000-Zeichen-Aussage darf nicht mehr im Prompt stehen");
+  });
+
+  await check("V7.8.0/V7.8.1: Recherche- und PM-Prompts enthalten keine Dokumentations-Zwangsstruktur", async () => {
+    const researchPrompt = codexRunner.buildAgentSpecificCodexPrompt(basePromptInput());
+    const pmPrompt = codexRunner.buildAgentSpecificCodexPrompt(pmPromptInput());
+    [researchPrompt, pmPrompt].forEach((prompt) => {
+      assert.ok(!prompt.includes("Verbindliche Ausgabeform für diese Dokumentationsstufe (Schritt 2):"));
+      assert.ok(!prompt.includes("Zielgröße des gesamten Ergebnisses: 2200-3000 Zeichen."));
+      assert.ok(!prompt.includes("ABSCHNITT 1 KURZERGEBNIS"));
+      assert.ok(!prompt.includes("ABSCHNITT 5 HERKUNFTSHINWEIS"));
+      assert.ok(
+        !prompt.includes(
+          "Die Zentrale erzwingt die Ergebnisgröße technisch: überzählige Punkte und Sätze werden regelbasiert vollständig weggelassen, niemals innerhalb eines Satzes gekürzt.",
+        ),
+      );
+    });
   });
 
   await check("Phase 7 – der Prompt enthält alle im Auftrag geforderten Pflichtbestandteile", async () => {
@@ -376,6 +515,205 @@ async function run() {
     // Agentenidentität enthalten (Schwerpunkt 4 wirkt bis in den echten
     // Adapteraufruf hinein).
     assert.ok(fakeAdapter.calls[0].prompt.includes("review-agent"));
+  });
+
+  // V7.8.1 – angepasste Erwartung, gleiche Schutzabsicht: der hier injizierte
+  // Text ist strukturlos ("DDDD…") UND größer als das zulässige
+  // Ergebnisbudget. Seit V7.8.1 greift für die Dokumentationsstufe zuerst die
+  // Strukturprüfung, deshalb ist der Befund jetzt
+  // DOCUMENTATION_RESULT_STRUCTURE_INVALID statt RESULT_TOO_LARGE. Die
+  // eigentlichen Zusicherungen bleiben unverändert: ok=false, resultText=null,
+  // Runner-Phase RESULT_VALIDATION, Cleanup erfolgt – und ein Ergebnis über
+  // 6000 Zeichen wird niemals gespeichert.
+  await check("V7.8.0/V7.8.1: Dokumentationslauf speichert kein Ergebnis über 6000 Zeichen (auch bei fehlerhaftem Testdoppel)", async () => {
+    const fakeWorkspace = makeFakeWorkspaceModule({ workspaceId: "ws-doc-too-large" });
+    const oversizedResult = "D".repeat(codexReadOnlyAdapter.MAX_READ_ONLY_RESULT_CHARS + 1);
+    const fakeAdapter = makeFakeCodexAdapter({ resultText: oversizedResult });
+    const result = await codexRunner.runPilotAgentCodexAnalysisTask(
+      documentationRunInput({
+        executionRunId: "run-doc-too-large",
+        codexAdapterImpl: fakeAdapter,
+        workspaceModuleImpl: fakeWorkspace,
+      }),
+    );
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.failed, true);
+    assert.strictEqual(result.resultText, null, "ein zu großes Ergebnis darf nicht abgeschnitten übernommen werden");
+    assert.ok(result.diagnostics, "diagnostics muss vorhanden sein");
+    assert.strictEqual(result.diagnostics.reasonCode, "DOCUMENTATION_RESULT_STRUCTURE_INVALID");
+    assert.strictEqual(result.diagnostics.runnerPhase, "RESULT_VALIDATION");
+    assert.ok(result.errorMessage.includes("Fünf-Abschnittsstruktur"));
+    assert.ok(result.errorMessage.includes("Es wurde nichts gespeichert und Schritt 3 nicht gestartet."));
+    assert.strictEqual(fakeWorkspace.calls.cleanupCalls.length, 1);
+  });
+
+  // -------------------------------------------------------------------
+  // V7.8.1 ("Ergebnisbudget von Kettenschritt 2 technisch erzwingen")
+  // -------------------------------------------------------------------
+  await check("V7.8.1: die technische Grenze bleibt bei 6000 Zeichen, die gespeicherte Dokumentationsgröße liegt strikt darunter", async () => {
+    assert.strictEqual(codexReadOnlyAdapter.MAX_READ_ONLY_RESULT_CHARS, 6000);
+    assert.ok(
+      docResult.DOCUMENTATION_RESULT_NORMALIZED_MAX_CHARS < codexReadOnlyAdapter.MAX_READ_ONLY_RESULT_CHARS,
+      "die gespeicherte Dokumentationsgröße muss strikt unter der technischen Grenze liegen",
+    );
+    assert.strictEqual(docResult.DOCUMENTATION_RESULT_NORMALIZED_MAX_CHARS, 4500);
+    assert.strictEqual(docResult.DOCUMENTATION_RAW_MAX_CHARS, 12000);
+  });
+
+  await check("V7.8.1: maxResultChars wird ausschließlich für die Dokumentationsstufe an den Adapter übergeben", async () => {
+    const docAdapter = makeFakeCodexAdapter({ resultText: buildDocumentationResultText() });
+    await codexRunner.runPilotAgentCodexAnalysisTask(
+      documentationRunInput({
+        executionRunId: "run-doc-budget",
+        codexAdapterImpl: docAdapter,
+        workspaceModuleImpl: makeFakeWorkspaceModule({ workspaceId: "ws-doc-budget" }),
+      }),
+    );
+    assert.strictEqual(docAdapter.calls[0].maxResultChars, docResult.DOCUMENTATION_RAW_MAX_CHARS);
+    assert.strictEqual(docAdapter.calls[0].maxResultChars, 12000);
+
+    // Schritt 1 und Schritt 3 bleiben unverändert: dort wird der Parameter
+    // NICHT gesetzt, es gilt weiterhin MAX_READ_ONLY_RESULT_CHARS (6000).
+    const researchAdapter = makeFakeCodexAdapter({ resultText: "Kurzbefund: Recherche." });
+    await codexRunner.runPilotAgentCodexAnalysisTask(
+      documentationRunInput({
+        agentKey: "review-agent",
+        agentDisplayName: "Review-Agent",
+        pilotRole: "RECHERCHE_ANALYSE",
+        pilotRoleLabel: "Recherche/Analyse",
+        executionRunId: "run-research-budget",
+        codexAdapterImpl: researchAdapter,
+        workspaceModuleImpl: makeFakeWorkspaceModule({ workspaceId: "ws-research-budget" }),
+      }),
+    );
+    assert.strictEqual(researchAdapter.calls[0].maxResultChars, undefined);
+
+    const pmAdapter = makeFakeCodexAdapter({ resultText: "Gesamturteil: konsistent." });
+    await codexRunner.runPilotAgentCodexAnalysisTask(
+      documentationRunInput({
+        agentKey: "orchestrator-agent",
+        agentDisplayName: "Projektmanager-Agent",
+        pilotRole: "PROJEKTMANAGER",
+        pilotRoleLabel: "Projektmanagement",
+        executionRunId: "run-pm-budget",
+        codexAdapterImpl: pmAdapter,
+        workspaceModuleImpl: makeFakeWorkspaceModule({ workspaceId: "ws-pm-budget" }),
+      }),
+    );
+    assert.strictEqual(pmAdapter.calls[0].maxResultChars, undefined);
+  });
+
+  await check("V7.8.1: ein 9000 Zeichen langer, gültig strukturierter Rohtext wird regelbasiert auf maximal 4500 Zeichen gebracht", async () => {
+    const fakeWorkspace = makeFakeWorkspaceModule({ workspaceId: "ws-doc-9000" });
+    const rawText = buildDocumentationResultText(9000);
+    const fakeAdapter = makeFakeCodexAdapter({ resultText: rawText });
+    const result = await codexRunner.runPilotAgentCodexAnalysisTask(
+      documentationRunInput({
+        executionRunId: "run-doc-9000",
+        codexAdapterImpl: fakeAdapter,
+        workspaceModuleImpl: fakeWorkspace,
+      }),
+    );
+    assert.strictEqual(result.ok, true);
+    assert.ok(result.resultText.length <= docResult.DOCUMENTATION_RESULT_NORMALIZED_MAX_CHARS, "das gespeicherte Ergebnis muss innerhalb des Budgets liegen");
+    assert.ok(result.resultText.length < codexReadOnlyAdapter.MAX_READ_ONLY_RESULT_CHARS);
+    assert.ok(/[.!?]$/.test(result.resultText.trim()), "das Ergebnis darf niemals mitten im Satz enden");
+    assert.ok(result.documentationNormalization, "die Auditmetadaten müssen gesetzt sein");
+    assert.strictEqual(result.documentationNormalization.structureValid, true);
+    assert.strictEqual(result.documentationNormalization.rawCharCount, 9000);
+    assert.strictEqual(result.documentationNormalization.normalizedCharCount, result.resultText.length);
+    assert.strictEqual(result.documentationNormalization.compactionApplied, true);
+    assert.ok(result.documentationNormalization.droppedItemCount >= 1);
+    assert.strictEqual(result.documentationNormalization.contractVersion, "V7.8.1-DOC-5-SECTIONS");
+    assert.strictEqual(result.documentationNormalization.budgetMaxChars, 4500);
+    assert.strictEqual(fakeWorkspace.calls.cleanupCalls.length, 1, "Cleanup erfolgt auch im Erfolgsfall");
+  });
+
+  await check("V7.8.1: strukturloser Rohtext über dem Budget führt zu einem kontrollierten Fehler mit Cleanup und ohne Ergebnis", async () => {
+    const fakeWorkspace = makeFakeWorkspaceModule({ workspaceId: "ws-doc-structureless" });
+    const rawText = `${"Ein Satz ohne jede Abschnittsstruktur. ".repeat(200)}`;
+    const fakeAdapter = makeFakeCodexAdapter({ resultText: rawText });
+    const result = await codexRunner.runPilotAgentCodexAnalysisTask(
+      documentationRunInput({
+        executionRunId: "run-doc-structureless",
+        codexAdapterImpl: fakeAdapter,
+        workspaceModuleImpl: fakeWorkspace,
+      }),
+    );
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.failed, true);
+    assert.strictEqual(result.resultText, null);
+    assert.strictEqual(result.diagnostics.reasonCode, "DOCUMENTATION_RESULT_STRUCTURE_INVALID");
+    assert.strictEqual(result.diagnostics.runnerPhase, "RESULT_VALIDATION");
+    assert.ok(result.errorMessage.includes("fehlend: Abschnitt 1, Abschnitt 2, Abschnitt 3, Abschnitt 4, Abschnitt 5"));
+    assert.strictEqual(result.documentationNormalization.structureValid, false);
+    assert.strictEqual(fakeWorkspace.calls.cleanupCalls.length, 1, "Cleanup erfolgt auch im Fehlerfall");
+    // Der Prompt-/Mandat-/Vorgängermetadatenblock bleibt auch im Fehlerfall
+    // vollständig erhalten (Nachvollziehbarkeit).
+    assert.ok(result.promptDigest, "promptDigest bleibt im Fehlerfall erhalten");
+    assert.ok(typeof result.promptCharCount === "number");
+  });
+
+  await check("V7.8.1: ein einzelner überlanger Satz wird abgelehnt und niemals abgeschnitten", async () => {
+    const fakeWorkspace = makeFakeWorkspaceModule({ workspaceId: "ws-doc-single-sentence" });
+    const hugeSentence = `${"w".repeat(8999)}.`;
+    const rawText = [
+      "ABSCHNITT 1 KURZERGEBNIS",
+      "Kurzergebnis liegt vor.",
+      "",
+      "ABSCHNITT 2 BESTAETIGTE KERNBEFUNDE",
+      `1. ${hugeSentence}`,
+      "2. Zweiter Kernbefund ist belegt.",
+      "",
+      "ABSCHNITT 3 OFFENE PUNKTE UND GRENZEN",
+      "1. Ein offener Punkt bleibt bestehen.",
+      "",
+      "ABSCHNITT 4 PRIORISIERTE EMPFEHLUNGEN",
+      "1. Erste Empfehlung mit hoher Priorität.",
+      "2. Zweite Empfehlung mit mittlerer Priorität.",
+      "",
+      "ABSCHNITT 5 HERKUNFTSHINWEIS",
+      "Grundlage ist das Vorgängerergebnis.",
+    ].join("\n");
+    const fakeAdapter = makeFakeCodexAdapter({ resultText: rawText });
+    const result = await codexRunner.runPilotAgentCodexAnalysisTask(
+      documentationRunInput({
+        executionRunId: "run-doc-single-sentence",
+        codexAdapterImpl: fakeAdapter,
+        workspaceModuleImpl: fakeWorkspace,
+      }),
+    );
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.resultText, null, "es wird nichts abgeschnitten und nichts übernommen");
+    assert.strictEqual(result.diagnostics.reasonCode, "DOCUMENTATION_RESULT_STILL_TOO_LARGE");
+    assert.strictEqual(result.diagnostics.runnerPhase, "RESULT_VALIDATION");
+    assert.ok(result.errorMessage.includes("Es wurde nichts abgeschnitten und nichts gespeichert."));
+    assert.strictEqual(fakeWorkspace.calls.cleanupCalls.length, 1);
+  });
+
+  await check("V7.8.1: Schritt 1 und Schritt 3 liefern ihren Rohtext byteidentisch und ohne Normalisierungsmetadaten", async () => {
+    const longResearchText = `Kurzbefund: ${"Beobachtung mit Substanz. ".repeat(200)}`;
+    assert.ok(longResearchText.length > docResult.DOCUMENTATION_RESULT_NORMALIZED_MAX_CHARS, "der Testtext muss über dem Dokumentationsbudget liegen");
+    const stages = [
+      { agentKey: "review-agent", pilotRole: "RECHERCHE_ANALYSE", pilotRoleLabel: "Recherche/Analyse" },
+      { agentKey: "orchestrator-agent", pilotRole: "PROJEKTMANAGER", pilotRoleLabel: "Projektmanagement" },
+    ];
+    for (const stage of stages) {
+      const fakeAdapter = makeFakeCodexAdapter({ resultText: longResearchText });
+      const result = await codexRunner.runPilotAgentCodexAnalysisTask(
+        documentationRunInput({
+          agentKey: stage.agentKey,
+          pilotRole: stage.pilotRole,
+          pilotRoleLabel: stage.pilotRoleLabel,
+          executionRunId: `run-unchanged-${stage.agentKey}`,
+          codexAdapterImpl: fakeAdapter,
+          workspaceModuleImpl: makeFakeWorkspaceModule({ workspaceId: `ws-unchanged-${stage.agentKey}` }),
+        }),
+      );
+      assert.strictEqual(result.ok, true, `${stage.agentKey} muss unverändert erfolgreich bleiben`);
+      assert.strictEqual(result.resultText, longResearchText, `${stage.agentKey}: der Rohtext muss byteidentisch übernommen werden`);
+      assert.strictEqual(result.documentationNormalization, null, `${stage.agentKey}: keine Dokumentationsmetadaten`);
+    }
   });
 
   await check("Phase 7 – 35. Workspace-Erstellung scheitert: kein Codex-Aufruf, sicherer Fehler, kein Cleanup-Aufruf nötig (Workspace existiert nicht)", async () => {

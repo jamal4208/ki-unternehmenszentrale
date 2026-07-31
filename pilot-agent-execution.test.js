@@ -89,6 +89,21 @@ async function run() {
   const { db } = makeIsolatedDb();
   const healthBaselineBefore = JSON.stringify(healthService.getOrCreateCanonicalRun(db));
 
+  await check("V7.8.0: resolveChainSelectedFiles akzeptiert gültige Teilauswahl, lehnt ungültige Pfade/Typen ab und nutzt ohne Eingabe die vollständige Liste", () => {
+    const fullSelection = agentExecutionService.resolveChainSelectedFiles();
+    assert.deepStrictEqual(fullSelection, agentExecutionService.CHAIN_SELECTABLE_FILES.slice());
+    assert.deepStrictEqual(agentExecutionService.resolveChainSelectedFiles(["pilot-work-order-service.js"]), ["pilot-work-order-service.js"]);
+    [".env", ".git/config", "../.env", "/etc/passwd", "unbekannt.js"].forEach((invalidPath) => {
+      assert.throws(
+        () => agentExecutionService.resolveChainSelectedFiles([invalidPath]),
+        /selectedFiles enth\u00e4lt nicht erlaubte Dateien/,
+        `${invalidPath} muss abgewiesen werden`,
+      );
+    });
+    assert.throws(() => agentExecutionService.resolveChainSelectedFiles("pilot-work-order-service.js"), /selectedFiles muss ein Array/);
+    assert.throws(() => agentExecutionService.resolveChainSelectedFiles([]), /selectedFiles darf nicht leer sein/);
+  });
+
   // -------------------------------------------------------------------
   // Zwei unabhängige Pilotaufträge, beide bis IN_EXECUTION geführt
   // (Voraussetzung für einen Agentenlauf, siehe Schwerpunkt 3).

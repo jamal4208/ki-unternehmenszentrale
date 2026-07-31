@@ -2150,6 +2150,7 @@ function insertPilotAgentExecutionRunAsRunning(db, input = {}) {
     "networkRequired",
     "externalAiRequired",
     "approvalStatus",
+    "mandateOrderRevision",
   ];
   OPTIONAL_RUNNER_FIELDS.forEach((field) => {
     if (input[field] !== undefined) {
@@ -2227,6 +2228,38 @@ function updatePilotAgentExecutionRunTerminal(db, input = {}) {
     assignments.push("cancelledRun = @cancelledRun");
     values.cancelledRun = input.cancelledRun ? 1 : 0;
   }
+  if (input.promptDigest !== undefined) {
+    assignments.push("promptDigest = @promptDigest");
+    values.promptDigest = input.promptDigest ?? null;
+  }
+  if (input.promptCharCount !== undefined) {
+    assignments.push("promptCharCount = @promptCharCount");
+    values.promptCharCount = input.promptCharCount ?? null;
+  }
+  if (input.mandateDigest !== undefined) {
+    assignments.push("mandateDigest = @mandateDigest");
+    values.mandateDigest = input.mandateDigest ?? null;
+  }
+  if (input.mandateOrderRevision !== undefined) {
+    assignments.push("mandateOrderRevision = @mandateOrderRevision");
+    values.mandateOrderRevision = input.mandateOrderRevision ?? null;
+  }
+  if (input.predecessorCharCount !== undefined) {
+    assignments.push("predecessorCharCount = @predecessorCharCount");
+    values.predecessorCharCount = input.predecessorCharCount ?? null;
+  }
+  if (input.predecessorIncludedCharCount !== undefined) {
+    assignments.push("predecessorIncludedCharCount = @predecessorIncludedCharCount");
+    values.predecessorIncludedCharCount = input.predecessorIncludedCharCount ?? null;
+  }
+  if (input.predecessorTruncated !== undefined) {
+    assignments.push("predecessorTruncated = @predecessorTruncated");
+    values.predecessorTruncated = input.predecessorTruncated ? 1 : 0;
+  }
+  if (input.resultTruncated !== undefined) {
+    assignments.push("resultTruncated = @resultTruncated");
+    values.resultTruncated = input.resultTruncated ? 1 : 0;
+  }
   const info = db
     .prepare(
       `UPDATE pilot_agent_execution_runs
@@ -2276,12 +2309,8 @@ function updatePilotAgentExecutionRunHandoffOutcome(db, input = {}) {
 // ---------------------------------------------------------------------------
 
 function insertPilotAgentExecutionChain(db, input = {}) {
-  db.prepare(
-    `INSERT INTO pilot_agent_execution_chains
-      (id, pilotOrderId, chainStatus, currentStep, revision, waitingForJamal, createdByUserId, createdAt, updatedAt)
-     VALUES
-      (@id, @pilotOrderId, @chainStatus, @currentStep, @revision, @waitingForJamal, @createdByUserId, @createdAt, @updatedAt)`,
-  ).run({
+  const columns = ["id", "pilotOrderId", "chainStatus", "currentStep", "revision", "waitingForJamal", "createdByUserId", "createdAt", "updatedAt"];
+  const values = {
     id: input.id,
     pilotOrderId: input.pilotOrderId,
     chainStatus: input.chainStatus,
@@ -2291,7 +2320,20 @@ function insertPilotAgentExecutionChain(db, input = {}) {
     createdByUserId: input.createdByUserId ?? null,
     createdAt: input.createdAt,
     updatedAt: input.updatedAt,
+  };
+  const OPTIONAL_FIELDS = ["selectedFilesJson", "coreMandateJson", "mandateDigest", "mandateOrderRevisionAtPrepare"];
+  OPTIONAL_FIELDS.forEach((field) => {
+    if (input[field] !== undefined) {
+      columns.push(field);
+      values[field] = input[field];
+    }
   });
+  db.prepare(
+    `INSERT INTO pilot_agent_execution_chains
+      (${columns.join(", ")})
+     VALUES
+      (${columns.map((column) => `@${column}`).join(", ")})`,
+  ).run(values);
   return getPilotAgentExecutionChainById(db, input.id);
 }
 
@@ -2406,20 +2448,38 @@ function updatePilotAgentExecutionChainStepApprovalRequested(db, input = {}) {
 // festgeschrieben. Greift nur, wenn der Schritt zum Schreibzeitpunkt noch
 // PENDING mit REQUESTED-Freigabe ist.
 function updatePilotAgentExecutionChainStepStarted(db, input = {}) {
+  const assignments = [
+    "stepStatus = 'RUNNING'",
+    "approvalStatus = 'GRANTED'",
+    "startedAt = @startedAt",
+    "chainedFromExecutionRunId = @chainedFromExecutionRunId",
+    "predecessorResultDigest = @predecessorResultDigest",
+  ];
+  const values = {
+    id: input.id,
+    startedAt: input.startedAt,
+    chainedFromExecutionRunId: input.chainedFromExecutionRunId ?? null,
+    predecessorResultDigest: input.predecessorResultDigest ?? null,
+  };
+  if (input.predecessorCharCount !== undefined) {
+    assignments.push("predecessorCharCount = @predecessorCharCount");
+    values.predecessorCharCount = input.predecessorCharCount ?? null;
+  }
+  if (input.predecessorIncludedCharCount !== undefined) {
+    assignments.push("predecessorIncludedCharCount = @predecessorIncludedCharCount");
+    values.predecessorIncludedCharCount = input.predecessorIncludedCharCount ?? null;
+  }
+  if (input.predecessorTruncated !== undefined) {
+    assignments.push("predecessorTruncated = @predecessorTruncated");
+    values.predecessorTruncated = input.predecessorTruncated ? 1 : 0;
+  }
   const info = db
     .prepare(
       `UPDATE pilot_agent_execution_chain_steps
-       SET stepStatus = 'RUNNING', approvalStatus = 'GRANTED', startedAt = @startedAt,
-           chainedFromExecutionRunId = @chainedFromExecutionRunId,
-           predecessorResultDigest = @predecessorResultDigest
+       SET ${assignments.join(", ")}
        WHERE id = @id AND stepStatus = 'PENDING' AND approvalStatus = 'REQUESTED'`,
     )
-    .run({
-      id: input.id,
-      startedAt: input.startedAt,
-      chainedFromExecutionRunId: input.chainedFromExecutionRunId ?? null,
-      predecessorResultDigest: input.predecessorResultDigest ?? null,
-    });
+    .run(values);
   return info.changes === 1;
 }
 
@@ -2429,21 +2489,36 @@ function updatePilotAgentExecutionChainStepStarted(db, input = {}) {
 // (kein zweiter Aufruf kann greifen, weil stepStatus dann nicht mehr RUNNING
 // ist).
 function updatePilotAgentExecutionChainStepTerminal(db, input = {}) {
+  const assignments = [
+    "stepStatus = @stepStatus",
+    "executionRunId = @executionRunId",
+    "resultDigest = @resultDigest",
+    "failureReasonCode = @failureReasonCode",
+    "completedAt = @completedAt",
+  ];
+  const values = {
+    id: input.id,
+    stepStatus: input.stepStatus,
+    executionRunId: input.executionRunId ?? null,
+    resultDigest: input.resultDigest ?? null,
+    failureReasonCode: input.failureReasonCode ?? null,
+    completedAt: input.completedAt,
+  };
+  if (input.roleHandoffBooked !== undefined) {
+    assignments.push("roleHandoffBooked = @roleHandoffBooked");
+    values.roleHandoffBooked = input.roleHandoffBooked ? 1 : 0;
+  }
+  if (input.roleHandoffBookedAt !== undefined) {
+    assignments.push("roleHandoffBookedAt = @roleHandoffBookedAt");
+    values.roleHandoffBookedAt = input.roleHandoffBookedAt ?? null;
+  }
   const info = db
     .prepare(
       `UPDATE pilot_agent_execution_chain_steps
-       SET stepStatus = @stepStatus, executionRunId = @executionRunId, resultDigest = @resultDigest,
-           failureReasonCode = @failureReasonCode, completedAt = @completedAt
+       SET ${assignments.join(", ")}
        WHERE id = @id AND stepStatus = 'RUNNING'`,
     )
-    .run({
-      id: input.id,
-      stepStatus: input.stepStatus,
-      executionRunId: input.executionRunId ?? null,
-      resultDigest: input.resultDigest ?? null,
-      failureReasonCode: input.failureReasonCode ?? null,
-      completedAt: input.completedAt,
-    });
+    .run(values);
   return info.changes === 1;
 }
 

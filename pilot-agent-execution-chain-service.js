@@ -46,6 +46,7 @@ const crypto = require("crypto");
 const authDb = require("./auth-db");
 const authAudit = require("./auth-audit");
 const pilotAgentExecutionService = require("./pilot-agent-execution-service");
+const codexRunner = require("./pilot-agent-codex-runner");
 
 class PilotAgentExecutionChainError extends Error {
   constructor(message, statusCode = 400, details = null) {
@@ -88,6 +89,55 @@ const CHAIN_STEP_DEFINITIONS = Object.freeze([
   Object.freeze({ stepNumber: 2, agentKey: "documentation-agent", presetId: "codex-document-chain-result" }),
   Object.freeze({ stepNumber: 3, agentKey: "orchestrator-agent", presetId: "codex-pm-evaluate-chain" }),
 ]);
+const STEP_NUMBER_TO_PILOT_ROLE = Object.freeze({
+  1: "RECHERCHE_ANALYSE",
+  2: "DOKUMENTATION",
+  3: "PROJEKTMANAGER",
+});
+
+function parseJsonArrayOrEmpty(value) {
+  if (typeof value !== "string" || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((entry) => typeof entry === "string" && entry.trim()) : [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+function normalizeQualityCriteria(input) {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((entry) => String(entry === null || entry === undefined ? "" : entry).trim())
+    .filter(Boolean);
+}
+
+function buildCoreMandateFromOrderRow(orderRow) {
+  return {
+    orderId: orderRow.id,
+    orderRevision: Number.isInteger(orderRow.revision) && orderRow.revision >= 0 ? orderRow.revision : 0,
+    title: String(orderRow.title || ""),
+    desiredOutcome: String(orderRow.desiredOutcome || ""),
+    qualityCriteria: normalizeQualityCriteria(parseJsonArrayOrEmpty(orderRow.qualityCriteriaJson)),
+  };
+}
+
+function parseStoredCoreMandate(chainRow) {
+  if (!chainRow || typeof chainRow.coreMandateJson !== "string" || !chainRow.coreMandateJson.trim()) return null;
+  try {
+    const parsed = JSON.parse(chainRow.coreMandateJson);
+    if (!parsed || typeof parsed !== "object") return null;
+    return {
+      orderId: String(parsed.orderId || chainRow.pilotOrderId || ""),
+      orderRevision: Number.isInteger(parsed.orderRevision) && parsed.orderRevision >= 0 ? parsed.orderRevision : null,
+      title: String(parsed.title || ""),
+      desiredOutcome: String(parsed.desiredOutcome || ""),
+      qualityCriteria: normalizeQualityCriteria(parsed.qualityCriteria),
+    };
+  } catch (_error) {
+    return null;
+  }
+}
 
 // Fail-fast bei Registrierungsdrift zwischen diesem Modul und den additiven
 // Presets in pilot-agent-execution-service.js – ein Abweichen wäre ein
@@ -163,7 +213,19 @@ function stepRowToView(row) {
     executionRunId: row.executionRunId || null,
     chainedFromExecutionRunId: row.chainedFromExecutionRunId || null,
     predecessorResultDigest: row.predecessorResultDigest || null,
+    predecessorCharCount: row.predecessorCharCount === null || row.predecessorCharCount === undefined ? null : row.predecessorCharCount,
+    predecessorIncludedCharCount:
+      row.predecessorIncludedCharCount === null || row.predecessorIncludedCharCount === undefined
+        ? null
+        : row.predecessorIncludedCharCount,
+    predecessorTruncated: Boolean(row.predecessorTruncated),
+    predecessorFullyIncluded:
+      row.predecessorCharCount === null || row.predecessorCharCount === undefined
+        ? null
+        : !Boolean(row.predecessorTruncated),
     resultDigest: row.resultDigest || null,
+    roleHandoffBooked: Boolean(row.roleHandoffBooked),
+    roleHandoffBookedAt: row.roleHandoffBookedAt || null,
     failureReasonCode: row.failureReasonCode || null,
     approvalRequestedAt: row.approvalRequestedAt || null,
     startedAt: row.startedAt || null,
@@ -176,6 +238,45 @@ function getChainView(db, chainId) {
   const chain = authDb.getPilotAgentExecutionChainById(db, chainId);
   if (!chain) return null;
   const steps = authDb.listPilotAgentExecutionChainStepsForChain(db, chainId).map(stepRowToView);
+  const selectedFilesFixed = typeof chain.selectedFilesJson === "string" && chain.selectedFilesJson.trim().length > 0;
+  const parsedSelectedFiles = selectedFilesFixed ? parseJsonArrayOrEmpty(chain.selectedFilesJson) : [];
+  const selectedFiles = selectedFilesFixed
+    ? pilotAgentExecutionService.resolveChainSelectedFiles(parsedSelectedFiles.length > 0 ? parsedSelectedFiles : undefined)
+    : [];
+  const stepByNumber = new Map(steps.map((step) => [step.stepNumber, step]));
+  const predecessorRunsById = new Map();
+  const stepsWithPendingPredecessorInfo = steps.map((step) => {
+    let pendingPredecessorCharCount = null;
+    let pendingPredecessorTooLarge = null;
+    if (step.stepNumber > 1 && step.stepStatus === "PENDING") {
+      const predecessorStep = stepByNumber.get(step.stepNumber - 1);
+      if (predecessorStep && predecessorStep.executionRunId) {
+        let predecessorRun = predecessorRunsById.get(predecessorStep.executionRunId);
+        if (predecessorRun === undefined) {
+          predecessorRun = authDb.getPilotAgentExecutionRunById(db, predecessorStep.executionRunId) || null;
+          predecessorRunsById.set(predecessorStep.executionRunId, predecessorRun);
+        }
+        if (predecessorRun && predecessorRun.status === "SUCCEEDED" && predecessorRun.resultRawText) {
+          const predecessorDetails = codexRunner.buildPredecessorContextDetails({
+            fromAgentKey: predecessorStep.agentKey,
+            fromExecutionRunId: predecessorStep.executionRunId,
+            resultText: predecessorRun.resultRawText,
+          });
+          if (predecessorDetails) {
+            pendingPredecessorCharCount = predecessorDetails.predecessorCharCount;
+            pendingPredecessorTooLarge =
+              predecessorDetails.predecessorCharCount > codexRunner.MAX_PREDECESSOR_CONTEXT_CHARS;
+          }
+        }
+      }
+    }
+    return {
+      ...step,
+      pendingPredecessorCharCount,
+      pendingPredecessorTooLarge,
+    };
+  });
+  const coreMandate = parseStoredCoreMandate(chain);
   return {
     id: chain.id,
     pilotOrderId: chain.pilotOrderId,
@@ -188,7 +289,15 @@ function getChainView(db, chainId) {
     createdAt: chain.createdAt,
     updatedAt: chain.updatedAt,
     completedAt: chain.completedAt || null,
-    steps,
+    selectedFiles,
+    selectedFilesFixed,
+    coreMandate,
+    mandateDigest: chain.mandateDigest || null,
+    mandateOrderRevisionAtPrepare:
+      chain.mandateOrderRevisionAtPrepare === null || chain.mandateOrderRevisionAtPrepare === undefined
+        ? null
+        : chain.mandateOrderRevisionAtPrepare,
+    steps: stepsWithPendingPredecessorInfo,
   };
 }
 
@@ -288,6 +397,17 @@ function prepareChain(db, options = {}) {
   if (!orderRow) {
     throw notFound(`Der Pilotauftrag "${pilotOrderId}" wurde nicht gefunden.`, { pilotOrderId });
   }
+  const selectedFiles = pilotAgentExecutionService.resolveChainSelectedFiles(options.selectedFiles);
+  const coreMandate = buildCoreMandateFromOrderRow(orderRow);
+  const mandateDigest = sha256Hex(
+    JSON.stringify({
+      orderId: coreMandate.orderId,
+      orderRevision: coreMandate.orderRevision,
+      title: coreMandate.title,
+      desiredOutcome: coreMandate.desiredOutcome,
+      qualityCriteria: coreMandate.qualityCriteria,
+    }),
+  );
   const now = options.now || new Date();
   const createdAt = nowIso(now);
   const actorUserId = options.actorUserId ?? null;
@@ -304,6 +424,10 @@ function prepareChain(db, options = {}) {
       createdByUserId: actorUserId,
       createdAt,
       updatedAt: createdAt,
+      selectedFilesJson: JSON.stringify(selectedFiles),
+      coreMandateJson: JSON.stringify(coreMandate),
+      mandateDigest,
+      mandateOrderRevisionAtPrepare: coreMandate.orderRevision,
     });
     CHAIN_STEP_DEFINITIONS.forEach((definition) => {
       authDb.insertPilotAgentExecutionChainStep(db, {
@@ -323,7 +447,12 @@ function prepareChain(db, options = {}) {
       actorUserId,
       tenantId: null,
       timestamp: createdAt,
-      metadata: { chainId, status: "PREPARED" },
+      metadata: {
+        chainId,
+        status: "PREPARED",
+        selectedFilesCount: selectedFiles.length,
+        mandateDigest,
+      },
     });
   });
 
@@ -502,6 +631,8 @@ function finalizeChainStepSuccess(db, { chain, step, stepNumber, now, actorUserI
       resultDigest,
       failureReasonCode: null,
       completedAt,
+      roleHandoffBooked: true,
+      roleHandoffBookedAt: completedAt,
     });
     if (!stepApplied) {
       throw new Error("Interner Fehler: Kettenschritt konnte nicht als erfolgreich markiert werden (unerwarteter Zustand).");
@@ -525,7 +656,16 @@ function finalizeChainStepSuccess(db, { chain, step, stepNumber, now, actorUserI
       actorUserId,
       tenantId: null,
       timestamp: completedAt,
-      metadata: { chainId: chain.id, chainStep: stepNumber, executionRunId: run.id, agentKey: step.agentKey, resultDigest, status: nextStatus },
+      metadata: {
+        chainId: chain.id,
+        chainStep: stepNumber,
+        executionRunId: run.id,
+        agentKey: step.agentKey,
+        pilotRole: STEP_NUMBER_TO_PILOT_ROLE[stepNumber],
+        resultDigest,
+        status: nextStatus,
+        roleHandoffBooked: true,
+      },
     });
     if (stepNumber === 3) {
       authAudit.recordAuditEvent(db, {
@@ -718,6 +858,44 @@ async function startStep(db, options = {}) {
     });
   }
 
+  const orderRow = authDb.getPilotWorkOrderById(db, chain.pilotOrderId);
+  if (!orderRow) {
+    throw notFound(`Der Pilotauftrag "${chain.pilotOrderId}" wurde nicht gefunden.`, { pilotOrderId: chain.pilotOrderId });
+  }
+  const selectedFilesFixed = typeof chain.selectedFilesJson === "string" && chain.selectedFilesJson.trim().length > 0;
+  const parsedSelectedFiles = selectedFilesFixed ? parseJsonArrayOrEmpty(chain.selectedFilesJson) : [];
+  const selectedFilesForChain = selectedFilesFixed
+    ? pilotAgentExecutionService.resolveChainSelectedFiles(parsedSelectedFiles.length > 0 ? parsedSelectedFiles : undefined)
+    : null;
+  const stepPreset = pilotAgentExecutionService.PILOT_AGENT_TASK_PRESETS[step.presetId];
+  if (!stepPreset) {
+    throw conflict(`Kettenschritt ${stepNumber} referenziert ein unbekanntes Preset "${step.presetId}".`, {
+      chainId,
+      chainStep: stepNumber,
+      presetId: step.presetId,
+    });
+  }
+  const effectiveAllowedFiles = selectedFilesForChain || stepPreset.allowedFiles;
+  const storedMandate = parseStoredCoreMandate(chain);
+  const coreMandate = storedMandate || buildCoreMandateFromOrderRow(orderRow);
+  const coreMandateDigest = sha256Hex(
+    JSON.stringify({
+      orderId: coreMandate.orderId,
+      orderRevision: coreMandate.orderRevision,
+      title: coreMandate.title,
+      desiredOutcome: coreMandate.desiredOutcome,
+      qualityCriteria: coreMandate.qualityCriteria,
+    }),
+  );
+  if (chain.mandateDigest && chain.mandateDigest !== coreMandateDigest) {
+    blockChain(db, chain, "MANDATE_DIGEST_MISMATCH", now, actorUserId);
+    throw conflict("Der unveränderte Kernauftrag konnte nicht verifiziert werden (Mandat-Digest-Abweichung). Die Kette wurde blockiert.", {
+      chainId,
+      chainStep: stepNumber,
+      reasonCode: "MANDATE_DIGEST_MISMATCH",
+    });
+  }
+
   // Vorgängerergebnis laden und prüfen (Übergabe echter Ergebnisse, siehe
   // Auftrag Abschnitt "Übergabe echter Ergebnisse"). Läuft VOR jedem
   // Tokenverbrauch, damit ein Integritätsbefund die Freigabe nicht verbraucht
@@ -725,6 +903,7 @@ async function startStep(db, options = {}) {
   let predecessorStep = null;
   let predecessorRun = null;
   let freshPredecessorDigest = null;
+  let predecessorPromptDetails = null;
   if (stepNumber > 1) {
     predecessorStep = authDb.getPilotAgentExecutionChainStepByNumber(db, chainId, stepNumber - 1);
     if (!predecessorStep || predecessorStep.stepStatus !== "SUCCEEDED" || !predecessorStep.executionRunId) {
@@ -753,6 +932,26 @@ async function startStep(db, options = {}) {
       throw conflict(
         "Das Vorgängerergebnis wurde nach dessen Abschluss verändert (Digest-Abweichung). Die Kette wurde blockiert.",
         { chainId, chainStep: stepNumber },
+      );
+    }
+    predecessorPromptDetails = codexRunner.buildPredecessorContextDetails({
+      fromAgentKey: predecessorStep.agentKey,
+      fromExecutionRunId: predecessorStep.executionRunId,
+      resultText: predecessorRun.resultRawText,
+    });
+    if (predecessorPromptDetails && predecessorPromptDetails.predecessorTruncated) {
+      blockChain(db, chain, "PREDECESSOR_CONTEXT_TOO_LARGE", now, actorUserId);
+      throw conflict(
+        `Das Vorgängerergebnis überschreitet die sichere Obergrenze (${predecessorPromptDetails.predecessorCharCount} von maximal ` +
+          `${codexRunner.MAX_PREDECESSOR_CONTEXT_CHARS} Zeichen). Der Schritt wurde kontrolliert gestoppt, bevor ein Token ` +
+          "verbraucht oder ein Codex-Lauf gestartet wurde.",
+        {
+          chainId,
+          chainStep: stepNumber,
+          predecessorCharCount: predecessorPromptDetails.predecessorCharCount,
+          predecessorMaxChars: codexRunner.MAX_PREDECESSOR_CONTEXT_CHARS,
+          reasonCode: "PREDECESSOR_CONTEXT_TOO_LARGE",
+        },
       );
     }
   }
@@ -786,6 +985,9 @@ async function startStep(db, options = {}) {
       startedAt,
       chainedFromExecutionRunId: predecessorStep ? predecessorStep.executionRunId : null,
       predecessorResultDigest: freshPredecessorDigest,
+      predecessorCharCount: predecessorPromptDetails ? predecessorPromptDetails.predecessorCharCount : null,
+      predecessorIncludedCharCount: predecessorPromptDetails ? predecessorPromptDetails.predecessorIncludedCharCount : null,
+      predecessorTruncated: predecessorPromptDetails ? predecessorPromptDetails.predecessorTruncated : false,
     });
     if (!stepApplied) {
       throw conflict("Kettenschritt konnte nicht gestartet werden (evtl. bereits parallel gestartet).", { chainId, chainStep: stepNumber });
@@ -815,6 +1017,9 @@ async function startStep(db, options = {}) {
         chainStep: stepNumber,
         agentKey: step.agentKey,
         runnerKind: pilotAgentExecutionService.RUNNER_KINDS.CODEX,
+        selectedFilesCount: effectiveAllowedFiles.length,
+        mandateDigest: coreMandateDigest,
+        predecessorFullyIncluded: predecessorPromptDetails ? !predecessorPromptDetails.predecessorTruncated : null,
         ...(predecessorStep ? { predecessorExecutionRunId: predecessorStep.executionRunId } : {}),
         status: runningChainStatus,
       },
@@ -855,6 +1060,8 @@ async function startStep(db, options = {}) {
       actorUserId,
       now,
       approvalToken: innerApproval.approvalToken,
+      mandate: coreMandate,
+      ...(selectedFilesForChain ? { allowedFilesOverride: selectedFilesForChain } : {}),
       predecessorContext: predecessorStep
         ? {
             fromAgentKey: predecessorStep.agentKey,

@@ -3052,6 +3052,67 @@ const MIGRATIONS = Object.freeze([
       CREATE INDEX idx_auth_audit_events_timestamp ON auth_audit_events(timestamp);
     `,
   }),
+  // V7.8.0 ("Drei-Agenten-Kette auftragsfähig machen") – rein additive
+  // Nachvollziehbarkeitsfelder: kein Tabellen-Neubau, keine Änderung an
+  // bestehenden Statusmaschinen. Ziel: unveränderter Kernauftrag über alle
+  // drei Stufen, einmalige Dateiauswahl je Kette, sowie explizite
+  // Vollständigkeitsmarkierung des Vorgängertexts statt stiller Kürzung.
+  Object.freeze({
+    version: 24,
+    name: "add_chain_mandate_and_predecessor_integrity_metadata_v17",
+    sql: `
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN promptDigest TEXT CHECK (promptDigest IS NULL OR length(promptDigest) <= 128);
+
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN promptCharCount INTEGER CHECK (promptCharCount IS NULL OR promptCharCount >= 0);
+
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN mandateDigest TEXT CHECK (mandateDigest IS NULL OR length(mandateDigest) <= 128);
+
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN mandateOrderRevision INTEGER CHECK (mandateOrderRevision IS NULL OR mandateOrderRevision >= 0);
+
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN predecessorCharCount INTEGER CHECK (predecessorCharCount IS NULL OR predecessorCharCount >= 0);
+
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN predecessorIncludedCharCount INTEGER CHECK (predecessorIncludedCharCount IS NULL OR predecessorIncludedCharCount >= 0);
+
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN predecessorTruncated INTEGER NOT NULL DEFAULT 0 CHECK (predecessorTruncated IN (0, 1));
+
+      ALTER TABLE pilot_agent_execution_runs
+        ADD COLUMN resultTruncated INTEGER NOT NULL DEFAULT 0 CHECK (resultTruncated IN (0, 1));
+
+      ALTER TABLE pilot_agent_execution_chains
+        ADD COLUMN selectedFilesJson TEXT;
+
+      ALTER TABLE pilot_agent_execution_chains
+        ADD COLUMN coreMandateJson TEXT;
+
+      ALTER TABLE pilot_agent_execution_chains
+        ADD COLUMN mandateDigest TEXT CHECK (mandateDigest IS NULL OR length(mandateDigest) <= 128);
+
+      ALTER TABLE pilot_agent_execution_chains
+        ADD COLUMN mandateOrderRevisionAtPrepare INTEGER CHECK (mandateOrderRevisionAtPrepare IS NULL OR mandateOrderRevisionAtPrepare >= 0);
+
+      ALTER TABLE pilot_agent_execution_chain_steps
+        ADD COLUMN predecessorCharCount INTEGER CHECK (predecessorCharCount IS NULL OR predecessorCharCount >= 0);
+
+      ALTER TABLE pilot_agent_execution_chain_steps
+        ADD COLUMN predecessorIncludedCharCount INTEGER CHECK (predecessorIncludedCharCount IS NULL OR predecessorIncludedCharCount >= 0);
+
+      ALTER TABLE pilot_agent_execution_chain_steps
+        ADD COLUMN predecessorTruncated INTEGER NOT NULL DEFAULT 0 CHECK (predecessorTruncated IN (0, 1));
+
+      ALTER TABLE pilot_agent_execution_chain_steps
+        ADD COLUMN roleHandoffBooked INTEGER NOT NULL DEFAULT 0 CHECK (roleHandoffBooked IN (0, 1));
+
+      ALTER TABLE pilot_agent_execution_chain_steps
+        ADD COLUMN roleHandoffBookedAt TEXT;
+    `,
+  }),
 ]);
 
 function ensureMigrationsTable(db) {

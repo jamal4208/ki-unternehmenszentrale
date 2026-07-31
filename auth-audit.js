@@ -452,6 +452,15 @@ const METADATA_ALLOWLIST = Object.freeze([
   "predecessorExecutionRunId",
   "resultDigest",
   "status",
+  // V7.8.0: Ketten-Metadaten ohne Inhaltsleakage. "selectedFilesCount" ist
+  // nur die Anzahl der zuvor fixierten Allowlist-Dateien (kein Pfadinhalt),
+  // "mandateDigest" ist ein Hash des Kernauftrags (kein Auftragstext),
+  // "predecessorFullyIncluded" markiert nur ja/nein bzgl. vollständiger
+  // Übernahme, "pilotRole"/"roleHandoffBooked" sind reine Statussignale.
+  "selectedFilesCount",
+  "mandateDigest",
+  "predecessorFullyIncluded",
+  "roleHandoffBooked",
   // V7.7.0 Korrektur 2 ("chainManaged-Presets nur über Chain-Service
   // erlauben", Audit-Wahrheit): "approvalSource" markiert AUSSCHLIESSLICH
   // den bereits bestehenden PILOT_AGENT_EXECUTION_CODEX_APPROVAL_REQUESTED-

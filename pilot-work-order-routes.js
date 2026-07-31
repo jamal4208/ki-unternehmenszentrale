@@ -463,12 +463,13 @@ const PILOT_ACTIONS = Object.freeze({
   // tatsächlich zu diesem Auftrag gehört (expectedPilotOrderId).
   // ---------------------------------------------------------------------
   "prepare-agent-chain": {
-    fields: [],
+    fields: ["selectedFiles"],
     run: async (db, body, meta) => ({
       chain: chainService.prepareChain(db, {
         pilotOrderId: meta.pilotOrderId,
         actorUserId: meta.actorUserId,
         now: meta.now,
+        selectedFiles: body.selectedFiles,
       }),
       overview: withAgentChains(db, service.getPilotOverview(db, { pilotOrderId: meta.pilotOrderId })),
     }),

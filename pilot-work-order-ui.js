@@ -86,6 +86,10 @@
     chainStepApprovalTokens: {},
     chainActionInFlight: false,
     chainActionError: null,
+    // Korrekturlauf V7.8.0: lokale Checkbox-Auswahl für
+    // "Neue Agentenkette vorbereiten" (null = noch nicht initialisiert für
+    // den aktuell ausgewählten Auftrag).
+    chainSelectedFiles: null,
     // V7.7.1 ("Explizite Jamal-Ausführungsfreigabe bedienbar machen"): die
     // einzige Stelle, an der `confirmed: true` jemals versendet wird (siehe
     // confirmJamalConfirmation unten). Ausschließlich lokaler Zustand –
@@ -216,6 +220,7 @@
     state.codexApprovalError = null;
     state.chainStepApprovalTokens = {};
     state.chainActionError = null;
+    state.chainSelectedFiles = null;
     // Ein Auftragswechsel verwirft eine ggf. offene Jamal-Bestätigungsfläche
     // ohne jeden API-Aufruf (kein Status ändert sich dadurch) – dieselbe
     // Grundregel wie für codexApprovalToken/chainStepApprovalTokens oben.
@@ -582,11 +587,17 @@
 
   function prepareAgentChain() {
     if (state.chainActionInFlight || !state.selectedPilotOrderId) return Promise.resolve();
+    var selection = getChainFileSelectionForOverview(state.overview || {});
+    if (selection.selectedFiles.length === 0) {
+      state.chainActionError = null;
+      render();
+      return Promise.resolve();
+    }
     var pilotOrderId = state.selectedPilotOrderId;
     state.chainActionInFlight = true;
     state.chainActionError = null;
     render();
-    return postAction(pilotOrderId, "prepare-agent-chain", {}).then(function (response) {
+    return postAction(pilotOrderId, "prepare-agent-chain", { selectedFiles: selection.selectedFiles }).then(function (response) {
       state.chainActionInFlight = false;
       if (state.selectedPilotOrderId !== pilotOrderId) return;
       if (response.statusCode === 200 && response.data && response.data.ok) {
@@ -749,6 +760,7 @@
 
   function renderFacts(overview) {
     var progress = overview.progress || { rolesPassed: 0, rolesTotal: 3 };
+    var chainRoleProgress = overview.chainRoleProgress || null;
     var rows = [
       ["Pilotauftrag-ID", escapeHtml(overview.order.id)],
       ["Revision", escapeHtml(String(overview.order.revision))],
@@ -758,6 +770,12 @@
       ["Fortschritt", progress.rolesPassed + " von " + progress.rolesTotal + " Pilotrollen mit angenommenem Ergebnis"],
       ["Offene Entscheidung", overview.openDecision ? escapeHtml(overview.openDecision) : "Keine"],
     ];
+    if (chainRoleProgress && chainRoleProgress.totalCount) {
+      rows.push([
+        "Ketten-Rollenbuchung",
+        chainRoleProgress.bookedCount + " von " + chainRoleProgress.totalCount + " Rollen über Kettenschritte erfolgreich verbucht",
+      ]);
+    }
     return (
       '<dl class="pilot-work-order-facts">' +
       rows.map(function (row) { return "<div><dt>" + row[0] + "</dt><dd>" + row[1] + "</dd></div>"; }).join("") +
@@ -964,9 +982,103 @@
   };
   var CHAIN_STEP_STATUS_LABELS = { PENDING: "Offen", RUNNING: "L\u00e4uft\u2026", SUCCEEDED: "Erfolgreich", FAILED: "Fehlgeschlagen" };
   var CHAIN_APPROVAL_STATUS_LABELS = { NOT_REQUESTED: "keine Freigabe angefordert", REQUESTED: "Freigabe angefordert", GRANTED: "freigegeben und gestartet" };
+  var CHAIN_BLOCK_REASON_TEXT = {
+    PREDECESSOR_RESULT_MISSING: "Vorg\u00e4ngerergebnis fehlt oder ist nicht erfolgreich abgeschlossen.",
+    PREDECESSOR_RESULT_UNAVAILABLE: "Persistiertes Vorg\u00e4ngerergebnis ist nicht verf\u00fcgbar oder ung\u00fcltig.",
+    PREDECESSOR_RESULT_DIGEST_MISMATCH: "Persistiertes Vorg\u00e4ngerergebnis wurde nachtr\u00e4glich ver\u00e4ndert (Digest-Abweichung).",
+    PREDECESSOR_CONTEXT_TOO_LARGE: "Vorg\u00e4nger\u00fcbergabe \u00fcberschreitet die zul\u00e4ssige Gr\u00f6\u00dfenobergrenze.",
+    MANDATE_DIGEST_MISMATCH: "Der unver\u00e4nderte Kernauftrag konnte nicht verifiziert werden (Digest-Abweichung).",
+  };
+  var CHAIN_PREDECESSOR_MAX_CHARS = 6000;
 
   function chainStatusLabel(status) {
     return CHAIN_STATUS_LABELS[status] || escapeHtml(String(status || ""));
+  }
+
+  function chainBlockReasonText(reasonCode) {
+    var normalized = isNonEmptyString(reasonCode) ? reasonCode.trim() : "";
+    if (!normalized) return "";
+    return CHAIN_BLOCK_REASON_TEXT[normalized] || normalized;
+  }
+
+  // V7.8.1 ("Ergebnisbudget von Kettenschritt 2 technisch erzwungen"):
+  // fester, ausschließlich informativer Hinweistext. Er wird genau dann
+  // angezeigt, wenn die deterministische Budgetdurchsetzung des
+  // Dokumentationsschritts tatsächlich etwas weggelassen hat (siehe
+  // pilot-agent-documentation-result.js). Eine Reduktion darf niemals
+  // unbemerkt bleiben. Enthält ausschließlich Zählwerte, niemals Fachinhalt.
+  function documentationCompactionNoticeText(normalization) {
+    var droppedItems = typeof normalization.droppedItemCount === "number" ? normalization.droppedItemCount : 0;
+    var droppedSentences = typeof normalization.droppedSentenceCount === "number" ? normalization.droppedSentenceCount : 0;
+    var rawChars = typeof normalization.rawCharCount === "number" ? normalization.rawCharCount : 0;
+    var storedChars = typeof normalization.normalizedCharCount === "number" ? normalization.normalizedCharCount : 0;
+    return (
+      "Das Dokumentationsergebnis wurde regelbasiert auf die verbindliche Ergebnisgröße reduziert (" +
+      droppedItems +
+      " Punkte, " +
+      droppedSentences +
+      " Sätze weggelassen; Rohgröße " +
+      rawChars +
+      ", gespeichert " +
+      storedChars +
+      " Zeichen). Keine Kürzung innerhalb eines Satzes."
+    );
+  }
+
+  function documentationCompactionNoticeHtml(run) {
+    var summary = run && run.resultSummary;
+    var normalization = summary && summary.documentationNormalization;
+    if (!normalization || normalization.compactionApplied !== true) return "";
+    return '<br><span class="pilot-work-order-action-error">' + escapeHtml(documentationCompactionNoticeText(normalization)) + "</span>";
+  }
+
+  function chainSelectableFilesFromOverview(overview) {
+    var entries = overview && Array.isArray(overview.chainSelectableFiles) ? overview.chainSelectableFiles : [];
+    var result = [];
+    var seen = {};
+    entries.forEach(function (entry) {
+      if (!isNonEmptyString(entry)) return;
+      var value = entry.trim();
+      if (!value || seen[value]) return;
+      seen[value] = true;
+      result.push(value);
+    });
+    return result;
+  }
+
+  function getChainFileSelectionForOverview(overview) {
+    var selectableFiles = chainSelectableFilesFromOverview(overview);
+    if (!Array.isArray(state.chainSelectedFiles)) {
+      state.chainSelectedFiles = selectableFiles.slice();
+    } else {
+      var selectedSeen = {};
+      var filteredSelection = [];
+      state.chainSelectedFiles.forEach(function (entry) {
+        var value = isNonEmptyString(entry) ? entry.trim() : "";
+        if (!value || selectedSeen[value]) return;
+        if (selectableFiles.indexOf(value) === -1) return;
+        selectedSeen[value] = true;
+        filteredSelection.push(value);
+      });
+      state.chainSelectedFiles = filteredSelection;
+    }
+    return { selectableFiles: selectableFiles, selectedFiles: state.chainSelectedFiles.slice() };
+  }
+
+  function toggleChainSelectedFile(filePath, checked) {
+    if (!state.overview) return;
+    var selection = getChainFileSelectionForOverview(state.overview);
+    if (selection.selectableFiles.indexOf(filePath) === -1) return;
+    var selected = selection.selectedFiles.slice();
+    var idx = selected.indexOf(filePath);
+    if (checked && idx === -1) selected.push(filePath);
+    if (!checked && idx !== -1) selected.splice(idx, 1);
+    selected = selection.selectableFiles.filter(function (pathEntry) {
+      return selected.indexOf(pathEntry) !== -1;
+    });
+    state.chainSelectedFiles = selected;
+    state.chainActionError = null;
+    render();
   }
 
   function findAgentExecutionRunById(overview, executionRunId) {
@@ -992,11 +1104,13 @@
     });
     var tokenKey = chainStepTokenKey(chain.id, step.stepNumber);
     var hasToken = Boolean(state.chainStepApprovalTokens[tokenKey]);
+    var pendingPredecessorTooLarge = step.pendingPredecessorTooLarge === true;
 
     var canRequestApproval =
       isCurrentStep &&
       chainIsOpen &&
       !anyStepRunning &&
+      !pendingPredecessorTooLarge &&
       step.stepStatus === "PENDING" &&
       step.approvalStatus === "NOT_REQUESTED" &&
       availability.available &&
@@ -1006,22 +1120,67 @@
       isCurrentStep &&
       chainIsOpen &&
       !anyStepRunning &&
+      !pendingPredecessorTooLarge &&
       step.stepStatus === "PENDING" &&
       step.approvalStatus === "REQUESTED" &&
       hasToken &&
       availability.available &&
       availability.authenticated &&
       !state.chainActionInFlight;
+    var run = findAgentExecutionRunById(overview, step.executionRunId);
+    var chainMandate = chain.coreMandate || null;
+    var qualityCriteria = chainMandate && Array.isArray(chainMandate.qualityCriteria) ? chainMandate.qualityCriteria.filter(Boolean) : [];
+    var qualityPreview = qualityCriteria.length > 0 ? qualityCriteria.join(" | ") : "nicht angegeben";
+    var stageTaskLabel = run && run.taskTitle ? run.taskTitle : CHAIN_STEP_TITLES[step.stepNumber] || "Schritt " + step.stepNumber;
 
     var html = '<li class="pilot-agent-chain-step">';
     html += "<strong>" + escapeHtml(CHAIN_STEP_TITLES[step.stepNumber] || "Schritt " + step.stepNumber) + "</strong>";
     html += "<br>Agent: " + escapeHtml(CHAIN_AGENT_LABELS[step.agentKey] || step.agentKey) + " (" + escapeHtml(step.agentKey) + ")";
     html += "<br>Status: " + (CHAIN_STEP_STATUS_LABELS[step.stepStatus] || escapeHtml(step.stepStatus)) + " \u00b7 Freigabe: " + (CHAIN_APPROVAL_STATUS_LABELS[step.approvalStatus] || escapeHtml(step.approvalStatus));
+    if (chainMandate) {
+      html += "<br>Kernauftrag: " + escapeHtml(chainMandate.title || "nicht angegeben");
+      html += "<br>Ergebniswunsch: " + escapeHtml(chainMandate.desiredOutcome || "nicht angegeben");
+      html += "<br>Qualitätskriterien (Kernauftrag): " + escapeHtml(qualityPreview);
+    } else {
+      html += "<br>Kernauftrag f\u00fcr diese Altkette nicht mitgef\u00fchrt";
+    }
+    html += "<br>Stufenauftrag: " + escapeHtml(stageTaskLabel);
     if (step.executionRunId) {
       html += "<br>executionRunId: " + escapeHtml(step.executionRunId);
     }
     if (step.chainedFromExecutionRunId) {
       html += "<br>Vorg\u00e4nger-executionRunId: " + escapeHtml(step.chainedFromExecutionRunId);
+    }
+    if (step.stepNumber === 1) {
+      html += "<br>Vorgänger vollständig übernommen: nicht erforderlich (Schritt 1).";
+    } else if (step.predecessorFullyIncluded === true) {
+      html +=
+        "<br>Vorgänger vollständig übernommen: ja" +
+        (step.predecessorIncludedCharCount !== null && step.predecessorIncludedCharCount !== undefined
+          ? " (" + escapeHtml(String(step.predecessorIncludedCharCount)) + " Zeichen)."
+          : ".");
+    } else if (step.predecessorFullyIncluded === false) {
+      html +=
+        '<br><span class="pilot-work-order-action-error">Vorgänger vollständig übernommen: nein' +
+        (step.predecessorCharCount !== null && step.predecessorCharCount !== undefined
+          ? " (" + escapeHtml(String(step.predecessorCharCount)) + " Zeichen vorhanden)."
+          : ".") +
+        "</span>";
+    }
+    if (step.roleHandoffBooked) {
+      html += "<br>Rollenverbuchung: erfolgt" + (step.roleHandoffBookedAt ? " (" + escapeHtml(formatTimestamp(step.roleHandoffBookedAt)) + ")" : "");
+    }
+    if (pendingPredecessorTooLarge) {
+      var pendingCharCountText =
+        step.pendingPredecessorCharCount !== null && step.pendingPredecessorCharCount !== undefined
+          ? String(step.pendingPredecessorCharCount)
+          : "unbekannt";
+      html +=
+        '<br><span class="pilot-work-order-action-error">Vorg\u00e4nger\u00fcbergabe zu lang (' +
+        escapeHtml(pendingCharCountText) +
+        " von maximal " +
+        escapeHtml(String(CHAIN_PREDECESSOR_MAX_CHARS)) +
+        " Zeichen). Dieser Schritt kann so nicht gestartet werden.</span>";
     }
     html +=
       ' <button type="button" data-action="request-chain-step-approval" data-chain-id="' +
@@ -1042,13 +1201,35 @@
     if (hasToken) {
       html += "<p>Freigabe liegt vor \u2013 gilt ausschlie\u00dflich f\u00fcr genau diese eine Stufe.</p>";
     }
-    var run = findAgentExecutionRunById(overview, step.executionRunId);
     if (step.stepStatus === "SUCCEEDED" && run) {
       html +=
         "<br>Tats\u00e4chlicher Runner: " +
         escapeHtml(run.actualRunnerKind || "") +
         " \u00b7 KI ausgef\u00fchrt: " +
         (run.aiExecuted ? "ja" : "nein");
+      if (run.promptDigest) {
+        html += "<br>Prompt-Digest: " + escapeHtml(run.promptDigest);
+      }
+      if (run.mandateDigest) {
+        html += "<br>Kernauftrag-Digest: " + escapeHtml(run.mandateDigest);
+      }
+      if (run.resultTruncated) {
+        html += '<br><span class="pilot-work-order-action-error">Hinweis: Das persistierte Ergebnis wurde beim Speichern gekürzt.</span>';
+      }
+      html += documentationCompactionNoticeHtml(run);
+      var analyzedFiles = [];
+      if (run.resultSummary && Array.isArray(run.resultSummary.analyzedFiles)) {
+        analyzedFiles = run.resultSummary.analyzedFiles
+          .map(function (entry) {
+            if (typeof entry === "string") return entry;
+            if (entry && typeof entry.path === "string") return entry.path;
+            return "";
+          })
+          .filter(Boolean);
+      }
+      if (analyzedFiles.length > 0) {
+        html += "<br>Tats\u00e4chlich verwendete Dateien: " + escapeHtml(analyzedFiles.join(", "));
+      }
       if (run.resultRawText) {
         html += "<br>Ergebnis:<br><pre class=\"pilot-agent-execution-result\">" + escapeHtml(run.resultRawText) + "</pre>";
       }
@@ -1066,8 +1247,19 @@
   function renderAgentChainCard(overview, chain) {
     var html = '<div class="pilot-agent-chain-card">';
     html += "<p><strong>Kette " + escapeHtml(chain.id) + "</strong> \u2013 " + chainStatusLabel(chain.chainStatus) + " (Revision " + escapeHtml(String(chain.revision)) + ")</p>";
+    if (chain.selectedFilesFixed === false) {
+      html += "<p>Altkette ohne fixierte Dateiauswahl - je Stufe gelten die Preset-Dateien</p>";
+    } else if (Array.isArray(chain.selectedFiles) && chain.selectedFiles.length > 0) {
+      html += "<p>Dateiauswahl dieser Kette (für alle drei Stufen fixiert): " + escapeHtml(chain.selectedFiles.join(", ")) + "</p>";
+    }
+    if (chain.mandateDigest) {
+      html += "<p>Kernauftrag-Digest der Kette: " + escapeHtml(chain.mandateDigest) + "</p>";
+    }
     if (chain.chainStatus === "BLOCKED" && chain.blockReason) {
-      html += '<p class="pilot-work-order-action-error">Blockiert: ' + escapeHtml(chain.blockReason) + ". Kein automatischer weiterer Schritt m\u00f6glich.</p>";
+      html +=
+        '<p class="pilot-work-order-action-error">Blockiert: ' +
+        escapeHtml(chainBlockReasonText(chain.blockReason)) +
+        ". Kein automatischer weiterer Schritt m\u00f6glich.</p>";
     }
     if (chain.chainStatus === "FAILED") {
       html += '<p class="pilot-work-order-action-error">Diese Kette ist fehlgeschlagen und wird nicht automatisch fortgesetzt.</p>';
@@ -1086,19 +1278,41 @@
 
   function renderAgentChainSection(overview) {
     var chains = overview.agentChains || [];
+    var selection = getChainFileSelectionForOverview(overview);
     var html = "<h4>Drei-Agenten-Kette (Recherche \u2192 Dokumentation \u2192 PM-Bewertung)</h4>";
     html +=
       "<p>Jede Stufe verwendet einen echten, isolierten Codex-Agentenlauf mit eigener executionRunId und ben\u00f6tigt eine eigene, " +
       "kurzlebige Einzelfreigabe. Ein erfolgreicher Schritt startet den n\u00e4chsten niemals automatisch.</p>";
+    html += "<p>Der Kernauftrag bleibt f\u00fcr alle drei Stufen unver\u00e4ndert. Jamal legt die Dateiauswahl hier einmal f\u00fcr alle drei Stufen fest.</p>";
     if (overview.status !== "IN_EXECUTION") {
       html += "<p>Eine Agentenkette kann nur w\u00e4hrend \u201eIn Ausf\u00fchrung\u201c vorbereitet werden.</p>";
       return html;
     }
-    var canPrepare = !state.chainActionInFlight;
+    if (selection.selectableFiles.length > 0) {
+      html += '<div class="pilot-chain-file-selection"><p><strong>Dateiauswahl f\u00fcr alle drei Stufen:</strong></p><ul>';
+      selection.selectableFiles.forEach(function (filePath) {
+        var checked = selection.selectedFiles.indexOf(filePath) !== -1;
+        html +=
+          "<li><label>" +
+          '<input type="checkbox" data-action="toggle-chain-selected-file" data-file-path="' +
+          escapeHtml(filePath) +
+          '"' +
+          (checked ? " checked" : "") +
+          (state.chainActionInFlight ? " disabled" : "") +
+          " /> " +
+          escapeHtml(filePath) +
+          "</label></li>";
+      });
+      html += "</ul></div>";
+    }
+    var canPrepare = !state.chainActionInFlight && selection.selectedFiles.length > 0;
     html +=
       '<button type="button" data-action="prepare-agent-chain"' +
       (canPrepare ? "" : " disabled") +
       ">Neue Agentenkette vorbereiten (Recherche/Dokumentation/PM)</button>";
+    if (selection.selectedFiles.length === 0) {
+      html += '<p class="pilot-work-order-action-error">Mindestens eine Datei muss ausgew\u00e4hlt sein, bevor die Kette vorbereitet werden kann.</p>';
+    }
     if (state.chainActionError) {
       html += '<p class="pilot-work-order-action-error">' + escapeHtml(state.chainActionError) + "</p>";
     }
@@ -1146,6 +1360,9 @@
           escapeHtml(run.resultSummary.secretRedactionNotice || "Ergebnis wurde aus Sicherheitsgründen redigiert und kann fachlich verkürzt sein.") +
           "</span>",
       );
+    }
+    if (run.status === "SUCCEEDED") {
+      lines.push(documentationCompactionNoticeHtml(run));
     }
     if (run.status === "SUCCEEDED" && run.resultRawText) {
       lines.push("<br>Ergebnis:<br><pre class=\"pilot-agent-execution-result\">" + escapeHtml(run.resultRawText) + "</pre>");
@@ -1424,6 +1641,8 @@
         requestCodexApproval();
       } else if (action === "start-codex-agent-execution") {
         runCodexAgentExecution();
+      } else if (action === "toggle-chain-selected-file") {
+        toggleChainSelectedFile(target.getAttribute("data-file-path"), target.checked);
       } else if (action === "prepare-agent-chain") {
         prepareAgentChain();
       } else if (action === "request-chain-step-approval") {

@@ -4,6 +4,47 @@
 
 `server.js` registriert über `server-http-router.js` **89 GET-Routen** und **52 additive POST-Routen** (Execution Bridge seit Phase C gesichert + V7.1 Phase A Dokumente/Backup gesichert `59f985f` + V7.1 Phase B HeyGen-Connector-Pilot gesichert `ff43089` + V7.1 Phase B.1 Mandantenbasis/Ergebnisrückführung gesichert `37e8a28` + V7.1 Phase C Canva-Connector-Pilot gesichert `52b2d02` + V7.1 Phase C.1 Pilot-Ergebnisakte/Kundenfeedback-Schleife und V7.1 Phase C.1.1 skalierbares Reviewmodell gemeinsam gesichert `6621d93` + V7.2 Phase A Schritt 2 Auth-Routen/Route-Gates + V7.2 Phase A Schritt 3 Owner-Verwaltung/Kundenportal-API + V7.2 Phase A Schritt 4 Betriebsabnahme + V7.2 Phase B Schritt 1 Arbeitsauftrags-API + V7.2 Phase C Schritt 1 Agentenlauf-/Ergebnis-Endpunkte + V7.2 Phase C Schritt 2 Änderungswunsch-/Freigabe-/Versions-Endpunkte innerhalb bestehender Präfixe + V7.3 Jamal-Arbeitsmodus-Zustand/-Aktionen + V7.4 Canva-Produktionskorridor-Zustand/-Aktionen gesichert `f2b0909` + V7.5 Agentenleitstand-/Unternehmensleitlinien-Routen gesichert `6ffa3f8` + V7.6.1 Office-/Finance-Routen gesichert `5b59b17` + V7.6.3 Health-Referenzlauf-Routen (lokal umgesetzt, ungesichert)). Andere HTTP-Methoden bleiben 405. GET-Routen bleiben read-only. Die POST-Routen schreiben ausschließlich lokal (App-Support-Metadaten bzw. die Auth-Datenbank bzw. – nach Jamal-Freigabe – ein Fixture-Testrepository); niemals in Health und niemals mit Commit/Push/Deployment.
 
+## V7.8.1 – Ergebnisbudget von Schritt 2 technisch erzwungen (keine neue Route, ein additives read-only Unterobjekt)
+
+Routenzahlen bleiben unverändert (**89 GET, 52 POST**). Es gibt keine neue Route, keinen neuen Parameter und keine neue Aktion. Ausschließlich die bereits bestehende Antwortstruktur eines Agentenlaufs (`agentExecutionRuns[]` in der Overview sowie die Einzellauf-/Kettenansichten) trägt für **Läufe der Dokumentationsstufe** ein zusätzliches, rein informatives read-only Unterobjekt in `resultSummary`:
+
+`resultSummary.documentationNormalization`:
+
+| Feld | Typ | Bedeutung |
+|---|---|---|
+| `contractVersion` | string | Version des Ausgabevertrags, aktuell `"V7.8.1-DOC-5-SECTIONS"` |
+| `structureValid` | boolean | ob die verbindliche Fünf-Abschnittsstruktur erkannt wurde |
+| `contractFallbackAccepted` | boolean | true, wenn ein markerloses Ergebnis unverändert durchgelassen wurde, weil es das Budget bereits einhielt |
+| `rawCharCount` | number | Zeichenzahl der ursprünglichen Modellantwort |
+| `normalizedCharCount` | number | Zeichenzahl des tatsächlich gespeicherten Ergebnisses |
+| `sectionCharCounts` | object | Zeichenzahl je Abschnitt (Schlüssel `"1"` bis `"5"`) |
+| `droppedItemCount` | number | Anzahl vollständig weggelassener nummerierter Punkte |
+| `droppedSentenceCount` | number | Anzahl vollständig weggelassener Sätze |
+| `droppedIncompleteTailSentence` | boolean | true, wenn ein unvollständiger Schlusssatz als Ganzes weggelassen wurde |
+| `compactionApplied` | boolean | true, wenn tatsächlich etwas weggelassen wurde (steuert die Cockpit-Hinweiszeile) |
+| `budgetMaxChars` | number | verbindliche maximale gespeicherte Größe (4500) |
+| `missingSections` | number[] | fehlende bzw. nach der Verdichtung leere Pflichtabschnitte |
+| `duplicateSectionNumbers` | number[] | mehrfach vorhandene Abschnittsnummern (Inhalt wird zusammengeführt, nicht verworfen) |
+| `preambleCharCount` | number | Zeichenzahl des verworfenen Textes vor Abschnitt 1 |
+
+Grenzen und Zusicherungen: das Feld enthält ausschließlich Zählwerte und Metadaten, niemals Prompttext, Fachinhalt, Secrets oder Tokens. Es ist ausschließlich für Läufe der Dokumentationsstufe vorhanden; Läufe von Schritt 1, Schritt 3 und Einzelläufe behalten ihr bisheriges `resultSummary` unverändert, und Läufe von vor V7.8.1 liefern das Feld nicht (`undefined`). Keine neue Spalte, keine neue Migration (siehe `MIGRATION_PLAN.md`).
+
+Fehlerverhalten über die bestehende Route `start-chain-step`: hält ein Dokumentationsergebnis die Fünf-Abschnittsstruktur nicht ein oder bleibt es auch nach der regelbasierten Reduktion über 4500 Zeichen, endet der Schritt kontrolliert als `FAILED` mit `resultSummary.diagnostics.reasonCode` = `DOCUMENTATION_RESULT_STRUCTURE_INVALID` bzw. `DOCUMENTATION_RESULT_STILL_TOO_LARGE` und `runnerPhase` = `RESULT_VALIDATION`. Es wird nichts abgeschnitten, nichts gespeichert und Schritt 3 nicht gestartet.
+
+## V7.8.0 – Drei-Agenten-Kette auftragsfähig (keine neue Top-Level-Route, bestehende Pilot-Routen erweitert)
+
+Routenzahlen bleiben unverändert (**89 GET, 52 POST**). Die bestehende Pilot-Action-Route für auftragsbezogene Aktionen wurde für die Drei-Agenten-Kette fachlich erweitert:
+
+| Methode | Pfad | Zweck |
+|---|---|---|
+| POST | `/api/pilot-work-order/orders/:pilotOrderId/prepare-agent-chain` | Kette vorbereiten (3 feste Schritte), optional `selectedFiles` einmalig für die gesamte Kette fixieren; speichert zusätzlich den unveränderten Kernauftrag (`coreMandate`) samt Digest |
+| POST | `/api/pilot-work-order/orders/:pilotOrderId/request-chain-step-approval` | kurzlebigen, schrittgebundenen Freigabetoken für genau eine Stufe anfordern |
+| POST | `/api/pilot-work-order/orders/:pilotOrderId/start-chain-step` | genau eine freigegebene Stufe starten; übernimmt Kernauftrag + feste Dateiauswahl + (falls vorhanden) Vorgängerergebnis kontrolliert |
+
+Erweiterte read-only Rückgabefelder in Overview-/Ketten-/Run-Views (ohne Prompt- oder Ergebnisleakage): `chainSelectableFiles`, `selectedFiles`, `selectedFilesFixed`, `coreMandate`, `mandateDigest`, `promptDigest`, `predecessorCharCount`, `predecessorIncludedCharCount`, `predecessorTruncated`, `pendingPredecessorCharCount`, `pendingPredecessorTooLarge`, `resultTruncated`, `roleHandoffBooked`.
+
+Sicherheitsgrenze: wenn ein Vorgängertext die echte Read-only-Grenze überschreitet, wird der Schritt kontrolliert mit Konfliktfehler beendet (kein stilles Kürzen, kein Laufstart).
+
 ## V7.6.3 – Health Upgrade Kompass als ersten echten Referenz-Arbeitslauf verankern (lokal umgesetzt, ungesichert – Commit/Push stehen aus)
 
 Eine neue GET-Route auf oberster Ebene plus ein neuer POST-Präfix (alle `OWNER_ONLY`, kein Kunden-/Supportzugriff): **89 GET, 52 POST, 8 GET-Präfixe, 8 POST-Präfixe, 32 statische Assets** (+1 GET/+1 POST-Präfix/+1 statisches Asset gegenüber dem V7.6.1-Ausgangsstand 88/52/8/7/31).

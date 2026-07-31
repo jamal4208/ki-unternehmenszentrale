@@ -242,9 +242,9 @@ const PILOT_AGENT_TASK_PRESETS = Object.freeze({
     chainManaged: true,
     title: "Kettenschritt 2 – Rechercheergebnis in ein prüfbares Dokumentationsresultat überführen",
     instructions:
-      "Überführe das dir als Vorgängerergebnis vorgelegte Rechercheergebnis in ein klares, prüfbares " +
-      "Dokumentationsresultat. Gib nichts als selbst recherchiert aus, was ausschließlich vom Vorgänger stammt. " +
-      "Kennzeichne Quellen und Herkunft transparent. Mache Widersprüche und fehlende Informationen sichtbar. " +
+      "Überführe das dir als Vorgängerergebnis vorgelegte Rechercheergebnis in ein fachlich brauchbares, eng " +
+      "strukturiertes Dokumentationsresultat. Verwende ausschließlich die im Prompt vorgegebene " +
+      "Fünf-Abschnittsstruktur, priorisiere entscheidungsrelevante Befunde und lasse nachrangige Details weg. " +
       "Erteile keine Projektmanager-Freigabe.",
     allowedFiles: Object.freeze([
       "pilot-agent-execution-chain-service.js",
@@ -267,8 +267,9 @@ const PILOT_AGENT_TASK_PRESETS = Object.freeze({
       "Projektmanager-Freigabe erteilen",
     ]),
     expectedResultFormat:
-      "Titel, Ausgangslage, bestätigte Erkenntnisse, übernommene Aussagen des Vorgängers, offene oder " +
-      "widersprüchliche Punkte, Risiken, empfohlener nächster Schritt, Herkunfts-/Quellenhinweis – strukturierter Text.",
+      "Genau fünf Abschnitte in fixer Reihenfolge: (1) Kurzergebnis, (2) Bestätigte Kernbefunde, " +
+      "(3) Offene Punkte und Grenzen, (4) Priorisierte Empfehlungen mit Maßnahme/Nutzen/Priorität, " +
+      "(5) Herkunftshinweis.",
   }),
   // Phase 8 – Schritt 3 (Projektmanager-/PM-Bewertung). agentKeyOverride
   // "orchestrator-agent" ist die im kanonischen Register bereits bestehende
@@ -321,6 +322,43 @@ const PILOT_AGENT_TASK_PRESETS = Object.freeze({
   }),
 });
 
+// V7.8.0: die Dateiauswahl für die Drei-Agenten-Kette wird EINMAL zentral
+// definiert und anschließend für alle drei Stufen wiederverwendet. Keine
+// automatische Dateierweiterung durch ein Modell.
+const CHAIN_SELECTABLE_FILES = Object.freeze([
+  "pilot-agent-execution-chain-service.js",
+  "pilot-work-order-service.js",
+  "pilot-agent-runner.js",
+  "auth-db-migrations.js",
+]);
+
+function resolveChainSelectedFiles(input) {
+  if (input === undefined || input === null) {
+    return CHAIN_SELECTABLE_FILES.slice();
+  }
+  if (!Array.isArray(input)) {
+    throw badRequest("selectedFiles muss ein Array mit relativen Dateipfaden sein.");
+  }
+  const normalized = Array.from(
+    new Set(
+      input
+        .map((entry) => String(entry === null || entry === undefined ? "" : entry).trim())
+        .filter(Boolean),
+    ),
+  );
+  if (normalized.length === 0) {
+    throw badRequest("selectedFiles darf nicht leer sein.");
+  }
+  const invalid = normalized.filter((entry) => !CHAIN_SELECTABLE_FILES.includes(entry));
+  if (invalid.length > 0) {
+    throw badRequest("selectedFiles enthält nicht erlaubte Dateien.", {
+      invalidFiles: invalid,
+      allowedFiles: CHAIN_SELECTABLE_FILES,
+    });
+  }
+  return normalized;
+}
+
 function requireKnownPreset(presetId) {
   const preset = PILOT_AGENT_TASK_PRESETS[presetId];
   if (!preset) {
@@ -353,6 +391,16 @@ const CHAIN_INTERNAL_BRIDGE_CAPABILITY = Symbol("pilot-agent-execution-chain-int
 
 function isChainInternalBridgeCall(options) {
   return Boolean(options) && options.__chainInternalBridge === CHAIN_INTERNAL_BRIDGE_CAPABILITY;
+}
+
+function resolveAllowedFilesForRun(preset, options = {}) {
+  if (options.allowedFilesOverride === undefined) {
+    return preset.allowedFiles.slice();
+  }
+  if (!isChainInternalBridgeCall(options)) {
+    throw badRequest("allowedFilesOverride ist ausschließlich für den internen Kettenpfad zulässig.");
+  }
+  return resolveChainSelectedFiles(options.allowedFilesOverride);
 }
 
 function assertChainManagedPresetHasInternalBridge(preset, options) {
@@ -600,6 +648,17 @@ function rowToAgentExecutionRunView(row) {
     allowedTools: JSON.parse(row.allowedToolsJson),
     forbiddenActions: JSON.parse(row.forbiddenActionsJson),
     expectedResultFormat: row.expectedResultFormat,
+    promptDigest: row.promptDigest || null,
+    promptCharCount: row.promptCharCount === null || row.promptCharCount === undefined ? null : row.promptCharCount,
+    mandateDigest: row.mandateDigest || null,
+    mandateOrderRevision: row.mandateOrderRevision === null || row.mandateOrderRevision === undefined ? null : row.mandateOrderRevision,
+    predecessorCharCount: row.predecessorCharCount === null || row.predecessorCharCount === undefined ? null : row.predecessorCharCount,
+    predecessorIncludedCharCount:
+      row.predecessorIncludedCharCount === null || row.predecessorIncludedCharCount === undefined
+        ? null
+        : row.predecessorIncludedCharCount,
+    predecessorTruncated: Boolean(row.predecessorTruncated),
+    resultTruncated: Boolean(row.resultTruncated),
     runnerId: row.runnerId,
     runnerLabel: row.runnerLabel,
     status: row.status,
@@ -700,6 +759,12 @@ async function startAgentExecutionRun(db, options = {}) {
     );
   }
 
+  const allowedFilesForRun = resolveAllowedFilesForRun(preset, options);
+  const mandateOrderRevisionForRun =
+    options.mandate && Number.isInteger(options.mandate.orderRevision) && options.mandate.orderRevision >= 0
+      ? options.mandate.orderRevision
+      : null;
+
   const now = options.now || new Date();
 
   // Phase 7 (Schwerpunkt 6/10): "fehlende Authentifizierung/Verfügbarkeit/
@@ -794,7 +859,7 @@ async function startAgentExecutionRun(db, options = {}) {
         agentKey: agent.agentKey,
         taskTitle: preset.title,
         taskInstructions: preset.instructions,
-        allowedFilesJson: JSON.stringify(preset.allowedFiles),
+        allowedFilesJson: JSON.stringify(allowedFilesForRun),
         allowedToolsJson: JSON.stringify(preset.allowedTools),
         forbiddenActionsJson: JSON.stringify(preset.forbiddenActions),
         expectedResultFormat: preset.expectedResultFormat,
@@ -802,6 +867,7 @@ async function startAgentExecutionRun(db, options = {}) {
         runnerLabel,
         startedAt: nowIso(now),
         createdAt: nowIso(now),
+        ...(mandateOrderRevisionForRun !== null ? { mandateOrderRevision: mandateOrderRevisionForRun } : {}),
         // Phase 7: nur für den Codex-Pfad tatsächlich befüllt (siehe
         // auth-db.js#insertPilotAgentExecutionRunAsRunning,
         // OPTIONAL_RUNNER_FIELDS). Der lokale Pfad lässt diese Felder
@@ -856,7 +922,7 @@ async function startAgentExecutionRun(db, options = {}) {
     if (isCodexRun) {
       execResult = await codexRunner.runPilotAgentCodexAnalysisTask({
         repoRoot: REPO_ROOT,
-        allowedFiles: preset.allowedFiles,
+        allowedFiles: allowedFilesForRun,
         allowedTools: preset.allowedTools,
         forbiddenActions: preset.forbiddenActions,
         taskTitle: preset.title,
@@ -878,6 +944,10 @@ async function startAgentExecutionRun(db, options = {}) {
         // undefined, wodurch buildAgentSpecificCodexPrompt exakt denselben
         // Prompt wie vor Phase 8 erzeugt (siehe pilot-agent-codex-runner.js).
         predecessorContext: options.predecessorContext,
+        // V7.8.0: unveränderter Kernauftrag, der jeder Stufe explizit
+        // vorangestellt wird (falls gesetzt ausschließlich aus der
+        // Kettenorchestrierung, niemals frei aus dem Client-Body).
+        mandate: options.mandate,
         // Ausschließlich für Tests: injizierte Ersatzimplementierungen für
         // den echten Codex-Kindprozess/Dateisystemzugriff (siehe
         // pilot-agent-codex-runner.js/execution-codex-adapter.js). Im
@@ -891,7 +961,7 @@ async function startAgentExecutionRun(db, options = {}) {
     } else {
       execResult = await runner.runPilotAgentAnalysisTask({
         repoRoot: REPO_ROOT,
-        allowedFiles: preset.allowedFiles,
+        allowedFiles: allowedFilesForRun,
         taskTitle: preset.title,
         taskInstructions: preset.instructions,
       });
@@ -976,6 +1046,27 @@ function buildFailedRunResultSummary(execResult) {
   };
 }
 
+function buildPromptMetadataPatch(execResult) {
+  if (!execResult || typeof execResult !== "object") return {};
+  const patch = {};
+  if (execResult.promptDigest) patch.promptDigest = String(execResult.promptDigest).slice(0, 128);
+  if (Number.isInteger(execResult.promptCharCount) && execResult.promptCharCount >= 0) patch.promptCharCount = execResult.promptCharCount;
+  if (execResult.mandateDigest) patch.mandateDigest = String(execResult.mandateDigest).slice(0, 128);
+  if (Number.isInteger(execResult.mandateOrderRevision) && execResult.mandateOrderRevision >= 0) {
+    patch.mandateOrderRevision = execResult.mandateOrderRevision;
+  }
+  if (Number.isInteger(execResult.predecessorCharCount) && execResult.predecessorCharCount >= 0) {
+    patch.predecessorCharCount = execResult.predecessorCharCount;
+  }
+  if (Number.isInteger(execResult.predecessorIncludedCharCount) && execResult.predecessorIncludedCharCount >= 0) {
+    patch.predecessorIncludedCharCount = execResult.predecessorIncludedCharCount;
+  }
+  if (execResult.predecessorTruncated !== undefined) {
+    patch.predecessorTruncated = Boolean(execResult.predecessorTruncated);
+  }
+  return patch;
+}
+
 function persistFailedAgentExecutionRun(db, { runId, pilotOrderId, preset, execResult, now, actorUserId, isCodexRun }) {
   return authDb.withAuthTransaction(db, () => {
     const errorMessage = String((execResult && execResult.errorMessage) || "Agentenlauf ist technisch fehlgeschlagen.");
@@ -1001,6 +1092,7 @@ function persistFailedAgentExecutionRun(db, { runId, pilotOrderId, preset, execR
             workspaceId: (execResult && execResult.workspaceId) || null,
             timedOut: Boolean(execResult && execResult.timedOut),
             cancelledRun: Boolean(execResult && execResult.cancelled),
+            ...buildPromptMetadataPatch(execResult),
           }
         : {}),
     });
@@ -1048,6 +1140,9 @@ function persistFailedAgentExecutionRun(db, { runId, pilotOrderId, preset, execR
 // Verlauf.
 function persistSucceededAgentExecutionRun(db, { runId, pilotOrderId, preset, execResult, now, actorUserId, isCodexRun }) {
   return authDb.withAuthTransaction(db, () => {
+    const rawResultText = String((execResult && execResult.resultText) || "");
+    const persistedResultText = rawResultText.slice(0, 8000);
+    const resultWasTruncated = rawResultText.length > persistedResultText.length;
     const resultSummary = isCodexRun
       ? {
           analyzedFiles: execResult.analyzedFiles || [],
@@ -1059,6 +1154,17 @@ function persistSucceededAgentExecutionRun(db, { runId, pilotOrderId, preset, ex
           // pilot-work-order-ui.js#renderAgentExecutionRun). Niemals ein
           // Secret- oder Tokenwert, ausschließlich der fixe Hinweissatz.
           secretRedactionNotice: execResult.secretRedactionApplied ? execResult.secretRedactionNotice || null : null,
+          // V7.8.1 ("Ergebnisbudget von Kettenschritt 2 technisch erzwungen"):
+          // Auditmetadaten der deterministischen Budgetdurchsetzung des
+          // Dokumentationsschritts (siehe pilot-agent-documentation-result.js
+          // und pilot-agent-codex-runner.js). Ausschließlich für die
+          // Dokumentationsstufe vorhanden; jeder andere Lauf (Schritt 1,
+          // Schritt 3, Phase-7-Einzellauf) bleibt dadurch byteidentisch zum
+          // bisherigen resultSummary. Bewusst in der bereits bestehenden
+          // resultSummaryJson-Spalte – keine neue Spalte, keine Migration.
+          ...(execResult.documentationNormalization
+            ? { documentationNormalization: execResult.documentationNormalization }
+            : {}),
         }
       : {
           observations: execResult.observations,
@@ -1075,7 +1181,7 @@ function persistSucceededAgentExecutionRun(db, { runId, pilotOrderId, preset, ex
       status: "SUCCEEDED",
       finishedAt: nowIso(now),
       resultSummaryJson: JSON.stringify(resultSummary),
-      resultRawText: execResult.resultText.slice(0, 8000),
+      resultRawText: persistedResultText,
       // Phase 7 – siehe Kommentar in persistFailedAgentExecutionRun oben.
       // aiExecuted = true ist HIER (und ausschließlich hier) korrekt: dieser
       // Zweig wird nur erreicht, wenn execResult.ok === true (siehe
@@ -1088,6 +1194,8 @@ function persistSucceededAgentExecutionRun(db, { runId, pilotOrderId, preset, ex
             aiExecuted: true,
             timedOut: false,
             cancelledRun: false,
+            resultTruncated: resultWasTruncated,
+            ...buildPromptMetadataPatch(execResult),
           }
         : {}),
     });
@@ -1271,6 +1379,7 @@ function startAgentExecutionRunForChainInternal(db, options = {}) {
 module.exports = {
   PilotAgentExecutionError,
   PILOT_AGENT_TASK_PRESETS,
+  CHAIN_SELECTABLE_FILES,
   RUNNER_KINDS,
   REPO_ROOT,
   rowToAgentExecutionRunView,
@@ -1292,4 +1401,5 @@ module.exports = {
   clearCodexApprovalTokensForTests,
   getCodexAvailabilitySummary,
   resolveAgentForPreset,
+  resolveChainSelectedFiles,
 };

@@ -585,6 +585,17 @@ function rowToAgentExecutionRunSummary(row) {
     resultSummary,
     resultRawText: row.resultRawText,
     errorMessage: row.errorMessage,
+    promptDigest: row.promptDigest || null,
+    promptCharCount: row.promptCharCount === null || row.promptCharCount === undefined ? null : row.promptCharCount,
+    mandateDigest: row.mandateDigest || null,
+    mandateOrderRevision: row.mandateOrderRevision === null || row.mandateOrderRevision === undefined ? null : row.mandateOrderRevision,
+    predecessorCharCount: row.predecessorCharCount === null || row.predecessorCharCount === undefined ? null : row.predecessorCharCount,
+    predecessorIncludedCharCount:
+      row.predecessorIncludedCharCount === null || row.predecessorIncludedCharCount === undefined
+        ? null
+        : row.predecessorIncludedCharCount,
+    predecessorTruncated: Boolean(row.predecessorTruncated),
+    resultTruncated: Boolean(row.resultTruncated),
     // Korrekturlauf vor Commit (Migration 21): Stufe B (fachliche
     // Rollenübergabe) getrennt vom Runstatus sichtbar machen, damit die UI
     // einen technischen Runner-Erfolg und einen davon unabhängigen
@@ -614,6 +625,57 @@ function rowToAgentExecutionRunSummary(row) {
   };
 }
 
+const CHAIN_STEP_TO_PILOT_ROLE = Object.freeze({
+  1: "RECHERCHE_ANALYSE",
+  2: "DOKUMENTATION",
+  3: "PROJEKTMANAGER",
+});
+
+// V7.8.0 Korrektur: die im Cockpit auswählbaren Ketten-Dateien stammen
+// ausschließlich aus der serverseitigen Allowlist von
+// pilot-agent-execution-service.js. Der require ist bewusst lazy, um beim
+// Modulstart keinen Zirkelbezug zu erzwingen (dieses Modul wird dort bereits
+// importiert).
+function getChainSelectableFilesSnapshot() {
+  try {
+    const executionService = require("./pilot-agent-execution-service");
+    if (Array.isArray(executionService.CHAIN_SELECTABLE_FILES)) {
+      return executionService.CHAIN_SELECTABLE_FILES.slice();
+    }
+  } catch (_error) {
+    // Bei sehr frühem Bootstrap (bevor das Gegenmodul vollständig geladen ist)
+    // bleibt die Liste defensiv leer; in der normalen Cockpitlaufzeit ist sie
+    // vollständig vorhanden.
+  }
+  return [];
+}
+
+function loadChainRoleProgress(db, pilotOrderId) {
+  const bookedRoles = new Set();
+  try {
+    const chains = authDb.listPilotAgentExecutionChainsForOrder(db, pilotOrderId);
+    chains.forEach((chainRow) => {
+      const steps = authDb.listPilotAgentExecutionChainStepsForChain(db, chainRow.id);
+      steps.forEach((stepRow) => {
+        const mappedRole = CHAIN_STEP_TO_PILOT_ROLE[stepRow.stepNumber];
+        if (!mappedRole) return;
+        const roleBookedByColumn = stepRow.roleHandoffBooked === undefined ? true : Boolean(stepRow.roleHandoffBooked);
+        if (stepRow.stepStatus === "SUCCEEDED" && roleBookedByColumn) {
+          bookedRoles.add(mappedRole);
+        }
+      });
+    });
+  } catch (error) {
+    // Alte Datenbankstände (z. B. gezielte Migrationstests auf Version 22)
+    // enthalten die Kettentabellen noch nicht. In diesem Fall ist der
+    // Kettenfortschritt definitionsgemäß leer.
+    if (!String((error && error.message) || "").includes("no such table")) {
+      throw error;
+    }
+  }
+  return Array.from(bookedRoles);
+}
+
 function buildOverview(db, orderRow) {
   if (!orderRow) return null;
   const order = rowToOrderView(orderRow);
@@ -636,7 +698,8 @@ function buildOverview(db, orderRow) {
 
   const risksAndLimits = Array.from(new Set(handoffs.map((handoff) => handoff.riskOrLimit).filter(Boolean)));
 
-  const passedRoles = new Set(handoffs.filter((handoff) => handoff.pmFilterStatus === "PASSED").map((handoff) => handoff.toPilotRole));
+  const handoffPassedRoles = new Set(handoffs.filter((handoff) => handoff.pmFilterStatus === "PASSED").map((handoff) => handoff.toPilotRole));
+  const chainBookedRoles = loadChainRoleProgress(db, orderRow.id);
 
   // Phase 7 – ausschließlich lesende, gecachte (execution-codex-adapter.js#
   // DEFAULT_AVAILABILITY_TTL_MS) CLI-Prüfung, niemals ein Login-Vorgang,
@@ -663,10 +726,21 @@ function buildOverview(db, orderRow) {
     handoffs,
     agentExecutionRuns,
     codexAvailability,
+    chainSelectableFiles: getChainSelectableFilesSnapshot(),
     openDecision,
     risksAndLimits,
     nextStep: NEXT_STEP_BY_STATUS[order.status] || NEXT_STEP_BY_STATUS.DRAFT,
-    progress: { rolesPassed: passedRoles.size, rolesTotal: PILOT_ROLE_VALUES.length, handoffsSubmitted: handoffs.length },
+    progress: {
+      rolesPassed: handoffPassedRoles.size,
+      rolesTotal: PILOT_ROLE_VALUES.length,
+      handoffsSubmitted: handoffs.length,
+      chainRolesBooked: chainBookedRoles.length,
+    },
+    chainRoleProgress: {
+      bookedRoles: chainBookedRoles,
+      bookedCount: chainBookedRoles.length,
+      totalCount: PILOT_ROLE_VALUES.length,
+    },
     autonomyBoundaries: AUTONOMY_BOUNDARIES_NOTICE,
     createdAt: order.createdAt,
     updatedAt: order.updatedAt,

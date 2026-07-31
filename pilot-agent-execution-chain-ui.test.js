@@ -54,6 +54,12 @@ const CHAIN_STEP_DEFINITIONS = [
   { stepNumber: 2, agentKey: "documentation-agent", presetId: "codex-document-chain-result" },
   { stepNumber: 3, agentKey: "orchestrator-agent", presetId: "codex-pm-evaluate-chain" },
 ];
+const CHAIN_SELECTABLE_FILES = [
+  "pilot-agent-execution-chain-service.js",
+  "pilot-work-order-service.js",
+  "pilot-agent-runner.js",
+  "auth-db-migrations.js",
+];
 
 const RESULT_TEXT_BY_STEP = {
   1: "Kurzbefund: Testbefund Schritt 1.",
@@ -105,6 +111,9 @@ function makeFakeBackend() {
   orders.set(CANONICAL_ID, baseOrder(CANONICAL_ID, { title: "Kanonischer Pilotauftrag" }));
 
   function overviewFor(order) {
+    const bookedCount = (order.agentChains || [])
+      .flatMap((chain) => chain.steps || [])
+      .filter((step) => step.roleHandoffBooked === true).length;
     return {
       codexAvailability: { available: codexAvailable, authenticated: codexAuthenticated, version: "codex-cli 0.999.0-test", authLabel: codexAuthenticated ? "ChatGPT" : null },
       order: {
@@ -129,10 +138,12 @@ function makeFakeBackend() {
       handoffs: order.handoffs,
       agentExecutionRuns: order.agentExecutionRuns || [],
       agentChains: order.agentChains || [],
+      chainSelectableFiles: CHAIN_SELECTABLE_FILES.slice(),
       openDecision: null,
       risksAndLimits: [],
       nextStep: "Weiter im Ablauf.",
-      progress: { rolesPassed: 0, rolesTotal: 3 },
+      progress: { rolesPassed: 0, rolesTotal: 3, chainRolesBooked: bookedCount },
+      chainRoleProgress: { bookedRoles: [], bookedCount, totalCount: 3 },
       autonomyBoundaries: { disclaimer: "Testfixtur." },
       createdAt: order.createdAt,
       updatedAt: order.updatedAt,
@@ -156,6 +167,10 @@ function makeFakeBackend() {
   function handleChainAction(order, action, body) {
     if (action === "prepare-agent-chain") {
       chainCounter += 1;
+      const selectedFiles =
+        Array.isArray(body.selectedFiles) && body.selectedFiles.length > 0
+          ? body.selectedFiles.slice()
+          : CHAIN_SELECTABLE_FILES.slice();
       const chain = {
         id: `pilot-agent-chain-test-${chainCounter}`,
         pilotOrderId: order.id,
@@ -165,6 +180,16 @@ function makeFakeBackend() {
         waitingForJamal: false,
         blockReason: null,
         completedAt: null,
+        selectedFiles,
+        selectedFilesFixed: true,
+        coreMandate: {
+          orderId: order.id,
+          orderRevision: order.revision,
+          title: order.title,
+          desiredOutcome: order.desiredOutcome,
+          qualityCriteria: order.qualityCriteria,
+        },
+        mandateDigest: "a".repeat(64),
         steps: CHAIN_STEP_DEFINITIONS.map((definition) => ({
           stepNumber: definition.stepNumber,
           agentKey: definition.agentKey,
@@ -173,6 +198,14 @@ function makeFakeBackend() {
           approvalStatus: "NOT_REQUESTED",
           executionRunId: null,
           chainedFromExecutionRunId: null,
+          predecessorCharCount: null,
+          predecessorIncludedCharCount: null,
+          predecessorTruncated: false,
+          predecessorFullyIncluded: null,
+          pendingPredecessorCharCount: null,
+          pendingPredecessorTooLarge: null,
+          roleHandoffBooked: false,
+          roleHandoffBookedAt: null,
           resultDigest: null,
           failureReasonCode: null,
         })),
@@ -223,6 +256,12 @@ function makeFakeBackend() {
       step.stepStatus = "SUCCEEDED";
       step.executionRunId = executionRunId;
       step.chainedFromExecutionRunId = predecessor ? predecessor.executionRunId : null;
+      step.predecessorCharCount = predecessor ? RESULT_TEXT_BY_STEP[body.chainStep - 1].length : null;
+      step.predecessorIncludedCharCount = predecessor ? RESULT_TEXT_BY_STEP[body.chainStep - 1].length : null;
+      step.predecessorTruncated = false;
+      step.predecessorFullyIncluded = predecessor ? true : null;
+      step.roleHandoffBooked = true;
+      step.roleHandoffBookedAt = nowIso();
       const run = {
         id: executionRunId,
         presetId: step.presetId,
@@ -238,8 +277,15 @@ function makeFakeBackend() {
         modelLabel: "Codex (ChatGPT)",
         runnerVersion: "codex-cli 0.999.0-test",
         status: "SUCCEEDED",
+        promptDigest: "b".repeat(64),
+        mandateDigest: "a".repeat(64),
+        resultTruncated: false,
         resultRawText: RESULT_TEXT_BY_STEP[step.stepNumber],
-        resultSummary: { secretRedactionApplied: false, secretRedactionNotice: null },
+        resultSummary: {
+          secretRedactionApplied: false,
+          secretRedactionNotice: null,
+          analyzedFiles: chain.selectedFiles.slice(),
+        },
         errorMessage: null,
         handoffStatus: "PENDING",
         handoffErrorMessage: null,
@@ -299,6 +345,49 @@ function makeFakeBackend() {
     setNextStepOutcome: (value) => {
       nextStepOutcome = value;
     },
+    setPendingPredecessorTooLarge: (chainId, stepNumber, charCount) => {
+      const order = orders.get(CANONICAL_ID);
+      const chain = findChain(order, chainId);
+      if (!chain) return;
+      const step = findStep(chain, stepNumber);
+      if (!step) return;
+      step.pendingPredecessorCharCount = charCount;
+      step.pendingPredecessorTooLarge = true;
+      step.stepStatus = "PENDING";
+      step.approvalStatus = "NOT_REQUESTED";
+      chain.currentStep = stepNumber;
+      chain.chainStatus = waitingStatusFor(stepNumber);
+      chain.revision += 1;
+    },
+    // V7.8.1 ("Ergebnisbudget von Kettenschritt 2 technisch erzwungen"):
+    // setzt bzw. entfernt die Auditmetadaten der deterministischen
+    // Budgetdurchsetzung an dem Lauf, der zu einer bereits erfolgreichen
+    // Stufe gehört. `normalization === null` entfernt das Feld vollständig
+    // (Rückwärtskompatibilität für Läufe von vor V7.8.1).
+    setDocumentationNormalization: (chainId, stepNumber, normalization) => {
+      const order = orders.get(CANONICAL_ID);
+      const chain = findChain(order, chainId);
+      if (!chain) return;
+      const step = findStep(chain, stepNumber);
+      if (!step || !step.executionRunId) return;
+      const run = (order.agentExecutionRuns || []).find((entry) => entry.id === step.executionRunId);
+      if (!run) return;
+      if (normalization === null) {
+        delete run.resultSummary.documentationNormalization;
+      } else {
+        run.resultSummary.documentationNormalization = normalization;
+      }
+      chain.revision += 1;
+    },
+    markChainAsLegacy: (chainId) => {
+      const order = orders.get(CANONICAL_ID);
+      const chain = findChain(order, chainId);
+      if (!chain) return;
+      chain.selectedFilesFixed = false;
+      chain.selectedFiles = [];
+      chain.coreMandate = null;
+      chain.revision += 1;
+    },
   };
 }
 
@@ -315,6 +404,10 @@ function diagnosticsHtml() {
   return domElements["pilot-work-order-diagnostics-output"].innerHTML;
 }
 
+function orderHtml() {
+  return domElements["pilot-work-order-output"].innerHTML;
+}
+
 async function run() {
   await ui.getInitPromise();
 
@@ -322,10 +415,29 @@ async function run() {
     assert.match(diagnosticsHtml(), /Noch keine Agentenkette vorbereitet/);
     assert.match(diagnosticsHtml(), /data-action="prepare-agent-chain"/);
     assert.doesNotMatch(diagnosticsHtml(), /data-action="prepare-agent-chain" disabled/);
+    assert.match(diagnosticsHtml(), /Jamal legt die Dateiauswahl hier einmal f\u00fcr alle drei Stufen fest/);
+  });
+
+  await check("V7.8.0: wenn lokal keine Datei ausgewählt ist, bleibt 'Neue Agentenkette vorbereiten' deaktiviert und sendet keinen API-Aufruf", async () => {
+    fetchCalls.length = 0;
+    const uiState = ui.getState();
+    uiState.chainSelectedFiles = [];
+    ui.render();
+    const html = diagnosticsHtml();
+    assert.match(html, /Mindestens eine Datei muss ausgew\u00e4hlt sein/);
+    assert.match(html, /data-action="prepare-agent-chain"[^>]*disabled/);
+    await ui.prepareAgentChain();
+    assert.strictEqual(fetchCalls.filter((entry) => entry.url.includes("prepare-agent-chain")).length, 0);
+    uiState.chainSelectedFiles = CHAIN_SELECTABLE_FILES.slice();
+    ui.render();
   });
 
   await check("44. eine vorbereitete Kette zeigt genau drei getrennte Stufen mit Agent und Status", async () => {
+    fetchCalls.length = 0;
     await ui.prepareAgentChain();
+    const prepareCall = fetchCalls.find((entry) => entry.url.includes("prepare-agent-chain"));
+    assert.ok(prepareCall);
+    assert.deepStrictEqual(prepareCall.body.selectedFiles, CHAIN_SELECTABLE_FILES);
     const html = diagnosticsHtml();
     assert.match(html, /Schritt 1 \u2013 Recherche\/Analyse/);
     assert.match(html, /Schritt 2 \u2013 Dokumentation/);
@@ -373,6 +485,9 @@ async function run() {
     assert.match(html, /Tats\u00e4chlicher Runner: CODEX_READ_ONLY/);
     assert.match(html, /executionRunId: pilot-agent-run-chain-test-1/);
     assert.match(html, /Testbefund Schritt 1/);
+    assert.match(html, /Dateiauswahl dieser Kette \(f\u00fcr alle drei Stufen fixiert\)/);
+    assert.match(html, /Kernauftrag:/);
+    assert.match(html, /Tats\u00e4chlich verwendete Dateien:/);
     // Schritt 2 wurde technisch vorbereitet (currentStep=2), aber NICHT
     // automatisch gestartet oder freigegeben.
     const step2RequestMatch = html.match(new RegExp(`data-action="request-chain-step-approval" data-chain-id="${chainId}" data-chain-step="2"[^>]*`));
@@ -404,6 +519,32 @@ async function run() {
     backend.setNextStepOutcome("SUCCEEDED");
   });
 
+  let warningChainId;
+  await check("V7.8.0: bei pendingPredecessorTooLarge zeigt die UI Warnung mit Ist/Max und deaktiviert Freigabe+Start für die betroffene Stufe", async () => {
+    await ui.prepareAgentChain();
+    const currentState = ui.getState();
+    const chains = currentState.overview.agentChains;
+    warningChainId = chains[chains.length - 1].id;
+    await ui.requestChainStepApproval(warningChainId, 1);
+    await ui.startChainStep(warningChainId, 1);
+    backend.setPendingPredecessorTooLarge(warningChainId, 2, 6123);
+    await ui.reloadSelectedOrder();
+    const html = diagnosticsHtml();
+    assert.match(html, /Vorg\u00e4nger\u00fcbergabe zu lang \(6123 von maximal 6000 Zeichen\)/);
+    const step2RequestMatch = html.match(new RegExp(`data-action="request-chain-step-approval" data-chain-id="${warningChainId}" data-chain-step="2"[^>]*`));
+    assert.ok(step2RequestMatch && step2RequestMatch[0].includes("disabled"), "Freigabe für den zu langen Folgeschritt muss deaktiviert sein");
+    const step2StartMatch = html.match(new RegExp(`data-action="start-chain-step" data-chain-id="${warningChainId}" data-chain-step="2"[^>]*`));
+    assert.ok(step2StartMatch && step2StartMatch[0].includes("disabled"), "Start für den zu langen Folgeschritt muss deaktiviert sein");
+  });
+
+  await check("V7.8.0: Altkette zeigt ehrliche Hinweise statt erfundener fixer Dateiauswahl/Kernauftrag", async () => {
+    backend.markChainAsLegacy(warningChainId);
+    await ui.reloadSelectedOrder();
+    const html = diagnosticsHtml();
+    assert.match(html, /Altkette ohne fixierte Dateiauswahl - je Stufe gelten die Preset-Dateien/);
+    assert.match(html, /Kernauftrag f\u00fcr diese Altkette nicht mitgef\u00fchrt/);
+  });
+
   // -------------------------------------------------------------------
   // Eine zweite, frische Kette bis COMPLETED durchlaufen: die erste Kette
   // oben ist nach dem simulierten Fehlschlag in Schritt 2 bewusst FAILED
@@ -431,11 +572,65 @@ async function run() {
 
   await check("PM-Gesamturteil ist nach vollständigem Abschluss sichtbar", async () => {
     const html = diagnosticsHtml();
+    const cardHtml = orderHtml();
     assert.match(html, /PM-Gesamturteil/);
     assert.match(html, /Gesamturteil: konsistent \(Testergebnis Schritt 3\)/);
+    assert.match(html, /Vorgänger vollständig übernommen: ja/);
+    assert.match(cardHtml, /Fortschritt<\/dt><dd>0 von 3 Pilotrollen mit angenommenem Ergebnis/);
+    assert.match(cardHtml, /Ketten-Rollenbuchung<\/dt><dd>/);
     // Kein "gesamte Kette starten"-Button existiert und keine Stufe der
     // abgeschlossenen Kette bietet noch eine aktive Schaltfläche an.
     assert.doesNotMatch(html, /data-action="start-agent-chain"/);
+  });
+
+  // -------------------------------------------------------------------
+  // V7.8.1 ("Ergebnisbudget von Kettenschritt 2 technisch erzwungen"):
+  // eine regelbasierte Reduktion darf NIEMALS unbemerkt bleiben. Der
+  // Hinweistext erscheint deshalb genau dann, wenn tatsächlich etwas
+  // weggelassen wurde.
+  // -------------------------------------------------------------------
+  const COMPACTION_NOTICE =
+    "Das Dokumentationsergebnis wurde regelbasiert auf die verbindliche Ergebnisgröße reduziert " +
+    "(4 Punkte, 2 Sätze weggelassen; Rohgröße 7684, gespeichert 4312 Zeichen). Keine Kürzung innerhalb eines Satzes.";
+
+  await check("V7.8.1: bei compactionApplied=true zeigt das Cockpit die Reduktion mit Zählwerten an", async () => {
+    backend.setDocumentationNormalization(secondChainId, 2, {
+      contractVersion: "V7.8.1-DOC-5-SECTIONS",
+      structureValid: true,
+      compactionApplied: true,
+      droppedItemCount: 4,
+      droppedSentenceCount: 2,
+      droppedIncompleteTailSentence: false,
+      rawCharCount: 7684,
+      normalizedCharCount: 4312,
+      budgetMaxChars: 4500,
+    });
+    await ui.reloadSelectedOrder();
+    assert.ok(diagnosticsHtml().includes(COMPACTION_NOTICE), "der Reduktionshinweis muss im Ketten-Cockpit sichtbar sein");
+  });
+
+  await check("V7.8.1: bei compactionApplied=false erscheint kein Reduktionshinweis", async () => {
+    backend.setDocumentationNormalization(secondChainId, 2, {
+      contractVersion: "V7.8.1-DOC-5-SECTIONS",
+      structureValid: true,
+      compactionApplied: false,
+      droppedItemCount: 0,
+      droppedSentenceCount: 0,
+      droppedIncompleteTailSentence: false,
+      rawCharCount: 2480,
+      normalizedCharCount: 2480,
+      budgetMaxChars: 4500,
+    });
+    await ui.reloadSelectedOrder();
+    assert.ok(!diagnosticsHtml().includes("wurde regelbasiert auf die verbindliche Ergebnisgröße reduziert"));
+    assert.match(diagnosticsHtml(), /Testdokumentation Schritt 2/, "das Ergebnis selbst bleibt unverändert sichtbar");
+  });
+
+  await check("V7.8.1: ein Lauf ohne das neue Feld bleibt rückwärtskompatibel und zeigt keinen Hinweis", async () => {
+    backend.setDocumentationNormalization(secondChainId, 2, null);
+    await ui.reloadSelectedOrder();
+    assert.ok(!diagnosticsHtml().includes("wurde regelbasiert auf die verbindliche Ergebnisgröße reduziert"));
+    assert.match(diagnosticsHtml(), /PM-Gesamturteil/, "die übrige Kettenanzeige bleibt vollständig erhalten");
   });
 
   console.log(`pilot-agent-execution-chain-ui.test.js: ${passed} Prüfpunkte erfolgreich`);

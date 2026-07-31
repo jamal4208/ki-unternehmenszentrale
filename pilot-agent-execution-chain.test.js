@@ -20,6 +20,7 @@ const assert = require("assert");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const crypto = require("crypto");
 
 const authDb = require("./auth-db");
 const authAudit = require("./auth-audit");
@@ -95,6 +96,26 @@ function fakeSuccessfulCodexAdapter(resultText) {
   };
 }
 
+function fakePromptDigestCodexAdapter(prefix = "Ergebnis") {
+  const calls = [];
+  return {
+    calls,
+    runCodexReadOnlyAnalysis: async (options) => {
+      calls.push(options);
+      const digest = crypto.createHash("sha256").update(String(options?.prompt || ""), "utf8").digest("hex").slice(0, 16);
+      return {
+        ok: true,
+        cancelled: false,
+        timedOut: false,
+        resultText: `${prefix} ${digest}`,
+        secretRedactionApplied: false,
+        secretRedactionNotice: null,
+        errors: [],
+      };
+    },
+  };
+}
+
 function fakeFailingCodexAdapter(errorMessage) {
   const calls = [];
   return {
@@ -112,6 +133,52 @@ const RESEARCH_RESULT_TEXT =
   "Beobachtung 3: Freigaben sind einzeln gebunden.\nRisiko 1: Abhängigkeit von der lokalen Codex-CLI.\n" +
   "Risiko 2: Ergebnisgröße begrenzt.\nEmpfehlung: Dokumentationsschritt anschließen.\n" +
   "Verwendete Grundlagen: pilot-agent-execution-chain-service.js.\nOffene Punkte: keine.";
+// V7.8.1: der Dokumentationsvertrag ist jetzt maschinenlesbar (Markerzeilen,
+// siehe pilot-agent-documentation-result.js). Diese Konstanten spiegeln
+// wörtlich den Prompttext aus pilot-agent-codex-runner.js#
+// buildDocumentationOutputBudgetLines und wurden mit dessen Neufassung
+// mitgeführt; die alten Zahlen (3800-4300 Zielgröße, 5000 Zeichen Obergrenze)
+// existieren im Prompt nicht mehr. Die Prüfabsicht bleibt unverändert: der
+// Dokumentationsvertrag darf ausschließlich in Schritt 2 auftauchen.
+const DOC_STEP2_STRUCTURE_HEADER = "Verbindliche Ausgabeform für diese Dokumentationsstufe (Schritt 2):";
+const DOC_STEP2_TARGET_SIZE_LINE = "Zielgröße des gesamten Ergebnisses: 2200-3000 Zeichen.";
+const DOC_STEP2_LIMIT_SENTENCE =
+  "Die Zentrale erzwingt die Ergebnisgröße technisch: überzählige Punkte und Sätze werden regelbasiert vollständig weggelassen, niemals innerhalb eines Satzes gekürzt.";
+
+// Gültige, vertragskonforme Dokumentationsantwort für Kettenschritt 2. Mit
+// `targetRawChars` wird die Rohgröße exakt getroffen; die Auffüllung erfolgt
+// über einen zusätzlichen fünften Punkt in Abschnitt 2, der durch die
+// Item-Deckelung (maximal 4) regelbasiert weggelassen wird.
+function buildDocumentationResultText(targetRawChars) {
+  const base = [
+    "ABSCHNITT 1 KURZERGEBNIS",
+    "Die Kette ist auftragsfähig. Der Vorgängerbefund ist bestätigt.",
+    "",
+    "ABSCHNITT 2 BESTAETIGTE KERNBEFUNDE",
+    "1. Erster Kernbefund ist belegt.",
+    "2. Zweiter Kernbefund ist belegt.",
+    "3. Dritter Kernbefund ist belegt.",
+    "4. Vierter Kernbefund ist belegt.",
+    "",
+    "ABSCHNITT 3 OFFENE PUNKTE UND GRENZEN",
+    "1. Ein offener Punkt bleibt bestehen.",
+    "",
+    "ABSCHNITT 4 PRIORISIERTE EMPFEHLUNGEN",
+    "1. Erste Empfehlung mit Nutzen und hoher Priorität.",
+    "2. Zweite Empfehlung mit Nutzen und mittlerer Priorität.",
+    "",
+    "ABSCHNITT 5 HERKUNFTSHINWEIS",
+    "Grundlage ist ausschließlich das Vorgängerergebnis aus Schritt 1.",
+  ].join("\n");
+  if (!targetRawChars) return base;
+  const marker = "\n5. ";
+  const fillerLength = targetRawChars - base.length - marker.length - 1;
+  assert.ok(fillerLength > 0, `Zielrohgröße ${targetRawChars} ist zu klein für den Basistext`);
+  const insertAt = base.indexOf("\n\nABSCHNITT 3");
+  const text = `${base.slice(0, insertAt)}${marker}${"y".repeat(fillerLength)}.${base.slice(insertAt)}`;
+  assert.strictEqual(text.length, targetRawChars, "Testhelfer muss die Rohgröße exakt treffen");
+  return text;
+}
 
 // V7.7.0 Korrektur 3 – gezielte, ausschließlich für Tests bestimmte
 // Fehlerinjektion nach demselben, bereits etablierten Muster wie
@@ -161,11 +228,16 @@ async function run() {
   // -------------------------------------------------------------------
   // Migration/Grundlagen
   // -------------------------------------------------------------------
-  await check("49. Migration 23 funktioniert auf einer neuen Datenbank (Kettentabellen existieren von Anfang an)", () => {
+  await check("49. Migration 24 funktioniert auf einer neuen Datenbank (Kettentabellen + V7.8.0-Metadaten existieren von Anfang an)", () => {
     const versions = migrations.getAppliedVersions(db);
     assert.ok(versions.includes(23));
+    assert.ok(versions.includes(24));
     assert.doesNotThrow(() => db.prepare("SELECT * FROM pilot_agent_execution_chains LIMIT 1").all());
     assert.doesNotThrow(() => db.prepare("SELECT * FROM pilot_agent_execution_chain_steps LIMIT 1").all());
+    const runColumns = db.prepare("PRAGMA table_info(pilot_agent_execution_runs)").all().map((entry) => entry.name);
+    ["promptDigest", "mandateDigest", "predecessorTruncated", "resultTruncated"].forEach((columnName) =>
+      assert.ok(runColumns.includes(columnName), `Spalte ${columnName} muss vorhanden sein`),
+    );
   });
 
   // -------------------------------------------------------------------
@@ -177,6 +249,7 @@ async function run() {
     const v22Db = openRawDbAtMigrationVersion(v22DataDir, 22);
     assert.deepStrictEqual(migrations.getAppliedVersions(v22Db), Array.from({ length: 22 }, (_, i) => i + 1));
     assert.ok(!migrations.getAppliedVersions(v22Db).includes(23), "Migration 23 darf zu diesem Zeitpunkt noch NICHT angewendet sein");
+    assert.ok(!migrations.getAppliedVersions(v22Db).includes(24), "Migration 24 darf zu diesem Zeitpunkt noch NICHT angewendet sein");
 
     // Realistische Phase-7-Bestandsdaten über die ECHTEN Servicefunktionen
     // (keine rohen INSERTs) – Pilotauftrag, ein tatsächlich ausgeführter
@@ -224,14 +297,21 @@ async function run() {
     // Migration 23 anwenden.
     // -----------------------------------------------------------------
     const migrationResult = migrations.runMigrations(v22Db);
-    assert.deepStrictEqual(migrationResult.appliedNow, [23]);
+    assert.deepStrictEqual(migrationResult.appliedNow, [23, 24]);
     assert.ok(migrations.getAppliedVersions(v22Db).includes(23));
+    assert.ok(migrations.getAppliedVersions(v22Db).includes(24));
 
     // Bestandsdaten vollständig unverändert erhalten.
     const orderRowAfter = v22Db.prepare("SELECT * FROM pilot_work_orders WHERE id = ?").get(v22OrderId);
     const runRowAfter = v22Db.prepare("SELECT * FROM pilot_agent_execution_runs WHERE id = ?").get(v22Run.run.id);
     assert.deepStrictEqual(orderRowAfter, orderRowBefore, "der bestehende Pilotauftrag darf durch Migration 23 nicht verändert werden");
-    assert.deepStrictEqual(runRowAfter, runRowBefore, "der bestehende Agentenlauf darf durch Migration 23 nicht verändert werden");
+    Object.keys(runRowBefore).forEach((columnName) => {
+      assert.deepStrictEqual(runRowAfter[columnName], runRowBefore[columnName], `Bestandswert "${columnName}" muss unverändert bleiben`);
+    });
+    assert.strictEqual(runRowAfter.promptDigest, null);
+    assert.strictEqual(runRowAfter.mandateDigest, null);
+    assert.strictEqual(runRowAfter.predecessorTruncated, 0);
+    assert.strictEqual(runRowAfter.resultTruncated, 0);
     const auditRowsAfter = v22Db.prepare("SELECT eventId, eventType, timestamp, metadata FROM auth_audit_events ORDER BY eventId ASC").all();
     assert.deepStrictEqual(auditRowsAfter, auditRowsBefore, "alle bereits bestehenden Audit-Ereignisse bleiben inhaltlich exakt erhalten");
     assert.strictEqual(v22Db.prepare("SELECT COUNT(*) AS n FROM auth_audit_events").get().n, auditCountBefore, "keine Audit-Zeile darf durch die Migration verloren gehen oder verdoppelt werden");
@@ -267,6 +347,7 @@ async function run() {
     const secondRunResult = migrations.runMigrations(v22Db);
     assert.deepStrictEqual(secondRunResult.appliedNow, []);
     assert.strictEqual(v22Db.prepare("SELECT COUNT(*) AS n FROM schema_migrations WHERE version = 23").get().n, 1);
+    assert.strictEqual(v22Db.prepare("SELECT COUNT(*) AS n FROM schema_migrations WHERE version = 24").get().n, 1);
     assert.strictEqual(v22Db.prepare("SELECT COUNT(*) AS n FROM pilot_agent_execution_chains").get().n, 1, "kein doppelt angelegter Kettendatensatz durch den erneuten Migrationslauf");
 
     v22Db.close();
@@ -280,6 +361,7 @@ async function run() {
   const orderA = pilotService.createPilotOrder(db, orderInput({ title: "Auftrag A: Drei-Agenten-Kette" }));
   const orderAId = orderA.order.id;
   driveOrderToInExecution(db, orderAId);
+  const orderAOverviewBeforeChain = pilotService.getPilotOrderOverview(db, orderAId);
 
   // -------------------------------------------------------------------
   // 1./2./3./4. Kette anlegen
@@ -293,6 +375,9 @@ async function run() {
     assert.strictEqual(chain.steps.length, 3);
     assert.deepStrictEqual(chain.steps.map((s) => s.stepNumber), [1, 2, 3]);
     assert.ok(chain.steps.every((s) => s.stepStatus === "PENDING" && s.approvalStatus === "NOT_REQUESTED"));
+    assert.ok(Array.isArray(chain.selectedFiles) && chain.selectedFiles.length > 0, "Dateiauswahl muss beim Vorbereiten einmalig fixiert sein");
+    assert.ok(chain.coreMandate && chain.coreMandate.title && chain.coreMandate.desiredOutcome, "Kernauftrag muss bereits an der Kette hängen");
+    assert.ok(typeof chain.mandateDigest === "string" && chain.mandateDigest.length === 64);
 
     const chain2 = chainService.prepareChain(db, { pilotOrderId: orderAId, actorUserId: "owner-1" });
     assert.notStrictEqual(chain.id, chain2.id, "zwei vorbereitete Ketten müssen unterschiedliche chainId besitzen");
@@ -426,7 +511,48 @@ async function run() {
     assert.strictEqual(step1Run.resultRawText, RESEARCH_RESULT_TEXT);
     step1PromptCall = adapter.calls[0];
     assert.ok(step1PromptCall.prompt.includes("review-agent"));
+    assert.ok(step1PromptCall.prompt.includes("Verbindlicher Kernauftrag"));
+    assert.ok(step1PromptCall.prompt.includes(orderA.order.title));
+    assert.ok(step1PromptCall.prompt.includes(orderA.order.desiredOutcome));
+    assert.ok(step1PromptCall.prompt.includes(orderInput().qualityCriteria[0]));
     assert.ok(!step1PromptCall.prompt.includes("VORGÄNGERERGEBNIS"), "Schritt 1 hat keinen Vorgänger, der Prompt darf keinen Vorgängerblock enthalten");
+    assert.ok(!step1PromptCall.prompt.includes(DOC_STEP2_STRUCTURE_HEADER), "Schritt 1 darf keine Schritt-2-Dokumentationsstruktur enthalten");
+    assert.ok(!step1PromptCall.prompt.includes(DOC_STEP2_TARGET_SIZE_LINE), "Schritt 1 darf keine Dokumentations-Zielgröße erzwingen");
+    assert.ok(!step1PromptCall.prompt.includes(DOC_STEP2_LIMIT_SENTENCE), "Schritt 1 darf keine Schritt-2-Limitregel enthalten");
+  });
+
+  await check("V7.8.0: zwei unterschiedliche Pilotaufträge erzeugen unterschiedliche Agentenergebnisse", async () => {
+    const orderB = pilotService.createPilotOrder(
+      db,
+      orderInput({
+        title: "Auftrag B: Risikoanalyse Lieferkette",
+        desiredOutcome: "Spezifische Risikoanalyse für Lieferengpässe.",
+        qualityCriteria: ["Risiken priorisiert", "Handlungsempfehlungen enthalten"],
+      }),
+    );
+    const orderC = pilotService.createPilotOrder(
+      db,
+      orderInput({
+        title: "Auftrag C: Onboarding-Dokumentation",
+        desiredOutcome: "Strukturierte Onboarding-Checkliste für neue Teammitglieder.",
+        qualityCriteria: ["Schritte sind zeitlich geordnet", "Verantwortlichkeiten sind klar benannt"],
+      }),
+    );
+    driveOrderToInExecution(db, orderB.order.id);
+    driveOrderToInExecution(db, orderC.order.id);
+    const chainB = chainService.prepareChain(db, { pilotOrderId: orderB.order.id, actorUserId: "owner-1" });
+    const chainC = chainService.prepareChain(db, { pilotOrderId: orderC.order.id, actorUserId: "owner-1" });
+
+    const adapterB = fakePromptDigestCodexAdapter("OrderB");
+    const adapterC = fakePromptDigestCodexAdapter("OrderC");
+    const { result: chainBResult } = await requestAndStart(db, { chainId: chainB.id, chainStep: 1, adapter: adapterB });
+    const { result: chainCResult } = await requestAndStart(db, { chainId: chainC.id, chainStep: 1, adapter: adapterC });
+    const runB = authDb.getPilotAgentExecutionRunById(db, chainBResult.steps[0].executionRunId);
+    const runC = authDb.getPilotAgentExecutionRunById(db, chainCResult.steps[0].executionRunId);
+    assert.notStrictEqual(runB.resultRawText, runC.resultRawText, "unterschiedliche Kernaufträge müssen zu unterschiedlichen Ergebnissen führen");
+    assert.notStrictEqual(adapterB.calls[0].prompt, adapterC.calls[0].prompt, "die Prompts für unterschiedliche Aufträge müssen sich unterscheiden");
+    assert.ok(adapterB.calls[0].prompt.includes(orderB.order.title));
+    assert.ok(adapterC.calls[0].prompt.includes(orderC.order.title));
   });
 
   // V7.7.0 Korrektur 3 – Test 4./5. (Auftrag: "Ersetze den bisherigen
@@ -561,6 +687,25 @@ async function run() {
     assert.ok(promptSentToStep2.includes("===BEGIN NICHT VERTRAUENSWÜRDIGES VORGÄNGERERGEBNIS==="));
     assert.ok(promptSentToStep2.includes("===ENDE NICHT VERTRAUENSWÜRDIGES VORGÄNGERERGEBNIS==="));
     assert.ok(promptSentToStep2.includes(INJECTION_MARKER), "der Vorgängertext (inkl. Fehlinstruktion) muss als Datenblock zitiert sein");
+    assert.ok(promptSentToStep2.includes(orderA.order.title), "der unveränderte Kernauftrag muss auch in Schritt 2 enthalten sein");
+    assert.ok(promptSentToStep2.includes(orderA.order.desiredOutcome), "der Ergebniswunsch muss auch in Schritt 2 enthalten sein");
+    [
+      DOC_STEP2_STRUCTURE_HEADER,
+      "ABSCHNITT 1 KURZERGEBNIS",
+      "ABSCHNITT 2 BESTAETIGTE KERNBEFUNDE",
+      "ABSCHNITT 3 OFFENE PUNKTE UND GRENZEN",
+      "ABSCHNITT 4 PRIORISIERTE EMPFEHLUNGEN",
+      "ABSCHNITT 5 HERKUNFTSHINWEIS",
+      "- Abschnitt 1: maximal 3 kurze Sätze.",
+      "- Abschnitt 2: maximal 4 nummerierte Kernbefunde.",
+      "- Abschnitt 3: maximal 3 nummerierte offene Punkte oder Grenzen.",
+      "- Abschnitt 4: genau 3 nummerierte Empfehlungen, je Empfehlung Maßnahme, Nutzen und Priorität.",
+      "- Abschnitt 5: maximal 2 Sätze.",
+      DOC_STEP2_TARGET_SIZE_LINE,
+      DOC_STEP2_LIMIT_SENTENCE,
+      "Keine zusätzlichen Überschriften, keine Anhänge, keine Tabellen.",
+      "Wiederhole weder den vollständigen Kernauftrag noch den vollständigen Vorgängertext.",
+    ].forEach((mustContain) => assert.ok(promptSentToStep2.includes(mustContain), `Dokumentations-Prompt fehlt: "${mustContain}"`));
 
     // Die tatsächlich verwendeten erlaubten Dateien/Werkzeuge stammen
     // ausschließlich aus dem fest verdrahteten Preset des AKTUELLEN
@@ -604,6 +749,26 @@ async function run() {
     assert.strictEqual(step3Run.agentKey, "orchestrator-agent");
     const promptSentToStep3 = adapter.calls[0].prompt;
     assert.ok(promptSentToStep3.includes("===BEGIN NICHT VERTRAUENSWÜRDIGES VORGÄNGERERGEBNIS==="));
+    assert.ok(promptSentToStep3.includes(orderA.order.title), "der unveränderte Kernauftrag muss auch in Schritt 3 enthalten sein");
+    assert.ok(promptSentToStep3.includes(orderA.order.desiredOutcome), "der Ergebniswunsch muss auch in Schritt 3 enthalten sein");
+    assert.ok(!promptSentToStep3.includes(DOC_STEP2_STRUCTURE_HEADER), "Schritt 3 darf keine Schritt-2-Dokumentationsstruktur enthalten");
+    assert.ok(!promptSentToStep3.includes(DOC_STEP2_TARGET_SIZE_LINE), "Schritt 3 darf keine Dokumentations-Zielgröße erzwingen");
+    assert.ok(!promptSentToStep3.includes(DOC_STEP2_LIMIT_SENTENCE), "Schritt 3 darf keine Schritt-2-Limitregel enthalten");
+  });
+
+  await check("V7.8.0: erfolgreiche Kette bucht Rollen je Stufe, ohne progress.rolesPassed zu verändern (nur chainRoleProgress steigt)", () => {
+    chain.steps.forEach((step) => {
+      assert.strictEqual(step.roleHandoffBooked, true, `Schritt ${step.stepNumber} muss als Rollenverbuchung markiert sein`);
+      assert.ok(step.roleHandoffBookedAt, `Schritt ${step.stepNumber} benötigt einen Rollenverbuchungszeitpunkt`);
+    });
+    const overviewAfterCompletedChain = pilotService.getPilotOrderOverview(db, orderAId);
+    assert.strictEqual(
+      overviewAfterCompletedChain.progress.rolesPassed,
+      orderAOverviewBeforeChain.progress.rolesPassed,
+      "PM-Handoff-Fortschritt darf durch Kettenverbuchung nicht verändert werden",
+    );
+    assert.strictEqual(overviewAfterCompletedChain.chainRoleProgress.bookedCount, 3);
+    assert.strictEqual(overviewAfterCompletedChain.progress.chainRolesBooked, 3);
   });
 
   await check("keine Repository-Datei wurde durch die simulierten Agentenläufe verändert (execution-codex-adapter.js unverändert nutzbar)", () => {
@@ -637,6 +802,8 @@ async function run() {
     assert.strictEqual(result.chainStatus, "FAILED");
     assert.strictEqual(result.steps[0].stepStatus, "FAILED");
     assert.strictEqual(result.steps[0].failureReasonCode, "STEP_EXECUTION_FAILED");
+    assert.strictEqual(result.steps[0].roleHandoffBooked, false);
+    assert.strictEqual(result.steps[0].roleHandoffBookedAt, null);
     assert.notStrictEqual(result.chainStatus, "COMPLETED");
     assert.throws(() => chainService.requestStepApproval(db, { chainId: failChain.id, chainStep: 2, actorUserId: "owner-1" }));
   });
@@ -661,6 +828,243 @@ async function run() {
     const finalChain = chainService.getChainView(db, blockedChain.id);
     assert.strictEqual(finalChain.chainStatus, "BLOCKED");
     assert.strictEqual(finalChain.blockReason, "PREDECESSOR_RESULT_DIGEST_MISMATCH");
+    const blockedStep2 = finalChain.steps.find((entry) => entry.stepNumber === 2);
+    assert.ok(blockedStep2);
+    assert.strictEqual(blockedStep2.roleHandoffBooked, false);
+    assert.strictEqual(blockedStep2.roleHandoffBookedAt, null);
+  });
+
+  await check("V7.8.0: ein zu langer Vorgängertext führt zu kontrolliertem Abbruch vor dem Start (keine stille Kürzung, kein Laufstart)", async () => {
+    const orderLong = pilotService.createPilotOrder(db, orderInput({ title: "Auftrag: zu langer Vorgängertext" }));
+    driveOrderToInExecution(db, orderLong.order.id);
+    const longChain = chainService.prepareChain(db, { pilotOrderId: orderLong.order.id, actorUserId: "owner-1" });
+    const step1Adapter = fakeSuccessfulCodexAdapter(RESEARCH_RESULT_TEXT);
+    const { result: afterStep1 } = await requestAndStart(db, { chainId: longChain.id, chainStep: 1, adapter: step1Adapter });
+    const step1 = afterStep1.steps[0];
+    const overlyLongPredecessor = "L".repeat(codexRunnerModule.MAX_PREDECESSOR_CONTEXT_CHARS + 25);
+    const longDigest = crypto.createHash("sha256").update(overlyLongPredecessor, "utf8").digest("hex");
+    db.prepare("UPDATE pilot_agent_execution_runs SET resultRawText = ? WHERE id = ?").run(overlyLongPredecessor, step1.executionRunId);
+    db.prepare("UPDATE pilot_agent_execution_chain_steps SET resultDigest = ? WHERE id = ?").run(longDigest, step1.id);
+    const viewBeforeStart = chainService.getChainView(db, longChain.id);
+    const startedStep1 = viewBeforeStart.steps.find((entry) => entry.stepNumber === 1);
+    const pendingStep2 = viewBeforeStart.steps.find((entry) => entry.stepNumber === 2);
+    assert.ok(startedStep1);
+    assert.strictEqual(startedStep1.pendingPredecessorCharCount, null);
+    assert.strictEqual(startedStep1.pendingPredecessorTooLarge, null);
+    assert.ok(pendingStep2);
+    assert.strictEqual(pendingStep2.pendingPredecessorCharCount, overlyLongPredecessor.length);
+    assert.strictEqual(pendingStep2.pendingPredecessorTooLarge, true);
+
+    const approval = chainService.requestStepApproval(db, { chainId: longChain.id, chainStep: 2, actorUserId: "owner-1" });
+    await assert.rejects(
+      () =>
+        chainService.startStep(db, {
+          chainId: longChain.id,
+          chainStep: 2,
+          actorUserId: "owner-1",
+          approvalToken: approval.approvalToken,
+          codexAvailabilityOptions: { execFileSyncImpl: AVAILABLE_AUTHENTICATED_EXEC, forceRefresh: true },
+          codexAdapterImpl: fakeSuccessfulCodexAdapter("wird nicht aufgerufen"),
+        }),
+      /überschreitet die sichere Obergrenze/,
+    );
+
+    const step2 = approval.chain.steps.find((entry) => entry.stepNumber === 2);
+    const tokenOutcome = chainService.consumeChainApprovalToken(
+      approval.approvalToken,
+      {
+        chainId: longChain.id,
+        chainStep: 2,
+        agentKey: step2.agentKey,
+        presetId: step2.presetId,
+        runnerKind: agentExecutionService.RUNNER_KINDS.CODEX,
+        actorUserId: "owner-1",
+        currentRevision: approval.chain.revision,
+      },
+    );
+    assert.strictEqual(tokenOutcome.ok, true, "der Token darf vor dem kontrollierten Abbruch nicht verbraucht worden sein");
+    const finalChain = chainService.getChainView(db, longChain.id);
+    assert.strictEqual(finalChain.chainStatus, "BLOCKED");
+    assert.strictEqual(finalChain.blockReason, "PREDECESSOR_CONTEXT_TOO_LARGE");
+    const runsForOrder = agentExecutionService.listAgentExecutionRunsForOrder(db, orderLong.order.id);
+    assert.strictEqual(runsForOrder.length, 1, "nach dem Abbruch darf kein zusätzlicher Schrittlauf erzeugt sein");
+  });
+
+  await check("V7.8.0: ein Vorgängerergebnis mit exakt 5369 Zeichen wird vollständig in Schritt 2 übernommen (ohne Kürzung)", async () => {
+    const orderExact = pilotService.createPilotOrder(db, orderInput({ title: "Auftrag: exakter 5369-Zeichen-Vorgänger" }));
+    driveOrderToInExecution(db, orderExact.order.id);
+    const exactChain = chainService.prepareChain(db, { pilotOrderId: orderExact.order.id, actorUserId: "owner-1" });
+    const exactResultText = "R".repeat(5369);
+    await requestAndStart(db, {
+      chainId: exactChain.id,
+      chainStep: 1,
+      adapter: fakeSuccessfulCodexAdapter(exactResultText),
+    });
+    const step2Adapter = fakeSuccessfulCodexAdapter("Dokumentation aus vollständig übernommener Vorgabe.");
+    const { result: afterStep2 } = await requestAndStart(db, {
+      chainId: exactChain.id,
+      chainStep: 2,
+      adapter: step2Adapter,
+    });
+    const step2 = afterStep2.steps.find((entry) => entry.stepNumber === 2);
+    assert.ok(step2);
+    assert.strictEqual(step2.predecessorCharCount, 5369);
+    assert.strictEqual(step2.predecessorIncludedCharCount, 5369);
+    assert.strictEqual(step2.predecessorTruncated, false);
+    const promptSent = step2Adapter.calls[0].prompt;
+    assert.ok(promptSent.includes(exactResultText), "der vollständige Vorgängertext muss im Adapter-Prompt enthalten sein");
+    const blockStart = promptSent.indexOf(codexRunnerModule.PREDECESSOR_BEGIN_MARKER);
+    const blockEnd = promptSent.indexOf(codexRunnerModule.PREDECESSOR_END_MARKER);
+    assert.ok(blockStart >= 0 && blockEnd > blockStart, "der Vorgängerblock muss vollständig im Prompt enthalten sein");
+    const predecessorBlock = promptSent.slice(blockStart, blockEnd);
+    assert.strictEqual(predecessorBlock.indexOf("…"), -1, "im Vorgängerblock darf kein Kürzungszeichen enthalten sein");
+  });
+
+  // -------------------------------------------------------------------
+  // V7.8.1 ("Ergebnisbudget von Kettenschritt 2 technisch erzwingen"):
+  // nachgewiesener Produktblocker aus drei echten Browserläufen
+  // (6731 / 6360 / 7684 Zeichen, jeweils RESULT_TOO_LARGE). Geprüft wird der
+  // vollständige Kettenpfad mit einem bewusst zu ausführlichen, aber
+  // vertragskonformen Rohergebnis in Schritt 2.
+  // -------------------------------------------------------------------
+  await check("V7.8.1: ein 9000 Zeichen langes Dokumentations-Rohergebnis wird regelbasiert verdichtet, gespeichert und Schritt 3 erreicht COMPLETED", async () => {
+    const orderNorm = pilotService.createPilotOrder(db, orderInput({ title: "Auftrag: V7.8.1 Ergebnisbudget Schritt 2" }));
+    driveOrderToInExecution(db, orderNorm.order.id);
+    const normChain = chainService.prepareChain(db, { pilotOrderId: orderNorm.order.id, actorUserId: "owner-1" });
+    await requestAndStart(db, { chainId: normChain.id, chainStep: 1, adapter: fakeSuccessfulCodexAdapter(RESEARCH_RESULT_TEXT) });
+
+    const rawDocText = buildDocumentationResultText(9000);
+    assert.strictEqual(rawDocText.length, 9000);
+    const step2Adapter = fakeSuccessfulCodexAdapter(rawDocText);
+    const { result: afterStep2 } = await requestAndStart(db, { chainId: normChain.id, chainStep: 2, adapter: step2Adapter });
+
+    // Die Roh-Annahmegrenze wird ausschließlich für die Dokumentationsstufe
+    // angehoben (der Adapter selbst bleibt unverändert).
+    assert.strictEqual(step2Adapter.calls[0].maxResultChars, 12000);
+
+    const step2 = afterStep2.steps.find((entry) => entry.stepNumber === 2);
+    assert.strictEqual(step2.stepStatus, "SUCCEEDED");
+    const step2Run = agentExecutionService.getAgentExecutionRunById(db, orderNorm.order.id, step2.executionRunId);
+    assert.strictEqual(step2Run.status, "SUCCEEDED");
+    assert.ok(step2Run.resultRawText.length <= 4500, `gespeichert wurden ${step2Run.resultRawText.length} Zeichen`);
+    assert.ok(step2Run.resultRawText.length < codexRunnerModule.MAX_PREDECESSOR_CONTEXT_CHARS);
+    assert.strictEqual(step2Run.resultTruncated, false, "eine Speicherkürzung darf durch die Verdichtung gar nicht mehr nötig werden");
+    assert.ok(/[.!?]$/.test(step2Run.resultRawText.trim()), "das gespeicherte Ergebnis darf nicht mitten im Satz enden");
+    assert.ok(step2Run.resultRawText.startsWith("ABSCHNITT 1 KURZERGEBNIS"));
+
+    // Der Kettendigest gehört zum TATSÄCHLICH gespeicherten Text, nicht zum Rohtext.
+    const expectedDigest = crypto.createHash("sha256").update(step2Run.resultRawText, "utf8").digest("hex");
+    assert.strictEqual(step2.resultDigest, expectedDigest, "der Digest muss zum gespeicherten (verdichteten) Text passen");
+    assert.notStrictEqual(step2.resultDigest, crypto.createHash("sha256").update(rawDocText, "utf8").digest("hex"));
+
+    // Auditspur der Verdichtung liegt in der bestehenden resultSummaryJson-Spalte.
+    const normalization = step2Run.resultSummary.documentationNormalization;
+    assert.ok(normalization, "documentationNormalization muss persistiert sein");
+    assert.strictEqual(normalization.contractVersion, "V7.8.1-DOC-5-SECTIONS");
+    assert.strictEqual(normalization.structureValid, true);
+    assert.strictEqual(normalization.compactionApplied, true);
+    assert.strictEqual(normalization.rawCharCount, 9000);
+    assert.strictEqual(normalization.normalizedCharCount, step2Run.resultRawText.length);
+    assert.ok(normalization.droppedItemCount >= 1);
+
+    // Schritt 3 ist startbar: keine Vorgängerwarnung, keine Blockade.
+    const viewBeforeStep3 = chainService.getChainView(db, normChain.id);
+    assert.strictEqual(viewBeforeStep3.chainStatus, "WAITING_FOR_PM_APPROVAL");
+    assert.strictEqual(viewBeforeStep3.blockReason, null, "PREDECESSOR_CONTEXT_TOO_LARGE darf nicht auftreten");
+    const pendingStep3 = viewBeforeStep3.steps.find((entry) => entry.stepNumber === 3);
+    assert.notStrictEqual(pendingStep3.pendingPredecessorTooLarge, true);
+    assert.strictEqual(pendingStep3.pendingPredecessorCharCount, step2Run.resultRawText.length);
+
+    const step3Adapter = fakeSuccessfulCodexAdapter("Gesamturteil: konsistent. Empfehlung: Jamal kann entscheiden.");
+    const { result: afterStep3 } = await requestAndStart(db, { chainId: normChain.id, chainStep: 3, adapter: step3Adapter });
+    assert.strictEqual(afterStep3.chainStatus, "COMPLETED");
+    const step3 = afterStep3.steps.find((entry) => entry.stepNumber === 3);
+    assert.strictEqual(step3.stepStatus, "SUCCEEDED");
+    assert.strictEqual(step3.predecessorTruncated, false, "der verdichtete Text wird vollständig an Schritt 3 übergeben");
+    assert.ok(step3Adapter.calls[0].prompt.includes(step2Run.resultRawText), "Schritt 3 erhält den gespeicherten Text vollständig");
+    assert.strictEqual(step3Adapter.calls[0].maxResultChars, undefined, "für Schritt 3 bleibt die Adaptergrenze unverändert");
+  });
+
+  await check("V7.8.1: ein strukturloses, zu großes Dokumentationsergebnis terminalisiert die Kette kontrolliert, ohne Schritt 3 zu starten", async () => {
+    const orderBad = pilotService.createPilotOrder(db, orderInput({ title: "Auftrag: V7.8.1 ungültige Dokumentationsstruktur" }));
+    driveOrderToInExecution(db, orderBad.order.id);
+    const badChain = chainService.prepareChain(db, { pilotOrderId: orderBad.order.id, actorUserId: "owner-1" });
+    const { result: afterStep1 } = await requestAndStart(db, {
+      chainId: badChain.id,
+      chainStep: 1,
+      adapter: fakeSuccessfulCodexAdapter(RESEARCH_RESULT_TEXT),
+    });
+    const step1 = afterStep1.steps.find((entry) => entry.stepNumber === 1);
+
+    const structurelessResult = "Ein Satz ohne jede Abschnittsstruktur. ".repeat(200);
+    assert.ok(structurelessResult.length > 4500);
+    const { result: afterStep2 } = await requestAndStart(db, {
+      chainId: badChain.id,
+      chainStep: 2,
+      adapter: fakeSuccessfulCodexAdapter(structurelessResult),
+    });
+
+    assert.strictEqual(afterStep2.chainStatus, "FAILED");
+    assert.strictEqual(afterStep2.waitingForJamal, false);
+    const failedStep2 = afterStep2.steps.find((entry) => entry.stepNumber === 2);
+    assert.strictEqual(failedStep2.stepStatus, "FAILED");
+    assert.strictEqual(failedStep2.roleHandoffBooked, false);
+    const failedRun = agentExecutionService.getAgentExecutionRunById(db, orderBad.order.id, failedStep2.executionRunId);
+    assert.strictEqual(failedRun.status, "FAILED");
+    assert.strictEqual(failedRun.resultRawText, null, "ein ungültiges Ergebnis darf niemals gespeichert werden");
+    assert.ok(failedRun.errorMessage.includes("Fünf-Abschnittsstruktur"));
+    assert.strictEqual(failedRun.resultSummary.diagnostics.reasonCode, "DOCUMENTATION_RESULT_STRUCTURE_INVALID");
+    assert.strictEqual(failedRun.resultSummary.diagnostics.runnerPhase, "RESULT_VALIDATION");
+
+    // Kein RUNNING-Rest, kein automatischer Start von Schritt 3.
+    const finalView = chainService.getChainView(db, badChain.id);
+    finalView.steps.forEach((entry) => assert.notStrictEqual(entry.stepStatus, "RUNNING", `Schritt ${entry.stepNumber} darf nicht RUNNING bleiben`));
+    const step3 = finalView.steps.find((entry) => entry.stepNumber === 3);
+    assert.strictEqual(step3.executionRunId, null, "Schritt 3 darf nicht automatisch gestartet worden sein");
+    assert.strictEqual(step3.stepStatus, "PENDING");
+    assert.throws(() => chainService.requestStepApproval(db, { chainId: badChain.id, chainStep: 3, actorUserId: "owner-1" }));
+
+    // Das Ergebnis von Schritt 1 bleibt vollständig und unverändert erhalten.
+    const step1Run = agentExecutionService.getAgentExecutionRunById(db, orderBad.order.id, step1.executionRunId);
+    assert.strictEqual(step1Run.status, "SUCCEEDED");
+    assert.strictEqual(step1Run.resultRawText, RESEARCH_RESULT_TEXT);
+    assert.strictEqual(step1Run.resultSummary.documentationNormalization, undefined, "Schritt 1 erhält keine Dokumentationsmetadaten");
+  });
+
+  await check("V7.8.1: Schritt 1 und Schritt 3 bleiben mit einem langen Ergebnis unverändert (keine Verdichtung, keine Metadaten)", async () => {
+    const orderUnchanged = pilotService.createPilotOrder(db, orderInput({ title: "Auftrag: V7.8.1 Schritt 1 und 3 unverändert" }));
+    driveOrderToInExecution(db, orderUnchanged.order.id);
+    const chainUnchanged = chainService.prepareChain(db, { pilotOrderId: orderUnchanged.order.id, actorUserId: "owner-1" });
+    // Deutlich über dem Dokumentationsbudget (4500), aber unter der
+    // unveränderten technischen Grenze von 6000 Zeichen.
+    const longStep1Text = `Kurzbefund: ${"Beobachtung mit Substanz. ".repeat(200)}`.slice(0, 5500);
+    assert.ok(longStep1Text.length > 4500 && longStep1Text.length < 6000);
+    const { result: afterStep1 } = await requestAndStart(db, {
+      chainId: chainUnchanged.id,
+      chainStep: 1,
+      adapter: fakeSuccessfulCodexAdapter(longStep1Text),
+    });
+    const step1 = afterStep1.steps.find((entry) => entry.stepNumber === 1);
+    const step1Run = agentExecutionService.getAgentExecutionRunById(db, orderUnchanged.order.id, step1.executionRunId);
+    assert.strictEqual(step1Run.resultRawText, longStep1Text, "Schritt 1 speichert seinen Rohtext byteidentisch");
+    assert.strictEqual(step1Run.resultSummary.documentationNormalization, undefined);
+
+    await requestAndStart(db, {
+      chainId: chainUnchanged.id,
+      chainStep: 2,
+      adapter: fakeSuccessfulCodexAdapter(buildDocumentationResultText()),
+    });
+    const longStep3Text = `Gesamturteil: konsistent. ${"Begründung mit Substanz. ".repeat(200)}`.slice(0, 5500);
+    const { result: afterStep3 } = await requestAndStart(db, {
+      chainId: chainUnchanged.id,
+      chainStep: 3,
+      adapter: fakeSuccessfulCodexAdapter(longStep3Text),
+    });
+    assert.strictEqual(afterStep3.chainStatus, "COMPLETED");
+    const step3 = afterStep3.steps.find((entry) => entry.stepNumber === 3);
+    const step3Run = agentExecutionService.getAgentExecutionRunById(db, orderUnchanged.order.id, step3.executionRunId);
+    assert.strictEqual(step3Run.resultRawText, longStep3Text, "Schritt 3 speichert seinen Rohtext byteidentisch");
+    assert.strictEqual(step3Run.resultSummary.documentationNormalization, undefined);
   });
 
   // -------------------------------------------------------------------
@@ -862,6 +1266,68 @@ async function run() {
     const step1 = chain.steps[0];
     const run = authDb.getPilotAgentExecutionRunById(db, step1.executionRunId);
     assert.strictEqual(run.handoffStatus, "PENDING");
+  });
+
+  await check("V7.8.0: Altkette ohne selectedFiles/coreMandate bleibt als Altkette markiert und startet mit Preset-Dateien je Stufe", async () => {
+    const orderOldChain = pilotService.createPilotOrder(db, orderInput({ title: "Auftrag: Altkette ohne Fixierung" }));
+    driveOrderToInExecution(db, orderOldChain.order.id);
+    const preparedOldChain = chainService.prepareChain(db, { pilotOrderId: orderOldChain.order.id, actorUserId: "owner-1" });
+    db.prepare("UPDATE pilot_agent_execution_chains SET selectedFilesJson = NULL, coreMandateJson = NULL WHERE id = ?").run(preparedOldChain.id);
+
+    const oldViewBeforeStart = chainService.getChainView(db, preparedOldChain.id);
+    assert.strictEqual(oldViewBeforeStart.selectedFilesFixed, false);
+    assert.deepStrictEqual(oldViewBeforeStart.selectedFiles, []);
+    assert.strictEqual(oldViewBeforeStart.coreMandate, null);
+
+    const step1Preset = agentExecutionService.PILOT_AGENT_TASK_PRESETS[oldViewBeforeStart.steps[0].presetId];
+    const step2Preset = agentExecutionService.PILOT_AGENT_TASK_PRESETS[oldViewBeforeStart.steps[1].presetId];
+    const { result: oldAfterStep1 } = await requestAndStart(db, {
+      chainId: preparedOldChain.id,
+      chainStep: 1,
+      adapter: fakeSuccessfulCodexAdapter("Altkette Schritt 1 erfolgreich."),
+    });
+    const step1Run = authDb.getPilotAgentExecutionRunById(db, oldAfterStep1.steps[0].executionRunId);
+    assert.deepStrictEqual(JSON.parse(step1Run.allowedFilesJson), step1Preset.allowedFiles);
+
+    const { result: oldAfterStep2 } = await requestAndStart(db, {
+      chainId: preparedOldChain.id,
+      chainStep: 2,
+      adapter: fakeSuccessfulCodexAdapter("Altkette Schritt 2 erfolgreich."),
+    });
+    const step2Run = authDb.getPilotAgentExecutionRunById(db, oldAfterStep2.steps[1].executionRunId);
+    assert.deepStrictEqual(JSON.parse(step2Run.allowedFilesJson), step2Preset.allowedFiles);
+  });
+
+  await check("V7.8.0: Qualitätskriterien mit Randleerzeichen verursachen keinen MANDATE_DIGEST_MISMATCH über alle drei Stufen", async () => {
+    const orderWithSpacedCriteria = pilotService.createPilotOrder(
+      db,
+      orderInput({
+        title: "Auftrag: Qualitätskriterien mit Leerzeichen",
+        qualityCriteria: ["  Kriterium Eins  ", "Kriterium Zwei   "],
+      }),
+    );
+    driveOrderToInExecution(db, orderWithSpacedCriteria.order.id);
+    const digestChain = chainService.prepareChain(db, { pilotOrderId: orderWithSpacedCriteria.order.id, actorUserId: "owner-1" });
+    const digestChainView = chainService.getChainView(db, digestChain.id);
+    assert.deepStrictEqual(digestChainView.coreMandate.qualityCriteria, ["Kriterium Eins", "Kriterium Zwei"]);
+
+    await requestAndStart(db, {
+      chainId: digestChain.id,
+      chainStep: 1,
+      adapter: fakeSuccessfulCodexAdapter("Digest-Kette Schritt 1 erfolgreich."),
+    });
+    await requestAndStart(db, {
+      chainId: digestChain.id,
+      chainStep: 2,
+      adapter: fakeSuccessfulCodexAdapter("Digest-Kette Schritt 2 erfolgreich."),
+    });
+    const { result: digestCompleted } = await requestAndStart(db, {
+      chainId: digestChain.id,
+      chainStep: 3,
+      adapter: fakeSuccessfulCodexAdapter("Digest-Kette Schritt 3 erfolgreich."),
+    });
+    assert.strictEqual(digestCompleted.chainStatus, "COMPLETED");
+    assert.notStrictEqual(digestCompleted.blockReason, "MANDATE_DIGEST_MISMATCH");
   });
 
   console.log(`pilot-agent-execution-chain.test.js: ${passed} Prüfpunkte erfolgreich`);

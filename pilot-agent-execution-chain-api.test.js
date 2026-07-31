@@ -219,6 +219,7 @@ const FAKE_STEP_RESULTS_BY_AGENT_KEY = {
     "Gesamturteil: konsistent.\nGeprüfte Vorgängerläufe: Schritt 1, Schritt 2.\nKonsistenzprüfung: ok.\n" +
     "Qualitätsmängel: keine.\nRisiken und Grenzen: X, Y.\nEmpfehlung: Jamal kann entscheiden.\nBenötigte Entscheidung durch Jamal: Freigabe des Gesamtergebnisses.",
 };
+const SINGLE_CHAIN_FILE_SELECTION = ["pilot-work-order-service.js"];
 
 async function withFakeCodexHttp(fn) {
   const originalDetectAvailability = codexAvailabilityAdapter.detectCodexAvailability;
@@ -333,23 +334,30 @@ async function run() {
   });
 
   let chainId;
-  await check("1./2. Kette vorbereiten (200) legt drei Schritte an und ist danach über GET sichtbar", async () => {
+  await check("1./2. Kette vorbereiten mit selectedFiles fixiert genau diese Auswahl und ist danach über GET sichtbar", async () => {
     const result = await invoke({
       method: "POST",
       url: `/api/pilot-work-order/orders/${orderId}/prepare-agent-chain`,
       headers: authedJsonHeaders(ownerSession),
-      bodyObj: {},
+      bodyObj: { selectedFiles: SINGLE_CHAIN_FILE_SELECTION.slice() },
     });
     assert.strictEqual(result.statusCode, 200);
     assert.strictEqual(result.json.ok, true);
     chainId = result.json.chain.id;
     assert.strictEqual(result.json.chain.chainStatus, "PREPARED");
     assert.strictEqual(result.json.chain.steps.length, 3);
+    assert.deepStrictEqual(result.json.chain.selectedFiles, SINGLE_CHAIN_FILE_SELECTION);
+    assert.ok(result.json.chain.coreMandate && result.json.chain.coreMandate.title === "Testauftrag: Drei-Agenten-Kette über HTTP");
     assert.strictEqual(result.json.overview.agentChains.length, 1);
+    assert.ok(
+      Array.isArray(result.json.overview.chainSelectableFiles) && result.json.overview.chainSelectableFiles.includes(SINGLE_CHAIN_FILE_SELECTION[0]),
+      "Overview muss die serverseitig auswählbaren Ketten-Dateien liefern",
+    );
 
     const overviewResult = await invoke({ method: "GET", url: `/api/pilot-work-order/orders/${orderId}`, headers: authedJsonHeaders(ownerSession) });
     assert.strictEqual(overviewResult.json.overview.agentChains.length, 1);
     assert.strictEqual(overviewResult.json.overview.agentChains[0].id, chainId);
+    assert.deepStrictEqual(overviewResult.json.overview.agentChains[0].selectedFiles, SINGLE_CHAIN_FILE_SELECTION);
   });
 
   await check("13./35. Freigabe für Schritt 2 kann nicht angefordert werden, bevor Schritt 1 abgeschlossen ist (409)", async () => {
@@ -443,6 +451,8 @@ async function run() {
       assert.strictEqual(step1.stepStatus, "SUCCEEDED");
       assert.ok(typeof step1.executionRunId === "string" && step1.executionRunId.length > 0);
       runIds[1] = step1.executionRunId;
+      const run1 = result.json.overview.agentExecutionRuns.find((entry) => entry.id === runIds[1]);
+      assert.ok(run1 && typeof run1.mandateDigest === "string" && run1.mandateDigest.length > 0);
 
       // 22./23. ein zuvor gültiger Token einer früheren Stufe ist danach
       // ungültig – erneute Verwendung darf nicht nochmal erfolgreich sein.
@@ -479,6 +489,7 @@ async function run() {
       const step2 = result.json.chain.steps.find((entry) => entry.stepNumber === 2);
       assert.strictEqual(step2.stepStatus, "SUCCEEDED");
       assert.strictEqual(step2.chainedFromExecutionRunId, runIds[1]);
+      assert.strictEqual(step2.predecessorFullyIncluded, true);
       runIds[2] = step2.executionRunId;
       assert.notStrictEqual(runIds[2], runIds[1], "jede Stufe erhält eine eigene, unterschiedliche executionRunId");
 
@@ -488,6 +499,8 @@ async function run() {
       const runFromOverview = result.json.overview.agentExecutionRuns.find((entry) => entry.id === runIds[1]);
       assert.ok(runFromOverview);
       assert.ok(runFromOverview.resultRawText.includes("Testbefund Schritt 1"));
+      const run2FromOverview = result.json.overview.agentExecutionRuns.find((entry) => entry.id === runIds[2]);
+      assert.ok(run2FromOverview && run2FromOverview.mandateDigest === runFromOverview.mandateDigest);
     });
 
     let step3ApprovalToken;
@@ -518,6 +531,15 @@ async function run() {
       const pmRun = result.json.overview.agentExecutionRuns.find((entry) => entry.id === runIds[3]);
       assert.ok(pmRun.resultRawText.includes("Gesamturteil"));
       assert.strictEqual(result.json.chain.completedAt !== null, true);
+    });
+
+    await check("V7.8.0: alle drei Stufen laufen mit der zuvor fixierten Einzeldatei (allowedFilesJson je executionRun)", async () => {
+      [1, 2, 3].forEach((stepNumber) => {
+        const runId = runIds[stepNumber];
+        const runRow = authDb.getPilotAgentExecutionRunById(seedDb, runId);
+        assert.ok(runRow, `executionRun ${runId} muss vorhanden sein`);
+        assert.deepStrictEqual(JSON.parse(runRow.allowedFilesJson), SINGLE_CHAIN_FILE_SELECTION);
+      });
     });
 
     await check("41./42. GET liefert Kettenstatus, alle drei executionRunIds und bleibt danach unverändert (keine automatische Folgeausführung)", async () => {
