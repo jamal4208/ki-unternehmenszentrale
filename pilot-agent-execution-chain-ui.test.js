@@ -271,9 +271,19 @@ function makeFakeBackend() {
       chain.revision += 1;
       return;
     }
-    // Default: FAILED
+    // Default: FAILED.
+    // V7.9.4 ("Konkrete Fehlerursache in der Kettenfehlerkarte sichtbar
+    // machen"): der reale, reguläre Fehlerpfad (finalizeChainStepFailure in
+    // pilot-agent-execution-chain-service.js) schreibt auf step.
+    // failureReasonCode bei einem Ausführungsfehler mit vorhandenem Run
+    // IMMER ausschließlich den Sammelcode STEP_EXECUTION_FAILED – NIEMALS
+    // direkt den präziseren Runner-/Adaptercode. Dieser lebt ausschließlich
+    // in run.resultSummary.diagnostics.reasonCode. Die Fixtur tat zuvor so,
+    // als würde step.failureReasonCode bereits den präzisen Code enthalten,
+    // was das eigentliche V7.9.4-Problem (Sammelcode verdeckt präzisen
+    // Runcode) in Tests unsichtbar gemacht hätte.
     step.stepStatus = "FAILED";
-    step.failureReasonCode = "CODEX_PROCESS_EXIT_NONZERO";
+    step.failureReasonCode = "STEP_EXECUTION_FAILED";
     chain.chainStatus = "FAILED";
     if (run) {
       run.status = "FAILED";
@@ -286,8 +296,11 @@ function makeFakeBackend() {
 
   function finalizeImmediateStep(order, chain, step, predecessor, outcome) {
     if (outcome === "FAILED") {
+      // Kein Run wird hier erzeugt (siehe unten) – realistisch entspricht das
+      // dem Sammelcode STEP_EXECUTION_FAILED, niemals einem präzisen
+      // Runner-/Adaptercode ohne zugehörigen Run.
       step.stepStatus = "FAILED";
-      step.failureReasonCode = "CODEX_PROCESS_EXIT_NONZERO";
+      step.failureReasonCode = "STEP_EXECUTION_FAILED";
       chain.chainStatus = "FAILED";
       chain.revision += 1;
       return;
@@ -1166,6 +1179,260 @@ async function run() {
     await ui.startChainStep(disconnectChainId, 2);
     const startCalls = fetchCalls.filter((entry) => entry.method === "POST" && entry.url.includes("start-chain-step"));
     assert.strictEqual(startCalls.length, 0);
+  });
+
+  // -------------------------------------------------------------------
+  // V7.9.4 ("Konkrete Fehlerursache in der Kettenfehlerkarte sichtbar
+  // machen"): Pflichttests für die neue Auswahlreihenfolge, die feste
+  // Allowlist, die additiven "Technische Details" und die Sanitization.
+  // Eigener, frischer Auftrag/Kette – unabhängig von allen Tests oben –
+  // damit direkt am rohen Fixturenzustand (Backend-Map) manipuliert werden
+  // kann, ohne bestehende Abläufe zu beeinflussen.
+  // -------------------------------------------------------------------
+  let v794OrderId;
+  let v794ChainId;
+
+  function v794ChainAndStep() {
+    const order = backend.orders.get(v794OrderId);
+    const chain = order.agentChains.find((entry) => entry.id === v794ChainId);
+    const step = chain.steps.find((entry) => entry.stepNumber === 3);
+    return { order, chain, step };
+  }
+
+  function v794TechnicalDetailsHtml(html) {
+    const match = html.match(/<details[\s\S]*?<\/details>/);
+    return match ? match[0] : "";
+  }
+
+  await check("V7.9.4 setup: eigener Auftrag/eigene Kette für die neuen Fehlerursache-Pflichttests", async () => {
+    v794OrderId = "pilot-order-v794-main";
+    backend.createOrder(v794OrderId, { title: "V7.9.4 Testauftrag", status: "IN_EXECUTION", statusLabel: "In Ausführung", revision: 0, agentChains: [], agentExecutionRuns: [] });
+    await ui.selectOrder(v794OrderId);
+    await ui.prepareAgentChain();
+    v794ChainId = newestChainId();
+    assert.ok(v794ChainId, "Testfixtur: frische Kette muss vorhanden sein");
+  });
+
+  await check("V7.9.4-1: präziser Code (RESULT_TOO_LARGE) schlägt Sammelcode (STEP_EXECUTION_FAILED) – sichtbarer Text UND Technische Details", async () => {
+    const { order, chain, step } = v794ChainAndStep();
+    step.stepStatus = "FAILED";
+    step.failureReasonCode = "STEP_EXECUTION_FAILED";
+    chain.chainStatus = "FAILED";
+    chain.blockReason = null;
+    chain.revision += 1;
+    const run = {
+      id: "pilot-agent-run-v794-1",
+      status: "FAILED",
+      errorMessage: "Kurze, sichere Testmeldung ohne sensible Inhalte.",
+      resultSummary: {
+        diagnostics: { reasonCode: "RESULT_TOO_LARGE", runnerPhase: "RESULT_VALIDATION", exitCode: 0, timedOut: false, cancelled: false },
+      },
+      startedAt: "2026-07-31T14:00:00.000Z",
+      finishedAt: "2026-07-31T14:01:00.000Z",
+    };
+    order.agentExecutionRuns = (order.agentExecutionRuns || []).concat([run]);
+    step.executionRunId = run.id;
+    await ui.reloadSelectedOrder();
+    const html = orderHtml();
+    assert.match(html, /Die Antwort war zu lang\./, "die konkrete Überschrift für RESULT_TOO_LARGE muss erscheinen");
+    assert.match(
+      html,
+      /Die Antwort war länger als die zulässige Höchstgröße und wurde deshalb nicht gespeichert\. Es wurde bewusst nichts abgeschnitten\./,
+    );
+    assert.match(html, /Bitte den Auftrag enger fokussieren oder ein knapperes Ergebnisformat vorgeben/);
+    const details = v794TechnicalDetailsHtml(html);
+    assert.match(details, /Code: RESULT_TOO_LARGE/, "Technische Details müssen den präzisen Code zeigen");
+    assert.match(details, /Sammelcode: STEP_EXECUTION_FAILED/, "Technische Details müssen zusätzlich den Sammelcode zeigen");
+    assert.match(details, /Phase: RESULT_VALIDATION/);
+    assert.match(details, /Exit-Code: 0/);
+    assert.match(details, /Zeitlimit überschritten: nein/);
+    assert.match(details, /Abgebrochen: nein/);
+    assert.match(details, /Kurze, sichere Testmeldung ohne sensible Inhalte\./);
+  });
+
+  await check("V7.9.4-2: die Produktionsfixtur persistiert bei einem regulären Fehlerlauf ausschließlich den Sammelcode auf step.failureReasonCode, nie den präzisen Runcode direkt", async () => {
+    // Bezieht sich auf den bereits weiter oben (V7.9-7/18/19) real durchlaufenen
+    // regulären DEFERRED_FAILED-Fehlerpfad über completeRunningStep(): dort
+    // persistiert die Fixtur jetzt realitätsnah STEP_EXECUTION_FAILED auf dem
+    // Kettenschritt, während der präzisere Code ausschließlich am Run liegt.
+    const order = backend.orders.get(v79OrderId);
+    const chain = order.agentChains.find((entry) => entry.id === v79ChainA);
+    const step = chain.steps.find((entry) => entry.stepNumber === 2);
+    assert.strictEqual(step.failureReasonCode, "STEP_EXECUTION_FAILED", "step.failureReasonCode darf bei einem regulären Ausführungsfehler nur den Sammelcode enthalten");
+    const run = (order.agentExecutionRuns || []).find((entry) => entry.id === step.executionRunId);
+    assert.ok(run, "Testfixtur: zugehöriger Run muss vorhanden sein");
+    assert.strictEqual(run.resultSummary.diagnostics.reasonCode, "CODEX_PROCESS_EXIT_NONZERO", "der präzise Code lebt ausschließlich am Run");
+  });
+
+  await check("V7.9.4-3: FAILED-chain.blockReason mit deutschem Freitext erscheint niemals als Code", async () => {
+    const { chain, step } = v794ChainAndStep();
+    step.stepStatus = "FAILED";
+    step.failureReasonCode = "STEP_EXECUTION_FAILED";
+    step.executionRunId = null;
+    chain.chainStatus = "FAILED";
+    chain.blockReason = "Die Antwort war länger als die zulässige Höchstgröße und wurde deshalb nicht gespeichert (Freitext, kein Code).";
+    chain.revision += 1;
+    await ui.reloadSelectedOrder();
+    const html = orderHtml();
+    assert.doesNotMatch(html, /Code: Die Antwort/);
+    assert.doesNotMatch(html, /Freitext, kein Code/);
+    const details = v794TechnicalDetailsHtml(html);
+    assert.match(details, /Code: STEP_EXECUTION_FAILED/, "FAILED (nicht BLOCKED) darf blockReason nicht als Code verwenden");
+  });
+
+  await check("V7.9.4-4: ein unbekannter/neuer reasonCode wird nicht roh angezeigt, sondern kontrolliert auf UNKNOWN abgebildet", async () => {
+    const presentation = ui.resolveFailurePresentation("SOME_FUTURE_UNKNOWN_CODE_XYZ");
+    assert.strictEqual(presentation.reasonCode, "UNKNOWN");
+    assert.strictEqual(presentation.cause, "Der Schritt ist technisch fehlgeschlagen. Die genaue Ursache ist derzeit nicht eindeutig bestimmbar.");
+  });
+
+  await check("V7.9.4-4b: unbekannte Rohwerte in step.failureReasonCode UND diagnostics.reasonCode werden nie unkontrolliert in der Kettenfehlerkarte gerendert", async () => {
+    const { order, chain, step } = v794ChainAndStep();
+    step.stepStatus = "FAILED";
+    step.failureReasonCode = "GARBAGE_CODE_NOT_IN_ALLOWLIST";
+    chain.chainStatus = "FAILED";
+    chain.blockReason = null;
+    chain.revision += 1;
+    const run = {
+      id: "pilot-agent-run-v794-4b",
+      status: "FAILED",
+      errorMessage: null,
+      resultSummary: { diagnostics: { reasonCode: "ANOTHER_GARBAGE_CODE_XYZ" } },
+      startedAt: "2026-07-31T14:00:00.000Z",
+      finishedAt: "2026-07-31T14:01:00.000Z",
+    };
+    order.agentExecutionRuns = (order.agentExecutionRuns || []).concat([run]);
+    step.executionRunId = run.id;
+    await ui.reloadSelectedOrder();
+    const html = orderHtml();
+    assert.doesNotMatch(html, /GARBAGE_CODE_NOT_IN_ALLOWLIST/);
+    assert.doesNotMatch(html, /ANOTHER_GARBAGE_CODE_XYZ/);
+    const details = v794TechnicalDetailsHtml(html);
+    assert.match(details, /Code: STEP_EXECUTION_FAILED/, "unbekannte Rohwerte fallen sicher auf den benannten Sammelcode zurück");
+  });
+
+  await check("V7.9.4-5: fehlender executionRun bzw. fehlende executionRunId führt kontrolliert zum Sammelcode, ohne Absturz", async () => {
+    const { chain, step } = v794ChainAndStep();
+    step.stepStatus = "FAILED";
+    step.failureReasonCode = "STEP_EXECUTION_FAILED";
+    step.executionRunId = null;
+    chain.chainStatus = "FAILED";
+    chain.blockReason = null;
+    chain.revision += 1;
+    await ui.reloadSelectedOrder();
+    let html = orderHtml();
+    assert.match(html, /Der Kettenschritt ist fehlgeschlagen\./);
+    let details = v794TechnicalDetailsHtml(html);
+    assert.match(details, /Code: STEP_EXECUTION_FAILED/);
+
+    step.executionRunId = "pilot-agent-run-does-not-exist";
+    chain.revision += 1;
+    await ui.reloadSelectedOrder();
+    html = orderHtml();
+    assert.match(html, /Der Kettenschritt ist fehlgeschlagen\./, "eine auf keinen Run verweisende executionRunId darf nicht zum Absturz führen");
+    details = v794TechnicalDetailsHtml(html);
+    assert.match(details, /Code: STEP_EXECUTION_FAILED/);
+  });
+
+  await check("V7.9.4-6: BLOCKED-Fälle wie PREDECESSOR_RESULT_MISSING und MANDATE_DIGEST_MISMATCH bleiben unverändert korrekt", async () => {
+    const { chain, step } = v794ChainAndStep();
+    step.stepStatus = "PENDING";
+    step.failureReasonCode = null;
+    step.executionRunId = null;
+    chain.chainStatus = "BLOCKED";
+    chain.blockReason = "PREDECESSOR_RESULT_MISSING";
+    chain.revision += 1;
+    await ui.reloadSelectedOrder();
+    let html = orderHtml();
+    assert.match(html, /Die Kette ist blockiert\./);
+    assert.match(html, /Das benötigte Vorgängerergebnis fehlt\./);
+    let details = v794TechnicalDetailsHtml(html);
+    assert.match(details, /Code: PREDECESSOR_RESULT_MISSING/);
+
+    chain.blockReason = "MANDATE_DIGEST_MISMATCH";
+    chain.revision += 1;
+    await ui.reloadSelectedOrder();
+    html = orderHtml();
+    assert.match(html, /Der Kernauftrag stimmt nicht mehr mit der signierten Version überein\./);
+    details = v794TechnicalDetailsHtml(html);
+    assert.match(details, /Code: MANDATE_DIGEST_MISMATCH/);
+  });
+
+  await check("V7.9.4-7: stderrSample und stdoutSample erscheinen niemals in der Fehlerkarte", async () => {
+    const { order, chain, step } = v794ChainAndStep();
+    step.stepStatus = "FAILED";
+    step.failureReasonCode = "STEP_EXECUTION_FAILED";
+    step.executionRunId = null;
+    chain.chainStatus = "FAILED";
+    chain.blockReason = null;
+    chain.revision += 1;
+    const run = {
+      id: "pilot-agent-run-v794-7",
+      status: "FAILED",
+      errorMessage: "Kurze sichere Meldung.",
+      resultSummary: {
+        diagnostics: {
+          reasonCode: "CODEX_PROCESS_EXIT_NONZERO",
+          stderrSample: "GEHEIM_STDERR: /Users/jamal/geheimer-pfad und TOKEN=abcdef1234567890",
+          stdoutSample: "GEHEIM_STDOUT_INHALT_DARF_NIE_ERSCHEINEN",
+        },
+      },
+      startedAt: "2026-07-31T14:00:00.000Z",
+      finishedAt: "2026-07-31T14:01:00.000Z",
+    };
+    order.agentExecutionRuns = (order.agentExecutionRuns || []).concat([run]);
+    step.executionRunId = run.id;
+    await ui.reloadSelectedOrder();
+    const html = orderHtml();
+    assert.doesNotMatch(html, /GEHEIM_STDOUT_INHALT_DARF_NIE_ERSCHEINEN/);
+    assert.doesNotMatch(html, /GEHEIM_STDERR/);
+    assert.doesNotMatch(html, /geheimer-pfad/);
+  });
+
+  await check("V7.9.4-8: Pfad-, Token- und Secret-Muster aus errorMessage werden nicht angezeigt, stattdessen der feste Sicherheitshinweis", async () => {
+    const { order, step } = v794ChainAndStep();
+    const run = order.agentExecutionRuns.find((entry) => entry.id === step.executionRunId);
+    run.errorMessage = "Fehler bei /Users/jamal/Documents/geheim/config mit TOKEN=abcdefghijklmnopqrst";
+    await ui.reloadSelectedOrder();
+    const html = orderHtml();
+    assert.doesNotMatch(html, /\/Users\/jamal/);
+    assert.doesNotMatch(html, /TOKEN=abcdefghijklmnopqrst/);
+    assert.match(
+      html,
+      /Eine zusätzliche technische Meldung liegt vor, wurde aus Sicherheitsgründen jedoch nicht vollständig angezeigt\./,
+    );
+  });
+
+  await check("V7.9.4-9: eine sichere, kurze Fehlermeldung darf gekürzt/escaped angezeigt werden", async () => {
+    const { order, step } = v794ChainAndStep();
+    const run = order.agentExecutionRuns.find((entry) => entry.id === step.executionRunId);
+    run.errorMessage = "Kurzer Hinweis <script>alert(1)</script> ohne sensible Inhalte.";
+    await ui.reloadSelectedOrder();
+    const html = orderHtml();
+    assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
+    assert.match(html, /Kurzer Hinweis &lt;script&gt;alert\(1\)&lt;\/script&gt; ohne sensible Inhalte\./);
+  });
+
+  await check("V7.9.4-10: das Rendern der Fehlerkarte erzeugt keinen POST-Aufruf", async () => {
+    fetchCalls.length = 0;
+    ui.render();
+    assert.strictEqual(fetchCalls.filter((entry) => entry.method === "POST").length, 0, "reines Rendern darf niemals einen POST auslösen");
+  });
+
+  await check("V7.9.4-11/12/13: nach einem fehlgeschlagenen/blockierten Schritt läuft kein automatischer Retry, Folgestart oder Freigabe", async () => {
+    assert.strictEqual(ui.getStatusPollingState().active, false, "kein aktives Polling auf einem bereits terminalen Fehlerzustand");
+    fetchCalls.length = 0;
+    await advanceTimeAndFlush(5000);
+    await advanceTimeAndFlush(5000);
+    assert.strictEqual(
+      fetchCalls.filter((entry) => entry.method === "POST").length,
+      0,
+      "kein automatischer POST (kein Retry, kein Folgestart, keine Freigabe)",
+    );
+  });
+
+  await check("V7.9.4-14: die bestehenden 28 Prüfpunkte wurden erweitert, nicht reduziert", async () => {
+    assert.ok(passed >= 28, "alle vorher bestehenden Prüfpunkte müssen weiterhin erfolgreich durchlaufen sein");
   });
 
   console.log(`pilot-agent-execution-chain-ui.test.js: ${passed} Prüfpunkte erfolgreich`);

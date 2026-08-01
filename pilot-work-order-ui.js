@@ -1438,13 +1438,12 @@
       title = activeChain.chainStatus === "BLOCKED" ? "Die Kette ist blockiert." : "Der Kettenschritt ist fehlgeschlagen.";
       var failureCode = resolveFailureReasonCodeFromContext(context);
       var failurePresentation = resolveFailurePresentation(failureCode, state.chainActionError);
+      if (isNonEmptyString(failurePresentation.title)) {
+        title = failurePresentation.title;
+      }
       lines.push(failurePresentation.cause);
       nextStepText = failurePresentation.action;
-      technicalDetailsHtml =
-        '<details class="pilot-chain-status-card__technical"><summary>Technische Details</summary>' +
-        "<p>Code: " +
-        escapeHtml(failurePresentation.reasonCode || "UNKNOWN") +
-        "</p></details>";
+      technicalDetailsHtml = buildChainFailureTechnicalDetailsHtml(context, failurePresentation);
     } else {
       variant = "approval-ready";
       var waitingStep = waitingStepNumberForChain(activeChain) || activeStepNumber || 1;
@@ -1589,8 +1588,9 @@
   var CHAIN_PREDECESSOR_MAX_CHARS = 6000;
   var CHAIN_STATUS_FAILURE_COPY = {
     RESULT_TOO_LARGE: {
-      cause: "Das Ergebnis war zu lang und konnte nicht sicher gespeichert werden.",
-      action: "Bitte den Auftrag enger fokussieren und die Stufe bewusst erneut freigeben.",
+      title: "Die Antwort war zu lang.",
+      cause: "Die Antwort war länger als die zulässige Höchstgröße und wurde deshalb nicht gespeichert. Es wurde bewusst nichts abgeschnitten.",
+      action: "Bitte den Auftrag enger fokussieren oder ein knapperes Ergebnisformat vorgeben und den Schritt danach bewusst erneut freigeben.",
     },
     DOCUMENTATION_RESULT_STRUCTURE_INVALID: {
       cause: "Das Dokumentationsergebnis hatte nicht die erwartete Struktur.",
@@ -1641,7 +1641,7 @@
       action: "Bitte den Status neu laden und danach bewusst erneut starten.",
     },
     TIMEOUT: {
-      cause: "Der Lauf hat das Zeitlimit erreicht.",
+      cause: "Der Lauf hat das Zeitlimit erreicht und wurde kontrolliert beendet.",
       action: "Bitte Auftrag fokussieren und den Schritt erneut starten.",
     },
     CODEX_PROCESS_EXIT_NONZERO: {
@@ -1649,15 +1649,16 @@
       action: "Bitte technische Details prüfen und den Schritt bewusst neu starten.",
     },
     SPAWN_ERROR: {
-      cause: "Der Codex-Prozess konnte technisch nicht gestartet werden.",
+      cause: "Der Codex-Prozess konnte auf diesem System technisch nicht gestartet werden.",
       action: "Bitte Codex-Verfügbarkeit prüfen und danach erneut starten.",
     },
     WORKSPACE_CHANGED: {
-      cause: "Der zugrunde liegende Workspace hat sich während des Laufs verändert.",
+      cause:
+        "Sicherheitsbefund: Der isolierte Read-only-Arbeitsbereich wurde während des Laufs unerwartet verändert. Das Ergebnis wurde deshalb verworfen.",
       action: "Bitte Stand stabilisieren und den Schritt danach neu starten.",
     },
     FORBIDDEN_ACTION_CLAIMED: {
-      cause: "Der Lauf meldete eine unzulässige Aktion und wurde gestoppt.",
+      cause: "Sicherheitsbefund: Die Antwort behauptete eine unzulässige Aktion. Das Ergebnis wurde abgelehnt.",
       action: "Bitte Auftrag/Sicherheitsgrenzen prüfen, dann gezielt neu starten.",
     },
     TOKEN_EXPIRED: {
@@ -1689,10 +1690,72 @@
       action: "Bitte nicht erneut starten. Der aktuelle Stand wird geprüft.",
     },
     UNKNOWN: {
-      cause: "Die genaue Ursache ist derzeit nicht eindeutig bestimmbar.",
+      cause: "Der Schritt ist technisch fehlgeschlagen. Die genaue Ursache ist derzeit nicht eindeutig bestimmbar.",
       action: "Bitte technischen Code prüfen und den Stand neu laden.",
     },
   };
+
+  // V7.9.4 ("Konkrete Fehlerursache in der Kettenfehlerkarte sichtbar
+  // machen"): feste, geschlossene Allowlist bekannter Fehlercodes – exakt
+  // die Schlüssel von CHAIN_STATUS_FAILURE_COPY oben. Ein Rohwert, der hier
+  // nicht enthalten ist (z. B. ein künftiger, dem UI noch unbekannter
+  // Server-Code oder ein deutscher Freitext aus chain.blockReason), wird an
+  // keiner Stelle als "Code: <Rohwert>" angezeigt, sondern kontrolliert auf
+  // UNKNOWN abgebildet (siehe normalizeFailureReasonCode/
+  // resolveFailureReasonCodeFromContext unten).
+  function isKnownFailureReasonCode(code) {
+    return isNonEmptyString(code) && Object.prototype.hasOwnProperty.call(CHAIN_STATUS_FAILURE_COPY, code.trim());
+  }
+
+  // Feste, geschlossene Liste der Runner-Phasen aus
+  // pilot-agent-codex-runner.js#runnerPhaseForReasonCode. Ein unbekannter
+  // Phasenwert wird niemals roh angezeigt.
+  var CHAIN_KNOWN_RUNNER_PHASES = [
+    "WORKSPACE_SETUP",
+    "WORKSPACE_INTEGRITY_CHECK",
+    "CONTENT_SAFETY_CHECK",
+    "RESULT_VALIDATION",
+    "CODEX_PROCESS",
+    "UNKNOWN",
+  ];
+
+  // Fester, überall identischer Diagnosehinweis für "Technische Details"
+  // (gleicher Wortlaut wie der serverseitige Standardtext, siehe
+  // pilot-agent-execution-service.js#DIAGNOSTIC_NOTICE_TEXT).
+  var CHAIN_TECHNICAL_DIAGNOSTIC_NOTICE = "Sichere technische Diagnose \u2013 m\u00f6glicherweise gek\u00fcrzt und redigiert.";
+
+  // Ein kurzer, technischer Signalname (z. B. "SIGTERM") ist unkritisch;
+  // alles andere wird sicherheitshalber nicht angezeigt.
+  var SAFE_SIGNAL_NAME_PATTERN = /^[A-Z][A-Z0-9_]{0,19}$/;
+
+  // Feste Muster für potenziell sensible Inhalte in einer rohen
+  // Fehlermeldung (Pfade, Tokens, Schlüssel-Zuweisungen). Trifft eines
+  // dieser Muster zu oder ist die Meldung zu lang, wird sie NICHT angezeigt
+  // – ausschließlich der feste Ersatzhinweis erscheint.
+  var UNSAFE_ERROR_MESSAGE_PATTERNS = [
+    /\/Users\//,
+    /\/var\//,
+    /[A-Za-z]:\\\\/,
+    /file:\/\//i,
+    /sk-[A-Za-z0-9]/,
+    /ghp_[A-Za-z0-9]/,
+    /Bearer\s+\S/i,
+    /\b(API_KEY|TOKEN|SECRET|PASSWORD)\s*=\s*\S/i,
+  ];
+  var UNSAFE_ERROR_MESSAGE_FALLBACK_TEXT =
+    "Eine zus\u00e4tzliche technische Meldung liegt vor, wurde aus Sicherheitsgr\u00fcnden jedoch nicht vollst\u00e4ndig angezeigt.";
+  var MAX_SAFE_ERROR_MESSAGE_CHARS = 300;
+
+  function sanitizeErrorMessageForDisplay(message) {
+    if (!isNonEmptyString(message)) return null;
+    var trimmed = message.trim();
+    var unsafe =
+      trimmed.length > MAX_SAFE_ERROR_MESSAGE_CHARS ||
+      UNSAFE_ERROR_MESSAGE_PATTERNS.some(function (pattern) {
+        return pattern.test(trimmed);
+      });
+    return unsafe ? UNSAFE_ERROR_MESSAGE_FALLBACK_TEXT : trimmed;
+  }
 
   function chainStatusLabel(status) {
     return CHAIN_STATUS_LABELS[status] || escapeHtml(String(status || ""));
@@ -1710,7 +1773,12 @@
       normalized = inferReasonCodeFromMessage(fallbackMessage) || "";
     }
     if (!normalized) return "UNKNOWN";
-    if (!CHAIN_STATUS_FAILURE_COPY[normalized]) return normalized;
+    // V7.9.4-Korrektur: ein unbekannter/neuer Rohwert (z. B. ein dem UI noch
+    // nicht bekannter Server-Code) wurde hier zuvor unverändert durchgereicht
+    // statt auf UNKNOWN abgebildet zu werden – die vorherige Prüfung hatte in
+    // beiden Zweigen dieselbe Rückgabe. Ein unbekannter Wert wird jetzt
+    // niemals roh angezeigt.
+    if (!CHAIN_STATUS_FAILURE_COPY[normalized]) return "UNKNOWN";
     return normalized;
   }
 
@@ -1719,6 +1787,7 @@
     var copy = CHAIN_STATUS_FAILURE_COPY[normalized] || CHAIN_STATUS_FAILURE_COPY.UNKNOWN;
     return {
       reasonCode: normalized,
+      title: isNonEmptyString(copy.title) ? copy.title : null,
       cause: copy.cause,
       action: copy.action,
     };
@@ -1915,21 +1984,132 @@
     };
   }
 
+  // V7.9.4 ("Konkrete Fehlerursache in der Kettenfehlerkarte sichtbar
+  // machen"): die Auswahlreihenfolge war zuvor invertiert – step.
+  // failureReasonCode (der Kettenservice schreibt hier bei einem regulären
+  // Ausführungsfehler IMMER ausschließlich den Sammelcode
+  // STEP_EXECUTION_FAILED, siehe pilot-agent-execution-chain-service.js#
+  // finalizeChainStepFailure) gewann dadurch gegen den tatsächlich
+  // präziseren, bereits gespeicherten und über die API gelieferten Code in
+  // run.resultSummary.diagnostics.reasonCode. Die neue Reihenfolge:
+  //   1. run.resultSummary.diagnostics.reasonCode – der präziseste bekannte
+  //      Wert, sofern in der festen Allowlist enthalten.
+  //   2. step.failureReasonCode – sofern bekannt UND NICHT ausschließlich
+  //      der Sammelcode STEP_EXECUTION_FAILED (sonst wäre Schritt 5 exakt
+  //      dasselbe Ergebnis, aber ohne die Sammelcode-Prüfung hier explizit
+  //      sichtbar zu machen).
+  //   3. chain.blockReason – AUSSCHLIESSLICH wenn die Kette tatsächlich
+  //      BLOCKED ist UND der Wert einem bekannten Fehlercode entspricht. Bei
+  //      FAILED enthält blockReason einen deutschen Freitextsatz (siehe
+  //      finalizeChainStepFailure: blockReason = truncate(errorMessage,
+  //      500)) – dieser darf NIEMALS als "Code: <Freitext>" erscheinen.
+  //   4. state.chainActionErrorReasonCode – ein vom Server über die
+  //      bestehende ERROR_DETAIL_FIELDS-Whitelist gelieferter reasonCode für
+  //      einen lokal fehlgeschlagenen Freigabe-/Startversuch, sofern bekannt.
+  //   5. STEP_EXECUTION_FAILED als bewusster, benannter Sammelcode-Rückfall.
+  //   6. UNKNOWN – hier praktisch unerreichbar (Schritt 5 liefert bereits
+  //      einen bekannten Code), bleibt aber der letzte sichere Rückfall in
+  //      normalizeFailureReasonCode/resolveFailurePresentation.
   function resolveFailureReasonCodeFromContext(context) {
-    if (context && context.step && isNonEmptyString(context.step.failureReasonCode)) {
-      return context.step.failureReasonCode.trim();
-    }
     if (context && context.run && context.run.resultSummary && context.run.resultSummary.diagnostics) {
       var diagnosticsReasonCode = context.run.resultSummary.diagnostics.reasonCode;
-      if (isNonEmptyString(diagnosticsReasonCode)) return diagnosticsReasonCode.trim();
+      if (isKnownFailureReasonCode(diagnosticsReasonCode)) return diagnosticsReasonCode.trim();
     }
-    if (context && context.chain && isNonEmptyString(context.chain.blockReason)) {
+    if (
+      context &&
+      context.step &&
+      isKnownFailureReasonCode(context.step.failureReasonCode) &&
+      context.step.failureReasonCode.trim() !== "STEP_EXECUTION_FAILED"
+    ) {
+      return context.step.failureReasonCode.trim();
+    }
+    if (
+      context &&
+      context.chain &&
+      context.chain.chainStatus === "BLOCKED" &&
+      isKnownFailureReasonCode(context.chain.blockReason)
+    ) {
       return context.chain.blockReason.trim();
     }
-    if (isNonEmptyString(state.chainActionErrorReasonCode)) {
+    if (isKnownFailureReasonCode(state.chainActionErrorReasonCode)) {
       return state.chainActionErrorReasonCode.trim();
     }
-    return inferReasonCodeFromMessage(state.chainActionError);
+    return "STEP_EXECUTION_FAILED";
+  }
+
+  // Der "Sammelcode" (heute ausschließlich STEP_EXECUTION_FAILED, siehe
+  // Kopfkommentar oben) wird in "Technische Details" additiv gezeigt, wenn
+  // er vom bereits präziser aufgelösten Code abweicht – niemals doppelt,
+  // niemals roh/unbekannt.
+  function resolveSammelcodeForDetails(context, preciseCode) {
+    if (!context || !context.step) return null;
+    var stepCode = isNonEmptyString(context.step.failureReasonCode) ? context.step.failureReasonCode.trim() : "";
+    if (!isKnownFailureReasonCode(stepCode)) return null;
+    return stepCode !== preciseCode ? stepCode : null;
+  }
+
+  function resolveRunnerPhaseForDetails(run) {
+    var phase = run && run.resultSummary && run.resultSummary.diagnostics ? run.resultSummary.diagnostics.runnerPhase : null;
+    return isNonEmptyString(phase) && CHAIN_KNOWN_RUNNER_PHASES.indexOf(phase.trim()) !== -1 ? phase.trim() : null;
+  }
+
+  function resolveExitCodeForDetails(run) {
+    var diagnostics = run && run.resultSummary ? run.resultSummary.diagnostics : null;
+    return diagnostics && Number.isInteger(diagnostics.exitCode) ? diagnostics.exitCode : null;
+  }
+
+  function resolveSafeSignalForDetails(run) {
+    var diagnostics = run && run.resultSummary ? run.resultSummary.diagnostics : null;
+    var signal = diagnostics ? diagnostics.signal : null;
+    return isNonEmptyString(signal) && SAFE_SIGNAL_NAME_PATTERN.test(signal.trim()) ? signal.trim() : null;
+  }
+
+  function resolveDiagnosticFlagForDetails(run, diagnosticsField, runField) {
+    var diagnostics = run && run.resultSummary ? run.resultSummary.diagnostics : null;
+    if (diagnostics && Object.prototype.hasOwnProperty.call(diagnostics, diagnosticsField)) {
+      return Boolean(diagnostics[diagnosticsField]);
+    }
+    if (run && Object.prototype.hasOwnProperty.call(run, runField)) {
+      return Boolean(run[runField]);
+    }
+    return false;
+  }
+
+  // Additive, ausschließlich lesende Erweiterung von "Technische Details":
+  // präziser Code, Sammelcode (falls abweichend), Runner-Phase, Exit-Code,
+  // Signal, Zeitlimit-/Abbruchstatus, eine sicher geprüfte Kurzfassung von
+  // run.errorMessage und der feste Diagnosehinweis. Niemals stdoutSample/
+  // stderrSample/workspaceId/vollständige Pfade/Prompttext/Tokens/Secrets/
+  // Umgebungsvariablen/vollständige rohe Systemmeldungen.
+  function buildChainFailureTechnicalDetailsHtml(context, failurePresentation) {
+    var run = context && context.run ? context.run : null;
+    var preciseCode = failurePresentation.reasonCode || "UNKNOWN";
+    var sammelcode = resolveSammelcodeForDetails(context, preciseCode);
+    var phase = resolveRunnerPhaseForDetails(run);
+    var exitCode = resolveExitCodeForDetails(run);
+    var signal = resolveSafeSignalForDetails(run);
+    var sanitizedMessage = run ? sanitizeErrorMessageForDisplay(run.errorMessage) : null;
+
+    var rows = ["Code: " + escapeHtml(preciseCode)];
+    if (sammelcode) rows.push("Sammelcode: " + escapeHtml(sammelcode));
+    if (phase) rows.push("Phase: " + escapeHtml(phase));
+    if (exitCode !== null) rows.push("Exit-Code: " + escapeHtml(String(exitCode)));
+    if (signal) rows.push("Signal: " + escapeHtml(signal));
+    if (run) {
+      var timedOut = resolveDiagnosticFlagForDetails(run, "timedOut", "timedOut");
+      var cancelled = resolveDiagnosticFlagForDetails(run, "cancelled", "cancelledRun");
+      rows.push("Zeitlimit \u00fcberschritten: " + (timedOut ? "ja" : "nein"));
+      rows.push("Abgebrochen: " + (cancelled ? "ja" : "nein"));
+    }
+
+    var html = '<details class="pilot-chain-status-card__technical"><summary>Technische Details</summary>';
+    html += rows.map(function (row) { return "<p>" + row + "</p>"; }).join("");
+    if (sanitizedMessage) {
+      html += "<p>" + escapeHtml(sanitizedMessage) + "</p>";
+    }
+    html += "<p>" + escapeHtml(CHAIN_TECHNICAL_DIAGNOSTIC_NOTICE) + "</p>";
+    html += "</details>";
+    return html;
   }
 
   function nextChainStepHint(chain) {
