@@ -10006,3 +10006,112 @@ details.local-agent-assignment-details > summary {
   margin: 0;
   color: var(--red, #b3441f);
 }
+
+/* V7.9.0 – obere Statuskarte für laufende/abgeschlossene Kettenschritte.
+   Additiver Klassenraum, keine bestehende Regel wird überschrieben. */
+.pilot-chain-status-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--card-border-soft, var(--line));
+  border-radius: var(--radius-card, var(--radius));
+  background: var(--card-bg-muted, #fcfaf7);
+}
+
+.pilot-chain-status-card__title {
+  margin: 0;
+  font-size: var(--text-md, 1rem);
+  color: var(--ink);
+}
+
+.pilot-chain-status-card__text,
+.pilot-chain-status-card__next {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--text-sm, 0.84rem);
+  line-height: 1.5;
+}
+
+.pilot-chain-status-card__next strong {
+  font-weight: var(--font-medium, 600);
+}
+
+.pilot-chain-status-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pilot-chain-status-card__technical summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.pilot-chain-status-card__technical p {
+  margin: 6px 0 0;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-xs, 12px);
+  color: var(--muted);
+}
+
+.pilot-chain-status-card--neutral {
+  border-color: var(--card-border-soft, var(--line));
+  background: var(--card-bg-muted, #fcfaf7);
+}
+
+.pilot-chain-status-card--approval-ready {
+  border-color: rgba(37, 90, 155, 0.3);
+  background: rgba(228, 238, 251, 0.55);
+}
+
+.pilot-chain-status-card--running {
+  border-color: rgba(15, 118, 110, 0.34);
+  background: rgba(223, 243, 239, 0.58);
+}
+
+.pilot-chain-status-card--success {
+  border-color: rgba(63, 125, 70, 0.35);
+  background: rgba(229, 244, 232, 0.62);
+}
+
+.pilot-chain-status-card--failure {
+  border-color: rgba(180, 35, 24, 0.35);
+  background: rgba(253, 227, 223, 0.62);
+}
+
+.pilot-chain-status-card--notice {
+  border-color: rgba(161, 98, 7, 0.34);
+  background: rgba(255, 241, 199, 0.6);
+}
+
+.pilot-chain-status-card__pulse {
+  display: block;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(15, 118, 110, 0.18), rgba(15, 118, 110, 0.46), rgba(15, 118, 110, 0.18));
+  background-size: 220% 100%;
+  animation: pilot-chain-status-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes pilot-chain-status-pulse {
+  0% {
+    background-position: 0% 50%;
+    opacity: 0.74;
+  }
+  50% {
+    background-position: 100% 50%;
+    opacity: 1;
+  }
+  100% {
+    background-position: 0% 50%;
+    opacity: 0.74;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pilot-chain-status-card__pulse {
+    animation: none;
+    background-position: 50% 50%;
+  }
+}

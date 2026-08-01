@@ -764,6 +764,16 @@ async function run() {
     assert.match(domElements["pilot-work-order-diagnostics-output"].innerHTML, /data-action="start-agent-execution"/);
   });
 
+  await check("V7.9.0 – die obere Statuskarte für die Drei-Agenten-Kette ist sichtbar und bleibt passiv (kein automatischer POST)", async () => {
+    fetchCalls.length = 0;
+    ui.render();
+    const output = domElements["pilot-work-order-output"].innerHTML;
+    assert.match(output, /pilot-chain-status-card/);
+    assert.match(output, /Noch keine Drei-Agenten-Kette vorbereitet|wartet auf Freigabe|wird gerade ausgeführt|erfolgreich abgeschlossen/);
+    const postCalls = fetchCalls.filter((call) => call.method === "POST");
+    assert.strictEqual(postCalls.length, 0, "reines Rendern der Statuskarte darf niemals einen POST auslösen");
+  });
+
   await check("33./28. ein erfolgreicher Agentenlauf wird gestartet, zeigt Status/Ergebnis und erzeugt keine automatische Freigabe/keinen Abschluss", async () => {
     backend.setNextAgentExecutionOutcome("SUCCEEDED");
     fetchCalls.length = 0;

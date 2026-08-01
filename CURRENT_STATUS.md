@@ -1,5 +1,49 @@
 # CURRENT STATUS
 
+## V7.9.3 – Start-Zwischenzustand unübersehbar gemacht (lokal umgesetzt, getestet, vor Commit/Push gestoppt)
+
+Ausgangsziel dieses Schritts: Der lokale Start-Zwischenzustand direkt nach „Genau diese Stufe starten“ muss am Klickort klar als aktiver Arbeitszustand erkennbar sein, auch wenn ein serverseitiges RUNNING bei sehr kurzen Läufen zwischen zwei Polling-GETs verpasst werden kann.
+
+- **Technischer Befund bestätigt:** Bei sehr kurzen Agentenläufen kann der serverseitige RUNNING-Zustand zwischen zwei Overview-Abfragen vollständig verpasst werden, obwohl der lange Start-POST den Browser nicht blockiert und Polling/Rendering parallel laufen.
+- **Sichtbarer lokaler Startzustand geschärft:** Der bestehende lokale Zustand (`bridge && !hasRunning`) wird weiterhin als noch nicht serverbestätigter Zwischenzustand behandelt, aber jetzt mit derselben deutlich sichtbaren Running-Variante dargestellt.
+- **Text bleibt ehrlich und verbindlich:** Die Karte zeigt jetzt unmittelbar nach Klick „Start wurde angenommen. Der Agent wird gestartet.“, „Die serverseitige Bestätigung wird automatisch geprüft.“ und „Bitte nicht erneut klicken.“; optional zusätzlich „Start angefordert vor …“ aus `bridge.acceptedAtMs`.
+- **Klare Abgrenzung bleibt erhalten:** Solange `hasRunning` noch `false` ist, wird weiterhin keine serverbestätigte RUNNING-Aussage wie „Schritt N wird gerade ausgeführt“ behauptet; diese Darstellung bleibt unverändert dem bestätigten RUNNING-Snapshot vorbehalten.
+- **Technischer Umfang bewusst eng:** Kein Backend-, API-, Polling-, Freigabe- oder Sicherheitsumbau; keine Änderung an CSS, Routen, Datenbank oder Statuswerten.
+- **Browser-Abnahme (Jamal, bestätigt):** Schritt 1/2/3 jeweils mit sichtbarem Start- und RUNNING-Zustand sowie automatischem sichtbaren Abschluss; „Alle drei Schritte abgeschlossen“, Laufzeiten und nächster sicherer Schritt sichtbar; keine automatische Freigabe, kein automatischer Folgestart, keine automatische Abnahme; kein Reload und kein Scrollen nötig, um den Laufstatus am Bedienort zu sehen.
+- **Grenze dieses Schritts:** Kein Commit, kein Push.
+
+## V7.9.1 – Statuskarte am Bedienort sichtbar (lokal umgesetzt, getestet, vor Commit/Push gestoppt)
+
+Ausgangsziel dieses Schritts: Die bereits vorhandene Ketten-Statuskarte muss direkt an der realen Stufenbedienung sichtbar sein, und die RUNNING-Laufzeit muss nach Reload bzw. in einem zweiten Tab aus serverseitiger Startzeit stabil weiter angezeigt werden.
+
+- **Praxisbefund:** Die Statuskarte war technisch korrekt vorhanden, wurde aber nur oben in `#pilot-work-order-output` gerendert und lag damit beim Klick auf „Genau diese Stufe starten" außerhalb des sichtbaren Bereichs.
+- **Korrektur am Bedienort:** Dieselbe bestehende `renderChainStatusCard(overview)` wird nun zusätzlich innerhalb der Drei-Agenten-Kettensektion direkt oberhalb der Kettenkarten/Stufenbedienung gerendert; die obere Karte bleibt unverändert erhalten.
+- **Serverzeit-Rangfolge für RUNNING:** Die Laufzeitbasis wird jetzt vorrangig aus `activeStep.startedAt`, danach aus `activeRun.startedAt`, und erst danach aus `bridge.acceptedAtMs` gelesen; dadurch bleiben „Gestartet um … Uhr" und „Läuft seit …" auch ohne lokale Bridge nach Reload sichtbar.
+- **Technischer Umfang bewusst eng:** Keine Backend-, API-, Polling-, CSS-, Freigabe-, Sicherheits-, Routen- oder Datenbankänderung; kein neues Zustandsmodell, keine neue Statuskartenfunktion, kein automatischer Folgeschritt.
+- **Tests additiv erweitert:** `pilot-agent-execution-chain-ui.test.js` prüft RUNNING-Statuskarten nun oben und im Diagnosebereich sowie die Laufzeitanzeige aus `activeStep.startedAt` bei `state.chainStartBridge === null`.
+- **Browser-Abnahme (Jamal, bestätigt):** Die Sichtbarkeit der Statuskarte direkt am Ketten-Bedienort und die serverzeitbasierte Laufzeitanzeige wurden im Gesamtlauf V7.9.x im Browser abgenommen.
+- **Grenze dieses Schritts:** Kein Commit, kein Push.
+
+## V7.9.0 – Intuitiver Arbeitsfluss und sichtbarer Agentenstatus (lokal umgesetzt, getestet, vor Commit/Push gestoppt)
+
+Ausgangsziel dieses Schritts: Der laufende und abgeschlossene Zustand eines Drei-Agenten-Kettenschritts muss oben im Cockpit ohne Scrollen und ohne manuelles Neuladen klar sichtbar sein, bei unveränderter Sicherheitsarchitektur.
+
+- **Nachgewiesene Ursache:** Der Start einer Kettenstufe lief weiterhin als synchroner, langer POST-Request. Ohne zusätzliche obere Statusführung blieb zwischen Klick, bestätigtem RUNNING-Stand und Abschlusszustand unklar, ob ein erneuter Klick nötig oder sogar gefährlich wäre.
+- **Obere Statuskarte (additiv):** Im bestehenden `#pilot-work-order-output` wurde vor dem bisherigen Primäraktionsbereich eine additive Statuskarte eingeführt. Sie zeigt je Zustand eine klare Überschrift, kurze Erklärung, nächsten sicheren Schritt und höchstens eine aktive Hauptschaltfläche.
+- **Lokaler Start-Zwischenzustand:** Direkt nach „Genau diese Stufe starten“ erscheint sofort oben: „Start wurde angenommen. Der Agent wird gestartet.“ plus „Bitte nicht erneut klicken. Der Zustand wird automatisch geprüft.“ Dieser lokale Zustand überbrückt nur bis zum bestätigten Serverstand.
+- **Serverstand als Autorität:** Der bestätigte Laufzustand wird aus dem bestehenden Overview-Stand abgeleitet (`chainStatus`, `stepStatus`, `agentExecutionRuns.status`). Die untere Ketten-/Diagnostikdarstellung bleibt fachlich unverändert erhalten.
+- **Kontrolliertes 5-Sekunden-Polling (nur GET):** Additives, verkettetes `setTimeout`-Polling auf `GET /api/pilot-work-order/orders/:pilotOrderId`, genau ein Poller gleichzeitig, keine überlappenden Requests, kein Listennachladen pro Tick, kein globales `overviewLoading`-Flackern.
+- **Stopbedingungen umgesetzt:** Polling endet bei Erfolg, Fehler, Blockade, vollständig abgeschlossener Kette, Auftragswechsel, drei aufeinanderfolgenden Polling-Fehlern, 15-Minuten-Sicherheitsdeckel und `pagehide` (defensiv bei fehlendem `window` abgesichert).
+- **Polling-Fehlerführung:** Einzelfehler zeigt „Der Zustand konnte gerade nicht abgefragt werden. Nächste Prüfung in 5 Sekunden.“; nach drei Fehlern: „Automatische Aktualisierung angehalten.“ mit manueller Schaltfläche „Aktuellen Stand neu laden“. Der zuletzt gültige Serverstand bleibt sichtbar.
+- **Sichtbarer RUNNING-/Erfolgs-/Fehlerzustand:** RUNNING zeigt Schritt, Read-only-Hinweis, lokale Startzeit (Browser-Zeitformatierer), verständliche Laufzeit und typische Dauer; Erfolg zeigt Laufdauer, Ergebnishinweis unten, explizit keinen Autostart und nächsten erlaubten Schritt; Fehler/Blockade zeigen verständliche Ursache+Handlung aus festem Code-Mapping, technischer Code nur in „Technische Details“.
+- **Doppelklick- und auftragsweite Sperre:** Während lokalem Start-Zwischenzustand oder serverseitigem RUNNING sind alle Freigabe-/Startschaltflächen aller Ketten des ausgewählten Auftrags deaktiviert. Serverseitige Sicherungen bleiben unverändert maßgeblich.
+- **Entsperrung bei Fehlerpfaden:** Die betroffenen asynchronen Aktionspfade (`startChainStep`, `requestChainStepApproval`, `prepareAgentChain`, sowie betroffene Auftragsaktionen mit gleichem Sperrfehlerbild) setzen Sperrflags nun auch bei rejected Promises zuverlässig zurück (`catch/finally`), ohne automatischen Wiederholungs-POST.
+- **Sicherheitsgrenzen unverändert:** Keine automatische Freigabe, kein automatischer Folgestart, keine neue Route, keine Migration, keine neue Tabelle/Spalte/Statusvokabel, keine neue Autonomie.
+- **Wichtige Rahmenbedingungen bleiben bestehen:** Der lange Start-Request bleibt weiterhin synchron; Hintergrund-Tabs können Timer verzögern; Overview-Abrufe prüfen weiterhin Codex-Verfügbarkeit; authentifizierte Abrufe aktualisieren weiterhin `sessions.lastSeenAt`.
+- **Tests (lokal):** `pilot-agent-execution-chain-ui.test.js` und `pilot-work-order-command-center-ui.test.js` wurden substanziell erweitert (Start-Zwischenzustand, Sperren, Polling-Start/Stop, Verbindungsabbruch, Fehlerabbildung, technische Details, Ortszeit-Formatierung, kein Auto-Approval/Autostart, keine POST-Wiederholung, stale-response-Schutz).
+- **Browser-Abnahme (Jamal, bestätigt):** Der gesamte End-to-End-Flow der Drei-Agenten-Kette wurde im Browser vollständig abgenommen (Start/RUNNING/Abschluss je Schritt, Abschlusskarte, Laufzeiten, nächster sicherer Schritt, keine Automatikaktionen).
+- **Grenze dieses Schritts:** Kein Commit, kein Push.
+
 ## V7.8.1 – Ergebnisbudget von Schritt 2 technisch erzwungen (lokal umgesetzt, vor Commit/Push gestoppt)
 
 Ausgangsziel dieses Schritts: Der Dokumentations-Agent (Kettenschritt 2) muss die technische Ergebnisgrenze zuverlässig einhalten – ohne diese Grenze zu erhöhen, ohne Text mitten im Satz abzuschneiden und ohne dass eine Kürzung unbemerkt bleibt.

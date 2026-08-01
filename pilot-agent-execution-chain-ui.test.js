@@ -76,7 +76,11 @@ function makeFakeBackend() {
   let codexAvailable = true;
   let codexAuthenticated = true;
   let nextStepOutcome = "SUCCEEDED";
+  let startStepMode = "IMMEDIATE";
+  let deferredStart = null;
   const issuedTokens = new Map(); // token -> { chainId, chainStep }
+  const pausedOrderReadCounts = new Map();
+  const pausedOrderReadResolvers = new Map();
 
   function nowIso() {
     return new Date().toISOString();
@@ -164,6 +168,145 @@ function makeFakeBackend() {
     return { 1: "WAITING_FOR_RESEARCH_APPROVAL", 2: "WAITING_FOR_DOCUMENTATION_APPROVAL", 3: "WAITING_FOR_PM_APPROVAL" }[stepNumber];
   }
 
+  function runningStatusFor(stepNumber) {
+    return { 1: "RESEARCH_RUNNING", 2: "DOCUMENTATION_RUNNING", 3: "PM_RUNNING" }[stepNumber];
+  }
+
+  function createRunForStep(order, chain, step, predecessor, status) {
+    runCounter += 1;
+    const executionRunId = `pilot-agent-run-chain-test-${runCounter}`;
+    const run = {
+      id: executionRunId,
+      presetId: step.presetId,
+      pilotRole: "RECHERCHE_ANALYSE",
+      pilotRoleLabel: "Recherche-/Analyse-Agent",
+      taskTitle: `Kettenschritt ${step.stepNumber}`,
+      runnerId: "codex-read-only-analysis",
+      runnerLabel: "Codex – echter, isolierter Read-Only-KI-Agentenlauf",
+      requestedRunnerKind: "CODEX_READ_ONLY",
+      actualRunnerKind: "CODEX_READ_ONLY",
+      aiExecuted: status === "SUCCEEDED" || status === "RUNNING",
+      fallbackUsed: false,
+      modelLabel: "Codex (ChatGPT)",
+      runnerVersion: "codex-cli 0.999.0-test",
+      status,
+      promptDigest: "b".repeat(64),
+      mandateDigest: "a".repeat(64),
+      resultTruncated: false,
+      resultRawText: status === "SUCCEEDED" ? RESULT_TEXT_BY_STEP[step.stepNumber] : null,
+      resultSummary:
+        status === "FAILED"
+          ? { diagnostics: { reasonCode: "CODEX_PROCESS_EXIT_NONZERO" } }
+          : {
+              secretRedactionApplied: false,
+              secretRedactionNotice: null,
+              analyzedFiles: chain.selectedFiles.slice(),
+            },
+      errorMessage: status === "FAILED" ? "Simulierter technischer Codex-Fehler (Testfixtur)." : null,
+      handoffStatus: status === "SUCCEEDED" ? "SUCCEEDED" : "PENDING",
+      handoffErrorMessage: null,
+      startedAt: nowIso(),
+      finishedAt: status === "RUNNING" ? null : nowIso(),
+    };
+    step.executionRunId = executionRunId;
+    step.chainedFromExecutionRunId = predecessor ? predecessor.executionRunId : null;
+    step.predecessorCharCount = predecessor ? RESULT_TEXT_BY_STEP[step.stepNumber - 1].length : null;
+    step.predecessorIncludedCharCount = predecessor ? RESULT_TEXT_BY_STEP[step.stepNumber - 1].length : null;
+    step.predecessorTruncated = false;
+    step.predecessorFullyIncluded = predecessor ? true : null;
+    order.agentExecutionRuns = (order.agentExecutionRuns || []).concat([run]);
+    return run;
+  }
+
+  function markStepRunning(order, chain, step, predecessor) {
+    const run = createRunForStep(order, chain, step, predecessor, "RUNNING");
+    step.stepStatus = "RUNNING";
+    step.failureReasonCode = null;
+    step.approvalStatus = "GRANTED";
+    chain.currentStep = step.stepNumber;
+    chain.chainStatus = runningStatusFor(step.stepNumber);
+    chain.revision += 1;
+    return run;
+  }
+
+  function completeRunningStep(order, chain, step, outcome) {
+    const run = (order.agentExecutionRuns || []).find((entry) => entry.id === step.executionRunId) || null;
+    if (outcome === "SUCCEEDED") {
+      step.stepStatus = "SUCCEEDED";
+      step.failureReasonCode = null;
+      step.roleHandoffBooked = true;
+      step.roleHandoffBookedAt = nowIso();
+      if (run) {
+        run.status = "SUCCEEDED";
+        run.finishedAt = nowIso();
+        run.resultRawText = RESULT_TEXT_BY_STEP[step.stepNumber];
+        run.errorMessage = null;
+        run.resultSummary = {
+          secretRedactionApplied: false,
+          secretRedactionNotice: null,
+          analyzedFiles: chain.selectedFiles.slice(),
+        };
+      }
+      if (step.stepNumber < 3) {
+        chain.currentStep = step.stepNumber + 1;
+        chain.chainStatus = waitingStatusFor(step.stepNumber + 1);
+      } else {
+        chain.chainStatus = "COMPLETED";
+        chain.completedAt = nowIso();
+      }
+      chain.revision += 1;
+      return;
+    }
+    if (outcome === "BLOCKED") {
+      step.stepStatus = "FAILED";
+      step.failureReasonCode = null;
+      chain.chainStatus = "BLOCKED";
+      chain.blockReason = "PREDECESSOR_CONTEXT_TOO_LARGE";
+      if (run) {
+        run.status = "FAILED";
+        run.finishedAt = nowIso();
+        run.errorMessage = "Simulierter blockierter Lauf (Testfixtur).";
+        run.resultSummary = { diagnostics: { reasonCode: "PREDECESSOR_CONTEXT_TOO_LARGE" } };
+      }
+      chain.revision += 1;
+      return;
+    }
+    // Default: FAILED
+    step.stepStatus = "FAILED";
+    step.failureReasonCode = "CODEX_PROCESS_EXIT_NONZERO";
+    chain.chainStatus = "FAILED";
+    if (run) {
+      run.status = "FAILED";
+      run.finishedAt = nowIso();
+      run.errorMessage = "Simulierter technischer Codex-Fehler (Testfixtur).";
+      run.resultSummary = { diagnostics: { reasonCode: "CODEX_PROCESS_EXIT_NONZERO" } };
+    }
+    chain.revision += 1;
+  }
+
+  function finalizeImmediateStep(order, chain, step, predecessor, outcome) {
+    if (outcome === "FAILED") {
+      step.stepStatus = "FAILED";
+      step.failureReasonCode = "CODEX_PROCESS_EXIT_NONZERO";
+      chain.chainStatus = "FAILED";
+      chain.revision += 1;
+      return;
+    }
+    createRunForStep(order, chain, step, predecessor, "SUCCEEDED");
+    step.stepStatus = "SUCCEEDED";
+    step.failureReasonCode = null;
+    step.roleHandoffBooked = true;
+    step.roleHandoffBookedAt = nowIso();
+    if (step.stepNumber < 3) {
+      chain.currentStep = step.stepNumber + 1;
+      chain.chainStatus = waitingStatusFor(step.stepNumber + 1);
+    } else {
+      chain.chainStatus = "COMPLETED";
+      chain.completedAt = nowIso();
+    }
+    chain.revision += 1;
+  }
+
   function handleChainAction(order, action, body) {
     if (action === "prepare-agent-chain") {
       chainCounter += 1;
@@ -244,64 +387,28 @@ function makeFakeBackend() {
       if (predecessor && predecessor.stepStatus !== "SUCCEEDED") {
         return respond(409, { ok: false, message: "Das Vorgängerergebnis fehlt." });
       }
-      runCounter += 1;
-      if (nextStepOutcome === "FAILED") {
-        step.stepStatus = "FAILED";
-        step.failureReasonCode = "CODEX_PROCESS_EXIT_NONZERO";
-        chain.chainStatus = "FAILED";
-        chain.revision += 1;
+      if (startStepMode === "IMMEDIATE") {
+        finalizeImmediateStep(order, chain, step, predecessor, nextStepOutcome);
         return respond(200, { ok: true, chain, overview: overviewFor(order) });
       }
-      const executionRunId = `pilot-agent-run-chain-test-${runCounter}`;
-      step.stepStatus = "SUCCEEDED";
-      step.executionRunId = executionRunId;
-      step.chainedFromExecutionRunId = predecessor ? predecessor.executionRunId : null;
-      step.predecessorCharCount = predecessor ? RESULT_TEXT_BY_STEP[body.chainStep - 1].length : null;
-      step.predecessorIncludedCharCount = predecessor ? RESULT_TEXT_BY_STEP[body.chainStep - 1].length : null;
-      step.predecessorTruncated = false;
-      step.predecessorFullyIncluded = predecessor ? true : null;
-      step.roleHandoffBooked = true;
-      step.roleHandoffBookedAt = nowIso();
-      const run = {
-        id: executionRunId,
-        presetId: step.presetId,
-        pilotRole: "RECHERCHE_ANALYSE",
-        pilotRoleLabel: "Recherche-/Analyse-Agent",
-        taskTitle: `Kettenschritt ${step.stepNumber}`,
-        runnerId: "codex-read-only-analysis",
-        runnerLabel: "Codex – echter, isolierter Read-Only-KI-Agentenlauf",
-        requestedRunnerKind: "CODEX_READ_ONLY",
-        actualRunnerKind: "CODEX_READ_ONLY",
-        aiExecuted: true,
-        fallbackUsed: false,
-        modelLabel: "Codex (ChatGPT)",
-        runnerVersion: "codex-cli 0.999.0-test",
-        status: "SUCCEEDED",
-        promptDigest: "b".repeat(64),
-        mandateDigest: "a".repeat(64),
-        resultTruncated: false,
-        resultRawText: RESULT_TEXT_BY_STEP[step.stepNumber],
-        resultSummary: {
-          secretRedactionApplied: false,
-          secretRedactionNotice: null,
-          analyzedFiles: chain.selectedFiles.slice(),
-        },
-        errorMessage: null,
-        handoffStatus: "PENDING",
-        handoffErrorMessage: null,
-        startedAt: nowIso(),
-        finishedAt: nowIso(),
-      };
-      order.agentExecutionRuns = (order.agentExecutionRuns || []).concat([run]);
-      if (body.chainStep < 3) {
-        chain.currentStep = body.chainStep + 1;
-        chain.chainStatus = waitingStatusFor(body.chainStep + 1);
-      } else {
-        chain.chainStatus = "COMPLETED";
-        chain.completedAt = nowIso();
+      markStepRunning(order, chain, step, predecessor);
+      if (startStepMode === "REJECT_AFTER_RUNNING") {
+        return Promise.reject(new Error("Simulierter Verbindungsabbruch während start-chain-step (Testfixtur)."));
       }
-      chain.revision += 1;
-      return respond(200, { ok: true, chain, overview: overviewFor(order) });
+      return new Promise((resolve) => {
+        deferredStart = {
+          order,
+          chain,
+          step,
+          resolve,
+          outcome:
+            startStepMode === "DEFERRED_FAILED"
+              ? "FAILED"
+              : startStepMode === "DEFERRED_BLOCKED"
+                ? "BLOCKED"
+                : "SUCCEEDED",
+        };
+      });
     }
     return null;
   }
@@ -318,7 +425,17 @@ function makeFakeBackend() {
     }
     const getMatch = url.match(/^\/api\/pilot-work-order\/orders\/([^/]+)$/);
     if (method === "GET" && getMatch) {
-      const order = orders.get(decodeURIComponent(getMatch[1]));
+      const orderId = decodeURIComponent(getMatch[1]);
+      const pauseCount = pausedOrderReadCounts.get(orderId) || 0;
+      if (pauseCount > 0) {
+        pausedOrderReadCounts.set(orderId, pauseCount - 1);
+        return new Promise((resolve) => {
+          const queue = pausedOrderReadResolvers.get(orderId) || [];
+          queue.push(resolve);
+          pausedOrderReadResolvers.set(orderId, queue);
+        });
+      }
+      const order = orders.get(orderId);
       if (!order) return respond(404, { ok: false, message: "Nicht gefunden." });
       return respond(200, { ok: true, overview: overviewFor(order) });
     }
@@ -338,12 +455,52 @@ function makeFakeBackend() {
   return {
     handle,
     orders,
+    createOrder: (id, overrides) => {
+      const order = baseOrder(id, overrides || {});
+      orders.set(id, order);
+      return order;
+    },
     setCodexAvailability: (available, authenticated) => {
       codexAvailable = available;
       codexAuthenticated = authenticated;
     },
     setNextStepOutcome: (value) => {
       nextStepOutcome = value;
+    },
+    setStartStepMode: (mode) => {
+      startStepMode = mode;
+    },
+    resolveDeferredStart: (forcedOutcome) => {
+      if (!deferredStart) return;
+      const pending = deferredStart;
+      deferredStart = null;
+      completeRunningStep(pending.order, pending.chain, pending.step, forcedOutcome || pending.outcome || "SUCCEEDED");
+      pending.resolve(respond(200, { ok: true, chain: pending.chain, overview: overviewFor(pending.order) }));
+    },
+    completeRunningStep: (chainId, stepNumber, outcome) => {
+      for (const order of orders.values()) {
+        const chain = findChain(order, chainId);
+        if (!chain) continue;
+        const step = findStep(chain, stepNumber);
+        if (!step) return;
+        completeRunningStep(order, chain, step, outcome || "SUCCEEDED");
+        return;
+      }
+    },
+    pauseNextOrderRead: (orderId, count = 1) => {
+      pausedOrderReadCounts.set(orderId, count);
+    },
+    releasePausedOrderRead: (orderId) => {
+      const queue = pausedOrderReadResolvers.get(orderId) || [];
+      if (queue.length === 0) return;
+      const resolve = queue.shift();
+      pausedOrderReadResolvers.set(orderId, queue);
+      const order = orders.get(orderId);
+      if (!order) {
+        resolve(respond(404, { ok: false, message: "Nicht gefunden." }));
+        return;
+      }
+      resolve(respond(200, { ok: true, overview: overviewFor(order) }));
     },
     setPendingPredecessorTooLarge: (chainId, stepNumber, charCount) => {
       const order = orders.get(CANONICAL_ID);
@@ -393,12 +550,87 @@ function makeFakeBackend() {
 
 const backend = makeFakeBackend();
 const fetchCalls = [];
+let forcedOrderReadFailureCount = 0;
+
+function createTimerHarness() {
+  let now = Date.parse("2026-07-31T14:00:00.000Z");
+  let idCounter = 0;
+  const timers = new Map();
+
+  function runDueTimers() {
+    let ran = true;
+    while (ran) {
+      ran = false;
+      const dueEntries = Array.from(timers.entries())
+        .filter(([, timer]) => timer.dueAt <= now)
+        .sort((a, b) => a[1].dueAt - b[1].dueAt || a[0] - b[0]);
+      if (dueEntries.length === 0) continue;
+      ran = true;
+      dueEntries.forEach(([id, timer]) => {
+        if (!timers.has(id)) return;
+        timers.delete(id);
+        timer.callback();
+      });
+    }
+  }
+
+  return {
+    now: () => now,
+    setTimeout: (callback, delayMs) => {
+      idCounter += 1;
+      timers.set(idCounter, { callback, dueAt: now + (delayMs || 0), delayMs: delayMs || 0 });
+      return idCounter;
+    },
+    clearTimeout: (timerId) => {
+      timers.delete(timerId);
+    },
+    advanceBy: (ms) => {
+      now += ms;
+      runDueTimers();
+    },
+    pendingCount: () => timers.size,
+    clearAll: () => {
+      timers.clear();
+    },
+  };
+}
+
+const timerHarness = createTimerHarness();
+let formatterCallCount = 0;
+const testClockFormatter = new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" });
+
 global.fetch = (url, opts) => {
-  fetchCalls.push({ url, method: (opts && opts.method) || "GET", body: opts && opts.body ? JSON.parse(opts.body) : undefined });
+  const method = (opts && opts.method) || "GET";
+  fetchCalls.push({ url, method, body: opts && opts.body ? JSON.parse(opts.body) : undefined });
+  if (forcedOrderReadFailureCount > 0 && method === "GET" && /^\/api\/pilot-work-order\/orders\/[^/]+$/.test(url)) {
+    forcedOrderReadFailureCount -= 1;
+    return Promise.reject(new Error("Simulierter Polling-Fehler (Testfixtur)."));
+  }
   return backend.handle(url, opts);
 };
 
 const ui = require("./pilot-work-order-ui.js");
+ui.setStatusTimeHooksForTests({
+  now: () => timerHarness.now(),
+  setTimeout: (callback, delayMs) => timerHarness.setTimeout(callback, delayMs),
+  clearTimeout: (timerId) => timerHarness.clearTimeout(timerId),
+  createTimeFormatter: () => ({
+    format: (date) => {
+      formatterCallCount += 1;
+      return testClockFormatter.format(date);
+    },
+  }),
+});
+
+async function flushAsyncState() {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+async function advanceTimeAndFlush(ms) {
+  timerHarness.advanceBy(ms);
+  await flushAsyncState();
+}
 
 function diagnosticsHtml() {
   return domElements["pilot-work-order-diagnostics-output"].innerHTML;
@@ -406,6 +638,27 @@ function diagnosticsHtml() {
 
 function orderHtml() {
   return domElements["pilot-work-order-output"].innerHTML;
+}
+
+function statusCardHtml() {
+  const match = orderHtml().match(/<section class="pilot-chain-status-card[\s\S]*?<\/section>/);
+  return match ? match[0] : "";
+}
+
+function diagnosticsStatusCardHtml() {
+  const match = diagnosticsHtml().match(/<section class="pilot-chain-status-card[\s\S]*?<\/section>/);
+  return match ? match[0] : "";
+}
+
+function enabledButtonCountInStatusCard() {
+  const card = statusCardHtml();
+  const matches = card.match(/<button\b(?![^>]*disabled)[^>]*>/g);
+  return matches ? matches.length : 0;
+}
+
+function newestChainId() {
+  const chains = ui.getState().overview.agentChains || [];
+  return chains.length > 0 ? chains[chains.length - 1].id : null;
 }
 
 async function run() {
@@ -631,6 +884,288 @@ async function run() {
     await ui.reloadSelectedOrder();
     assert.ok(!diagnosticsHtml().includes("wurde regelbasiert auf die verbindliche Ergebnisgröße reduziert"));
     assert.match(diagnosticsHtml(), /PM-Gesamturteil/, "die übrige Kettenanzeige bleibt vollständig erhalten");
+  });
+
+  // -------------------------------------------------------------------
+  // V7.9.0 – Intuitiver Arbeitsfluss und sichtbarer Agentenstatus:
+  // lokale Startanzeige, serverautoritärer Running-Status, kontrolliertes
+  // Polling, sauberes Entsperren bei Fehlern und klare Fehlertexte.
+  // -------------------------------------------------------------------
+  let v79OrderId;
+  let v79ChainA;
+  let v79ChainB;
+  let v79StartPromise;
+
+  await check("V7.9 setup: eigener IN_EXECUTION-Auftrag mit zwei Ketten", async () => {
+    ui.stopStatusPolling("test-setup");
+    timerHarness.clearAll();
+    v79OrderId = "pilot-order-v79-main";
+    backend.createOrder(v79OrderId, {
+      title: "V7.9 Testauftrag",
+      status: "IN_EXECUTION",
+      statusLabel: "In Ausführung",
+      revision: 0,
+      agentChains: [],
+      agentExecutionRuns: [],
+    });
+    await ui.selectOrder(v79OrderId);
+    await ui.prepareAgentChain();
+    v79ChainA = newestChainId();
+    await ui.prepareAgentChain();
+    v79ChainB = newestChainId();
+    assert.ok(v79ChainA && v79ChainB && v79ChainA !== v79ChainB);
+  });
+
+  await check("V7.9-22: Anfragekörper von Freigabe- und Startaktion bleiben unverändert", async () => {
+    fetchCalls.length = 0;
+    await ui.requestChainStepApproval(v79ChainA, 1);
+    const approvalCall = fetchCalls.find((entry) => entry.url.includes("request-chain-step-approval"));
+    assert.ok(approvalCall);
+    assert.deepStrictEqual(approvalCall.body, { chainId: v79ChainA, chainStep: 1 });
+  });
+
+  await check("V7.9-1/2/3/4/5/20: Start-Zwischenzustand sofort sichtbar, alle Ketten gesperrt, Polling startet einmalig per GET", async () => {
+    backend.setStartStepMode("DEFERRED_SUCCESS");
+    fetchCalls.length = 0;
+    formatterCallCount = 0;
+    forcedOrderReadFailureCount = 0;
+    timerHarness.clearAll();
+
+    v79StartPromise = ui.startChainStep(v79ChainA, 1);
+    const localStartCardTop = orderHtml();
+    const localStartCardBottom = diagnosticsStatusCardHtml();
+    assert.match(localStartCardTop, /pilot-chain-status-card--running/);
+    assert.match(localStartCardBottom, /pilot-chain-status-card--running/);
+    assert.match(localStartCardTop, /Start wurde angenommen\. Der Agent wird gestartet\./);
+    assert.match(localStartCardTop, /Die serverseitige Bestätigung wird automatisch geprüft\./);
+    assert.match(localStartCardTop, /Bitte nicht erneut klicken\./);
+    assert.match(localStartCardTop, /Start angefordert vor /);
+    assert.doesNotMatch(localStartCardTop, /Schritt 1 wird gerade ausgeführt\./);
+    assert.match(localStartCardBottom, /Start wurde angenommen\. Der Agent wird gestartet\./);
+    assert.match(localStartCardBottom, /Die serverseitige Bestätigung wird automatisch geprüft\./);
+    assert.match(localStartCardBottom, /Bitte nicht erneut klicken\./);
+    assert.doesNotMatch(localStartCardBottom, /Schritt 1 wird gerade ausgeführt\./);
+
+    const stepARequest = diagnosticsHtml().match(new RegExp(`data-action="request-chain-step-approval" data-chain-id="${v79ChainA}" data-chain-step="1"[^>]*`));
+    const stepAStart = diagnosticsHtml().match(new RegExp(`data-action="start-chain-step" data-chain-id="${v79ChainA}" data-chain-step="1"[^>]*`));
+    const stepBRequest = diagnosticsHtml().match(new RegExp(`data-action="request-chain-step-approval" data-chain-id="${v79ChainB}" data-chain-step="1"[^>]*`));
+    const stepBStart = diagnosticsHtml().match(new RegExp(`data-action="start-chain-step" data-chain-id="${v79ChainB}" data-chain-step="1"[^>]*`));
+    assert.ok(stepARequest && stepARequest[0].includes("disabled"));
+    assert.ok(stepAStart && stepAStart[0].includes("disabled"));
+    assert.ok(stepBRequest && stepBRequest[0].includes("disabled"));
+    assert.ok(stepBStart && stepBStart[0].includes("disabled"));
+
+    await flushAsyncState();
+    assert.match(orderHtml(), /Start wurde angenommen\. Der Agent wird gestartet\./);
+    assert.match(orderHtml(), /Die serverseitige Bestätigung wird automatisch geprüft\./);
+    assert.match(orderHtml(), /Bitte nicht erneut klicken\./);
+    assert.doesNotMatch(orderHtml(), /Schritt 1 wird gerade ausgeführt\./);
+
+    const startCalls = fetchCalls.filter((entry) => entry.method === "POST" && entry.url.includes("start-chain-step"));
+    assert.strictEqual(startCalls.length, 1);
+    assert.deepStrictEqual(Object.keys(startCalls[0].body).sort(), ["approvalToken", "chainId", "chainStep"]);
+    assert.strictEqual(ui.getStatusPollingState().active, true);
+    assert.ok(timerHarness.pendingCount() <= 1, "es darf nur ein Poller gleichzeitig geplant sein");
+
+    await advanceTimeAndFlush(5000);
+    assert.match(orderHtml(), /Schritt 1 wird gerade ausgeführt\./);
+    assert.match(orderHtml(), /Codex arbeitet ausschließlich lesend\./);
+    assert.match(orderHtml(), /Gestartet um \d{2}:\d{2} Uhr\./);
+    assert.match(orderHtml(), /Läuft seit /);
+    assert.match(orderHtml(), /Typische Dauer: 1-3 Minuten\./);
+    assert.match(orderHtml(), /pilot-chain-status-card--running/);
+    assert.match(diagnosticsStatusCardHtml(), /pilot-chain-status-card--running/);
+    assert.ok(formatterCallCount > 0, "die Anzeige muss den Browser-Zeitformatierer verwenden");
+    const pollGetCalls = fetchCalls.filter((entry) => entry.method === "GET" && entry.url === `/api/pilot-work-order/orders/${v79OrderId}`);
+    const unexpectedPosts = fetchCalls.filter((entry) => entry.method === "POST" && !entry.url.includes("start-chain-step"));
+    assert.ok(pollGetCalls.length >= 1, "Polling muss den bestehenden GET-Endpunkt verwenden");
+    assert.strictEqual(unexpectedPosts.length, 0, "Polling darf keinen POST erzeugen");
+  });
+
+  await check("V7.9.1-2: RUNNING-Laufzeit bleibt ohne lokale Bridge sichtbar, wenn activeStep.startedAt vorliegt", async () => {
+    const order = backend.orders.get(v79OrderId);
+    const chain = (order.agentChains || []).find((entry) => entry.id === v79ChainA);
+    const step = chain && chain.steps ? chain.steps.find((entry) => entry.stepNumber === 1) : null;
+    const run = step ? (order.agentExecutionRuns || []).find((entry) => entry.id === step.executionRunId) : null;
+    assert.ok(chain && step && run, "Testfixtur: laufender Schritt muss vorhanden sein");
+    step.startedAt = "2026-07-31T13:58:00.000Z";
+    run.startedAt = null;
+    ui.getState().chainStartBridge = null;
+    await ui.reloadSelectedOrder();
+    assert.strictEqual(ui.getState().chainStartBridge, null);
+    assert.match(orderHtml(), /Gestartet um \d{2}:\d{2} Uhr\./);
+    assert.match(orderHtml(), /Läuft seit /);
+    assert.match(orderHtml(), /pilot-chain-status-card--running/);
+    assert.match(diagnosticsStatusCardHtml(), /Gestartet um \d{2}:\d{2} Uhr\./);
+    assert.match(diagnosticsStatusCardHtml(), /Läuft seit /);
+    assert.match(diagnosticsStatusCardHtml(), /pilot-chain-status-card--running/);
+  });
+
+  await check("V7.9-6/11/12/13: Polling stoppt bei Erfolg, zeigt nächsten Schritt und startet nichts automatisch", async () => {
+    backend.resolveDeferredStart("SUCCEEDED");
+    await v79StartPromise;
+    await flushAsyncState();
+    assert.strictEqual(ui.getStatusPollingState().active, false);
+    assert.match(orderHtml(), /Schritt 1 erfolgreich abgeschlossen\./);
+    assert.match(orderHtml(), /Schritt 2 kann jetzt freigegeben werden\./);
+    assert.match(orderHtml(), /Es wurde nichts automatisch weitergestartet\./);
+    assert.ok(enabledButtonCountInStatusCard() <= 1, "oben darf höchstens eine aktive Hauptschaltfläche stehen");
+    const autoApprovalCalls = fetchCalls.filter((entry) => entry.method === "POST" && entry.url.includes("request-chain-step-approval") && entry.body.chainStep === 2);
+    const autoStartCalls = fetchCalls.filter((entry) => entry.method === "POST" && entry.url.includes("start-chain-step") && entry.body.chainStep === 2);
+    assert.strictEqual(autoApprovalCalls.length, 0, "keine automatische Freigabe");
+    assert.strictEqual(autoStartCalls.length, 0, "kein automatischer Folgestart");
+  });
+
+  await check("V7.9-7/18/19: Polling stoppt bei Fehler, Fehlercode wird verständlich gemappt, technischer Code nur in Details", async () => {
+    fetchCalls.length = 0;
+    await ui.requestChainStepApproval(v79ChainA, 2);
+    backend.setStartStepMode("DEFERRED_FAILED");
+    const failingStart = ui.startChainStep(v79ChainA, 2);
+    await flushAsyncState();
+    backend.resolveDeferredStart("FAILED");
+    await failingStart;
+    await flushAsyncState();
+    assert.strictEqual(ui.getStatusPollingState().active, false);
+    assert.match(orderHtml(), /Der Kettenschritt ist fehlgeschlagen\./);
+    assert.match(orderHtml(), /Der Codex-Prozess wurde mit einem Fehler beendet\./);
+    assert.match(orderHtml(), /Bitte technische Details prüfen und den Schritt bewusst neu starten\./);
+    assert.match(orderHtml(), /Technische Details/);
+    const htmlWithoutDetails = orderHtml().replace(/<details[\s\S]*?<\/details>/g, "");
+    assert.doesNotMatch(htmlWithoutDetails, /CODEX_PROCESS_EXIT_NONZERO/);
+  });
+
+  await check("V7.9-8: Polling stoppt bei Blockade und zeigt blockierten Zustand verständlich", async () => {
+    fetchCalls.length = 0;
+    await ui.requestChainStepApproval(v79ChainB, 1);
+    backend.setStartStepMode("DEFERRED_BLOCKED");
+    const blockedStart = ui.startChainStep(v79ChainB, 1);
+    await flushAsyncState();
+    backend.resolveDeferredStart("BLOCKED");
+    await blockedStart;
+    await flushAsyncState();
+    assert.strictEqual(ui.getStatusPollingState().active, false);
+    assert.match(orderHtml(), /Die Kette ist blockiert\./);
+    assert.match(orderHtml(), /Die Vorgängerübergabe war für den nächsten Schritt zu groß\./);
+  });
+
+  await check("V7.9-9: Auftragswechsel beendet laufendes Polling", async () => {
+    const switchOrderA = "pilot-order-v79-switch-a";
+    const switchOrderB = "pilot-order-v79-switch-b";
+    backend.createOrder(switchOrderA, { title: "V7.9 Switch A", status: "IN_EXECUTION", statusLabel: "In Ausführung", revision: 0, agentChains: [], agentExecutionRuns: [] });
+    backend.createOrder(switchOrderB, { title: "V7.9 Switch B", status: "IN_EXECUTION", statusLabel: "In Ausführung", revision: 0, agentChains: [], agentExecutionRuns: [] });
+    await ui.selectOrder(switchOrderA);
+    await ui.prepareAgentChain();
+    const switchChain = newestChainId();
+    await ui.requestChainStepApproval(switchChain, 1);
+    backend.setStartStepMode("DEFERRED_SUCCESS");
+    const pendingSwitchStart = ui.startChainStep(switchChain, 1);
+    await flushAsyncState();
+    assert.strictEqual(ui.getStatusPollingState().active, true);
+    await ui.selectOrder(switchOrderB);
+    assert.strictEqual(ui.getStatusPollingState().active, false);
+    backend.resolveDeferredStart("SUCCEEDED");
+    await pendingSwitchStart;
+    await flushAsyncState();
+  });
+
+  await check("V7.9-10: verspätete Antwort des alten Auftrags überschreibt den neuen Auftragsstand nicht", async () => {
+    const delayedOrderA = "pilot-order-v79-delay-a";
+    const delayedOrderB = "pilot-order-v79-delay-b";
+    backend.createOrder(delayedOrderA, { title: "V7.9 Verzögert A", status: "IN_EXECUTION", statusLabel: "In Ausführung", revision: 0, agentChains: [], agentExecutionRuns: [] });
+    backend.createOrder(delayedOrderB, { title: "V7.9 Verzögert B", status: "IN_EXECUTION", statusLabel: "In Ausführung", revision: 0, agentChains: [], agentExecutionRuns: [] });
+    backend.pauseNextOrderRead(delayedOrderA, 1);
+    const delayedSelectPromise = ui.selectOrder(delayedOrderA);
+    await flushAsyncState();
+    await ui.selectOrder(delayedOrderB);
+    backend.releasePausedOrderRead(delayedOrderA);
+    await delayedSelectPromise;
+    await flushAsyncState();
+    assert.strictEqual(ui.getState().selectedPilotOrderId, delayedOrderB);
+    assert.match(orderHtml(), /V7\.9 Verzögert B/);
+    assert.doesNotMatch(orderHtml(), /V7\.9 Verzögert A/);
+  });
+
+  await check("V7.9-14/15/16/21: Verbindungsabbruch entsperrt sauber, wiederholt keinen POST, zeigt Hinweis und RUNNING bleibt nach Reload sichtbar", async () => {
+    const disconnectOrderId = "pilot-order-v79-disconnect";
+    backend.createOrder(disconnectOrderId, { title: "V7.9 Verbindungsabbruch", status: "IN_EXECUTION", statusLabel: "In Ausführung", revision: 0, agentChains: [], agentExecutionRuns: [] });
+    await ui.selectOrder(disconnectOrderId);
+    await ui.prepareAgentChain();
+    const disconnectChainId = newestChainId();
+    await ui.requestChainStepApproval(disconnectChainId, 1);
+    backend.setStartStepMode("REJECT_AFTER_RUNNING");
+    fetchCalls.length = 0;
+    await ui.startChainStep(disconnectChainId, 1);
+    assert.strictEqual(ui.getState().chainActionInFlight, false);
+    assert.match(ui.getState().chainActionError, /Die Verbindung wurde während des Laufs unterbrochen\./);
+    assert.match(orderHtml(), /Die Verbindung wurde während des Laufs unterbrochen\./);
+    await flushAsyncState();
+    const startPosts = fetchCalls.filter((entry) => entry.method === "POST" && entry.url.includes("start-chain-step"));
+    assert.strictEqual(startPosts.length, 1);
+    await advanceTimeAndFlush(5000);
+    assert.strictEqual(fetchCalls.filter((entry) => entry.method === "POST" && entry.url.includes("start-chain-step")).length, 1, "kein automatischer Wiederholungs-POST");
+    await ui.reloadSelectedOrder();
+    assert.match(orderHtml(), /Schritt 1 wird gerade ausgeführt\./);
+  });
+
+  await check("V7.9-17: drei Pollingfehler stoppen die Aktualisierung und zeigen die manuelle Neu-Laden-Schaltfläche", async () => {
+    forcedOrderReadFailureCount = 3;
+    await advanceTimeAndFlush(5000);
+    await advanceTimeAndFlush(5000);
+    await advanceTimeAndFlush(5000);
+    assert.strictEqual(ui.getStatusPollingState().stoppedByErrors, true);
+    assert.match(orderHtml(), /Automatische Aktualisierung angehalten\./);
+    assert.match(orderHtml(), /data-action="reload-chain-status"/);
+    forcedOrderReadFailureCount = 0;
+  });
+
+  await check("V7.9.3-4/5/6/7: sehr kurzer Lauf springt direkt zu SUCCEEDED, zeigt aber vorher Startzustand und Sperre", async () => {
+    const shortOrderId = "pilot-order-v793-short";
+    backend.createOrder(shortOrderId, { title: "V7.9.3 Kurzlauf", status: "IN_EXECUTION", statusLabel: "In Ausführung", revision: 0, agentChains: [], agentExecutionRuns: [] });
+    await ui.selectOrder(shortOrderId);
+    await ui.prepareAgentChain();
+    const shortChainId = newestChainId();
+    await ui.requestChainStepApproval(shortChainId, 1);
+    backend.setStartStepMode("IMMEDIATE");
+    fetchCalls.length = 0;
+    timerHarness.clearAll();
+
+    const shortStartPromise = ui.startChainStep(shortChainId, 1);
+    const shortLocalTop = orderHtml();
+    const shortLocalBottom = diagnosticsStatusCardHtml();
+    assert.match(shortLocalTop, /pilot-chain-status-card--running/);
+    assert.match(shortLocalBottom, /pilot-chain-status-card--running/);
+    assert.match(shortLocalTop, /Start wurde angenommen\. Der Agent wird gestartet\./);
+    assert.match(shortLocalTop, /Die serverseitige Bestätigung wird automatisch geprüft\./);
+    assert.match(shortLocalTop, /Bitte nicht erneut klicken\./);
+    assert.match(shortLocalTop, /Start angefordert vor /);
+    assert.doesNotMatch(shortLocalTop, /Schritt 1 wird gerade ausgeführt\./);
+
+    const shortStepRequest = diagnosticsHtml().match(new RegExp(`data-action="request-chain-step-approval" data-chain-id="${shortChainId}" data-chain-step="1"[^>]*`));
+    const shortStepStart = diagnosticsHtml().match(new RegExp(`data-action="start-chain-step" data-chain-id="${shortChainId}" data-chain-step="1"[^>]*`));
+    assert.ok(shortStepRequest && shortStepRequest[0].includes("disabled"));
+    assert.ok(shortStepStart && shortStepStart[0].includes("disabled"));
+
+    await shortStartPromise;
+    await flushAsyncState();
+    assert.match(orderHtml(), /Schritt 1 erfolgreich abgeschlossen\./);
+    assert.match(orderHtml(), /Es wurde nichts automatisch weitergestartet\./);
+
+    const startPosts = fetchCalls.filter((entry) => entry.method === "POST" && entry.url.includes("start-chain-step"));
+    const autoApprovalCalls = fetchCalls.filter((entry) => entry.method === "POST" && entry.url.includes("request-chain-step-approval") && entry.body.chainStep === 2);
+    const autoStartCalls = fetchCalls.filter((entry) => entry.method === "POST" && entry.url.includes("start-chain-step") && entry.body.chainStep === 2);
+    assert.strictEqual(startPosts.length, 1, "kein zusätzlicher POST");
+    assert.strictEqual(autoApprovalCalls.length, 0, "keine automatische Freigabe");
+    assert.strictEqual(autoStartCalls.length, 0, "kein automatischer Folgestart");
+
+    await ui.selectOrder(v79OrderId);
+  });
+
+  await check("V7.9-23: bestehende Sicherheitsbedingungen bleiben erhalten (kein Start ohne Token)", async () => {
+    fetchCalls.length = 0;
+    const disconnectChainId = newestChainId();
+    await ui.startChainStep(disconnectChainId, 2);
+    const startCalls = fetchCalls.filter((entry) => entry.method === "POST" && entry.url.includes("start-chain-step"));
+    assert.strictEqual(startCalls.length, 0);
   });
 
   console.log(`pilot-agent-execution-chain-ui.test.js: ${passed} Prüfpunkte erfolgreich`);

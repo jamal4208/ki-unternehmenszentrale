@@ -86,6 +86,21 @@
     chainStepApprovalTokens: {},
     chainActionInFlight: false,
     chainActionError: null,
+    chainActionErrorReasonCode: null,
+    // V7.9.0 ("Intuitiver Arbeitsfluss und sichtbarer Agentenstatus"):
+    // kurzer lokaler Start-Zwischenzustand zwischen Startklick und erster
+    // bestätigter Serverantwort. Form:
+    // { pilotOrderId, chainId, chainStep, acceptedAtMs, connectionInterrupted }.
+    chainStartBridge: null,
+    // Kontrolliertes Polling (genau ein Poller je ausgewähltem Auftrag).
+    statusPollingOrderId: null,
+    statusPollingTimerId: null,
+    statusPollingInFlight: false,
+    statusPollingStartedAtMs: null,
+    statusPollingErrorCount: 0,
+    statusPollingRetryNoticeActive: false,
+    statusPollingStoppedByErrors: false,
+    statusPollingStoppedBySafetyCap: false,
     // Korrekturlauf V7.8.0: lokale Checkbox-Auswahl für
     // "Neue Agentenkette vorbereiten" (null = noch nicht initialisiert für
     // den aktuell ausgewählten Auftrag).
@@ -99,6 +114,50 @@
     // Form: { action, pilotOrderId, orderTitle, checked, submitting, error }.
     jamalConfirmation: null,
   };
+
+  var STATUS_POLLING_INTERVAL_MS = 5000;
+  var STATUS_POLLING_MAX_DURATION_MS = 15 * 60 * 1000;
+  var CHAIN_RUNNING_STATUSES = {
+    RESEARCH_RUNNING: true,
+    DOCUMENTATION_RUNNING: true,
+    PM_RUNNING: true,
+  };
+  var CHAIN_STATUS_TO_STEP_NUMBER = {
+    RESEARCH_RUNNING: 1,
+    DOCUMENTATION_RUNNING: 2,
+    PM_RUNNING: 3,
+  };
+  function createDefaultStatusTimeHooks() {
+    return {
+      now: function () {
+        return Date.now();
+      },
+      setTimeout: function (callback, delayMs) {
+        return setTimeout(callback, delayMs);
+      },
+      clearTimeout: function (timerId) {
+        clearTimeout(timerId);
+      },
+      createTimeFormatter: function () {
+        if (typeof Intl === "object" && Intl && typeof Intl.DateTimeFormat === "function") {
+          return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
+        }
+        return null;
+      },
+    };
+  }
+  var statusTimeHooks = createDefaultStatusTimeHooks();
+
+  function setStatusTimeHooksForTests(overrides) {
+    var nextHooks = createDefaultStatusTimeHooks();
+    if (overrides && typeof overrides === "object") {
+      if (typeof overrides.now === "function") nextHooks.now = overrides.now;
+      if (typeof overrides.setTimeout === "function") nextHooks.setTimeout = overrides.setTimeout;
+      if (typeof overrides.clearTimeout === "function") nextHooks.clearTimeout = overrides.clearTimeout;
+      if (typeof overrides.createTimeFormatter === "function") nextHooks.createTimeFormatter = overrides.createTimeFormatter;
+    }
+    statusTimeHooks = nextHooks;
+  }
 
   function byId(id) {
     return typeof document !== "undefined" ? document.getElementById(id) : null;
@@ -130,6 +189,155 @@
 
   function isNonEmptyStringArray(value) {
     return Array.isArray(value) && value.length > 0 && value.every(isNonEmptyString);
+  }
+
+  function nowMs() {
+    return statusTimeHooks.now();
+  }
+
+  function parseTimestampMs(isoValue) {
+    if (!isNonEmptyString(isoValue)) return null;
+    var value = Date.parse(isoValue);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function formatLocalClockTime(isoValue) {
+    var parsed = parseTimestampMs(isoValue);
+    if (parsed === null) return null;
+    var formatter = statusTimeHooks.createTimeFormatter();
+    if (!formatter || typeof formatter.format !== "function") {
+      var fallbackDate = new Date(parsed);
+      var hour = String(fallbackDate.getHours()).padStart(2, "0");
+      var minute = String(fallbackDate.getMinutes()).padStart(2, "0");
+      return hour + ":" + minute;
+    }
+    return formatter.format(new Date(parsed));
+  }
+
+  function formatElapsedDurationFromMs(totalMs) {
+    if (!Number.isFinite(totalMs) || totalMs < 0) return null;
+    var totalSeconds = Math.floor(totalMs / 1000);
+    var minutes = Math.floor(totalSeconds / 60);
+    var seconds = totalSeconds % 60;
+    if (minutes <= 0) {
+      return seconds <= 3 ? "weniger als 5 Sekunden" : seconds + " Sekunden";
+    }
+    if (minutes < 10) {
+      return minutes + (minutes === 1 ? " Minute" : " Minuten") + (seconds > 0 ? " " + seconds + " Sekunden" : "");
+    }
+    return minutes + (minutes === 1 ? " Minute" : " Minuten");
+  }
+
+  function runDurationFromRun(run) {
+    if (!run) return null;
+    var started = parseTimestampMs(run.startedAt);
+    var finished = parseTimestampMs(run.finishedAt);
+    if (started === null || finished === null || finished < started) return null;
+    return formatElapsedDurationFromMs(finished - started);
+  }
+
+  function hasRunningChainStatus(chainStatus) {
+    return Boolean(CHAIN_RUNNING_STATUSES[chainStatus]);
+  }
+
+  function hasServerRunningState(overview) {
+    if (!overview) return false;
+    var chains = Array.isArray(overview.agentChains) ? overview.agentChains : [];
+    for (var i = 0; i < chains.length; i += 1) {
+      var chain = chains[i];
+      if (hasRunningChainStatus(chain.chainStatus)) return true;
+      var steps = Array.isArray(chain.steps) ? chain.steps : [];
+      for (var j = 0; j < steps.length; j += 1) {
+        if (steps[j].stepStatus === "RUNNING") return true;
+      }
+    }
+    var runs = Array.isArray(overview.agentExecutionRuns) ? overview.agentExecutionRuns : [];
+    for (var r = 0; r < runs.length; r += 1) {
+      if (runs[r].status === "RUNNING") return true;
+    }
+    return false;
+  }
+
+  function hasLocalStartBridgeForOrder(orderId) {
+    return Boolean(state.chainStartBridge && state.chainStartBridge.pilotOrderId === orderId);
+  }
+
+  function clearChainStartBridgeForOrder(orderId) {
+    if (hasLocalStartBridgeForOrder(orderId)) {
+      state.chainStartBridge = null;
+    }
+  }
+
+  function clearStatusPollingTimer() {
+    if (state.statusPollingTimerId !== null && state.statusPollingTimerId !== undefined) {
+      statusTimeHooks.clearTimeout(state.statusPollingTimerId);
+    }
+    state.statusPollingTimerId = null;
+  }
+
+  function stopStatusPolling(stopReason) {
+    clearStatusPollingTimer();
+    state.statusPollingInFlight = false;
+    state.statusPollingOrderId = null;
+    state.statusPollingStartedAtMs = null;
+    state.statusPollingErrorCount = 0;
+    state.statusPollingRetryNoticeActive = false;
+    if (stopReason !== "poll-errors") {
+      state.statusPollingStoppedByErrors = false;
+    }
+    if (stopReason !== "safety-cap") {
+      state.statusPollingStoppedBySafetyCap = false;
+    }
+  }
+
+  function shouldKeepPollingForOrder(orderId) {
+    if (!orderId || state.selectedPilotOrderId !== orderId) return false;
+    if (hasLocalStartBridgeForOrder(orderId)) return true;
+    if (!state.overview || !state.overview.order || state.overview.order.id !== orderId) return false;
+    return hasServerRunningState(state.overview);
+  }
+
+  function findChainById(overview, chainId) {
+    if (!overview || !chainId) return null;
+    var chains = Array.isArray(overview.agentChains) ? overview.agentChains : [];
+    for (var i = 0; i < chains.length; i += 1) {
+      if (chains[i].id === chainId) return chains[i];
+    }
+    return null;
+  }
+
+  function findChainStepByNumber(chain, chainStep) {
+    var steps = chain && Array.isArray(chain.steps) ? chain.steps : [];
+    for (var i = 0; i < steps.length; i += 1) {
+      if (steps[i].stepNumber === chainStep) return steps[i];
+    }
+    return null;
+  }
+
+  function findLatestChain(overview) {
+    var chains = overview && Array.isArray(overview.agentChains) ? overview.agentChains : [];
+    if (chains.length === 0) return null;
+    return chains[chains.length - 1];
+  }
+
+  function resolveStepNumberFromChainStatus(chainStatus) {
+    return CHAIN_STATUS_TO_STEP_NUMBER[chainStatus] || null;
+  }
+
+  function extractReasonCodeFromResponseData(data) {
+    if (!data || typeof data !== "object") return null;
+    if (isNonEmptyString(data.reasonCode)) return data.reasonCode.trim();
+    if (isNonEmptyString(data.errorCode)) return data.errorCode.trim();
+    return null;
+  }
+
+  function inferReasonCodeFromMessage(message) {
+    var text = isNonEmptyString(message) ? message.toLowerCase() : "";
+    if (!text) return null;
+    if (text.indexOf("nicht verf") !== -1 && text.indexOf("codex") !== -1) {
+      return "CODEX_UNAVAILABLE";
+    }
+    return null;
   }
 
   function fetchJson(url, options) {
@@ -164,6 +372,134 @@
     });
   }
 
+  function isChainStepServerTerminal(chain, step) {
+    if (!chain) return false;
+    if (chain.chainStatus === "FAILED" || chain.chainStatus === "BLOCKED" || chain.chainStatus === "COMPLETED") {
+      return true;
+    }
+    if (!step) return false;
+    return step.stepStatus === "SUCCEEDED" || step.stepStatus === "FAILED";
+  }
+
+  function syncLocalStartBridgeFromOverview(orderId) {
+    if (!hasLocalStartBridgeForOrder(orderId) || !state.overview) return;
+    var bridge = state.chainStartBridge;
+    var chain = findChainById(state.overview, bridge.chainId);
+    var step = findChainStepByNumber(chain, bridge.chainStep);
+    if (hasServerRunningState(state.overview)) return;
+    if (isChainStepServerTerminal(chain, step)) {
+      state.chainStartBridge = null;
+    }
+  }
+
+  function scheduleStatusPollingTick(orderId, delayMs) {
+    if (state.selectedPilotOrderId !== orderId || state.statusPollingOrderId !== orderId) return;
+    clearStatusPollingTimer();
+    state.statusPollingTimerId = statusTimeHooks.setTimeout(function () {
+      runStatusPollingTick(orderId);
+    }, delayMs);
+  }
+
+  function registerStatusPollingFailure() {
+    state.statusPollingErrorCount += 1;
+    state.statusPollingRetryNoticeActive = true;
+    if (state.statusPollingErrorCount >= 3) {
+      state.statusPollingStoppedByErrors = true;
+      stopStatusPolling("poll-errors");
+      render();
+      return;
+    }
+    render();
+    scheduleStatusPollingTick(state.selectedPilotOrderId, STATUS_POLLING_INTERVAL_MS);
+  }
+
+  function runStatusPollingTick(orderId) {
+    if (!orderId) return;
+    if (state.selectedPilotOrderId !== orderId || state.statusPollingOrderId !== orderId) return;
+    if (state.statusPollingInFlight) return;
+    if (state.statusPollingStartedAtMs !== null && nowMs() - state.statusPollingStartedAtMs >= STATUS_POLLING_MAX_DURATION_MS) {
+      state.statusPollingStoppedBySafetyCap = true;
+      stopStatusPolling("safety-cap");
+      render();
+      return;
+    }
+    state.statusPollingInFlight = true;
+    state.statusPollingTimerId = null;
+    fetchJson("/api/pilot-work-order/orders/" + encodeURIComponent(orderId))
+      .then(function (response) {
+        if (state.selectedPilotOrderId !== orderId || state.statusPollingOrderId !== orderId) return;
+        if (response.statusCode === 200 && response.data && response.data.ok && response.data.overview) {
+          state.overview = response.data.overview;
+          state.overviewError = null;
+          state.statusPollingErrorCount = 0;
+          state.statusPollingRetryNoticeActive = false;
+          syncLocalStartBridgeFromOverview(orderId);
+          render();
+          if (!shouldKeepPollingForOrder(orderId)) {
+            stopStatusPolling("resolved");
+            render();
+            return;
+          }
+          scheduleStatusPollingTick(orderId, STATUS_POLLING_INTERVAL_MS);
+          return;
+        }
+        registerStatusPollingFailure();
+      })
+      .catch(function () {
+        if (state.selectedPilotOrderId !== orderId || state.statusPollingOrderId !== orderId) return;
+        registerStatusPollingFailure();
+      })
+      .finally(function () {
+        if (state.selectedPilotOrderId === orderId) {
+          state.statusPollingInFlight = false;
+        }
+      });
+  }
+
+  function startStatusPolling(forceRestart) {
+    var orderId = state.selectedPilotOrderId;
+    if (!orderId) return;
+    var alreadyRunning = state.statusPollingOrderId === orderId && (state.statusPollingInFlight || state.statusPollingTimerId !== null);
+    if (alreadyRunning && !forceRestart) return;
+    if (state.statusPollingStoppedByErrors && !forceRestart) return;
+    stopStatusPolling("restart");
+    state.statusPollingOrderId = orderId;
+    state.statusPollingStartedAtMs = nowMs();
+    state.statusPollingErrorCount = 0;
+    state.statusPollingRetryNoticeActive = false;
+    state.statusPollingStoppedByErrors = false;
+    state.statusPollingStoppedBySafetyCap = false;
+    runStatusPollingTick(orderId);
+  }
+
+  function syncStatusPollingFromOverview() {
+    var orderId = state.selectedPilotOrderId;
+    if (!orderId) {
+      stopStatusPolling("order-change");
+      return;
+    }
+    if (!state.overview || !state.overview.order || state.overview.order.id !== orderId) return;
+    if (shouldKeepPollingForOrder(orderId)) {
+      if (!state.statusPollingStoppedByErrors && !state.statusPollingStoppedBySafetyCap) {
+        startStatusPolling(false);
+      }
+      return;
+    }
+    if (state.statusPollingOrderId === orderId) {
+      stopStatusPolling("resolved");
+    }
+  }
+
+  var pagehidePollingStopBound = false;
+  function bindPagehidePollingStopOnce() {
+    if (pagehidePollingStopBound) return;
+    if (typeof window === "undefined" || !window || typeof window.addEventListener !== "function") return;
+    pagehidePollingStopBound = true;
+    window.addEventListener("pagehide", function () {
+      stopStatusPolling("pagehide");
+    });
+  }
+
   // -----------------------------------------------------------------------
   // Laden: Liste + Auswahl (Auftrag Abschnitt 1/2).
   // -----------------------------------------------------------------------
@@ -189,6 +525,8 @@
   function init() {
     state.ordersLoading = true;
     state.overviewLoading = true;
+    stopStatusPolling("init");
+    state.chainStartBridge = null;
     render();
     return fetchJson("/api/pilot-work-order/status")
       .then(function (response) {
@@ -200,6 +538,7 @@
         } else {
           state.overviewError = "Der Pilotauftrag konnte nicht geladen werden.";
         }
+        syncStatusPollingFromOverview();
         render();
         return loadOrdersList();
       });
@@ -210,6 +549,8 @@
   // Daten des vorherigen Auftrags während des Ladens weiter angezeigt.
   function selectOrder(orderId) {
     if (!orderId || orderId === state.selectedPilotOrderId) return Promise.resolve();
+    stopStatusPolling("order-change");
+    state.chainStartBridge = null;
     state.selectedPilotOrderId = orderId;
     state.overview = null;
     state.overviewLoading = true;
@@ -220,6 +561,7 @@
     state.codexApprovalError = null;
     state.chainStepApprovalTokens = {};
     state.chainActionError = null;
+    state.chainActionErrorReasonCode = null;
     state.chainSelectedFiles = null;
     // Ein Auftragswechsel verwirft eine ggf. offene Jamal-Bestätigungsfläche
     // ohne jeden API-Aufruf (kein Status ändert sich dadurch) – dieselbe
@@ -239,6 +581,7 @@
         state.overview = null;
         state.overviewError = "Der Pilotauftrag konnte nicht geladen werden.";
       }
+      syncStatusPollingFromOverview();
       render();
     });
   }
@@ -260,12 +603,15 @@
         state.overviewError = null;
         state.conflict = null;
         state.actionError = null;
+        state.chainActionError = null;
+        state.chainActionErrorReasonCode = null;
       } else if (response.statusCode === 404) {
         state.overview = null;
         state.overviewError = "Dieser Pilotauftrag wurde nicht gefunden.";
       } else {
         state.overviewError = "Der Pilotauftrag konnte nicht geladen werden.";
       }
+      syncStatusPollingFromOverview();
       render();
       return loadOrdersList();
     });
@@ -365,35 +711,44 @@
     state.actionError = null;
     render();
     var body = Object.assign({}, extraBody || {}, { expectedRevision: expectedRevision });
-    return postAction(pilotOrderId, action, body).then(function (response) {
-      state.actionInFlight = false;
-      if (state.selectedPilotOrderId !== pilotOrderId) {
-        // Auswahl hat sich während der laufenden Aktion geändert: das
-        // Ergebnis betrifft einen nicht mehr angezeigten Auftrag und wird
-        // verworfen (niemals Daten eines anderen Auftrags überschreiben).
-        return;
-      }
-      if (response.statusCode === 200 && response.data && response.data.ok) {
-        state.actionError = null;
-        state.conflict = null;
-        return reloadSelectedOrder();
-      }
-      if (response.statusCode === 409) {
-        var details = response.data || {};
-        state.conflict = {
-          pilotOrderId: details.pilotOrderId || pilotOrderId,
-          expectedRevision: details.expectedRevision,
-          currentRevision: details.currentRevision,
-          message:
-            "Dieser Auftrag wurde zwischenzeitlich ver\u00e4ndert. Der aktuelle Stand wurde noch nicht \u00fcberschrieben. " +
-            "Bitte laden Sie den Auftrag neu und pr\u00fcfen Sie die n\u00e4chste Aktion.",
-        };
+    return postAction(pilotOrderId, action, body)
+      .then(function (response) {
+        if (state.selectedPilotOrderId !== pilotOrderId) {
+          // Auswahl hat sich während der laufenden Aktion geändert: das
+          // Ergebnis betrifft einen nicht mehr angezeigten Auftrag und wird
+          // verworfen (niemals Daten eines anderen Auftrags überschreiben).
+          return;
+        }
+        if (response.statusCode === 200 && response.data && response.data.ok) {
+          state.actionError = null;
+          state.conflict = null;
+          return reloadSelectedOrder();
+        }
+        if (response.statusCode === 409) {
+          var details = response.data || {};
+          state.conflict = {
+            pilotOrderId: details.pilotOrderId || pilotOrderId,
+            expectedRevision: details.expectedRevision,
+            currentRevision: details.currentRevision,
+            message:
+              "Dieser Auftrag wurde zwischenzeitlich verändert. Der aktuelle Stand wurde noch nicht überschrieben. " +
+              "Bitte laden Sie den Auftrag neu und prüfen Sie die nächste Aktion.",
+          };
+          render();
+          return;
+        }
+        state.actionError = (response.data && response.data.message) || "Aktion ist im aktuellen Zustand nicht möglich.";
         render();
-        return;
-      }
-      state.actionError = (response.data && response.data.message) || "Aktion ist im aktuellen Zustand nicht m\u00f6glich.";
-      render();
-    });
+      })
+      .catch(function () {
+        if (state.selectedPilotOrderId !== pilotOrderId) return;
+        state.actionError = "Die Aktion konnte wegen eines Verbindungsproblems nicht bestätigt werden. Bitte erneut versuchen.";
+        render();
+      })
+      .finally(function () {
+        state.actionInFlight = false;
+        render();
+      });
   }
 
   // ---------------------------------------------------------------------
@@ -547,18 +902,27 @@
     state.codexApprovalInFlight = true;
     state.codexApprovalError = null;
     render();
-    return postAction(pilotOrderId, "request-codex-run-approval", { presetId: CODEX_AGENT_EXECUTION_PRESET_ID }).then(function (response) {
-      state.codexApprovalInFlight = false;
-      if (state.selectedPilotOrderId !== pilotOrderId) return;
-      if (response.statusCode === 200 && response.data && response.data.ok && response.data.approvalToken) {
-        state.codexApprovalToken = response.data.approvalToken;
-        state.codexApprovalError = null;
-      } else {
-        state.codexApprovalToken = null;
-        state.codexApprovalError = (response.data && response.data.message) || "Freigabe konnte nicht angefordert werden.";
-      }
-      render();
-    });
+    return postAction(pilotOrderId, "request-codex-run-approval", { presetId: CODEX_AGENT_EXECUTION_PRESET_ID })
+      .then(function (response) {
+        if (state.selectedPilotOrderId !== pilotOrderId) return;
+        if (response.statusCode === 200 && response.data && response.data.ok && response.data.approvalToken) {
+          state.codexApprovalToken = response.data.approvalToken;
+          state.codexApprovalError = null;
+        } else {
+          state.codexApprovalToken = null;
+          state.codexApprovalError = (response.data && response.data.message) || "Freigabe konnte nicht angefordert werden.";
+        }
+        render();
+      })
+      .catch(function () {
+        if (state.selectedPilotOrderId !== pilotOrderId) return;
+        state.codexApprovalError = "Die Freigabe konnte wegen eines Verbindungsproblems nicht angefordert werden.";
+        render();
+      })
+      .finally(function () {
+        state.codexApprovalInFlight = false;
+        render();
+      });
   }
 
   // Der Freigabe-Token ist per Definition genau einmal verwendbar (siehe
@@ -590,23 +954,37 @@
     var selection = getChainFileSelectionForOverview(state.overview || {});
     if (selection.selectedFiles.length === 0) {
       state.chainActionError = null;
+      state.chainActionErrorReasonCode = null;
       render();
       return Promise.resolve();
     }
     var pilotOrderId = state.selectedPilotOrderId;
     state.chainActionInFlight = true;
     state.chainActionError = null;
+    state.chainActionErrorReasonCode = null;
     render();
-    return postAction(pilotOrderId, "prepare-agent-chain", { selectedFiles: selection.selectedFiles }).then(function (response) {
-      state.chainActionInFlight = false;
-      if (state.selectedPilotOrderId !== pilotOrderId) return;
-      if (response.statusCode === 200 && response.data && response.data.ok) {
-        state.chainActionError = null;
-        return reloadSelectedOrder();
-      }
-      state.chainActionError = (response.data && response.data.message) || "Die Agentenkette konnte nicht vorbereitet werden.";
-      render();
-    });
+    return postAction(pilotOrderId, "prepare-agent-chain", { selectedFiles: selection.selectedFiles })
+      .then(function (response) {
+        if (state.selectedPilotOrderId !== pilotOrderId) return;
+        if (response.statusCode === 200 && response.data && response.data.ok) {
+          state.chainActionError = null;
+          state.chainActionErrorReasonCode = null;
+          return reloadSelectedOrder();
+        }
+        state.chainActionErrorReasonCode = extractReasonCodeFromResponseData(response.data);
+        state.chainActionError = (response.data && response.data.message) || "Die Agentenkette konnte nicht vorbereitet werden.";
+        render();
+      })
+      .catch(function () {
+        if (state.selectedPilotOrderId !== pilotOrderId) return;
+        state.chainActionErrorReasonCode = "NETWORK_INTERRUPTED";
+        state.chainActionError = "Die Agentenkette konnte wegen eines Verbindungsproblems nicht vorbereitet werden.";
+        render();
+      })
+      .finally(function () {
+        state.chainActionInFlight = false;
+        render();
+      });
   }
 
   function requestChainStepApproval(chainId, chainStep) {
@@ -615,44 +993,88 @@
     var tokenKey = chainStepTokenKey(chainId, chainStep);
     state.chainActionInFlight = true;
     state.chainActionError = null;
+    state.chainActionErrorReasonCode = null;
     render();
-    return postAction(pilotOrderId, "request-chain-step-approval", { chainId: chainId, chainStep: chainStep }).then(function (response) {
-      state.chainActionInFlight = false;
-      if (state.selectedPilotOrderId !== pilotOrderId) return;
-      if (response.statusCode === 200 && response.data && response.data.ok && response.data.approvalToken) {
-        state.chainStepApprovalTokens[tokenKey] = response.data.approvalToken;
-        state.chainActionError = null;
-        return reloadSelectedOrder();
-      }
-      delete state.chainStepApprovalTokens[tokenKey];
-      state.chainActionError = (response.data && response.data.message) || "Die Freigabe für diesen Kettenschritt konnte nicht angefordert werden.";
-      render();
-    });
+    return postAction(pilotOrderId, "request-chain-step-approval", { chainId: chainId, chainStep: chainStep })
+      .then(function (response) {
+        if (state.selectedPilotOrderId !== pilotOrderId) return;
+        if (response.statusCode === 200 && response.data && response.data.ok && response.data.approvalToken) {
+          state.chainStepApprovalTokens[tokenKey] = response.data.approvalToken;
+          state.chainActionError = null;
+          state.chainActionErrorReasonCode = null;
+          return reloadSelectedOrder();
+        }
+        delete state.chainStepApprovalTokens[tokenKey];
+        state.chainActionErrorReasonCode = extractReasonCodeFromResponseData(response.data);
+        state.chainActionError = (response.data && response.data.message) || "Die Freigabe für diesen Kettenschritt konnte nicht angefordert werden.";
+        render();
+      })
+      .catch(function () {
+        if (state.selectedPilotOrderId !== pilotOrderId) return;
+        state.chainActionErrorReasonCode = "NETWORK_INTERRUPTED";
+        state.chainActionError = "Die Freigabe konnte wegen eines Verbindungsproblems nicht angefordert werden.";
+        render();
+      })
+      .finally(function () {
+        state.chainActionInFlight = false;
+        render();
+      });
   }
 
   // Der Freigabe-Token ist per Definition genau einmal verwendbar (siehe
-  // pilot-agent-execution-chain-service.js#consumeChainApprovalToken) –
-  // nach JEDEM Startversuch (Erfolg oder Fehlschlag) wird er lokal
-  // verworfen, niemals erneut angezeigt oder automatisch nachgefordert.
+  // pilot-agent-execution-chain-service.js#consumeChainApprovalToken).
+  // V7.9.0 ergänzt: bei einem reinen Verbindungsabbruch bleibt der Token bis
+  // zur nächsten bestätigten Serverantwort lokal erhalten, damit er nicht
+  // versehentlich verloren geht.
   function startChainStep(chainId, chainStep) {
     var tokenKey = chainStepTokenKey(chainId, chainStep);
     var tokenUsed = state.chainStepApprovalTokens[tokenKey];
     if (!tokenUsed || state.chainActionInFlight || !state.selectedPilotOrderId) return Promise.resolve();
     var pilotOrderId = state.selectedPilotOrderId;
-    delete state.chainStepApprovalTokens[tokenKey];
+    state.chainStartBridge = {
+      pilotOrderId: pilotOrderId,
+      chainId: chainId,
+      chainStep: chainStep,
+      acceptedAtMs: nowMs(),
+      connectionInterrupted: false,
+    };
     state.chainActionInFlight = true;
     state.chainActionError = null;
+    state.chainActionErrorReasonCode = null;
     render();
-    return postAction(pilotOrderId, "start-chain-step", { chainId: chainId, chainStep: chainStep, approvalToken: tokenUsed }).then(function (response) {
-      state.chainActionInFlight = false;
-      if (state.selectedPilotOrderId !== pilotOrderId) return;
-      if (response.statusCode === 200 && response.data && response.data.ok) {
-        state.chainActionError = null;
-        return reloadSelectedOrder();
-      }
-      state.chainActionError = (response.data && response.data.message) || "Der Kettenschritt konnte nicht gestartet werden.";
-      render();
-    });
+    startStatusPolling(false);
+    return postAction(pilotOrderId, "start-chain-step", { chainId: chainId, chainStep: chainStep, approvalToken: tokenUsed })
+      .then(function (response) {
+        if (state.selectedPilotOrderId !== pilotOrderId) return;
+        delete state.chainStepApprovalTokens[tokenKey];
+        if (response.statusCode === 200 && response.data && response.data.ok) {
+          state.chainActionError = null;
+          state.chainActionErrorReasonCode = null;
+          state.chainStartBridge = null;
+          return reloadSelectedOrder();
+        }
+        state.chainStartBridge = null;
+        state.chainActionErrorReasonCode = extractReasonCodeFromResponseData(response.data);
+        state.chainActionError = (response.data && response.data.message) || "Der Kettenschritt konnte nicht gestartet werden.";
+        syncStatusPollingFromOverview();
+        render();
+      })
+      .catch(function () {
+        if (state.selectedPilotOrderId !== pilotOrderId) return;
+        if (state.chainStartBridge && state.chainStartBridge.pilotOrderId === pilotOrderId) {
+          state.chainStartBridge.connectionInterrupted = true;
+        }
+        state.chainActionErrorReasonCode = "NETWORK_INTERRUPTED";
+        state.chainActionError =
+          "Die Verbindung wurde während des Laufs unterbrochen. Der Lauf kann weiterlaufen oder bereits fertig sein. " +
+          "Der Stand wird automatisch weiter geprüft. Bitte nicht erneut starten.";
+        startStatusPolling(true);
+        render();
+      })
+      .finally(function () {
+        state.chainActionInFlight = false;
+        render();
+      });
   }
 
   var PRIMARY_ACTIONS_WITHOUT_CONFIRMATION = ["mark-ready-for-approval", "start-execution", "submit-for-review", "reopen-from-returned", "unblock-order"];
@@ -898,6 +1320,181 @@
     );
   }
 
+  function summarizeLastKnownChainStatus(context) {
+    if (!context || !context.step || !context.chain) return "Noch kein bestätigter Kettenstatus";
+    if (context.chain.chainStatus === "COMPLETED") return "Alle drei Schritte abgeschlossen";
+    if (context.chain.chainStatus === "BLOCKED") return "Kette blockiert";
+    if (context.step.stepStatus === "RUNNING") return "Schritt " + context.step.stepNumber + " läuft";
+    if (context.step.stepStatus === "FAILED") return "Schritt " + context.step.stepNumber + " fehlgeschlagen";
+    if (context.step.stepStatus === "SUCCEEDED") return "Schritt " + context.step.stepNumber + " erfolgreich abgeschlossen";
+    return "Schritt " + context.step.stepNumber + " wartet";
+  }
+
+  function renderChainStatusCard(overview) {
+    if (!overview || !overview.order) return "";
+    var orderId = overview.order.id;
+    var context = deriveActiveRun(overview);
+    var activeChain = context ? context.chain : findLatestChain(overview);
+    var activeStep = context ? context.step : null;
+    var activeRun = context ? context.run : null;
+    var activeStepNumber = activeStep ? activeStep.stepNumber : waitingStepNumberForChain(activeChain);
+    var bridge = hasLocalStartBridgeForOrder(orderId) ? state.chainStartBridge : null;
+    var hasRunning = hasServerRunningState(overview);
+    var pollingStopped = state.statusPollingStoppedByErrors || state.statusPollingStoppedBySafetyCap;
+    var showPollingRetryNotice = state.statusPollingRetryNoticeActive && !pollingStopped;
+
+    var variant = "neutral";
+    var title = "Kettenstatus wird geladen.";
+    var lines = [];
+    var nextStepText = "Oben arbeiten. Unten nachschauen.";
+    var primaryButtonHtml = "";
+    var technicalDetailsHtml = "";
+
+    if (overview.status !== "IN_EXECUTION") {
+      title = "Drei-Agenten-Kette ist noch nicht aktiv.";
+      lines.push("Die Kette kann erst im laufenden Ausführungsstatus gestartet werden.");
+      nextStepText = "Nächster sicherer Schritt: " + (overview.nextStep || "oben die nächste Auftragsaktion ausführen.");
+    } else if (!activeChain) {
+      title = "Noch keine Drei-Agenten-Kette vorbereitet.";
+      lines.push("Oben arbeiten. Unten nachschauen.");
+      lines.push("Es läuft aktuell kein Agent.");
+      nextStepText = "Nächster sicherer Schritt: unten eine neue Agentenkette vorbereiten.";
+    } else if (bridge && !hasRunning) {
+      variant = "running";
+      if (bridge.connectionInterrupted) {
+        title = "Verbindung unterbrochen – Statusprüfung läuft weiter.";
+        lines.push(
+          "Die Verbindung wurde während des Laufs unterbrochen. Der Lauf kann weiterlaufen oder bereits fertig sein. " +
+            "Der Stand wird automatisch weiter geprüft. Bitte nicht erneut starten.",
+        );
+        nextStepText = "Nächster sicherer Schritt: auf den bestätigten Serverstand warten.";
+      } else {
+        title = "Start wurde angenommen. Der Agent wird gestartet.";
+        lines.push("Die serverseitige Bestätigung wird automatisch geprüft.");
+        if (Number.isFinite(bridge.acceptedAtMs)) {
+          var localStartElapsed = formatElapsedDurationFromMs(nowMs() - bridge.acceptedAtMs);
+          if (localStartElapsed) {
+            lines.push("Start angefordert vor " + localStartElapsed + ".");
+          }
+        }
+        lines.push("Bitte nicht erneut klicken.");
+        nextStepText = "Nächster sicherer Schritt: auf die erste bestätigte Servermeldung warten.";
+      }
+    } else if (hasRunning) {
+      variant = "running";
+      var runningStepNumber = activeStepNumber || waitingStepNumberForChain(activeChain) || 1;
+      title = "Schritt " + runningStepNumber + " wird gerade ausgeführt.";
+      lines.push("Codex arbeitet ausschließlich lesend.");
+      var startedAtMs = parseTimestampMs(activeStep && activeStep.startedAt);
+      if (startedAtMs === null) {
+        startedAtMs = parseTimestampMs(activeRun && activeRun.startedAt);
+      }
+      if (startedAtMs === null && bridge && Number.isFinite(bridge.acceptedAtMs)) {
+        startedAtMs = bridge.acceptedAtMs;
+      }
+      if (startedAtMs !== null) {
+        var startedAtClock = formatLocalClockTime(new Date(startedAtMs).toISOString());
+        if (startedAtClock) {
+          lines.push("Gestartet um " + startedAtClock + " Uhr.");
+        }
+        var elapsedText = formatElapsedDurationFromMs(nowMs() - startedAtMs);
+        if (elapsedText) {
+          lines.push("Läuft seit " + elapsedText + ".");
+        }
+      }
+      lines.push("Typische Dauer: 1-3 Minuten.");
+      lines.push("Bitte nicht erneut klicken.");
+      if (bridge && bridge.connectionInterrupted) {
+        variant = "notice";
+        lines.unshift(
+          "Die Verbindung wurde während des Laufs unterbrochen. Der Lauf kann weiterlaufen oder bereits fertig sein. " +
+            "Der Stand wird automatisch weiter geprüft. Bitte nicht erneut starten.",
+        );
+      }
+      nextStepText = "Nächster sicherer Schritt: auf den Abschluss dieses Schritts warten.";
+    } else if (activeChain.chainStatus === "COMPLETED") {
+      variant = "success";
+      title = "Alle drei Schritte abgeschlossen.";
+      var finalRunDuration = runDurationFromRun(activeRun);
+      if (finalRunDuration) {
+        lines.push("Laufdauer des letzten Schritts: " + finalRunDuration + ".");
+      }
+      lines.push("Das Gesamturteil des Projektmanager-Agenten steht unten unter Details.");
+      lines.push("Der Pilotauftrag selbst ist damit noch nicht automatisch abgenommen.");
+      lines.push("Es wurde nichts automatisch weitergestartet.");
+      nextStepText = "Nächster erlaubter Schritt: bei Bedarf oben manuell zur Abschlussprüfung vorlegen.";
+    } else if (activeStep && activeStep.stepStatus === "SUCCEEDED") {
+      variant = "success";
+      title = "Schritt " + activeStep.stepNumber + " erfolgreich abgeschlossen.";
+      var durationText = runDurationFromRun(activeRun);
+      if (durationText) {
+        lines.push("Laufdauer: " + durationText + ".");
+      }
+      lines.push("Das vollständige Ergebnis steht unten unter Details.");
+      lines.push("Es wurde nichts automatisch weitergestartet.");
+      nextStepText = nextChainStepHint(activeChain);
+    } else if (activeChain.chainStatus === "FAILED" || activeChain.chainStatus === "BLOCKED" || (activeStep && activeStep.stepStatus === "FAILED") || state.chainActionError) {
+      variant = "failure";
+      title = activeChain.chainStatus === "BLOCKED" ? "Die Kette ist blockiert." : "Der Kettenschritt ist fehlgeschlagen.";
+      var failureCode = resolveFailureReasonCodeFromContext(context);
+      var failurePresentation = resolveFailurePresentation(failureCode, state.chainActionError);
+      lines.push(failurePresentation.cause);
+      nextStepText = failurePresentation.action;
+      technicalDetailsHtml =
+        '<details class="pilot-chain-status-card__technical"><summary>Technische Details</summary>' +
+        "<p>Code: " +
+        escapeHtml(failurePresentation.reasonCode || "UNKNOWN") +
+        "</p></details>";
+    } else {
+      variant = "approval-ready";
+      var waitingStep = waitingStepNumberForChain(activeChain) || activeStepNumber || 1;
+      var waitingStepData = findChainStepByNumber(activeChain, waitingStep);
+      var waitingTokenKey = chainStepTokenKey(activeChain.id, waitingStep);
+      var waitingHasToken = waitingStepData && waitingStepData.approvalStatus === "REQUESTED" && Boolean(state.chainStepApprovalTokens[waitingTokenKey]);
+      if (waitingHasToken) {
+        title = "Schritt " + waitingStep + " kann jetzt gestartet werden.";
+        lines.push("Der Server bestätigt aktuell keinen laufenden Agenten.");
+        nextStepText = "Nächster sicherer Schritt: Schritt " + waitingStep + " unten manuell starten.";
+      } else {
+        title = "Schritt " + waitingStep + " wartet auf Freigabe.";
+        lines.push("Der Server bestätigt aktuell keinen laufenden Agenten.");
+        nextStepText = "Schritt " + waitingStep + " kann jetzt freigegeben werden.";
+      }
+    }
+
+    if (showPollingRetryNotice) {
+      variant = variant === "running" ? "running" : "notice";
+      lines.push("Der Zustand konnte gerade nicht abgefragt werden. Nächste Prüfung in 5 Sekunden.");
+    }
+
+    if (pollingStopped) {
+      variant = "notice";
+      lines.push("Automatische Aktualisierung angehalten.");
+      if (state.statusPollingStoppedBySafetyCap) {
+        lines.push("Der 15-Minuten-Sicherheitsdeckel wurde erreicht.");
+      }
+      lines.push("Zuletzt bestätigter Stand: " + summarizeLastKnownChainStatus(context) + ".");
+      nextStepText = "Nächster sicherer Schritt: den aktuellen Stand manuell neu laden.";
+      primaryButtonHtml = '<button type="button" class="primary-button" data-action="reload-chain-status">Aktuellen Stand neu laden</button>';
+    }
+
+    var html = '<section class="pilot-chain-status-card pilot-chain-status-card--' + variant + '" data-chain-status-mode="' + variant + '">';
+    html += '<h4 class="pilot-chain-status-card__title">' + escapeHtml(title) + "</h4>";
+    if (variant === "running") {
+      html += '<span class="pilot-chain-status-card__pulse" aria-hidden="true"></span>';
+    }
+    lines.forEach(function (line) {
+      html += '<p class="pilot-chain-status-card__text">' + escapeHtml(line) + "</p>";
+    });
+    html += '<p class="pilot-chain-status-card__next"><strong>Nächster sicherer Schritt:</strong> ' + escapeHtml(nextStepText) + "</p>";
+    if (primaryButtonHtml) {
+      html += '<div class="pilot-chain-status-card__actions">' + primaryButtonHtml + "</div>";
+    }
+    html += technicalDetailsHtml;
+    html += "</section>";
+    return html;
+  }
+
   function renderTeam(overview) {
     var items = overview.involvedAgents
       .map(function (agent) {
@@ -990,6 +1587,112 @@
     MANDATE_DIGEST_MISMATCH: "Der unver\u00e4nderte Kernauftrag konnte nicht verifiziert werden (Digest-Abweichung).",
   };
   var CHAIN_PREDECESSOR_MAX_CHARS = 6000;
+  var CHAIN_STATUS_FAILURE_COPY = {
+    RESULT_TOO_LARGE: {
+      cause: "Das Ergebnis war zu lang und konnte nicht sicher gespeichert werden.",
+      action: "Bitte den Auftrag enger fokussieren und die Stufe bewusst erneut freigeben.",
+    },
+    DOCUMENTATION_RESULT_STRUCTURE_INVALID: {
+      cause: "Das Dokumentationsergebnis hatte nicht die erwartete Struktur.",
+      action: "Bitte Schritt 2 erneut freigeben und auf die geforderte Struktur achten.",
+    },
+    STRUCTURE_INVALID: {
+      cause: "Das Ergebnisformat war technisch ungültig.",
+      action: "Bitte die betroffene Stufe erneut mit klarer Formatvorgabe starten.",
+    },
+    DOCUMENTATION_RESULT_STILL_TOO_LARGE: {
+      cause: "Das Dokumentationsergebnis blieb auch nach Reduktion über der Grenze.",
+      action: "Bitte den Umfang reduzieren und die Stufe neu starten.",
+    },
+    STILL_TOO_LARGE: {
+      cause: "Das Ergebnis überschreitet weiterhin die zulässige Größe.",
+      action: "Bitte den Auftrag weiter eingrenzen und dann erneut freigeben.",
+    },
+    PREDECESSOR_CONTEXT_TOO_LARGE: {
+      cause: "Die Vorgängerübergabe war für den nächsten Schritt zu groß.",
+      action: "Bitte zuerst den Vorgängerumfang reduzieren, dann erneut starten.",
+    },
+    PREDECESSOR_RESULT_MISSING: {
+      cause: "Das benötigte Vorgängerergebnis fehlt.",
+      action: "Bitte den vorherigen Schritt erfolgreich abschließen, bevor Sie fortfahren.",
+    },
+    PREDECESSOR_RESULT_UNAVAILABLE: {
+      cause: "Das Vorgängerergebnis war technisch nicht verfügbar.",
+      action: "Bitte den Vorgängerschritt erneut ausführen und danach fortsetzen.",
+    },
+    PREDECESSOR_RESULT_DIGEST_MISMATCH: {
+      cause: "Das Vorgängerergebnis wurde nachträglich verändert.",
+      action: "Bitte die Kette neu vorbereiten, damit die Integrität wieder stimmt.",
+    },
+    MANDATE_DIGEST_MISMATCH: {
+      cause: "Der Kernauftrag stimmt nicht mehr mit der signierten Version überein.",
+      action: "Bitte die Kette neu vorbereiten und anschließend neu freigeben.",
+    },
+    STEP_EXECUTION_FAILED: {
+      cause: "Die Ausführung des Schritts ist technisch fehlgeschlagen.",
+      action: "Bitte technische Details prüfen und den Schritt bewusst neu starten.",
+    },
+    STEP_START_FAILED: {
+      cause: "Der Schritt konnte nicht sauber gestartet werden.",
+      action: "Bitte den aktuellen Stand neu laden und die Stufe erneut starten.",
+    },
+    CHAIN_STEP_FINALIZATION_FAILED: {
+      cause: "Der Schritt lief, konnte aber nicht final gespeichert werden.",
+      action: "Bitte den Status neu laden und danach bewusst erneut starten.",
+    },
+    TIMEOUT: {
+      cause: "Der Lauf hat das Zeitlimit erreicht.",
+      action: "Bitte Auftrag fokussieren und den Schritt erneut starten.",
+    },
+    CODEX_PROCESS_EXIT_NONZERO: {
+      cause: "Der Codex-Prozess wurde mit einem Fehler beendet.",
+      action: "Bitte technische Details prüfen und den Schritt bewusst neu starten.",
+    },
+    SPAWN_ERROR: {
+      cause: "Der Codex-Prozess konnte technisch nicht gestartet werden.",
+      action: "Bitte Codex-Verfügbarkeit prüfen und danach erneut starten.",
+    },
+    WORKSPACE_CHANGED: {
+      cause: "Der zugrunde liegende Workspace hat sich während des Laufs verändert.",
+      action: "Bitte Stand stabilisieren und den Schritt danach neu starten.",
+    },
+    FORBIDDEN_ACTION_CLAIMED: {
+      cause: "Der Lauf meldete eine unzulässige Aktion und wurde gestoppt.",
+      action: "Bitte Auftrag/Sicherheitsgrenzen prüfen, dann gezielt neu starten.",
+    },
+    TOKEN_EXPIRED: {
+      cause: "Die Freigabe ist abgelaufen.",
+      action: "Bitte eine neue Freigabe für genau diese Stufe anfordern.",
+    },
+    TOKEN_UNKNOWN: {
+      cause: "Die Freigabe ist ungültig oder nicht mehr bekannt.",
+      action: "Bitte die Freigabe für diese Stufe neu anfordern.",
+    },
+    TOKEN_ALREADY_USED: {
+      cause: "Diese Freigabe wurde bereits verwendet.",
+      action: "Bitte für diesen Schritt eine neue Freigabe anfordern.",
+    },
+    TOKEN_REVISION_MISMATCH: {
+      cause: "Die Freigabe passt nicht mehr zur aktuellen Auftragsrevision.",
+      action: "Bitte den Auftrag neu laden und eine frische Freigabe anfordern.",
+    },
+    TOKEN_USER_MISMATCH: {
+      cause: "Die Freigabe gehört nicht zum aktuellen Benutzerkontext.",
+      action: "Bitte den Schritt mit einer gültigen, frischen Freigabe starten.",
+    },
+    CODEX_UNAVAILABLE: {
+      cause: "Codex ist auf diesem System derzeit nicht verfügbar oder nicht authentifiziert.",
+      action: "Bitte Codex-Verfügbarkeit prüfen und danach erneut freigeben.",
+    },
+    NETWORK_INTERRUPTED: {
+      cause: "Die Verbindung wurde während des Laufs unterbrochen.",
+      action: "Bitte nicht erneut starten. Der aktuelle Stand wird geprüft.",
+    },
+    UNKNOWN: {
+      cause: "Die genaue Ursache ist derzeit nicht eindeutig bestimmbar.",
+      action: "Bitte technischen Code prüfen und den Stand neu laden.",
+    },
+  };
 
   function chainStatusLabel(status) {
     return CHAIN_STATUS_LABELS[status] || escapeHtml(String(status || ""));
@@ -999,6 +1702,26 @@
     var normalized = isNonEmptyString(reasonCode) ? reasonCode.trim() : "";
     if (!normalized) return "";
     return CHAIN_BLOCK_REASON_TEXT[normalized] || normalized;
+  }
+
+  function normalizeFailureReasonCode(reasonCode, fallbackMessage) {
+    var normalized = isNonEmptyString(reasonCode) ? reasonCode.trim() : "";
+    if (!normalized && fallbackMessage) {
+      normalized = inferReasonCodeFromMessage(fallbackMessage) || "";
+    }
+    if (!normalized) return "UNKNOWN";
+    if (!CHAIN_STATUS_FAILURE_COPY[normalized]) return normalized;
+    return normalized;
+  }
+
+  function resolveFailurePresentation(reasonCode, fallbackMessage) {
+    var normalized = normalizeFailureReasonCode(reasonCode, fallbackMessage);
+    var copy = CHAIN_STATUS_FAILURE_COPY[normalized] || CHAIN_STATUS_FAILURE_COPY.UNKNOWN;
+    return {
+      reasonCode: normalized,
+      cause: copy.cause,
+      action: copy.action,
+    };
   }
 
   // V7.8.1 ("Ergebnisbudget von Kettenschritt 2 technisch erzwungen"):
@@ -1090,6 +1813,137 @@
     return null;
   }
 
+  function isOrderChainInteractionLocked(overview) {
+    if (!overview || !overview.order) return Boolean(state.chainActionInFlight);
+    return state.chainActionInFlight || hasLocalStartBridgeForOrder(overview.order.id) || hasServerRunningState(overview);
+  }
+
+  function waitingStepNumberForChain(chain) {
+    if (!chain) return null;
+    var byStatus = {
+      WAITING_FOR_RESEARCH_APPROVAL: 1,
+      WAITING_FOR_DOCUMENTATION_APPROVAL: 2,
+      WAITING_FOR_PM_APPROVAL: 3,
+    };
+    if (byStatus[chain.chainStatus]) return byStatus[chain.chainStatus];
+    if (typeof chain.currentStep === "number") return chain.currentStep;
+    return null;
+  }
+
+  function contextTimeMs(context) {
+    if (!context) return 0;
+    var run = context.run;
+    var runTime = parseTimestampMs(run && (run.finishedAt || run.startedAt));
+    if (runTime !== null) return runTime;
+    var chainTime = parseTimestampMs(context.chain && context.chain.completedAt);
+    if (chainTime !== null) return chainTime;
+    return (context.chainIndex + 1) * 1000 + context.step.stepNumber;
+  }
+
+  function pickLatestContext(contexts) {
+    if (!Array.isArray(contexts) || contexts.length === 0) return null;
+    var winner = contexts[0];
+    for (var i = 1; i < contexts.length; i += 1) {
+      var candidate = contexts[i];
+      var candidateTime = contextTimeMs(candidate);
+      var winnerTime = contextTimeMs(winner);
+      if (candidateTime > winnerTime) {
+        winner = candidate;
+        continue;
+      }
+      if (candidateTime === winnerTime) {
+        if (candidate.chainIndex > winner.chainIndex) {
+          winner = candidate;
+          continue;
+        }
+        if (candidate.chainIndex === winner.chainIndex && candidate.step.stepNumber > winner.step.stepNumber) {
+          winner = candidate;
+          continue;
+        }
+        var candidateRevision = candidate.chain && typeof candidate.chain.revision === "number" ? candidate.chain.revision : -1;
+        var winnerRevision = winner.chain && typeof winner.chain.revision === "number" ? winner.chain.revision : -1;
+        if (candidateRevision > winnerRevision) {
+          winner = candidate;
+        }
+      }
+    }
+    return winner;
+  }
+
+  function deriveActiveRun(overview) {
+    if (!overview) return null;
+    var chains = Array.isArray(overview.agentChains) ? overview.agentChains : [];
+    if (chains.length === 0) return null;
+    var runningContexts = [];
+    var terminalContexts = [];
+    var pendingContexts = [];
+    for (var chainIndex = 0; chainIndex < chains.length; chainIndex += 1) {
+      var chain = chains[chainIndex];
+      var steps = Array.isArray(chain.steps) ? chain.steps : [];
+      var runningStepByChainStatus = resolveStepNumberFromChainStatus(chain.chainStatus);
+      for (var stepIndex = 0; stepIndex < steps.length; stepIndex += 1) {
+        var step = steps[stepIndex];
+        var run = findAgentExecutionRunById(overview, step.executionRunId);
+        var isRunning =
+          step.stepStatus === "RUNNING" ||
+          (run && run.status === "RUNNING") ||
+          (runningStepByChainStatus !== null && runningStepByChainStatus === step.stepNumber);
+        var context = { chain: chain, step: step, run: run, chainIndex: chainIndex };
+        if (isRunning) {
+          runningContexts.push(context);
+          continue;
+        }
+        if (step.stepStatus === "SUCCEEDED" || step.stepStatus === "FAILED" || chain.chainStatus === "FAILED" || chain.chainStatus === "BLOCKED") {
+          terminalContexts.push(context);
+          continue;
+        }
+        pendingContexts.push(context);
+      }
+    }
+    if (runningContexts.length > 0) return pickLatestContext(runningContexts);
+    if (terminalContexts.length > 0) return pickLatestContext(terminalContexts);
+    if (pendingContexts.length > 0) return pickLatestContext(pendingContexts);
+    var latestChain = findLatestChain(overview);
+    if (!latestChain || !Array.isArray(latestChain.steps) || latestChain.steps.length === 0) return null;
+    var fallbackStepNumber = waitingStepNumberForChain(latestChain);
+    var fallbackStep = findChainStepByNumber(latestChain, fallbackStepNumber) || latestChain.steps[latestChain.steps.length - 1];
+    return {
+      chain: latestChain,
+      step: fallbackStep,
+      run: findAgentExecutionRunById(overview, fallbackStep.executionRunId),
+      chainIndex: chains.length - 1,
+    };
+  }
+
+  function resolveFailureReasonCodeFromContext(context) {
+    if (context && context.step && isNonEmptyString(context.step.failureReasonCode)) {
+      return context.step.failureReasonCode.trim();
+    }
+    if (context && context.run && context.run.resultSummary && context.run.resultSummary.diagnostics) {
+      var diagnosticsReasonCode = context.run.resultSummary.diagnostics.reasonCode;
+      if (isNonEmptyString(diagnosticsReasonCode)) return diagnosticsReasonCode.trim();
+    }
+    if (context && context.chain && isNonEmptyString(context.chain.blockReason)) {
+      return context.chain.blockReason.trim();
+    }
+    if (isNonEmptyString(state.chainActionErrorReasonCode)) {
+      return state.chainActionErrorReasonCode.trim();
+    }
+    return inferReasonCodeFromMessage(state.chainActionError);
+  }
+
+  function nextChainStepHint(chain) {
+    if (!chain) return "Nächster sicherer Schritt: unten den bestätigten Status prüfen.";
+    var waitingStep = waitingStepNumberForChain(chain);
+    if (waitingStep === 1 || waitingStep === 2 || waitingStep === 3) {
+      return "Schritt " + waitingStep + " kann jetzt freigegeben werden.";
+    }
+    if (chain.chainStatus === "COMPLETED") {
+      return "Nächster erlaubter Schritt: bei Bedarf oben manuell zur Abschlussprüfung vorlegen.";
+    }
+    return "Nächster sicherer Schritt: unten den bestätigten Status prüfen.";
+  }
+
   // Eine Schaltfläche für genau eine Stufe. `kind` ist "approve" oder
   // "start". Deaktiviert, sobald: falscher Kettenstatus, Vorgänger fehlt,
   // Freigabe fehlt, Codex nicht verfügbar/authentifiziert, eine andere
@@ -1099,6 +1953,7 @@
     var availability = overview.codexAvailability || { available: false, authenticated: false };
     var isCurrentStep = chain.currentStep === step.stepNumber;
     var chainIsOpen = ["PREPARED", "WAITING_FOR_RESEARCH_APPROVAL", "WAITING_FOR_DOCUMENTATION_APPROVAL", "WAITING_FOR_PM_APPROVAL"].indexOf(chain.chainStatus) !== -1;
+    var orderChainLocked = isOrderChainInteractionLocked(overview);
     var anyStepRunning = chain.steps.some(function (entry) {
       return entry.stepStatus === "RUNNING";
     });
@@ -1115,7 +1970,8 @@
       step.approvalStatus === "NOT_REQUESTED" &&
       availability.available &&
       availability.authenticated &&
-      !state.chainActionInFlight;
+      !state.chainActionInFlight &&
+      !orderChainLocked;
     var canStart =
       isCurrentStep &&
       chainIsOpen &&
@@ -1126,7 +1982,8 @@
       hasToken &&
       availability.available &&
       availability.authenticated &&
-      !state.chainActionInFlight;
+      !state.chainActionInFlight &&
+      !orderChainLocked;
     var run = findAgentExecutionRunById(overview, step.executionRunId);
     var chainMandate = chain.coreMandate || null;
     var qualityCriteria = chainMandate && Array.isArray(chainMandate.qualityCriteria) ? chainMandate.qualityCriteria.filter(Boolean) : [];
@@ -1279,6 +2136,7 @@
   function renderAgentChainSection(overview) {
     var chains = overview.agentChains || [];
     var selection = getChainFileSelectionForOverview(overview);
+    var orderChainLocked = isOrderChainInteractionLocked(overview);
     var html = "<h4>Drei-Agenten-Kette (Recherche \u2192 Dokumentation \u2192 PM-Bewertung)</h4>";
     html +=
       "<p>Jede Stufe verwendet einen echten, isolierten Codex-Agentenlauf mit eigener executionRunId und ben\u00f6tigt eine eigene, " +
@@ -1298,14 +2156,14 @@
           escapeHtml(filePath) +
           '"' +
           (checked ? " checked" : "") +
-          (state.chainActionInFlight ? " disabled" : "") +
+          (state.chainActionInFlight || orderChainLocked ? " disabled" : "") +
           " /> " +
           escapeHtml(filePath) +
           "</label></li>";
       });
       html += "</ul></div>";
     }
-    var canPrepare = !state.chainActionInFlight && selection.selectedFiles.length > 0;
+    var canPrepare = !state.chainActionInFlight && !orderChainLocked && selection.selectedFiles.length > 0;
     html +=
       '<button type="button" data-action="prepare-agent-chain"' +
       (canPrepare ? "" : " disabled") +
@@ -1316,6 +2174,7 @@
     if (state.chainActionError) {
       html += '<p class="pilot-work-order-action-error">' + escapeHtml(state.chainActionError) + "</p>";
     }
+    html += renderChainStatusCard(overview);
     if (chains.length === 0) {
       html += "<p>Noch keine Agentenkette vorbereitet.</p>";
     } else {
@@ -1569,7 +2428,13 @@
         output.innerHTML = "<p>" + escapeHtml(state.overviewError) + "</p>";
       } else if (state.overview) {
         var overview = state.overview;
-        var html = renderHead(overview) + renderFacts(overview) + renderRisks(overview) + renderConflictBanner(state.conflict) + renderPrimaryAction(overview);
+        var html =
+          renderHead(overview) +
+          renderFacts(overview) +
+          renderRisks(overview) +
+          renderConflictBanner(state.conflict) +
+          renderChainStatusCard(overview) +
+          renderPrimaryAction(overview);
         if (state.actionError) {
           html += '<p class="pilot-work-order-action-error">' + escapeHtml(state.actionError) + "</p>";
         }
@@ -1602,6 +2467,20 @@
     renderSelectedOrderOutput();
   }
 
+  function getStatusPollingState() {
+    return {
+      orderId: state.statusPollingOrderId,
+      active: Boolean(state.statusPollingOrderId) && (state.statusPollingInFlight || state.statusPollingTimerId !== null),
+      timerScheduled: state.statusPollingTimerId !== null,
+      inFlight: state.statusPollingInFlight,
+      errorCount: state.statusPollingErrorCount,
+      stoppedByErrors: state.statusPollingStoppedByErrors,
+      stoppedBySafetyCap: state.statusPollingStoppedBySafetyCap,
+      retryNoticeActive: state.statusPollingRetryNoticeActive,
+      localStartBridgeActive: hasLocalStartBridgeForOrder(state.selectedPilotOrderId),
+    };
+  }
+
   function isKnownPrimaryAction(action) {
     return PRIMARY_ACTIONS_WITHOUT_CONFIRMATION.indexOf(action) !== -1;
   }
@@ -1624,6 +2503,13 @@
         submitCreateOrder(gatherCreateFormInput());
       } else if (action === "reload-after-conflict") {
         reloadSelectedOrder();
+      } else if (action === "reload-chain-status") {
+        state.statusPollingStoppedByErrors = false;
+        state.statusPollingStoppedBySafetyCap = false;
+        stopStatusPolling("manual-reload");
+        reloadSelectedOrder().then(function () {
+          syncStatusPollingFromOverview();
+        });
       } else if (action === "approve-for-execution" || action === "approve-completion") {
         // V7.7.1: öffnet ausschließlich die lokale Bestätigungsfläche –
         // niemals ein direkter, unbestätigter Request (siehe
@@ -1659,6 +2545,7 @@
 
   function start() {
     bindActionHandlersOnce();
+    bindPagehidePollingStopOnce();
     initPromise = init();
     return initPromise;
   }
@@ -1698,6 +2585,11 @@
       prepareAgentChain: prepareAgentChain,
       requestChainStepApproval: requestChainStepApproval,
       startChainStep: startChainStep,
+      stopStatusPolling: stopStatusPolling,
+      getStatusPollingState: getStatusPollingState,
+      setStatusTimeHooksForTests: setStatusTimeHooksForTests,
+      deriveActiveRun: deriveActiveRun,
+      resolveFailurePresentation: resolveFailurePresentation,
       render: render,
       escapeHtml: escapeHtml,
       CODEX_AGENT_EXECUTION_PRESET_ID: CODEX_AGENT_EXECUTION_PRESET_ID,
