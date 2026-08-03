@@ -623,7 +623,54 @@
   // maßgebliche, zusätzliche Prüfung (400 bei unvollständigen Eingaben).
   // Nach Erfolg: Liste aktualisieren, neuen Auftrag auswählen, KEINE
   // automatische Ausführung, KEINE automatische Freigabe.
+  //
+  // V7.9.7 ("Formularinhalt nach Validierungs-/Serverfehler erhalten"):
+  // renderOrderListOutput() ersetzt bei JEDEM render() das komplette
+  // innerHTML des Listen-/Anlage-Containers (siehe unten). Ein echter
+  // Browser baut dabei alle Kindknoten – inklusive der Anlage-Formularfelder
+  // – neu auf; createFormField() liefert bewusst keinen `value`-Wert, daher
+  // starten neu erzeugte Felder immer leer. Bei einem fehlgeschlagenen
+  // Anlageversuch (lokale Validierung, HTTP 400/409, Netzwerkfehler) blieb
+  // state.createOpen weiterhin true, wodurch render() erneut aufgerufen und
+  // das Formular unbeabsichtigt geleert wurde. CREATE_FORM_FIELD_IDS sowie
+  // capture-/restoreCreateFormFieldValues fangen genau diesen
+  // Neuaufbau ab: unmittelbar vor dem Ersetzen des innerHTML werden die
+  // aktuell im DOM stehenden Werte gelesen und danach – sofern das Formular
+  // weiterhin geöffnet ist – in die frisch erzeugten Felder zurückgeschrieben.
+  // Nach einer ERFOLGREICHEN Anlage wird state.createOpen bewusst auf false
+  // gesetzt, bevor render() läuft: die Formularfelder werden dann gar nicht
+  // erst neu erzeugt (renderCreateForm() wird übersprungen) – das bisherige,
+  // gewünschte Leeren des Formulars nach Erfolg bleibt dadurch unverändert.
   // -----------------------------------------------------------------------
+
+  var CREATE_FORM_FIELD_IDS = [
+    "pilot-order-create-title",
+    "pilot-order-create-desired-outcome",
+    "pilot-order-create-requested-by",
+    "pilot-order-create-quality-criteria",
+    "pilot-order-create-allowed-tools",
+    "pilot-order-create-forbidden-actions",
+    "pilot-order-create-required-approvals",
+    "pilot-order-create-timeframe",
+  ];
+
+  function captureCreateFormFieldValues() {
+    var values = {};
+    CREATE_FORM_FIELD_IDS.forEach(function (id) {
+      var el = byId(id);
+      if (el) values[id] = el.value;
+    });
+    return values;
+  }
+
+  function restoreCreateFormFieldValues(values) {
+    if (!values) return;
+    CREATE_FORM_FIELD_IDS.forEach(function (id) {
+      if (!Object.prototype.hasOwnProperty.call(values, id)) return;
+      var el = byId(id);
+      if (el) el.value = values[id];
+    });
+  }
 
   function validateCreateInput(input) {
     var errors = [];
@@ -654,24 +701,35 @@
     state.creating = true;
     state.createError = null;
     render();
-    return fetchJson("/api/pilot-work-order/orders", { method: "POST", body: JSON.stringify(input) }).then(function (response) {
-      state.creating = false;
-      if (response.statusCode === 200 && response.data && response.data.ok) {
-        var overview = response.data.overview;
-        state.createError = null;
-        state.createOpen = false;
-        state.overview = overview;
-        state.selectedPilotOrderId = overview.order.id;
-        state.overviewError = null;
-        state.actionError = null;
-        state.conflict = null;
-        state.jamalConfirmation = null;
+    return fetchJson("/api/pilot-work-order/orders", { method: "POST", body: JSON.stringify(input) })
+      .then(function (response) {
+        state.creating = false;
+        if (response.statusCode === 200 && response.data && response.data.ok) {
+          var overview = response.data.overview;
+          state.createError = null;
+          state.createOpen = false;
+          state.overview = overview;
+          state.selectedPilotOrderId = overview.order.id;
+          state.overviewError = null;
+          state.actionError = null;
+          state.conflict = null;
+          state.jamalConfirmation = null;
+          render();
+          return loadOrdersList();
+        }
+        state.createError = (response.data && response.data.message) || "Der Pilotauftrag konnte nicht angelegt werden.";
         render();
-        return loadOrdersList();
-      }
-      state.createError = (response.data && response.data.message) || "Der Pilotauftrag konnte nicht angelegt werden.";
-      render();
-    });
+      })
+      .catch(function () {
+        // V7.9.7: fetchJson() (letztlich fetch()) lehnt sein Promise bei
+        // einem Netzwerk-/Verbindungsfehler ab (kein HTTP-Statuscode). Ohne
+        // diesen Zweig blieb state.creating dauerhaft true (der
+        // Anlegen-Knopf blieb dauerhaft gesperrt) und es gab keine
+        // Fehlermeldung – der Fehler des Promise blieb unbehandelt.
+        state.creating = false;
+        state.createError = "Der Pilotauftrag konnte wegen eines Verbindungsproblems nicht angelegt werden. Bitte erneut versuchen.";
+        render();
+      });
   }
 
   function gatherCreateFormInput() {
@@ -1155,6 +1213,10 @@
   function renderOrderListOutput() {
     var container = byId("pilot-work-order-list-output");
     if (!container) return;
+    // V7.9.7: Werte VOR dem Neuaufbau des innerHTML sichern (siehe
+    // Kommentar bei CREATE_FORM_FIELD_IDS oben) – nur relevant, wenn das
+    // Anlageformular gerade angezeigt wird.
+    var preservedCreateFormValues = state.createOpen ? captureCreateFormFieldValues() : null;
     var html = "";
     if (state.ordersLoading && state.orders.length === 0) {
       html += "<p>Lade Pilotauftr\u00e4ge\u2026</p>";
@@ -1171,6 +1233,14 @@
       (state.createOpen ? renderCreateForm() : "") +
       "</div>";
     container.innerHTML = html;
+    // Nach dem Neuaufbau die zuvor gesicherten Werte zurückschreiben, sofern
+    // das Formular weiterhin angezeigt wird (z. B. nach einem
+    // fehlgeschlagenen Anlageversuch). Nach Erfolg ist state.createOpen
+    // bereits false, wodurch das Formular gar nicht neu erzeugt wird – das
+    // gewünschte Leeren nach erfolgreicher Anlage bleibt unverändert.
+    if (state.createOpen) {
+      restoreCreateFormFieldValues(preservedCreateFormValues);
+    }
   }
 
   function renderHead(overview) {

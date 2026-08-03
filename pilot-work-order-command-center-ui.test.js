@@ -35,9 +35,53 @@ function makeElement(overrides = {}) {
   return Object.assign({ innerHTML: "", value: "" }, overrides);
 }
 
+const CREATE_FORM_FIELD_IDS = [
+  "pilot-order-create-title",
+  "pilot-order-create-desired-outcome",
+  "pilot-order-create-requested-by",
+  "pilot-order-create-quality-criteria",
+  "pilot-order-create-allowed-tools",
+  "pilot-order-create-forbidden-actions",
+  "pilot-order-create-required-approvals",
+  "pilot-order-create-timeframe",
+];
+
+// V7.9.7 ("Formularinhalt nach Validierungs-/Serverfehler erhalten"): ein
+// echter Browser zerstört beim Setzen von innerHTML sämtliche bisherigen
+// Kindknoten und erzeugt sie aus dem neuen HTML-String vollständig neu –
+// die Anlage-Formularfelder verlieren dabei ihren Wert, weil
+// pilot-work-order-ui.js#createFormField bewusst kein `value`-Attribut
+// einbettet. Der einfache String-Stub aus makeElement() bildet dieses
+// Verhalten NICHT nach (dort sind die Feld-Elemente eigenständige,
+// dauerhafte Einträge in domElements, unberührt vom innerHTML des
+// Container-Elements). Damit die untenstehenden V7.9.7-Tests den vor
+// dieser Version bestehenden Datenverlust überhaupt nachweisen können,
+// simuliert genau dieser Container (der in Wirklichkeit die
+// Anlage-Formularfelder als Kindknoten enthält) den echten Neuaufbau:
+// JEDES Setzen von innerHTML setzt die Werte aller Anlage-Formularfelder
+// auf "" zurück. pilot-work-order-ui.js muss die zuvor eingegebenen Werte
+// danach ausdrücklich wiederherstellen (siehe capture-/
+// restoreCreateFormFieldValues dort).
+function makeCreateFormAwareListOutputElement() {
+  const el = { value: "" };
+  let html = "";
+  Object.defineProperty(el, "innerHTML", {
+    get() {
+      return html;
+    },
+    set(newHtml) {
+      html = newHtml;
+      CREATE_FORM_FIELD_IDS.forEach((id) => {
+        if (domElements[id]) domElements[id].value = "";
+      });
+    },
+  });
+  return el;
+}
+
 const domElements = {
   "pilot-work-order-card": makeElement({ addEventListener: () => {} }),
-  "pilot-work-order-list-output": makeElement(),
+  "pilot-work-order-list-output": makeCreateFormAwareListOutputElement(),
   "pilot-work-order-output": makeElement(),
   "pilot-work-order-diagnostics-output": makeElement(),
   "pilot-order-create-title": makeElement(),
@@ -415,11 +459,22 @@ const fetchCalls = [];
 // (rejected Promise, kein HTTP-Statuscode) zu simulieren, ohne eine echte
 // Netzwerktrennung zu benötigen.
 let forceNextFetchNetworkFailure = false;
+// V7.9.7 ("Formularinhalt nach Validierungs-/Serverfehler erhalten"): ein
+// einmaliger Schalter, um die NÄCHSTE POST /api/pilot-work-order/orders-
+// Antwort auf einen bestimmten HTTP-Statuscode (400/409) zu erzwingen, ohne
+// das In-Memory-Fake-Backend selbst verändern zu müssen. Gleiches Muster
+// wie forceNextFetchNetworkFailure oben.
+let forceNextCreateOrderResponse = null;
 global.fetch = (url, opts) => {
   fetchCalls.push({ url, method: (opts && opts.method) || "GET", body: opts && opts.body ? JSON.parse(opts.body) : undefined });
   if (forceNextFetchNetworkFailure) {
     forceNextFetchNetworkFailure = false;
     return Promise.reject(new Error("Simulierter Netzwerkfehler (Testfixtur)."));
+  }
+  if (forceNextCreateOrderResponse && (opts && opts.method) === "POST" && url === "/api/pilot-work-order/orders") {
+    const { status, body } = forceNextCreateOrderResponse;
+    forceNextCreateOrderResponse = null;
+    return Promise.resolve({ status, json: () => Promise.resolve(body) });
   }
   return backend.handle(url, opts);
 };
@@ -533,6 +588,159 @@ async function run() {
     const createCalls = fetchCalls.filter((call) => call.method === "POST" && call.url === "/api/pilot-work-order/orders");
     assert.strictEqual(createCalls.length, 1, "eine spätere Anlage muss wieder genau einen POST erzeugen");
     assert.strictEqual(ui.getState().creating, false);
+  });
+
+  // -------------------------------------------------------------------
+  // V7.9.7 ("Formularinhalt beim Anlegen eines Pilotauftrags nach einer
+  // Validierungs- oder Serverfehlermeldung erhalten"): bereits eingegebene
+  // Formulardaten müssen nach einem fehlgeschlagenen Anlageversuch
+  // vollständig erhalten bleiben (lokale Validierung, HTTP 400, HTTP 409,
+  // Netzwerkfehler); state.creating darf dabei nie dauerhaft hängen
+  // bleiben; der V7.9.6-Doppelklickschutz bleibt unangetastet. Nur nach
+  // ERFOLG darf das Formular geleert werden.
+  // -------------------------------------------------------------------
+
+  const v797DomDraft = {
+    title: "Entwurf V7.9.7: darf nicht verloren gehen",
+    "desired-outcome": "Dieser Text muss nach einem Fehler exakt erhalten bleiben.",
+    "requested-by": "Jamal",
+    "quality-criteria": "Ergebnis passt",
+    "allowed-tools": "interne Dokumentenablage (read-only)",
+    "forbidden-actions": "externe Schreibzugriffe",
+    "required-approvals": "Freigabe vor Ausführungsstart",
+    timeframe: "ohne festes Enddatum",
+  };
+  const v797ValidInput = {
+    title: v797DomDraft.title,
+    desiredOutcome: v797DomDraft["desired-outcome"],
+    requestedBy: v797DomDraft["requested-by"],
+    qualityCriteria: [v797DomDraft["quality-criteria"]],
+    allowedTools: [v797DomDraft["allowed-tools"]],
+    forbiddenActions: [v797DomDraft["forbidden-actions"]],
+    requiredApprovals: [v797DomDraft["required-approvals"]],
+    timeframe: v797DomDraft.timeframe,
+  };
+
+  function assertV797DomDraftPreserved(message) {
+    Object.keys(v797DomDraft).forEach((suffix) => {
+      const id = `pilot-order-create-${suffix}`;
+      assert.strictEqual(domElements[id].value, v797DomDraft[suffix], `${message} (Feld ${id})`);
+    });
+  }
+
+  await check("V7.9.7-A. lokaler Validierungsfehler: Formularwerte bleiben erhalten, kein POST, Fehlermeldung sichtbar", async () => {
+    ui.getState().createOpen = true;
+    ui.getState().createError = null;
+    setCreateFormValues(v797DomDraft);
+    const callsBefore = fetchCalls.length;
+    // requestedBy fehlt bewusst: löst die rein clientseitige
+    // Vollständigkeitsprüfung aus (validateCreateInput), ohne dass ein
+    // Request gesendet wird.
+    await ui.submitCreateOrder(Object.assign({}, v797ValidInput, { requestedBy: "" }));
+    assert.strictEqual(fetchCalls.length, callsBefore, "eine unvollständige Anlage darf keinen Request auslösen");
+    assert.ok(ui.getState().createError && ui.getState().createError.length > 0, "Fehlermeldung muss sichtbar sein");
+    assert.strictEqual(ui.getState().creating, false);
+    assertV797DomDraftPreserved("nach lokalem Validierungsfehler");
+  });
+
+  await check("V7.9.7-B. HTTP 400: Formularwerte bleiben erhalten, Fehlermeldung sichtbar, state.creating wird zurückgesetzt, erneuter Versuch möglich", async () => {
+    ui.getState().createOpen = true;
+    ui.getState().createError = null;
+    setCreateFormValues(v797DomDraft);
+    fetchCalls.length = 0;
+    forceNextCreateOrderResponse = { status: 400, body: { ok: false, message: "Pilotauftrag ist unvollständig, es fehlen: requestedBy. (Testfixtur)" } };
+    await ui.submitCreateOrder(v797ValidInput);
+    assert.strictEqual(fetchCalls.filter((call) => call.method === "POST" && call.url === "/api/pilot-work-order/orders").length, 1, "genau ein POST bei HTTP 400");
+    assert.ok(ui.getState().createError && /unvollständig/.test(ui.getState().createError), "Serverfehlermeldung muss sichtbar sein");
+    assert.strictEqual(ui.getState().creating, false, "state.creating muss nach HTTP 400 zurückgesetzt werden");
+    assert.strictEqual(ui.getState().createOpen, true, "Dialog bleibt nach einem Fehler geöffnet");
+    assertV797DomDraftPreserved("nach HTTP 400");
+
+    // Erneuter Anlageversuch muss wieder möglich sein (keine dauerhafte Sperre).
+    fetchCalls.length = 0;
+    await ui.submitCreateOrder(v797ValidInput);
+    const retryCalls = fetchCalls.filter((call) => call.method === "POST" && call.url === "/api/pilot-work-order/orders");
+    assert.strictEqual(retryCalls.length, 1, "nach HTTP 400 muss ein erneuter Anlageversuch genau einen POST erzeugen");
+    assert.strictEqual(ui.getState().createOpen, false, "eine erfolgreiche Anlage schließt den Dialog");
+    assert.strictEqual(ui.getState().createError, null);
+  });
+
+  await check("V7.9.7-C. HTTP 409: Formularwerte bleiben erhalten, Kollisionsmeldung sichtbar, state.creating wird zurückgesetzt, erneuter Versuch möglich", async () => {
+    ui.getState().createOpen = true;
+    ui.getState().createError = null;
+    setCreateFormValues(v797DomDraft);
+    fetchCalls.length = 0;
+    forceNextCreateOrderResponse = {
+      status: 409,
+      body: { ok: false, message: 'Ein Pilotauftrag mit der ID "pilot-order-test-collision" existiert bereits und wird nicht überschrieben.' },
+    };
+    await ui.submitCreateOrder(v797ValidInput);
+    assert.strictEqual(fetchCalls.filter((call) => call.method === "POST" && call.url === "/api/pilot-work-order/orders").length, 1, "genau ein POST bei HTTP 409");
+    assert.ok(ui.getState().createError && /existiert bereits/.test(ui.getState().createError), "Kollisionsmeldung muss sichtbar sein");
+    assert.strictEqual(ui.getState().creating, false, "state.creating muss nach HTTP 409 zurückgesetzt werden");
+    assert.strictEqual(ui.getState().createOpen, true, "Dialog bleibt nach einem Konflikt geöffnet");
+    assertV797DomDraftPreserved("nach HTTP 409");
+
+    fetchCalls.length = 0;
+    await ui.submitCreateOrder(v797ValidInput);
+    const retryCalls = fetchCalls.filter((call) => call.method === "POST" && call.url === "/api/pilot-work-order/orders");
+    assert.strictEqual(retryCalls.length, 1, "nach HTTP 409 muss ein erneuter Anlageversuch genau einen POST erzeugen");
+    assert.strictEqual(ui.getState().createOpen, false, "eine erfolgreiche Anlage schließt den Dialog");
+    assert.strictEqual(ui.getState().createError, null);
+  });
+
+  await check("V7.9.7-D. Netzwerkfehler: Formularwerte bleiben erhalten, verständliche Meldung, state.creating wird zurückgesetzt, Anlegen-Knopf bleibt nicht dauerhaft gesperrt", async () => {
+    ui.getState().createOpen = true;
+    ui.getState().createError = null;
+    setCreateFormValues(v797DomDraft);
+    fetchCalls.length = 0;
+    forceNextFetchNetworkFailure = true;
+    await ui.submitCreateOrder(v797ValidInput);
+    assert.strictEqual(fetchCalls.filter((call) => call.method === "POST" && call.url === "/api/pilot-work-order/orders").length, 1, "genau ein POST-Versuch beim Netzwerkfehler");
+    assert.ok(ui.getState().createError && ui.getState().createError.length > 0, "verständliche Fehlermeldung muss sichtbar sein");
+    assert.strictEqual(ui.getState().creating, false, "state.creating muss nach einem Netzwerkfehler zurückgesetzt werden (Knopf nicht dauerhaft gesperrt)");
+    assert.strictEqual(ui.getState().createOpen, true, "Dialog bleibt nach einem Netzwerkfehler geöffnet");
+    assertV797DomDraftPreserved("nach Netzwerkfehler");
+
+    fetchCalls.length = 0;
+    await ui.submitCreateOrder(v797ValidInput);
+    const retryCalls = fetchCalls.filter((call) => call.method === "POST" && call.url === "/api/pilot-work-order/orders");
+    assert.strictEqual(retryCalls.length, 1, "nach einem Netzwerkfehler muss ein erneuter Anlageversuch genau einen POST erzeugen");
+    assert.strictEqual(ui.getState().createOpen, false, "eine erfolgreiche Anlage schließt den Dialog");
+  });
+
+  await check("V7.9.7-E. Erfolg: Doppelklickschutz bleibt aktiv, genau ein POST, Formular wird erst nach Erfolg geleert, Dialog schließt, neuer Auftrag wird ausgewählt, weitere Anlage danach möglich", async () => {
+    ui.getState().createOpen = true;
+    ui.getState().createError = null;
+    setCreateFormValues(v797DomDraft);
+    fetchCalls.length = 0;
+    const first = ui.submitCreateOrder(v797ValidInput);
+    assert.strictEqual(ui.getState().creating, true, "während der Anlage muss der Doppelklickschutz aktiv sein");
+    // Simuliert einen sofortigen zweiten Klick während die Anlage noch läuft.
+    const second = ui.submitCreateOrder(v797ValidInput);
+    await Promise.all([first, second]);
+    const createCalls = fetchCalls.filter((call) => call.method === "POST" && call.url === "/api/pilot-work-order/orders");
+    assert.strictEqual(createCalls.length, 1, "trotz zweitem Klick während der Anlage darf nur genau ein POST entstehen");
+    const state = ui.getState();
+    assert.strictEqual(state.creating, false, "nach Erfolg darf keine dauerhafte Sperre bestehen bleiben");
+    assert.strictEqual(state.createOpen, false, "der Dialog muss nach Erfolg schließen");
+    assert.strictEqual(state.createError, null);
+    assert.notStrictEqual(state.selectedPilotOrderId, ui.CANONICAL_PILOT_ORDER_ID, "der neu angelegte Auftrag muss ausgewählt werden");
+    assert.strictEqual(state.overview.order.id, state.selectedPilotOrderId);
+    Object.keys(v797DomDraft).forEach((suffix) => {
+      const id = `pilot-order-create-${suffix}`;
+      assert.strictEqual(domElements[id].value, "", `Formularfeld ${id} muss erst NACH erfolgreicher Anlage geleert werden`);
+    });
+
+    // Eine weitere, spätere Anlage muss weiterhin möglich sein.
+    ui.getState().createOpen = true;
+    setCreateFormValues(v797DomDraft);
+    fetchCalls.length = 0;
+    await ui.submitCreateOrder(v797ValidInput);
+    const laterCreateCalls = fetchCalls.filter((call) => call.method === "POST" && call.url === "/api/pilot-work-order/orders");
+    assert.strictEqual(laterCreateCalls.length, 1, "eine spätere Anlage nach einem erfolgreichen Durchlauf muss wieder genau einen POST erzeugen");
+    assert.strictEqual(ui.getState().creating, false);
+    assert.strictEqual(ui.getState().createOpen, false);
   });
 
   // -------------------------------------------------------------------
