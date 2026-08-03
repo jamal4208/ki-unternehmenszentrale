@@ -1,5 +1,31 @@
 # CURRENT STATUS
 
+## V7.9.6 – Doppelklickschutz beim Anlegen neuer Pilotaufträge (lokal umgesetzt, getestet, vor Commit/Push gestoppt)
+
+Ausgangsziel dieses Schritts: Ein schneller Doppelklick bzw. mehrfaches Auslösen der Anlage darf nicht zu zwei `POST /api/pilot-work-order/orders` führen.
+
+- **Tatsächliche Ursache:** `pilot-work-order-ui.js#submitCreateOrder` setzte `state.creating` zwar vor dem Request, verließ sich zum Schutz aber allein auf das `disabled`-Attribut des Anlegen-Knopfes. Dieses greift erst nach dem Neuzeichnen; ein zweites Klickereignis vor dem Neuzeichnen konnte deshalb einen zweiten POST auslösen.
+- **Umgesetzte Absicherung:** `submitCreateOrder` prüft jetzt zuerst `state.creating` und bricht während einer laufenden Anlage sofort ohne Zustandsänderung und ohne Request ab (`return Promise.resolve()`) – exakt dasselbe Muster wie das bereits bestehende `actionInFlight`-Wächtermuster in `runOrderAction`.
+- **Keine dauerhafte Sperre:** Die Sperre gilt ausschließlich während einer laufenden Anlage; nach Abschluss ist eine weitere Anlage unverändert möglich.
+- **Verhalten sonst unverändert:** Keine Änderung an Validierung, Fehlermeldungen, Requestinhalt, Auswahlverhalten nach Anlage, Backend, API, Routen oder Datenbank; weiterhin keine automatische Ausführung und keine automatische Freigabe nach der Anlage.
+- **Technischer Umfang bewusst eng:** Geändert wurden ausschließlich `pilot-work-order-ui.js`, `pilot-work-order-command-center-ui.test.js` und `CURRENT_STATUS.md`; kein Refactoring, keine funktionale Erweiterung.
+- **Testnachweis:** Der bereits vorhandene Prüfpunkt „9b. zwei unmittelbar ausgelöste Anlageaktionen erzeugen höchstens einen POST /orders" schlug vorher nachweislich fehl (2 statt 1 POST) und ist jetzt grün; ergänzt um „9c. nach einer abgeschlossenen Anlage ist eine weitere Anlage wieder möglich (keine dauerhafte Sperre)". Vollständiger Testlauf und `npm run check` grün.
+- **Browser-Abnahme (Jamal, bestätigt):** Schneller Doppelklick auf „Pilotauftrag anlegen" führte zu genau einem angelegten Pilotauftrag; keine doppelte Anlage, keine Kollisionsmeldung, keine Fehlermeldung; der Auftrag wurde anschließend normal geöffnet.
+- **Offene Abnahmepunkte:** Der aus V7.9.5 offene Folgepunkt „Formulartextverlust nach einer Fehlermeldung" bleibt unverändert bestehen.
+- **Grenze dieses Schritts:** Kein Commit, kein Push, kein Deployment.
+
+## V7.9.5 – Falsche Kollisionsmeldung bei Pilotauftrag-Anlage beseitigen
+
+Ausgangsziel dieses Schritts: Falsch-positive Meldungen „existiert bereits" bei der Pilotauftrag-Anlage entfernen, wenn tatsächlich keine ID-Kollision vorliegt, und überlange Eingaben vor dem Datenbankzugriff verständlich als HTTP 400 abweisen.
+
+- **Tatsächliche Ursache:** `INSERT OR IGNORE` in `auth-db.js#insertPilotWorkOrderIfMissing` kann neben echten UNIQUE-Kollisionen auch CHECK-Verletzungen stillschweigend überspringen; zusammen mit fehlenden Längenobergrenzen in `validatePilotOrderInput` wurde `created === false` bisher fälschlich immer als ID-Kollision interpretiert.
+- **Neue Grenzprüfungen vor dem Insert:** `title <= 200`, `desiredOutcome <= 2000`, `requestedBy <= 200`, `timeframe <= 500`; Überschreitungen werden mit verständlicher Feldmeldung inklusive Höchstgrenze und aktueller Zeichenanzahl als `400` abgewiesen.
+- **Echte Kollision bleibt unverändert:** Wenn `created === false` und ein Datensatz zur ID vorhanden ist (`row` vorhanden), bleibt die bestehende `409`-Ablehnung „existiert bereits und wird nicht überschrieben" unverändert bestehen.
+- **Insert-Fehler ohne nachgewiesene ID-Kollision:** Wenn `created === false` und `row === null`, wird die Anlage als wahrheitsgemäßer interner Fehler beendet (kein „existiert bereits", kein automatischer Retry, keine zweite ID-Erzeugung im selben Versuch).
+- **Daten-/Schema-Sicherheit unverändert:** Kein Schemawechsel, keine Migration, keine Erhöhung bestehender CHECK-Grenzen, keine Änderung bestehender Pilotauftrag-IDs oder bereits vorhandener Aufträge.
+- **Browser-Abnahme (Jamal, bestätigt):** Ein Titel mit 269 Zeichen wurde korrekt abgewiesen mit der sichtbaren Meldung „Der Titel darf höchstens 200 Zeichen haben (aktuell 269)."; keine falsche ID-Kollisionsmeldung; kein Auftrag wurde bei Überlänge angelegt. Eine anschließende gültige Eingabe wurde korrekt einmalig angelegt.
+- **Offene Abnahmepunkte:** Möglicher separater Folgepunkt bleibt bestehen: Formulartextverlust nach einer Fehlermeldung.
+
 ## V7.9.3 – Start-Zwischenzustand unübersehbar gemacht (lokal umgesetzt, getestet, vor Commit/Push gestoppt)
 
 Ausgangsziel dieses Schritts: Der lokale Start-Zwischenzustand direkt nach „Genau diese Stufe starten“ muss am Klickort klar als aktiver Arbeitszustand erkennbar sein, auch wenn ein serverseitiges RUNNING bei sehr kurzen Läufen zwischen zwei Polling-GETs verpasst werden kann.

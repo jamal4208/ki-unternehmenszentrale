@@ -45,6 +45,20 @@ function validHandoffInput(overrides = {}) {
   };
 }
 
+function validCreateOrderInput(overrides = {}) {
+  return {
+    title: "Zusätzlicher Test-Pilotauftrag",
+    desiredOutcome: "Die Anlagegrenzen des Pilotauftrags werden fachlich überprüft.",
+    requestedBy: "Jamal",
+    qualityCriteria: ["Ergebnis beantwortet die Auftragsfrage", "Risiken sind benannt"],
+    allowedTools: ["interne Dokumentenablage (read-only)"],
+    forbiddenActions: ["externe Schreibzugriffe"],
+    requiredApprovals: ["Freigabe vor Ausführungsstart (APPROVED_FOR_EXECUTION)"],
+    timeframe: "Ohne festes Enddatum.",
+    ...overrides,
+  };
+}
+
 async function run() {
   const { db } = makeIsolatedDb();
 
@@ -117,6 +131,66 @@ async function run() {
   await check("2b. leere Arrays/Strings gelten als unvollständig", () => {
     assert.throws(() => service.validatePilotOrderInput({ ...service.CANONICAL_PILOT_ORDER_INPUT, title: "   " }), /unvollständig/);
     assert.throws(() => service.validatePilotOrderInput({ ...service.CANONICAL_PILOT_ORDER_INPUT, qualityCriteria: [] }), /unvollständig/);
+  });
+
+  function expectLengthValidationError(input, expectedFieldLabel, expectedLimit, expectedLength) {
+    const beforeOrderCount = service.listPilotOrders(db).length;
+    let error = null;
+    try {
+      service.createPilotOrder(db, input);
+    } catch (thrown) {
+      error = thrown;
+    }
+    assert.ok(error, "es muss ein Fehler geworfen werden");
+    assert.strictEqual(error.statusCode, 400);
+    assert.ok(error.message.includes(expectedFieldLabel), "Feldname fehlt in der Fehlermeldung");
+    assert.ok(error.message.includes(`höchstens ${expectedLimit} Zeichen`), "Grenze fehlt in der Fehlermeldung");
+    assert.ok(error.message.includes(`aktuell ${expectedLength}`), "aktuelle Länge fehlt in der Fehlermeldung");
+    assert.strictEqual(service.listPilotOrders(db).length, beforeOrderCount, "bei 400 darf kein Auftrag angelegt werden");
+  }
+
+  await check("2c. title mit 200 Zeichen wird angenommen", () => {
+    const title = "T".repeat(200);
+    const overview = service.createPilotOrder(db, validCreateOrderInput({ title }));
+    assert.strictEqual(overview.order.title.length, 200);
+  });
+
+  await check("2d. title mit 201 Zeichen wird mit 400 abgelehnt", () => {
+    const title = "T".repeat(201);
+    expectLengthValidationError(validCreateOrderInput({ title }), "Titel", 200, 201);
+  });
+
+  await check("2e. desiredOutcome mit 2000 Zeichen wird angenommen", () => {
+    const desiredOutcome = "E".repeat(2000);
+    const overview = service.createPilotOrder(db, validCreateOrderInput({ desiredOutcome }));
+    assert.strictEqual(overview.order.desiredOutcome.length, 2000);
+  });
+
+  await check("2f. desiredOutcome mit 2001 Zeichen wird mit 400 abgelehnt", () => {
+    const desiredOutcome = "E".repeat(2001);
+    expectLengthValidationError(validCreateOrderInput({ desiredOutcome }), "gewünschte Ergebnis", 2000, 2001);
+  });
+
+  await check("2g. requestedBy mit 200 Zeichen wird angenommen", () => {
+    const requestedBy = "R".repeat(200);
+    const overview = service.createPilotOrder(db, validCreateOrderInput({ requestedBy }));
+    assert.strictEqual(overview.order.requestedBy.length, 200);
+  });
+
+  await check("2h. requestedBy mit 201 Zeichen wird mit 400 abgelehnt", () => {
+    const requestedBy = "R".repeat(201);
+    expectLengthValidationError(validCreateOrderInput({ requestedBy }), "Angefordert von", 200, 201);
+  });
+
+  await check("2i. timeframe mit 500 Zeichen wird angenommen", () => {
+    const timeframe = "Z".repeat(500);
+    const overview = service.createPilotOrder(db, validCreateOrderInput({ timeframe }));
+    assert.strictEqual(overview.order.timeframe.length, 500);
+  });
+
+  await check("2j. timeframe mit 501 Zeichen wird mit 400 abgelehnt", () => {
+    const timeframe = "Z".repeat(501);
+    expectLengthValidationError(validCreateOrderInput({ timeframe }), "Zeitrahmen", 500, 501);
   });
 
   // -------------------------------------------------------------------

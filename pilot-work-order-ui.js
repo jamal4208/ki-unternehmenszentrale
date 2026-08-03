@@ -639,6 +639,12 @@
   }
 
   function submitCreateOrder(input) {
+    // V7.9.6 ("Doppelklickschutz beim Anlegen neuer Pilotaufträge"): das
+    // `disabled` am Anlegen-Knopf greift erst nach dem Neuzeichnen. Ein
+    // schneller Doppelklick (zweites Klickereignis vor dem Neuzeichnen)
+    // konnte deshalb einen zweiten POST /orders auslösen. Gleiche
+    // Absicherung wie bei runOrderAction/actionInFlight.
+    if (state.creating) return Promise.resolve();
     var errors = validateCreateInput(input || {});
     if (errors.length > 0) {
       state.createError = "Bitte vervollst\u00e4ndigen: " + errors.join(", ") + ".";

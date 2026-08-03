@@ -212,6 +212,13 @@ const PILOT_STATUS_LABELS_DE = Object.freeze({
   BLOCKED: "Blockiert",
 });
 
+const PILOT_ORDER_TEXT_MAX_LENGTHS = Object.freeze({
+  title: 200,
+  desiredOutcome: 2000,
+  requestedBy: 200,
+  timeframe: 500,
+});
+
 const NEXT_STEP_BY_STATUS = Object.freeze({
   DRAFT: "Pilotauftrag prüfen und für Jamals Freigabe vorbereiten (markReadyForApproval).",
   READY_FOR_JAMAL_APPROVAL: "Jamal entscheidet über die Freigabe zur Ausführung (approveForExecution mit confirmed: true).",
@@ -312,6 +319,18 @@ function validatePilotOrderInput(input = {}) {
   if (!isNonEmptyString(input.timeframe)) errors.push("timeframe");
   if (errors.length > 0) {
     throw badRequest(`Pilotauftrag ist unvollständig, es fehlen: ${errors.join(", ")}.`);
+  }
+  const lengthChecks = [
+    { value: input.title, maxLength: PILOT_ORDER_TEXT_MAX_LENGTHS.title, fieldLabel: "Der Titel" },
+    { value: input.desiredOutcome, maxLength: PILOT_ORDER_TEXT_MAX_LENGTHS.desiredOutcome, fieldLabel: "Das gewünschte Ergebnis" },
+    { value: input.requestedBy, maxLength: PILOT_ORDER_TEXT_MAX_LENGTHS.requestedBy, fieldLabel: "Das Feld „Angefordert von“" },
+    { value: input.timeframe, maxLength: PILOT_ORDER_TEXT_MAX_LENGTHS.timeframe, fieldLabel: "Der Zeitrahmen" },
+  ];
+  for (const check of lengthChecks) {
+    const currentLength = String(check.value).length;
+    if (currentLength > check.maxLength) {
+      throw badRequest(`${check.fieldLabel} darf höchstens ${check.maxLength} Zeichen haben (aktuell ${currentLength}).`);
+    }
   }
 }
 
@@ -522,9 +541,22 @@ function createPilotOrder(db, input = {}, options = {}) {
       updatedAt: nowIso(now),
     });
     if (!created) {
-      throw conflict(`Ein Pilotauftrag mit der ID "${orderId}" existiert bereits und wird nicht überschrieben.`, {
-        pilotOrderId: orderId,
-      });
+      // INSERT OR IGNORE kann außer UNIQUE-Kollisionen auch andere
+      // Constraint-Verletzungen stillschweigend überspringen;
+      // changes === 0 allein beweist daher keine ID-Kollision.
+      if (row) {
+        throw conflict(`Ein Pilotauftrag mit der ID "${orderId}" existiert bereits und wird nicht überschrieben.`, {
+          pilotOrderId: orderId,
+        });
+      }
+      throw new PilotWorkOrderError(
+        `Der Pilotauftrag "${orderId}" konnte nicht angelegt werden, ohne dass eine bestehende ID-Kollision nachgewiesen werden konnte.`,
+        500,
+        {
+          pilotOrderId: orderId,
+          reasonCode: "PILOT_ORDER_INSERT_SKIPPED_WITHOUT_ROW",
+        },
+      );
     }
     authAudit.recordAuditEvent(db, {
       eventType: "PILOT_WORK_ORDER_CREATED",

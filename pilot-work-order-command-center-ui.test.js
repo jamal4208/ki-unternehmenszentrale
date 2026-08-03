@@ -470,7 +470,8 @@ async function run() {
     assert.ok(ui.getState().createError && ui.getState().createError.length > 0);
   });
 
-  await check("8./10./11. ein neuer Pilotauftrag kann angelegt werden, wird danach ausgewählt, ohne automatische Ausführung/Freigabe", async () => {
+  await check("8./10./11. ein neuer Pilotauftrag kann angelegt werden, wird danach ausgewählt, schließt den Dialog, löscht Fehler und sendet kein id-Feld", async () => {
+    fetchCalls.length = 0;
     await ui.submitCreateOrder({
       title: "Auftrag A: UI-Testauftrag",
       desiredOutcome: "Nachweis der Auftragszentrale.",
@@ -481,14 +482,57 @@ async function run() {
       requiredApprovals: ["Freigabe vor Ausführungsstart"],
       timeframe: "ohne festes Enddatum",
     });
+    const createCall = fetchCalls.find((call) => call.method === "POST" && call.url === "/api/pilot-work-order/orders");
+    assert.ok(createCall, "die Anlage muss einen POST /api/pilot-work-order/orders senden");
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(createCall.body || {}, "id"), false, "die UI darf kein id-Feld mitsenden");
     const state = ui.getState();
     orderAId = state.overview.order.id;
     assert.notStrictEqual(orderAId, ui.CANONICAL_PILOT_ORDER_ID);
     assert.strictEqual(state.selectedPilotOrderId, orderAId);
+    assert.strictEqual(state.createOpen, false);
+    assert.strictEqual(state.createError, null);
     assert.strictEqual(state.overview.status, "DRAFT", "keine automatische Ausführung/Freigabe nach Anlage");
     assert.ok(state.orders.some((order) => order.id === orderAId), "Liste wird nach Anlage aktualisiert");
     const executeCalls = fetchCalls.filter((call) => /start-execution|approve-for-execution/.test(call.url));
     assert.strictEqual(executeCalls.length, 0);
+  });
+
+  await check("9b. zwei unmittelbar ausgelöste Anlageaktionen erzeugen höchstens einen POST /orders", async () => {
+    fetchCalls.length = 0;
+    const createInput = {
+      title: "Auftrag A0: Doppelklick-Testauftrag",
+      desiredOutcome: "Nachweis des Doppelklickschutzes bei der Anlage.",
+      requestedBy: "Jamal",
+      qualityCriteria: ["Ergebnis passt"],
+      allowedTools: ["interne Dokumentenablage (read-only)"],
+      forbiddenActions: ["externe Schreibzugriffe"],
+      requiredApprovals: ["Freigabe vor Ausführungsstart"],
+      timeframe: "ohne festes Enddatum",
+    };
+    const first = ui.submitCreateOrder(createInput);
+    assert.strictEqual(ui.getState().creating, true, "während der Anlage muss der laufende Zustand gesetzt sein");
+    const second = ui.submitCreateOrder(createInput);
+    await Promise.all([first, second]);
+    const createCalls = fetchCalls.filter((call) => call.method === "POST" && call.url === "/api/pilot-work-order/orders");
+    assert.strictEqual(createCalls.length, 1, "zwei unmittelbare Anlageaktionen dürfen höchstens einen POST erzeugen");
+    assert.strictEqual(ui.getState().creating, false, "nach abgeschlossener Anlage darf die Sperre nicht bestehen bleiben");
+  });
+
+  await check("9c. nach einer abgeschlossenen Anlage ist eine weitere Anlage wieder möglich (keine dauerhafte Sperre)", async () => {
+    fetchCalls.length = 0;
+    await ui.submitCreateOrder({
+      title: "Auftrag A1: Anlage nach Doppelklickschutz",
+      desiredOutcome: "Nachweis, dass der Doppelklickschutz nur während der Anlage greift.",
+      requestedBy: "Jamal",
+      qualityCriteria: ["Ergebnis passt"],
+      allowedTools: ["interne Dokumentenablage (read-only)"],
+      forbiddenActions: ["externe Schreibzugriffe"],
+      requiredApprovals: ["Freigabe vor Ausführungsstart"],
+      timeframe: "ohne festes Enddatum",
+    });
+    const createCalls = fetchCalls.filter((call) => call.method === "POST" && call.url === "/api/pilot-work-order/orders");
+    assert.strictEqual(createCalls.length, 1, "eine spätere Anlage muss wieder genau einen POST erzeugen");
+    assert.strictEqual(ui.getState().creating, false);
   });
 
   // -------------------------------------------------------------------

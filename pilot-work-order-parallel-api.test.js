@@ -24,6 +24,7 @@
 // deployt nicht.
 
 const assert = require("assert");
+const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -332,6 +333,106 @@ async function run() {
       bodyObj: { ...testOrderInput(), id: "pilot-order-versuchte-fremdvergabe" },
     });
     assert.strictEqual(result.statusCode, 400);
+  });
+
+  let recoveredOrderId;
+  await check("21f. ein überlanges Feld wird mit 400 abgelehnt und meldet niemals fälschlich eine bestehende ID", async () => {
+    const result = await invoke({
+      method: "POST",
+      url: "/api/pilot-work-order/orders",
+      headers: authedJsonHeaders(ownerSession),
+      bodyObj: testOrderInput({
+        title: "Überlänge-Testauftrag",
+        desiredOutcome: "X".repeat(2001),
+      }),
+    });
+    assert.strictEqual(result.statusCode, 400);
+    assert.strictEqual(result.json.ok, false);
+    assert.match(result.json.message, /gewünschte[s]? Ergebnis/i);
+    assert.match(result.json.message, /2000/);
+    assert.match(result.json.message, /2001/);
+    assert.doesNotMatch(result.json.message, /existiert bereits/i);
+    assert.doesNotMatch(result.body, /existiert bereits/i);
+  });
+
+  await check("21g. nach einem überlangen Feld gelingt ein bewusster Neuversuch mit gekürztem Inhalt und liefert eine neue gültige ID", async () => {
+    const result = await invoke({
+      method: "POST",
+      url: "/api/pilot-work-order/orders",
+      headers: authedJsonHeaders(ownerSession),
+      bodyObj: testOrderInput({
+        title: "Überlänge-Testauftrag",
+        desiredOutcome: "X".repeat(2000),
+      }),
+    });
+    assert.strictEqual(result.statusCode, 200);
+    assert.strictEqual(result.json.ok, true);
+    recoveredOrderId = result.json.overview.order.id;
+    assert.match(recoveredOrderId, /^pilot-order-[0-9a-f-]{36}$/);
+  });
+
+  await check("21h. zwei Aufträge mit demselben Titel werden beide angelegt und behalten unterschiedliche IDs", async () => {
+    const title = "Gleicher Titel für zwei unabhängige Aufträge";
+    const first = await invoke({
+      method: "POST",
+      url: "/api/pilot-work-order/orders",
+      headers: authedJsonHeaders(ownerSession),
+      bodyObj: testOrderInput({ title, desiredOutcome: "Erster Auftrag mit gleichem Titel." }),
+    });
+    const second = await invoke({
+      method: "POST",
+      url: "/api/pilot-work-order/orders",
+      headers: authedJsonHeaders(ownerSession),
+      bodyObj: testOrderInput({ title, desiredOutcome: "Zweiter Auftrag mit gleichem Titel." }),
+    });
+    assert.strictEqual(first.statusCode, 200);
+    assert.strictEqual(second.statusCode, 200);
+    assert.match(first.json.overview.order.id, /^pilot-order-[0-9a-f-]{36}$/);
+    assert.match(second.json.overview.order.id, /^pilot-order-[0-9a-f-]{36}$/);
+    assert.notStrictEqual(first.json.overview.order.id, recoveredOrderId);
+    assert.notStrictEqual(second.json.overview.order.id, recoveredOrderId);
+    assert.notStrictEqual(first.json.overview.order.id, second.json.overview.order.id);
+  });
+
+  await check("21i. eine echte feste ID-Kollision bleibt HTTP 409 und überschreibt keinen bestehenden Auftrag", async () => {
+    const originalRandomUUID = crypto.randomUUID;
+    const fixedUuid = "00000000-0000-4000-8000-000000000321";
+    const fixedOrderId = `pilot-order-${fixedUuid}`;
+    try {
+      crypto.randomUUID = () => fixedUuid;
+      const firstTitle = "Feste-ID-Kollision Auftrag 1";
+      const secondTitle = "Feste-ID-Kollision Auftrag 2";
+      const first = await invoke({
+        method: "POST",
+        url: "/api/pilot-work-order/orders",
+        headers: authedJsonHeaders(ownerSession),
+        bodyObj: testOrderInput({ title: firstTitle, desiredOutcome: "Erster Inhalt für feste ID." }),
+      });
+      assert.strictEqual(first.statusCode, 200);
+      assert.strictEqual(first.json.overview.order.id, fixedOrderId);
+
+      const second = await invoke({
+        method: "POST",
+        url: "/api/pilot-work-order/orders",
+        headers: authedJsonHeaders(ownerSession),
+        bodyObj: testOrderInput({ title: secondTitle, desiredOutcome: "Zweiter Inhalt für identische feste ID." }),
+      });
+      assert.strictEqual(second.statusCode, 409);
+      assert.strictEqual(second.json.ok, false);
+      assert.match(second.json.message, /existiert bereits/);
+
+      const persisted = await invoke({
+        method: "GET",
+        url: `/api/pilot-work-order/orders/${fixedOrderId}`,
+        headers: { cookie: ownerSession.cookieHeader },
+      });
+      assert.strictEqual(persisted.statusCode, 200);
+      assert.strictEqual(persisted.json.overview.order.id, fixedOrderId);
+      assert.strictEqual(persisted.json.overview.order.title, firstTitle);
+      assert.notStrictEqual(persisted.json.overview.order.title, secondTitle);
+    } finally {
+      crypto.randomUUID = originalRandomUUID;
+    }
   });
 
   // -------------------------------------------------------------------
