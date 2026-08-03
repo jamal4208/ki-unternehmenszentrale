@@ -106,6 +106,47 @@ function endsWithSentenceMark(text) {
   return /[.!?]$/.test(String(text || "").trim());
 }
 
+// V7.9.8: derselbe Helfer für JEDE Stufe. Die Abschnittstitel werden aus dem
+// Vertrag des Produktivmoduls gelesen, damit ein stiller Vertragsdrift im Test
+// sofort auffällt.
+//   rawTarget      – trifft die Rohgröße exakt (Auffüllung über einen
+//                    zusätzlichen, regelbasiert weggelassenen Punkt),
+//   hugeFirstItem  – erzeugt einen einzelnen, unteilbaren Satz dieser Länge.
+function buildStageDoc(stage, { rawTarget = 0, hugeFirstItem = 0 } = {}) {
+  const contract = docResult.getStageContract(stage);
+  const header = (sectionNumber) => `ABSCHNITT ${sectionNumber} ${contract.sectionRules[sectionNumber].title}`;
+  const firstItem = hugeFirstItem ? `${"w".repeat(hugeFirstItem - 1)}.` : sentence("Erster belegter Punkt ist nachvollziehbar");
+  const base = [
+    header(1),
+    sentence("Kurzfassung liegt vor"),
+    "",
+    header(2),
+    `1. ${firstItem}`,
+    `2. ${sentence("Zweiter belegter Punkt ist nachvollziehbar")}`,
+    `3. ${sentence("Dritter belegter Punkt ist nachvollziehbar")}`,
+    "",
+    header(3),
+    `1. ${sentence("Ein Punkt bleibt bestehen")}`,
+    `2. ${sentence("Ein zweiter Punkt bleibt bestehen")}`,
+    "",
+    header(4),
+    `1. ${sentence("Erster Vorschlag mit Nutzen und hoher Priorität")}`,
+    `2. ${sentence("Zweiter Vorschlag mit Nutzen und mittlerer Priorität")}`,
+    `3. ${sentence("Dritter Vorschlag mit Nutzen und niedriger Priorität")}`,
+    "",
+    header(5),
+    sentence("Grundlage ist ausschließlich das tatsächlich gelesene Material"),
+  ].join("\n");
+  if (!rawTarget) return base;
+  const marker = "\n4. ";
+  const fillerLength = rawTarget - base.length - marker.length - 1;
+  assert.ok(fillerLength > 0, `Zielrohgröße ${rawTarget} ist zu klein für den Basistext`);
+  const insertAt = base.indexOf(`\n\n${header(3)}`);
+  const text = `${base.slice(0, insertAt)}${marker}${"y".repeat(fillerLength)}.${base.slice(insertAt)}`;
+  assert.strictEqual(text.length, rawTarget, "Testhelfer muss die Rohgröße exakt treffen");
+  return text;
+}
+
 async function run() {
   // -------------------------------------------------------------------
   // Vertrag und Konstanten
@@ -501,6 +542,209 @@ async function run() {
     assert.strictEqual(second.metadata.droppedItemCount, 0);
     assert.strictEqual(second.metadata.droppedSentenceCount, 0);
     assert.strictEqual(second.metadata.compactionApplied, false);
+  });
+
+  // -------------------------------------------------------------------
+  // V7.9.8 ("Ergebnisbudget für Recherche- und Projektmanager-Stufe
+  // technisch erzwingen") – dieselbe Logik, jetzt über drei Stufenverträge.
+  // -------------------------------------------------------------------
+
+  await check("V7.9.8: es gibt genau drei Stufenverträge mit identischen Budgets und stufeneigenen Reason Codes", () => {
+    assert.deepStrictEqual(Object.keys(docResult.RESULT_CONTRACT_STAGES).sort(), ["DOCUMENTATION", "PROJECT_MANAGER", "RESEARCH"]);
+    assert.strictEqual(docResult.STAGE_RESULT_RAW_MAX_CHARS, 12000);
+    assert.strictEqual(docResult.STAGE_RESULT_NORMALIZED_MAX_CHARS, 4500);
+    assert.strictEqual(docResult.STAGE_RESULT_ITEM_MAX_CHARS, 320);
+    const seenReasonCodes = new Set();
+    Object.values(docResult.RESULT_CONTRACT_STAGES).forEach((stage) => {
+      const contract = docResult.getStageContract(stage);
+      assert.strictEqual(contract.stage, stage);
+      assert.strictEqual(contract.normalizedMaxChars, 4500);
+      assert.strictEqual(contract.rawMaxChars, 12000);
+      assert.ok(contract.normalizedMaxChars < 6000, `${stage}: strikt unter der unveränderten technischen Grenze`);
+      assert.deepStrictEqual(contract.sectionNumbers.slice(), [1, 2, 3, 4, 5]);
+      // Abschnitt 5 ist in KEINEM Vertrag reduzierbar (Herkunft, Grenzen bzw.
+      // Empfehlung an Jamal bleiben immer erhalten).
+      assert.ok(!contract.reductionOrder.some((entry) => entry.sectionNumber === 5), `${stage}: Abschnitt 5 darf nicht reduziert werden`);
+      assert.strictEqual(contract.reductionOrder.length, 4, `${stage}: feste Reduktionsreihenfolge über vier Einträge`);
+      [contract.reasonCodes.STRUCTURE_INVALID, contract.reasonCodes.STILL_TOO_LARGE].forEach((reasonCode) => {
+        assert.ok(reasonCode, `${stage}: Reason Code fehlt`);
+        assert.ok(!seenReasonCodes.has(reasonCode), `Reason Code ${reasonCode} darf nicht doppelt vorkommen`);
+        seenReasonCodes.add(reasonCode);
+      });
+    });
+    // Die Dokumentationsstufe aus V7.8.1 bleibt wortgleich erhalten.
+    const documentation = docResult.getStageContract(docResult.RESULT_CONTRACT_STAGES.DOCUMENTATION);
+    assert.strictEqual(documentation.contractVersion, "V7.8.1-DOC-5-SECTIONS");
+    assert.strictEqual(documentation.sectionRules, docResult.DOCUMENTATION_SECTION_RULES);
+    assert.strictEqual(documentation.reductionOrder, docResult.DOCUMENTATION_REDUCTION_ORDER);
+    assert.throws(() => docResult.getStageContract("UNBEKANNT"), /unbekannter Stufenvertrag/);
+  });
+
+  await check("V7.9.8: Recherche- und PM-Vertrag tragen die vorgegebenen Abschnittsnamen und eine eigene Reduktionsreihenfolge", () => {
+    assert.strictEqual(docResult.RESEARCH_RESULT_CONTRACT_VERSION, "V7.9.8-RESEARCH-5-SECTIONS");
+    assert.deepStrictEqual(
+      [1, 2, 3, 4, 5].map((sectionNumber) => docResult.RESEARCH_SECTION_RULES[sectionNumber].title),
+      ["KURZFAZIT", "BELEGTE KERNBEFUNDE", "REIBUNGSVERLUSTE", "PRIORISIERTE VERBESSERUNGEN", "GRENZEN UND UNSICHERHEITEN"],
+    );
+    assert.deepStrictEqual(
+      docResult.RESEARCH_REDUCTION_ORDER.map((entry) => `${entry.sectionNumber}:${entry.unit}`),
+      ["3:ITEM", "2:ITEM", "1:SENTENCE", "4:ITEM"],
+    );
+    assert.strictEqual(docResult.PROJECT_MANAGER_RESULT_CONTRACT_VERSION, "V7.9.8-PM-5-SECTIONS");
+    assert.deepStrictEqual(
+      [1, 2, 3, 4, 5].map((sectionNumber) => docResult.PROJECT_MANAGER_SECTION_RULES[sectionNumber].title),
+      ["GESAMTURTEIL", "WICHTIGSTE BELEGTE STAERKEN", "WICHTIGSTE BELEGTE SCHWAECHEN", "PRIORISIERTE ENTSCHEIDUNGEN", "EMPFEHLUNG AN JAMAL"],
+    );
+    // Bewusst abweichend: eine Entscheidungsvorlage verliert ihre belegten
+    // Schwächen und Entscheidungen zuletzt, nicht zuerst.
+    assert.deepStrictEqual(
+      docResult.PROJECT_MANAGER_REDUCTION_ORDER.map((entry) => `${entry.sectionNumber}:${entry.unit}`),
+      ["2:ITEM", "3:ITEM", "1:SENTENCE", "4:ITEM"],
+    );
+    assert.deepStrictEqual(docResult.RESEARCH_RESULT_REASON_CODES, {
+      STRUCTURE_INVALID: "RESEARCH_RESULT_STRUCTURE_INVALID",
+      STILL_TOO_LARGE: "RESEARCH_RESULT_STILL_TOO_LARGE",
+    });
+    assert.deepStrictEqual(docResult.PROJECT_MANAGER_RESULT_REASON_CODES, {
+      STRUCTURE_INVALID: "PM_RESULT_STRUCTURE_INVALID",
+      STILL_TOO_LARGE: "PM_RESULT_STILL_TOO_LARGE",
+    });
+  });
+
+  await check("V7.9.8/A+B: alle Rohgrößen von 4501 bis 12000 werden in beiden neuen Stufen sicher auf <= 4500 gebracht", () => {
+    [docResult.RESULT_CONTRACT_STAGES.RESEARCH, docResult.RESULT_CONTRACT_STAGES.PROJECT_MANAGER].forEach((stage) => {
+      // 6002 und 7584 sind die beiden belegten Rohgrößen der gescheiterten
+      // Praxisläufe (Schritt 3 bzw. Schritt 1).
+      [4501, 5000, 6000, 6002, 7584, 9000, 12000].forEach((rawTarget) => {
+        const text = buildStageDoc(stage, { rawTarget });
+        assert.strictEqual(text.length, rawTarget);
+        const result = docResult.normalizeStageResult(stage, text);
+        assert.strictEqual(result.ok, true, `${stage}/${rawTarget}: muss akzeptiert werden`);
+        assert.ok(result.normalizedText.length <= 4500, `${stage}/${rawTarget}: ${result.normalizedText.length} Zeichen`);
+        assert.ok(result.normalizedText.length < 6000, `${stage}/${rawTarget}: die technische Grenze bleibt unberührt`);
+        assert.ok(endsWithSentenceMark(result.normalizedText), `${stage}/${rawTarget}: endet mitten im Satz`);
+        assert.strictEqual(result.metadata.contractStage, stage);
+        assert.strictEqual(result.metadata.rawCharCount, rawTarget);
+        assert.strictEqual(result.metadata.storedCharCount, result.normalizedText.length);
+        assert.strictEqual(result.metadata.normalizedCharCount, result.normalizedText.length);
+        assert.strictEqual(result.metadata.compactionApplied, true);
+        assert.strictEqual(result.metadata.budgetMaxChars, 4500);
+        assert.ok(result.metadata.droppedItemCount + result.metadata.droppedSentenceCount >= 1, "jede Weglassung ist gezählt");
+        // Alle fünf Abschnitte bleiben erhalten – verdichtet wird innerhalb
+        // der Abschnitte, niemals durch Weglassen eines ganzen Abschnitts.
+        const contract = docResult.getStageContract(stage);
+        contract.sectionNumbers.forEach((sectionNumber) =>
+          assert.ok(
+            result.normalizedText.includes(`ABSCHNITT ${sectionNumber} ${contract.sectionRules[sectionNumber].title}`),
+            `${stage}/${rawTarget}: Abschnitt ${sectionNumber} fehlt`,
+          ),
+        );
+      });
+    });
+  });
+
+  await check("V7.9.8/C: budgetkonforme Antworten der neuen Stufen bleiben byteidentisch – mit und ohne Marker", () => {
+    [docResult.RESULT_CONTRACT_STAGES.RESEARCH, docResult.RESULT_CONTRACT_STAGES.PROJECT_MANAGER].forEach((stage) => {
+      const structured = buildStageDoc(stage, {});
+      assert.ok(structured.length <= 4500);
+      const structuredResult = docResult.normalizeStageResult(stage, structured);
+      assert.strictEqual(structuredResult.ok, true);
+      assert.strictEqual(structuredResult.normalizedText, structured, `${stage}: strukturierte Antwort muss byteidentisch bleiben`);
+      assert.strictEqual(structuredResult.metadata.compactionApplied, false);
+      assert.strictEqual(structuredResult.metadata.droppedItemCount, 0);
+      assert.strictEqual(structuredResult.metadata.droppedSentenceCount, 0);
+
+      // Rückwärtskompatibilität: ein älteres, markerloses Ergebnis innerhalb
+      // des Budgets wird unverändert durchgelassen und als solches
+      // gekennzeichnet (structureValid = false, contractFallbackAccepted).
+      const markerless = "Kurzbefund ohne Marker. Zweiter Satz ohne Marker.";
+      const markerlessResult = docResult.normalizeStageResult(stage, markerless);
+      assert.strictEqual(markerlessResult.ok, true);
+      assert.strictEqual(markerlessResult.normalizedText, markerless);
+      assert.strictEqual(markerlessResult.metadata.structureValid, false);
+      assert.strictEqual(markerlessResult.metadata.contractFallbackAccepted, true);
+      assert.strictEqual(markerlessResult.metadata.compactionApplied, false);
+      assert.strictEqual(markerlessResult.metadata.storedCharCount, markerless.length);
+    });
+  });
+
+  await check("V7.9.8/D: strukturlose oder unreduzierbar große Texte werden in beiden neuen Stufen mit stufeneigenem Reason Code abgelehnt", () => {
+    [docResult.RESULT_CONTRACT_STAGES.RESEARCH, docResult.RESULT_CONTRACT_STAGES.PROJECT_MANAGER].forEach((stage) => {
+      const contract = docResult.getStageContract(stage);
+
+      const structureless = "Ein Satz ohne jede Abschnittsstruktur. ".repeat(200);
+      assert.ok(structureless.length > 4500);
+      const structurelessResult = docResult.normalizeStageResult(stage, structureless);
+      assert.strictEqual(structurelessResult.ok, false);
+      assert.strictEqual(structurelessResult.normalizedText, null, `${stage}: es wird nichts abgeschnitten`);
+      assert.strictEqual(structurelessResult.reasonCode, contract.reasonCodes.STRUCTURE_INVALID);
+      assert.ok(structurelessResult.errorMessage.includes(contract.resultLabel));
+      assert.ok(structurelessResult.errorMessage.includes("fehlend: Abschnitt 1, Abschnitt 2, Abschnitt 3, Abschnitt 4, Abschnitt 5"));
+      assert.strictEqual(structurelessResult.metadata.structureValid, false);
+      assert.strictEqual(structurelessResult.metadata.rawCharCount, structureless.length);
+
+      // Ein einzelner, extrem langer Satz kann nicht reduziert werden, ohne
+      // mitten im Satz zu schneiden – deshalb kontrollierte Ablehnung.
+      const hugeSentence = docResult.normalizeStageResult(stage, buildStageDoc(stage, { hugeFirstItem: 9000 }));
+      assert.strictEqual(hugeSentence.ok, false);
+      assert.strictEqual(hugeSentence.normalizedText, null);
+      assert.strictEqual(hugeSentence.reasonCode, contract.reasonCodes.STILL_TOO_LARGE);
+      assert.ok(hugeSentence.errorMessage.includes("Es wurde nichts abgeschnitten und nichts gespeichert."));
+      assert.ok(hugeSentence.metadata.normalizedCharCount > 4500, "die Metadaten belegen die tatsächliche Größe");
+    });
+  });
+
+  await check("V7.9.8: die Verdichtung der neuen Stufen ist deterministisch und idempotent", () => {
+    [docResult.RESULT_CONTRACT_STAGES.RESEARCH, docResult.RESULT_CONTRACT_STAGES.PROJECT_MANAGER].forEach((stage) => {
+      const text = buildStageDoc(stage, { rawTarget: 7584 });
+      const first = docResult.normalizeStageResult(stage, text);
+      const again = docResult.normalizeStageResult(stage, text);
+      assert.strictEqual(first.ok, true);
+      assert.strictEqual(again.normalizedText, first.normalizedText, `${stage}: gleiche Eingabe, gleiches Ergebnis`);
+      const second = docResult.normalizeStageResult(stage, first.normalizedText);
+      assert.strictEqual(second.ok, true);
+      assert.strictEqual(second.normalizedText, first.normalizedText, `${stage}: bereits normalisierte Ausgabe bleibt unverändert`);
+      assert.strictEqual(second.metadata.compactionApplied, false);
+      assert.strictEqual(second.metadata.droppedItemCount, 0);
+      assert.strictEqual(second.metadata.droppedSentenceCount, 0);
+    });
+  });
+
+  await check("V7.9.8: die Verträge sind stufenexklusiv – ein Ergebnis wird niemals mit fremden Abschnittstiteln gespeichert", () => {
+    const researchText = buildStageDoc(docResult.RESULT_CONTRACT_STAGES.RESEARCH, { rawTarget: 7584 });
+    const researchResult = docResult.normalizeStageResult(docResult.RESULT_CONTRACT_STAGES.RESEARCH, researchText);
+    assert.strictEqual(researchResult.ok, true);
+    assert.ok(researchResult.normalizedText.includes("ABSCHNITT 1 KURZFAZIT"));
+    assert.ok(!researchResult.normalizedText.includes("KURZERGEBNIS"), "kein Dokumentationstitel im Rechercheergebnis");
+    assert.ok(!researchResult.normalizedText.includes("GESAMTURTEIL"), "kein PM-Titel im Rechercheergebnis");
+
+    const pmText = buildStageDoc(docResult.RESULT_CONTRACT_STAGES.PROJECT_MANAGER, { rawTarget: 6002 });
+    const pmResult = docResult.normalizeStageResult(docResult.RESULT_CONTRACT_STAGES.PROJECT_MANAGER, pmText);
+    assert.strictEqual(pmResult.ok, true);
+    assert.ok(pmResult.normalizedText.includes("ABSCHNITT 5 EMPFEHLUNG AN JAMAL"));
+    assert.ok(!pmResult.normalizedText.includes("HERKUNFTSHINWEIS"), "kein Dokumentationstitel im PM-Ergebnis");
+
+    // Der eigentliche Ausgangsfehler von V7.9.8: dieselbe Recherchestufe
+    // durch den Dokumentationsvertrag geschickt hätte die Abschnitte
+    // stillschweigend UMBENANNT. Genau deshalb ist der Vertrag pro Stufe
+    // getrennt.
+    const wrongContract = docResult.normalizeDocumentationResult(researchText);
+    assert.strictEqual(wrongContract.ok, true);
+    assert.ok(wrongContract.normalizedText.includes("ABSCHNITT 1 KURZERGEBNIS"));
+    assert.ok(!wrongContract.normalizedText.includes("KURZFAZIT"));
+  });
+
+  await check("V7.9.8: die Dokumentationsstufe bleibt über normalizeStageResult und normalizeDocumentationResult identisch", () => {
+    [buildValidDocWithRawLength(9000), buildValidDocWithRawLength(4400), "Kurz und markerlos.", ""].forEach((text) => {
+      const viaStage = docResult.normalizeStageResult(docResult.RESULT_CONTRACT_STAGES.DOCUMENTATION, text);
+      const viaLegacy = docResult.normalizeDocumentationResult(text);
+      assert.strictEqual(viaStage.ok, viaLegacy.ok);
+      assert.strictEqual(viaStage.normalizedText, viaLegacy.normalizedText);
+      assert.strictEqual(viaStage.reasonCode, viaLegacy.reasonCode);
+      assert.deepStrictEqual(viaStage.metadata, viaLegacy.metadata);
+      assert.strictEqual(viaLegacy.metadata.contractVersion, "V7.8.1-DOC-5-SECTIONS");
+      assert.strictEqual(viaLegacy.metadata.contractStage, "DOCUMENTATION");
+    });
   });
 
   console.log(`pilot-agent-documentation-result.test.js: ${passed} Prüfpunkte erfolgreich`);

@@ -1,5 +1,15 @@
 # MIGRATION PLAN
 
+## V7.9.8 – Ergebnisbudget für die Recherche- und die Projektmanager-Stufe technisch erzwingen: **keine neue Migration**
+
+**Ausdrücklich keine neue Migration, keine neue Spalte, keine neue Tabelle, kein neuer CHECK-Wertebereich.** Migrationen 1–24 bleiben unverändert; die höchste Migrationsversion bleibt **24**. Der bestehende 8.000-Zeichen-CHECK auf dem gespeicherten Ergebnistext bleibt unverändert und wird durch das Stufenbudget von 4.500 Zeichen ohnehin deutlich unterschritten.
+
+Die stufenneutralen Auditmetadaten (`resultNormalization`: angewendeter Stufenvertrag, Vertragsversion, Rohgröße, gespeicherte Größe, Abschnittsgrößen, weggelassene Punkte/Sätze, verworfene Präambel, `compactionApplied`) werden – wie schon in V7.8.1 – ausschließlich in der **bereits bestehenden** Spalte `pilot_agent_execution_runs.resultSummaryJson` geführt. Diese Spalte wird von `authDb.updatePilotAgentExecutionRunTerminal` bereits generisch für jeden Status persistiert und von `rowToAgentExecutionRunView` bereits für jeden Status als `resultSummary` zurückgegeben.
+
+- **Rückwärtskompatibilität:** ein vor V7.9.8 gespeicherter Lauf besitzt `resultSummary.resultNormalization` nicht (`undefined`). Das Cockpit liest in diesem Fall unverändert `documentationNormalization` und zeigt für einen älteren Dokumentationslauf denselben Hinweistext wie bisher; ohne beide Felder erscheint kein Hinweis. Kein Datenbestand muss nachgezogen werden, keine bestehende Kette wird verändert oder fortgeführt.
+- **Vorwärtskompatibilität:** `resultNormalization` wird ausschließlich für Läufe **mit** Stufenvertrag geschrieben, also für die drei Kettenstufen. Für Kettenschritt 2 wird zusätzlich das V7.8.1-Feld `documentationNormalization` unverändert weitergeschrieben, damit bestehende Auswertungen exakt gleich bleiben; Schritt 1 und Schritt 3 tragen dieses Feld ausdrücklich nicht. Der bestehende Phase-7-Einzellauf besitzt keinen Stufenvertrag und behält sein `resultSummary` byteidentisch.
+- **Rollback:** rein codeseitig durch Zurücknehmen der geänderten Dateien. Es gibt keinen Schemaanteil, der zurückgerollt werden müsste; bereits geschriebene `resultNormalization`-Objekte bleiben als unschädliche Zusatzinformation lesbar.
+
 ## V7.8.1 – Ergebnisbudget von Schritt 2 technisch erzwingen: **keine neue Migration**
 
 **Ausdrücklich keine neue Migration, keine neue Spalte, keine neue Tabelle, kein neuer CHECK-Wertebereich.** Migrationen 1–24 bleiben unverändert; die höchste Migrationsversion bleibt **24**.

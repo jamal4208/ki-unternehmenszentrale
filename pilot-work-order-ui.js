@@ -1680,6 +1680,26 @@
       cause: "Das Dokumentationsergebnis blieb auch nach Reduktion über der Grenze.",
       action: "Bitte den Umfang reduzieren und die Stufe neu starten.",
     },
+    // V7.9.8: dieselben beiden Befunde für Schritt 1 und Schritt 3. Ohne
+    // eigene Einträge würden diese Codes kontrolliert auf UNKNOWN abgebildet
+    // (siehe normalizeFailureReasonCode unten) und die Ursache wäre im
+    // Cockpit nicht mehr benennbar.
+    RESEARCH_RESULT_STRUCTURE_INVALID: {
+      cause: "Das Rechercheergebnis hatte nicht die erwartete Struktur.",
+      action: "Bitte Schritt 1 erneut freigeben und auf die geforderte Struktur achten.",
+    },
+    RESEARCH_RESULT_STILL_TOO_LARGE: {
+      cause: "Das Rechercheergebnis blieb auch nach Reduktion über der Grenze.",
+      action: "Bitte den Umfang reduzieren und die Stufe neu starten.",
+    },
+    PM_RESULT_STRUCTURE_INVALID: {
+      cause: "Das Projektmanager-Ergebnis hatte nicht die erwartete Struktur.",
+      action: "Bitte Schritt 3 erneut freigeben und auf die geforderte Struktur achten.",
+    },
+    PM_RESULT_STILL_TOO_LARGE: {
+      cause: "Das Projektmanager-Ergebnis blieb auch nach Reduktion über der Grenze.",
+      action: "Bitte den Umfang reduzieren und die Stufe neu starten.",
+    },
     STILL_TOO_LARGE: {
       cause: "Das Ergebnis überschreitet weiterhin die zulässige Größe.",
       action: "Bitte den Auftrag weiter eingrenzen und dann erneut freigeben.",
@@ -1869,19 +1889,45 @@
     };
   }
 
-  // V7.8.1 ("Ergebnisbudget von Kettenschritt 2 technisch erzwungen"):
-  // fester, ausschließlich informativer Hinweistext. Er wird genau dann
-  // angezeigt, wenn die deterministische Budgetdurchsetzung des
-  // Dokumentationsschritts tatsächlich etwas weggelassen hat (siehe
-  // pilot-agent-documentation-result.js). Eine Reduktion darf niemals
-  // unbemerkt bleiben. Enthält ausschließlich Zählwerte, niemals Fachinhalt.
+  // V7.8.1 ("Ergebnisbudget von Kettenschritt 2 technisch erzwungen") und
+  // V7.9.8 (dasselbe für Schritt 1 und Schritt 3): fester, ausschließlich
+  // informativer Hinweistext. Er wird genau dann angezeigt, wenn die
+  // deterministische Budgetdurchsetzung einer Stufe tatsächlich etwas
+  // weggelassen hat (siehe pilot-agent-documentation-result.js). Eine
+  // Reduktion darf niemals unbemerkt bleiben. Enthält ausschließlich
+  // Zählwerte, niemals Fachinhalt, niemals die Rohantwort und niemals einen
+  // weggelassenen Inhalt.
+  //
+  // Die Stufenbezeichnung stammt ausschließlich aus dieser festen Tabelle.
+  // Ein älterer Lauf ohne contractStage (alle Läufe vor V7.9.8 waren
+  // ausnahmslos Dokumentationsläufe) behält deshalb unverändert seinen
+  // bisherigen Wortlaut.
+  var RESULT_CONTRACT_STAGE_RESULT_LABELS = {
+    RESEARCH: "Rechercheergebnis",
+    DOCUMENTATION: "Dokumentationsergebnis",
+    PROJECT_MANAGER: "Projektmanager-Ergebnis",
+  };
+
+  function compactionResultLabel(normalization) {
+    var stage = isNonEmptyString(normalization.contractStage) ? normalization.contractStage.trim() : "";
+    return RESULT_CONTRACT_STAGE_RESULT_LABELS[stage] || RESULT_CONTRACT_STAGE_RESULT_LABELS.DOCUMENTATION;
+  }
+
   function documentationCompactionNoticeText(normalization) {
     var droppedItems = typeof normalization.droppedItemCount === "number" ? normalization.droppedItemCount : 0;
     var droppedSentences = typeof normalization.droppedSentenceCount === "number" ? normalization.droppedSentenceCount : 0;
     var rawChars = typeof normalization.rawCharCount === "number" ? normalization.rawCharCount : 0;
-    var storedChars = typeof normalization.normalizedCharCount === "number" ? normalization.normalizedCharCount : 0;
+    // V7.9.8 liefert storedCharCount; ältere Läufe kennen ausschließlich
+    // normalizedCharCount. Beide bezeichnen dieselbe gespeicherte Größe.
+    var storedChars = typeof normalization.storedCharCount === "number"
+      ? normalization.storedCharCount
+      : typeof normalization.normalizedCharCount === "number"
+        ? normalization.normalizedCharCount
+        : 0;
     return (
-      "Das Dokumentationsergebnis wurde regelbasiert auf die verbindliche Ergebnisgröße reduziert (" +
+      "Das " +
+      compactionResultLabel(normalization) +
+      " wurde regelbasiert auf die verbindliche Ergebnisgröße reduziert (" +
       droppedItems +
       " Punkte, " +
       droppedSentences +
@@ -1895,7 +1941,10 @@
 
   function documentationCompactionNoticeHtml(run) {
     var summary = run && run.resultSummary;
-    var normalization = summary && summary.documentationNormalization;
+    // V7.9.8: `resultNormalization` ist der stufenneutrale, kanonische Name;
+    // `documentationNormalization` bleibt für Dokumentationsläufe (auch
+    // ältere) unverändert lesbar.
+    var normalization = summary && (summary.resultNormalization || summary.documentationNormalization);
     if (!normalization || normalization.compactionApplied !== true) return "";
     return '<br><span class="pilot-work-order-action-error">' + escapeHtml(documentationCompactionNoticeText(normalization)) + "</span>";
   }

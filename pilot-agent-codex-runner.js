@@ -76,6 +76,12 @@ function runnerPhaseForReasonCode(reasonCode) {
     // jede andere Ergebnisprüfung (kein neuer Phasenbegriff nötig).
     case "DOCUMENTATION_RESULT_STRUCTURE_INVALID":
     case "DOCUMENTATION_RESULT_STILL_TOO_LARGE":
+    // V7.9.8: dieselben beiden Befunde für die Recherche- und die
+    // Projektmanagerstufe – ebenfalls reine Ergebnisprüfung.
+    case "RESEARCH_RESULT_STRUCTURE_INVALID":
+    case "RESEARCH_RESULT_STILL_TOO_LARGE":
+    case "PM_RESULT_STRUCTURE_INVALID":
+    case "PM_RESULT_STILL_TOO_LARGE":
       return "RESULT_VALIDATION";
     case "SPAWN_ERROR":
     case "TIMEOUT":
@@ -240,6 +246,17 @@ if (!Number.isFinite(MAX_PREDECESSOR_CONTEXT_CHARS) || MAX_PREDECESSOR_CONTEXT_C
 }
 const DOCUMENTATION_AGENT_KEY = "documentation-agent";
 const DOCUMENTATION_PILOT_ROLE = "DOKUMENTATION";
+const RESULT_CONTRACT_STAGES = documentationResult.RESULT_CONTRACT_STAGES;
+// V7.9.8: die beiden neuen Stufenverträge werden AUSDRÜCKLICH angefordert
+// (Eingabefeld `resultContractStage`, gesetzt aus dem jeweiligen
+// Kettenpreset in pilot-agent-execution-service.js) und NICHT aus
+// agentKey/pilotRole abgeleitet. Grund: agentKey "review-agent" mit
+// pilotRole "RECHERCHE_ANALYSE" wird zusätzlich vom bestehenden
+// Phase-7-Einzellauf-Preset "codex-analyze-pilot-structure" verwendet. Eine
+// Ableitung aus der Rolle hätte diesen bestehenden Einzellauf ungefragt
+// mitverändert; so bleibt er byteidentisch. Die Dokumentationsstufe behält
+// unverändert ihre V7.8.1-Erkennung über agentKey/pilotRole.
+const OPT_IN_RESULT_CONTRACT_STAGES = Object.freeze([RESULT_CONTRACT_STAGES.RESEARCH, RESULT_CONTRACT_STAGES.PROJECT_MANAGER]);
 // V7.8.1: die Zielgröße im Prompt ist jetzt zahlengleich mit dem technisch
 // erzwungenen Vertrag (siehe pilot-agent-documentation-result.js). Die
 // vorherigen Werte (3800-4300 Zeichen Zielgröße, 5000 Zeichen "absolute
@@ -251,12 +268,21 @@ const DOCUMENTATION_PILOT_ROLE = "DOKUMENTATION";
 const DOCUMENTATION_TARGET_RESULT_MIN_CHARS = 2200;
 const DOCUMENTATION_TARGET_RESULT_MAX_CHARS = 3000;
 const DOCUMENTATION_PROMPT_ITEM_MAX_CHARS = 300;
-const DOCUMENTATION_RESULT_HARD_MAX_CHARS = codexReadOnlyAdapter.MAX_READ_ONLY_RESULT_CHARS;
+// Zweite, unabhängige Bodenschwelle für JEDE Stufe mit Ergebnisvertrag –
+// exakt die unveränderte technische Grenze (MAX_READ_ONLY_RESULT_CHARS).
+const STAGE_RESULT_HARD_MAX_CHARS = codexReadOnlyAdapter.MAX_READ_ONLY_RESULT_CHARS;
 const RESULT_TOO_LARGE_REASON_CODE =
   (codexReadOnlyAdapter.CODEX_READ_ONLY_REASON_CODES && codexReadOnlyAdapter.CODEX_READ_ONLY_REASON_CODES.RESULT_TOO_LARGE) ||
   "RESULT_TOO_LARGE";
-if (!Number.isFinite(DOCUMENTATION_RESULT_HARD_MAX_CHARS) || DOCUMENTATION_RESULT_HARD_MAX_CHARS < 1) {
-  throw new Error("pilot-agent-codex-runner: DOCUMENTATION_RESULT_HARD_MAX_CHARS ist ungültig.");
+if (!Number.isFinite(STAGE_RESULT_HARD_MAX_CHARS) || STAGE_RESULT_HARD_MAX_CHARS < 1) {
+  throw new Error("pilot-agent-codex-runner: STAGE_RESULT_HARD_MAX_CHARS ist ungültig.");
+}
+// Die verbindliche gespeicherte Ergebnisgröße jeder Stufe MUSS strikt unter
+// der unveränderten technischen Grenze liegen. Ein Konfigurationsfehler
+// (z. B. ein versehentlich angehobenes Stufenbudget) schlägt dadurch sofort
+// beim Laden des Moduls fehl, nicht erst im Praxislauf.
+if (documentationResult.STAGE_RESULT_NORMALIZED_MAX_CHARS >= STAGE_RESULT_HARD_MAX_CHARS) {
+  throw new Error("pilot-agent-codex-runner: das gespeicherte Stufenbudget muss strikt unter der technischen Grenze liegen.");
 }
 
 // Die beiden einzigen "echten" Marker-Literale des gesamten Moduls – jede
@@ -415,35 +441,89 @@ function isDocumentationStage({ agentKey, pilotRole }) {
   return agentKey === DOCUMENTATION_AGENT_KEY || pilotRole === DOCUMENTATION_PILOT_ROLE;
 }
 
-// V7.8.1: der Ausgabevertrag der Dokumentationsstufe ist jetzt
-// MASCHINENLESBAR. Jeder Abschnitt beginnt mit einer eigenen Markerzeile
-// "ABSCHNITT <Nr> <Titel>"; genau diese Marker wertet
-// pilot-agent-documentation-result.js#parseDocumentationSections aus, um die
+// V7.9.8: welcher Stufenvertrag gilt für diesen Lauf? Rückgabe null bedeutet
+// "kein Ergebnisvertrag" – dann bleibt der Rohtext byteidentisch und es wird
+// nichts geprüft (unveränderter Zustand für den Phase-7-Einzellauf und jeden
+// sonstigen Codex-Lauf).
+function resolveResultContractStage({ agentKey, pilotRole, resultContractStage }) {
+  if (isDocumentationStage({ agentKey, pilotRole })) return RESULT_CONTRACT_STAGES.DOCUMENTATION;
+  if (OPT_IN_RESULT_CONTRACT_STAGES.includes(resultContractStage)) return resultContractStage;
+  return null;
+}
+
+// V7.8.1 (Schritt 2) und V7.9.8 (Schritt 1 und 3): der Ausgabevertrag jeder
+// Stufe ist MASCHINENLESBAR. Jeder Abschnitt beginnt mit einer eigenen
+// Markerzeile "ABSCHNITT <Nr> <Titel>"; genau diese Marker wertet
+// pilot-agent-documentation-result.js#parseStageSections aus, um die
 // Ergebnisgröße anschließend deterministisch und ohne Schnitt innerhalb eines
-// Satzes durchzusetzen.
-function buildDocumentationOutputBudgetLines({ agentKey, pilotRole }) {
-  if (!isDocumentationStage({ agentKey, pilotRole })) return [];
+// Satzes durchzusetzen. Die Markerzeilen und Abschnittstitel im Prompt sind
+// zahlen- und wortgleich mit den Verträgen dort.
+//
+// Für jede Stufe gilt derselbe Schlussteil (STAGE_OUTPUT_BUDGET_TAIL_LINES) –
+// er ist bewusst EINMAL formuliert, damit die drei Verträge nicht
+// auseinanderdriften. Der Wortlaut der Dokumentationsstufe bleibt gegenüber
+// V7.8.1 unverändert.
+const STAGE_OUTPUT_BUDGET_TAIL_LINES = Object.freeze([
+  "- Die Zentrale erzwingt die Ergebnisgröße technisch: überzählige Punkte und Sätze werden regelbasiert vollständig weggelassen, niemals innerhalb eines Satzes gekürzt. Ein zu ausführliches Ergebnis kostet dich also eigenen Inhalt – priorisiere die entscheidungsrelevanten Befunde selbst.",
+  "- Beende jeden Satz vollständig. Höre niemals mitten im Satz auf.",
+  "- Wiederhole weder den vollständigen Kernauftrag noch den vollständigen Vorgängertext.",
+  "- Keine langen Einleitungen und keine doppelte Beschreibung desselben Risikos.",
+  "- Keine zusätzlichen Überschriften, keine Anhänge, keine Tabellen.",
+  "- Keine Meta-Erklärungen über deinen eigenen Arbeitsprozess.",
+]);
+
+const STAGE_OUTPUT_BUDGET_MARKER_INTRO_LINE =
+  "- Gib ausschließlich fünf Abschnitte aus. Jeder Abschnitt beginnt in einer EIGENEN Zeile mit exakt dieser Markerzeile:";
+
+const STAGE_PROMPT_SPECS = Object.freeze({
+  [RESULT_CONTRACT_STAGES.RESEARCH]: Object.freeze({
+    headlineLine: "Verbindliche Ausgabeform für diese Recherchestufe (Schritt 1):",
+    sectionLimitLines: Object.freeze([
+      "- Abschnitt 1: maximal 3 kurze Sätze mit dem Kurzfazit.",
+      "- Abschnitt 2: maximal 4 nummerierte, jeweils belegte Kernbefunde.",
+      "- Abschnitt 3: maximal 3 nummerierte Reibungsverluste.",
+      "- Abschnitt 4: genau 3 nummerierte Verbesserungen, je Verbesserung Maßnahme, Nutzen und Priorität.",
+      "- Abschnitt 5: maximal 2 Sätze zu Grenzen und Unsicherheiten deiner Analyse.",
+    ]),
+  }),
+  [RESULT_CONTRACT_STAGES.DOCUMENTATION]: Object.freeze({
+    headlineLine: "Verbindliche Ausgabeform für diese Dokumentationsstufe (Schritt 2):",
+    sectionLimitLines: Object.freeze([
+      "- Abschnitt 1: maximal 3 kurze Sätze.",
+      "- Abschnitt 2: maximal 4 nummerierte Kernbefunde.",
+      "- Abschnitt 3: maximal 3 nummerierte offene Punkte oder Grenzen.",
+      "- Abschnitt 4: genau 3 nummerierte Empfehlungen, je Empfehlung Maßnahme, Nutzen und Priorität.",
+      "- Abschnitt 5: maximal 2 Sätze.",
+    ]),
+  }),
+  [RESULT_CONTRACT_STAGES.PROJECT_MANAGER]: Object.freeze({
+    headlineLine: "Verbindliche Ausgabeform für diese Projektmanagerstufe (Schritt 3):",
+    sectionLimitLines: Object.freeze([
+      "- Abschnitt 1: maximal 3 kurze Sätze mit dem Gesamturteil.",
+      "- Abschnitt 2: maximal 3 nummerierte, jeweils belegte Stärken.",
+      "- Abschnitt 3: maximal 3 nummerierte, jeweils belegte Schwächen.",
+      "- Abschnitt 4: genau 3 nummerierte, priorisierte Entscheidungen.",
+      "- Abschnitt 5: maximal 2 Sätze mit deiner Empfehlung an Jamal. Erteile darin keine Freigabe – die Entscheidung trifft ausschließlich Jamal.",
+    ]),
+  }),
+});
+
+function buildStageMarkerLines(stage) {
+  const contract = documentationResult.getStageContract(stage);
+  return contract.sectionNumbers.map((sectionNumber) => `ABSCHNITT ${sectionNumber} ${contract.sectionRules[sectionNumber].title}`);
+}
+
+function buildStageOutputBudgetLines(stage) {
+  const spec = stage ? STAGE_PROMPT_SPECS[stage] : null;
+  if (!spec) return [];
   return [
-    "Verbindliche Ausgabeform für diese Dokumentationsstufe (Schritt 2):",
-    "- Gib ausschließlich fünf Abschnitte aus. Jeder Abschnitt beginnt in einer EIGENEN Zeile mit exakt dieser Markerzeile:",
-    "ABSCHNITT 1 KURZERGEBNIS",
-    "ABSCHNITT 2 BESTAETIGTE KERNBEFUNDE",
-    "ABSCHNITT 3 OFFENE PUNKTE UND GRENZEN",
-    "ABSCHNITT 4 PRIORISIERTE EMPFEHLUNGEN",
-    "ABSCHNITT 5 HERKUNFTSHINWEIS",
-    "- Abschnitt 1: maximal 3 kurze Sätze.",
-    "- Abschnitt 2: maximal 4 nummerierte Kernbefunde.",
-    "- Abschnitt 3: maximal 3 nummerierte offene Punkte oder Grenzen.",
-    "- Abschnitt 4: genau 3 nummerierte Empfehlungen, je Empfehlung Maßnahme, Nutzen und Priorität.",
-    "- Abschnitt 5: maximal 2 Sätze.",
+    spec.headlineLine,
+    STAGE_OUTPUT_BUDGET_MARKER_INTRO_LINE,
+    ...buildStageMarkerLines(stage),
+    ...spec.sectionLimitLines,
     `- Maximal ${DOCUMENTATION_PROMPT_ITEM_MAX_CHARS} Zeichen je nummeriertem Punkt.`,
     `- Zielgröße des gesamten Ergebnisses: ${DOCUMENTATION_TARGET_RESULT_MIN_CHARS}-${DOCUMENTATION_TARGET_RESULT_MAX_CHARS} Zeichen.`,
-    "- Die Zentrale erzwingt die Ergebnisgröße technisch: überzählige Punkte und Sätze werden regelbasiert vollständig weggelassen, niemals innerhalb eines Satzes gekürzt. Ein zu ausführliches Ergebnis kostet dich also eigenen Inhalt – priorisiere die entscheidungsrelevanten Befunde selbst.",
-    "- Beende jeden Satz vollständig. Höre niemals mitten im Satz auf.",
-    "- Wiederhole weder den vollständigen Kernauftrag noch den vollständigen Vorgängertext.",
-    "- Keine langen Einleitungen und keine doppelte Beschreibung desselben Risikos.",
-    "- Keine zusätzlichen Überschriften, keine Anhänge, keine Tabellen.",
-    "- Keine Meta-Erklärungen über deinen eigenen Arbeitsprozess.",
+    ...STAGE_OUTPUT_BUDGET_TAIL_LINES,
   ];
 }
 
@@ -461,10 +541,12 @@ function buildAgentSpecificCodexPromptEnvelope({
   expectedResultFormat,
   predecessorContext,
   mandate,
+  resultContractStage,
 }) {
   const mandateBlock = buildMandateBlock(mandate);
   const predecessorDetails = buildPredecessorContextDetails(predecessorContext);
-  const documentationOutputBudgetLines = buildDocumentationOutputBudgetLines({ agentKey, pilotRole });
+  const contractStage = resolveResultContractStage({ agentKey, pilotRole, resultContractStage });
+  const stageOutputBudgetLines = buildStageOutputBudgetLines(contractStage);
   const prompt = [
     `Du bist der bestehende, bereits im kanonischen Agentenregister eingetragene "${agentDisplayName}" (technische ID: ${agentKey}).`,
     `Fachliche Rolle laut Register: ${agentRole}.`,
@@ -488,7 +570,7 @@ function buildAgentSpecificCodexPromptEnvelope({
     "- Liefere dein Ergebnis ausschließlich als Textantwort. Du hast keine Möglichkeit, etwas anzuwenden oder zu speichern " +
       "– jeder Versuch, eine Datei zu ändern, wird von der Zentrale unabhängig geprüft und verworfen.",
     ...(predecessorDetails ? ["", predecessorDetails.block] : []),
-    ...(documentationOutputBudgetLines.length > 0 ? ["", ...documentationOutputBudgetLines] : []),
+    ...(stageOutputBudgetLines.length > 0 ? ["", ...stageOutputBudgetLines] : []),
     "",
     `Gewünschtes Ergebnisformat: ${expectedResultFormat}`,
     "Qualitätskriterien: sachlich, konkret, ausschließlich auf Basis der tatsächlich gelesenen Dateien – keine Vermutung " +
@@ -499,6 +581,7 @@ function buildAgentSpecificCodexPromptEnvelope({
     prompt,
     promptDigest: sha256Hex(prompt),
     promptCharCount: prompt.length,
+    resultContractStage: contractStage,
     mandateDigest: mandateBlock ? mandateBlock.mandateDigest : null,
     mandateOrderRevision: mandateBlock ? mandateBlock.mandateOrderRevision : null,
     predecessorCharCount: predecessorDetails ? predecessorDetails.predecessorCharCount : 0,
@@ -521,6 +604,7 @@ function buildAgentSpecificCodexPrompt({
   expectedResultFormat,
   predecessorContext,
   mandate,
+  resultContractStage,
 }) {
   return buildAgentSpecificCodexPromptEnvelope({
     agentKey,
@@ -536,6 +620,7 @@ function buildAgentSpecificCodexPrompt({
     expectedResultFormat,
     predecessorContext,
     mandate,
+    resultContractStage,
   }).prompt;
 }
 
@@ -566,6 +651,7 @@ async function runPilotAgentCodexAnalysisTask(input = {}) {
     shouldAbort,
     predecessorContext,
     mandate,
+    resultContractStage,
   } = input;
 
   if (typeof repoRoot !== "string" || !repoRoot) {
@@ -645,7 +731,12 @@ async function runPilotAgentCodexAnalysisTask(input = {}) {
       expectedResultFormat,
       predecessorContext,
       mandate,
+      resultContractStage,
     });
+    // Genau EINE Auflösung des Stufenvertrags pro Lauf: Prompt, Roh-Annahme-
+    // grenze, Verdichtung und Auditmetadaten können dadurch nicht
+    // auseinanderlaufen.
+    const contractStage = promptEnvelope.resultContractStage;
 
     const availability =
       input.codexAvailability ||
@@ -661,18 +752,18 @@ async function runPilotAgentCodexAnalysisTask(input = {}) {
       forbiddenRoots: [repoRoot],
       attemptTimeoutMs,
       shouldAbort,
-      // V7.8.1: ausschließlich für die Dokumentationsstufe wird die
-      // ROH-Annahmegrenze des bereits bestehenden, bislang ungenutzten
-      // Adapterparameters gesetzt (execution-codex-adapter-readonly.js#
-      // runCodexReadOnlyAnalysis kennt `maxResultChars` bereits; der Adapter
-      // wird NICHT verändert). Ohne diese Anhebung würde eine zu ausführliche
-      // Antwort bereits im Adapter verworfen und könnte hier gar nicht
-      // regelbasiert auf die verbindliche Größe gebracht werden. Für Schritt 1
-      // und Schritt 3 bleibt der Parameter bewusst ungesetzt – dort gilt
-      // unverändert MAX_READ_ONLY_RESULT_CHARS (6000).
-      ...(isDocumentationStage({ agentKey, pilotRole })
-        ? { maxResultChars: documentationResult.DOCUMENTATION_RAW_MAX_CHARS }
-        : {}),
+      // V7.8.1 (Schritt 2) / V7.9.8 (Schritt 1 und 3): für eine Stufe MIT
+      // Ergebnisvertrag wird die ROH-Annahmegrenze des bereits bestehenden,
+      // bislang ungenutzten Adapterparameters gesetzt
+      // (execution-codex-adapter-readonly.js#runCodexReadOnlyAnalysis kennt
+      // `maxResultChars` bereits; der Adapter wird NICHT verändert). Ohne
+      // diese Anhebung würde eine zu ausführliche Antwort bereits im Adapter
+      // verworfen (genau das ist im echten Praxislauf mit 7584 Zeichen in
+      // Schritt 1 passiert) und könnte hier gar nicht regelbasiert auf die
+      // verbindliche Größe gebracht werden. Ohne Stufenvertrag bleibt der
+      // Parameter ungesetzt – dort gilt unverändert
+      // MAX_READ_ONLY_RESULT_CHARS (6000).
+      ...(contractStage ? { maxResultChars: documentationResult.getStageContract(contractStage).rawMaxChars } : {}),
       execFileImpl: input.execFileImpl,
       realpathSyncImpl: input.realpathSyncImpl,
       mkdtempSyncImpl: input.mkdtempSyncImpl,
@@ -812,12 +903,12 @@ async function runPilotAgentCodexAnalysisTask(input = {}) {
     }
 
     // -------------------------------------------------------------------
-    // V7.8.1: deterministische Durchsetzung des Ergebnisbudgets – AUSSCHLIESSLICH
-    // für die Dokumentationsstufe (Kettenschritt 2). Für Schritt 1 und Schritt 3
-    // bleibt effectiveResultText byteidentisch der Rohtext, es wird nichts
-    // geprüft und nichts verändert.
+    // V7.8.1 (Schritt 2) / V7.9.8 (Schritt 1 und 3): deterministische
+    // Durchsetzung des Ergebnisbudgets für jede Stufe MIT Ergebnisvertrag.
+    // Ohne Stufenvertrag bleibt effectiveResultText byteidentisch der
+    // Rohtext, es wird nichts geprüft und nichts verändert.
     // -------------------------------------------------------------------
-    const rejectionEnvelope = (reasonCode, errorMessage, documentationNormalization) => ({
+    const rejectionEnvelope = (reasonCode, errorMessage, resultNormalization) => ({
       ok: false,
       failed: true,
       cancelled: false,
@@ -825,7 +916,10 @@ async function runPilotAgentCodexAnalysisTask(input = {}) {
       errorMessage,
       diagnostics: buildDiagnosticsForReasonCode(reasonCode),
       resultText: null,
-      documentationNormalization: documentationNormalization || null,
+      resultNormalization: resultNormalization || null,
+      documentationNormalization:
+        contractStage === RESULT_CONTRACT_STAGES.DOCUMENTATION ? resultNormalization || null : null,
+      resultContractStage: contractStage,
       workspaceId: workspace.workspaceId,
       runnerVersion: availability && availability.version ? availability.version : null,
       modelLabel: availability && availability.authLabel ? `Codex (${availability.authLabel})` : "Codex",
@@ -839,32 +933,28 @@ async function runPilotAgentCodexAnalysisTask(input = {}) {
     });
 
     let effectiveResultText = adapterResult.resultText;
-    let documentationNormalization = null;
-    if (isDocumentationStage({ agentKey, pilotRole })) {
-      const normalization = documentationResult.normalizeDocumentationResult(adapterResult.resultText);
-      documentationNormalization = normalization.metadata;
+    let resultNormalization = null;
+    if (contractStage) {
+      const normalization = documentationResult.normalizeStageResult(contractStage, adapterResult.resultText);
+      resultNormalization = normalization.metadata;
       if (!normalization.ok) {
-        return rejectionEnvelope(normalization.reasonCode, normalization.errorMessage, documentationNormalization);
+        return rejectionEnvelope(normalization.reasonCode, normalization.errorMessage, resultNormalization);
       }
       effectiveResultText = normalization.normalizedText;
     }
 
-    // Zusätzlicher Guard nur für den Dokumentationsschritt, jetzt auf dem
+    // Zusätzlicher Guard für jede Stufe mit Ergebnisvertrag, jetzt auf dem
     // TATSÄCHLICH zu speichernden Text: selbst wenn die Normalisierung
     // oberhalb einmal fehlerhaft wäre oder ein fehlerhaftes Testdoppel
     // fälschlich ok=true meldet, wird ein Ergebnis oberhalb der sicheren
     // 6000-Zeichen-Grenze niemals als erfolgreich akzeptiert. Diese Grenze
     // (MAX_READ_ONLY_RESULT_CHARS) bleibt unverändert.
-    if (
-      isDocumentationStage({ agentKey, pilotRole }) &&
-      typeof effectiveResultText === "string" &&
-      effectiveResultText.length > DOCUMENTATION_RESULT_HARD_MAX_CHARS
-    ) {
+    if (contractStage && typeof effectiveResultText === "string" && effectiveResultText.length > STAGE_RESULT_HARD_MAX_CHARS) {
       return rejectionEnvelope(
         RESULT_TOO_LARGE_REASON_CODE,
         `Codex-Antwort überschreitet die maximale sichere Größe (${effectiveResultText.length} von maximal ` +
-          `${DOCUMENTATION_RESULT_HARD_MAX_CHARS} Zeichen).`,
-        documentationNormalization,
+          `${STAGE_RESULT_HARD_MAX_CHARS} Zeichen).`,
+        resultNormalization,
       );
     }
 
@@ -875,11 +965,15 @@ async function runPilotAgentCodexAnalysisTask(input = {}) {
       timedOut: false,
       errorMessage: null,
       resultText: effectiveResultText,
-      // V7.8.1: Auditmetadaten der deterministischen Budgetdurchsetzung.
-      // Ausschließlich für die Dokumentationsstufe gesetzt (sonst null),
-      // wird von pilot-agent-execution-service.js additiv in
-      // resultSummaryJson persistiert – keine neue Spalte, keine Migration.
-      documentationNormalization,
+      // Auditmetadaten der deterministischen Budgetdurchsetzung. V7.9.8:
+      // `resultNormalization` gilt für JEDE Stufe mit Ergebnisvertrag,
+      // `documentationNormalization` bleibt der unveränderte V7.8.1-Name der
+      // Dokumentationsstufe (sonst null). Beide werden von
+      // pilot-agent-execution-service.js additiv in resultSummaryJson
+      // persistiert – keine neue Spalte, keine Migration.
+      resultNormalization,
+      documentationNormalization: contractStage === RESULT_CONTRACT_STAGES.DOCUMENTATION ? resultNormalization : null,
+      resultContractStage: contractStage,
       secretRedactionApplied: Boolean(adapterResult.secretRedactionApplied),
       // Korrektur 2: fester, für Run-Metadaten/Cockpit gedachter Hinweistext
       // – nur gesetzt, wenn tatsächlich redigiert wurde (siehe
@@ -914,6 +1008,11 @@ module.exports = {
   buildPredecessorContextDetails,
   buildPredecessorContextBlock,
   MAX_PREDECESSOR_CONTEXT_CHARS,
+  // V7.9.8 – Stufenverträge für Schritt 1/2/3.
+  RESULT_CONTRACT_STAGES,
+  STAGE_RESULT_HARD_MAX_CHARS,
+  resolveResultContractStage,
+  buildStageOutputBudgetLines,
   PREDECESSOR_BEGIN_MARKER,
   PREDECESSOR_END_MARKER,
   // V7.7.0 Korrektur 1: ausschließlich für gezielte Delimiter-Härtungstests

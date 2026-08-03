@@ -104,6 +104,79 @@ function buildDocumentationResultText(targetRawChars) {
   return text;
 }
 
+// V7.9.8: dieselbe Helferlogik für die beiden neuen Stufenverträge. Die
+// Markerzeilen werden bewusst aus dem PRODUKTIVMODUL gelesen, damit ein
+// stiller Vertragsdrift im Test sofort auffällt.
+function stageMarkerLines(stage) {
+  const contract = docResult.getStageContract(stage);
+  return contract.sectionNumbers.map((sectionNumber) => `ABSCHNITT ${sectionNumber} ${contract.sectionRules[sectionNumber].title}`);
+}
+const RESEARCH_MARKER_LINES = stageMarkerLines(docResult.RESULT_CONTRACT_STAGES.RESEARCH);
+const PM_MARKER_LINES = stageMarkerLines(docResult.RESULT_CONTRACT_STAGES.PROJECT_MANAGER);
+
+function buildStageResultText(markerLines, targetRawChars) {
+  const base = [
+    markerLines[0],
+    "Kurzfassung liegt vor. Der Befund ist belegt.",
+    "",
+    markerLines[1],
+    "1. Erster belegter Punkt ist nachvollziehbar.",
+    "2. Zweiter belegter Punkt ist nachvollziehbar.",
+    "3. Dritter belegter Punkt ist nachvollziehbar.",
+    "",
+    markerLines[2],
+    "1. Ein Punkt bleibt bestehen.",
+    "2. Ein zweiter Punkt bleibt bestehen.",
+    "",
+    markerLines[3],
+    "1. Erster Vorschlag mit Nutzen und hoher Priorität.",
+    "2. Zweiter Vorschlag mit Nutzen und mittlerer Priorität.",
+    "3. Dritter Vorschlag mit Nutzen und niedriger Priorität.",
+    "",
+    markerLines[4],
+    "Grundlage ist ausschließlich das tatsächlich gelesene Material.",
+  ].join("\n");
+  if (!targetRawChars) return base;
+  const marker = "\n4. ";
+  const fillerLength = targetRawChars - base.length - marker.length - 1;
+  assert.ok(fillerLength > 0, `Zielrohgröße ${targetRawChars} ist zu klein für den Basistext`);
+  const insertAt = base.indexOf(`\n\n${markerLines[2]}`);
+  const text = `${base.slice(0, insertAt)}${marker}${"y".repeat(fillerLength)}.${base.slice(insertAt)}`;
+  assert.strictEqual(text.length, targetRawChars, "Testhelfer muss die Rohgröße exakt treffen");
+  return text;
+}
+
+// Ein Kettenlauf der Recherche- bzw. PM-Stufe: der Stufenvertrag wird
+// AUSDRÜCKLICH über resultContractStage angefordert – genau so, wie
+// pilot-agent-execution-service.js ihn aus dem Kettenpreset setzt.
+function researchRunInput(overrides = {}) {
+  return documentationRunInput({
+    agentKey: "review-agent",
+    agentDisplayName: "Review-Agent",
+    agentRole: "Führt read-only Qualitätsreview durch",
+    pilotRole: "RECHERCHE_ANALYSE",
+    pilotRoleLabel: "Recherche/Analyse",
+    taskTitle: "Kettenschritt 1 – Recherche",
+    executionRunId: "run-research",
+    resultContractStage: docResult.RESULT_CONTRACT_STAGES.RESEARCH,
+    ...overrides,
+  });
+}
+
+function pmRunInput(overrides = {}) {
+  return documentationRunInput({
+    agentKey: "orchestrator-agent",
+    agentDisplayName: "Projektmanager-Agent",
+    agentRole: "Koordiniert Abschlussbewertung",
+    pilotRole: "PROJEKTMANAGER",
+    pilotRoleLabel: "Projektmanagement",
+    taskTitle: "Kettenschritt 3 – PM-Bewertung",
+    executionRunId: "run-pm",
+    resultContractStage: docResult.RESULT_CONTRACT_STAGES.PROJECT_MANAGER,
+    ...overrides,
+  });
+}
+
 function documentationRunInput(overrides = {}) {
   return {
     repoRoot: "/tmp/fake-repo",
@@ -560,7 +633,7 @@ async function run() {
     assert.strictEqual(docResult.DOCUMENTATION_RAW_MAX_CHARS, 12000);
   });
 
-  await check("V7.8.1: maxResultChars wird ausschließlich für die Dokumentationsstufe an den Adapter übergeben", async () => {
+  await check("V7.8.1/V7.9.8: maxResultChars wird ausschließlich für Läufe MIT Stufenvertrag an den Adapter übergeben", async () => {
     const docAdapter = makeFakeCodexAdapter({ resultText: buildDocumentationResultText() });
     await codexRunner.runPilotAgentCodexAnalysisTask(
       documentationRunInput({
@@ -572,35 +645,45 @@ async function run() {
     assert.strictEqual(docAdapter.calls[0].maxResultChars, docResult.DOCUMENTATION_RAW_MAX_CHARS);
     assert.strictEqual(docAdapter.calls[0].maxResultChars, 12000);
 
-    // Schritt 1 und Schritt 3 bleiben unverändert: dort wird der Parameter
-    // NICHT gesetzt, es gilt weiterhin MAX_READ_ONLY_RESULT_CHARS (6000).
-    const researchAdapter = makeFakeCodexAdapter({ resultText: "Kurzbefund: Recherche." });
+    // V7.9.8: Schritt 1 und Schritt 3 erhalten jetzt dasselbe Rohbudget –
+    // aber ausschließlich, wenn der Stufenvertrag ausdrücklich angefordert
+    // wurde (resultContractStage aus dem Kettenpreset).
+    const researchAdapter = makeFakeCodexAdapter({ resultText: buildStageResultText(RESEARCH_MARKER_LINES) });
+    await codexRunner.runPilotAgentCodexAnalysisTask(
+      researchRunInput({
+        executionRunId: "run-research-budget",
+        codexAdapterImpl: researchAdapter,
+        workspaceModuleImpl: makeFakeWorkspaceModule({ workspaceId: "ws-research-budget" }),
+      }),
+    );
+    assert.strictEqual(researchAdapter.calls[0].maxResultChars, docResult.STAGE_RESULT_RAW_MAX_CHARS);
+
+    const pmAdapter = makeFakeCodexAdapter({ resultText: buildStageResultText(PM_MARKER_LINES) });
+    await codexRunner.runPilotAgentCodexAnalysisTask(
+      pmRunInput({
+        executionRunId: "run-pm-budget",
+        codexAdapterImpl: pmAdapter,
+        workspaceModuleImpl: makeFakeWorkspaceModule({ workspaceId: "ws-pm-budget" }),
+      }),
+    );
+    assert.strictEqual(pmAdapter.calls[0].maxResultChars, docResult.STAGE_RESULT_RAW_MAX_CHARS);
+
+    // Ein Lauf OHNE Stufenvertrag (bestehender Phase-7-Einzellauf, dieselbe
+    // Rolle/derselbe agentKey wie Schritt 1) bleibt byteidentisch
+    // unverändert: kein Parameter, weiterhin die Adaptergrenze von 6000.
+    const singleRunAdapter = makeFakeCodexAdapter({ resultText: "Kurzbefund: Einzellauf." });
     await codexRunner.runPilotAgentCodexAnalysisTask(
       documentationRunInput({
         agentKey: "review-agent",
         agentDisplayName: "Review-Agent",
         pilotRole: "RECHERCHE_ANALYSE",
         pilotRoleLabel: "Recherche/Analyse",
-        executionRunId: "run-research-budget",
-        codexAdapterImpl: researchAdapter,
-        workspaceModuleImpl: makeFakeWorkspaceModule({ workspaceId: "ws-research-budget" }),
+        executionRunId: "run-phase7-single",
+        codexAdapterImpl: singleRunAdapter,
+        workspaceModuleImpl: makeFakeWorkspaceModule({ workspaceId: "ws-phase7-single" }),
       }),
     );
-    assert.strictEqual(researchAdapter.calls[0].maxResultChars, undefined);
-
-    const pmAdapter = makeFakeCodexAdapter({ resultText: "Gesamturteil: konsistent." });
-    await codexRunner.runPilotAgentCodexAnalysisTask(
-      documentationRunInput({
-        agentKey: "orchestrator-agent",
-        agentDisplayName: "Projektmanager-Agent",
-        pilotRole: "PROJEKTMANAGER",
-        pilotRoleLabel: "Projektmanagement",
-        executionRunId: "run-pm-budget",
-        codexAdapterImpl: pmAdapter,
-        workspaceModuleImpl: makeFakeWorkspaceModule({ workspaceId: "ws-pm-budget" }),
-      }),
-    );
-    assert.strictEqual(pmAdapter.calls[0].maxResultChars, undefined);
+    assert.strictEqual(singleRunAdapter.calls[0].maxResultChars, undefined);
   });
 
   await check("V7.8.1: ein 9000 Zeichen langer, gültig strukturierter Rohtext wird regelbasiert auf maximal 4500 Zeichen gebracht", async () => {
@@ -691,15 +774,19 @@ async function run() {
     assert.strictEqual(fakeWorkspace.calls.cleanupCalls.length, 1);
   });
 
-  await check("V7.8.1: Schritt 1 und Schritt 3 liefern ihren Rohtext byteidentisch und ohne Normalisierungsmetadaten", async () => {
-    const longResearchText = `Kurzbefund: ${"Beobachtung mit Substanz. ".repeat(200)}`;
-    assert.ok(longResearchText.length > docResult.DOCUMENTATION_RESULT_NORMALIZED_MAX_CHARS, "der Testtext muss über dem Dokumentationsbudget liegen");
+  // V7.9.8 – ersetzt die V7.8.1-Zusicherung "Schritt 1 und Schritt 3 bleiben
+  // ohne jede Prüfung". Ein Lauf OHNE angeforderten Stufenvertrag (der
+  // bestehende Phase-7-Einzellauf) bleibt unverändert: Rohtext byteidentisch,
+  // keine Metadaten, auch über 4500 Zeichen.
+  await check("V7.9.8: ein Lauf ohne Stufenvertrag liefert seinen Rohtext byteidentisch und ohne Normalisierungsmetadaten", async () => {
+    const longText = `Kurzbefund: ${"Beobachtung mit Substanz. ".repeat(200)}`;
+    assert.ok(longText.length > docResult.STAGE_RESULT_NORMALIZED_MAX_CHARS, "der Testtext muss über dem Stufenbudget liegen");
     const stages = [
       { agentKey: "review-agent", pilotRole: "RECHERCHE_ANALYSE", pilotRoleLabel: "Recherche/Analyse" },
       { agentKey: "orchestrator-agent", pilotRole: "PROJEKTMANAGER", pilotRoleLabel: "Projektmanagement" },
     ];
     for (const stage of stages) {
-      const fakeAdapter = makeFakeCodexAdapter({ resultText: longResearchText });
+      const fakeAdapter = makeFakeCodexAdapter({ resultText: longText });
       const result = await codexRunner.runPilotAgentCodexAnalysisTask(
         documentationRunInput({
           agentKey: stage.agentKey,
@@ -711,9 +798,278 @@ async function run() {
         }),
       );
       assert.strictEqual(result.ok, true, `${stage.agentKey} muss unverändert erfolgreich bleiben`);
-      assert.strictEqual(result.resultText, longResearchText, `${stage.agentKey}: der Rohtext muss byteidentisch übernommen werden`);
+      assert.strictEqual(result.resultText, longText, `${stage.agentKey}: der Rohtext muss byteidentisch übernommen werden`);
       assert.strictEqual(result.documentationNormalization, null, `${stage.agentKey}: keine Dokumentationsmetadaten`);
+      assert.strictEqual(result.resultNormalization, null, `${stage.agentKey}: keine Stufenmetadaten`);
+      assert.strictEqual(result.resultContractStage, null, `${stage.agentKey}: kein Stufenvertrag`);
     }
+  });
+
+  // -------------------------------------------------------------------
+  // V7.9.8 ("Ergebnisbudget für Recherche- und Projektmanager-Stufe
+  // technisch erzwingen") – Testfälle A, B, C, D und F.
+  // -------------------------------------------------------------------
+
+  await check("V7.9.8/F: die technische Grenze bleibt bei 6000 Zeichen, das Stufenbudget liegt für ALLE drei Verträge strikt darunter", async () => {
+    assert.strictEqual(codexReadOnlyAdapter.MAX_READ_ONLY_RESULT_CHARS, 6000);
+    assert.strictEqual(codexRunner.MAX_PREDECESSOR_CONTEXT_CHARS, codexReadOnlyAdapter.MAX_READ_ONLY_RESULT_CHARS);
+    assert.strictEqual(docResult.STAGE_RESULT_NORMALIZED_MAX_CHARS, 4500);
+    assert.strictEqual(docResult.STAGE_RESULT_RAW_MAX_CHARS, 12000);
+    Object.values(docResult.RESULT_CONTRACT_STAGES).forEach((stage) => {
+      const contract = docResult.getStageContract(stage);
+      assert.ok(
+        contract.normalizedMaxChars < codexReadOnlyAdapter.MAX_READ_ONLY_RESULT_CHARS,
+        `${stage}: das gespeicherte Budget muss strikt unter der technischen Grenze liegen`,
+      );
+      assert.strictEqual(contract.normalizedMaxChars, 4500);
+      assert.strictEqual(contract.rawMaxChars, 12000);
+    });
+  });
+
+  await check("V7.9.8/A: ein 7584 Zeichen langer, gültig strukturierter Rechercherohtext wird regelbasiert auf maximal 4500 Zeichen gebracht", async () => {
+    const fakeWorkspace = makeFakeWorkspaceModule({ workspaceId: "ws-research-7584" });
+    const rawText = buildStageResultText(RESEARCH_MARKER_LINES, 7584);
+    assert.strictEqual(rawText.length, 7584, "genau die Rohgröße des gescheiterten Praxislaufs");
+    const fakeAdapter = makeFakeCodexAdapter({ resultText: rawText });
+    const result = await codexRunner.runPilotAgentCodexAnalysisTask(
+      researchRunInput({
+        executionRunId: "run-research-7584",
+        codexAdapterImpl: fakeAdapter,
+        workspaceModuleImpl: fakeWorkspace,
+      }),
+    );
+    assert.strictEqual(result.ok, true);
+    assert.notStrictEqual(result.diagnostics && result.diagnostics.reasonCode, "RESULT_TOO_LARGE");
+    assert.ok(result.resultText.length <= 4500, `gespeichert wurden ${result.resultText.length} Zeichen`);
+    assert.ok(result.resultText.length < codexReadOnlyAdapter.MAX_READ_ONLY_RESULT_CHARS);
+    assert.ok(/[.!?]$/.test(result.resultText.trim()), "das Ergebnis darf niemals mitten im Satz enden");
+    assert.ok(!result.resultText.includes("…") && !result.resultText.includes("..."), "keine Auslassungszeichen als Inhaltsersatz");
+    // Keine stille Zeichenkürzung: jede verbleibende Zeile ist unverändert
+    // aus dem Rohtext übernommen (kein angeschnittenes Fragment).
+    result.resultText
+      .split("\n")
+      .filter((line) => line.trim() && !RESEARCH_MARKER_LINES.includes(line))
+      .forEach((line) => assert.ok(rawText.includes(line), `Zeile stammt nicht unverändert aus dem Rohtext: "${line.slice(0, 40)}"`));
+    const normalization = result.resultNormalization;
+    assert.ok(normalization, "die Auditmetadaten müssen gesetzt sein");
+    assert.strictEqual(normalization.contractStage, "RESEARCH");
+    assert.strictEqual(normalization.contractVersion, "V7.9.8-RESEARCH-5-SECTIONS");
+    assert.strictEqual(normalization.structureValid, true);
+    assert.strictEqual(normalization.compactionApplied, true);
+    assert.strictEqual(normalization.rawCharCount, 7584);
+    assert.strictEqual(normalization.storedCharCount, result.resultText.length);
+    assert.strictEqual(normalization.normalizedCharCount, result.resultText.length);
+    assert.ok(normalization.droppedItemCount >= 1);
+    assert.strictEqual(typeof normalization.droppedSentenceCount, "number");
+    assert.strictEqual(normalization.budgetMaxChars, 4500);
+    // Die Dokumentationsmetadaten aus V7.8.1 bleiben der Dokumentationsstufe
+    // vorbehalten (Rückwärtskompatibilität der Auswertung).
+    assert.strictEqual(result.documentationNormalization, null);
+    assert.strictEqual(result.resultContractStage, "RESEARCH");
+    assert.strictEqual(fakeWorkspace.calls.cleanupCalls.length, 1, "Cleanup erfolgt auch im Erfolgsfall");
+  });
+
+  await check("V7.9.8/B: der belegte PM-Regressionsfall mit 6002 Zeichen wird sicher gespeichert (kein RESULT_TOO_LARGE)", async () => {
+    const fakeWorkspace = makeFakeWorkspaceModule({ workspaceId: "ws-pm-6002" });
+    const rawText = buildStageResultText(PM_MARKER_LINES, 6002);
+    assert.strictEqual(rawText.length, 6002, "genau die belegte Rohgröße der gescheiterten PM-Stufe");
+    assert.ok(rawText.length > codexReadOnlyAdapter.MAX_READ_ONLY_RESULT_CHARS);
+    const fakeAdapter = makeFakeCodexAdapter({ resultText: rawText });
+    const result = await codexRunner.runPilotAgentCodexAnalysisTask(
+      pmRunInput({
+        executionRunId: "run-pm-6002",
+        codexAdapterImpl: fakeAdapter,
+        workspaceModuleImpl: fakeWorkspace,
+      }),
+    );
+    assert.strictEqual(result.ok, true);
+    assert.notStrictEqual(result.diagnostics && result.diagnostics.reasonCode, "RESULT_TOO_LARGE");
+    assert.ok(result.resultText.length <= 4500, `gespeichert wurden ${result.resultText.length} Zeichen`);
+    assert.ok(/[.!?]$/.test(result.resultText.trim()), "das Ergebnis darf niemals mitten im Satz enden");
+    assert.strictEqual(result.resultNormalization.contractStage, "PROJECT_MANAGER");
+    assert.strictEqual(result.resultNormalization.contractVersion, "V7.9.8-PM-5-SECTIONS");
+    assert.strictEqual(result.resultNormalization.compactionApplied, true);
+    assert.strictEqual(result.resultNormalization.rawCharCount, 6002);
+    assert.strictEqual(result.resultNormalization.storedCharCount, result.resultText.length);
+    assert.strictEqual(result.documentationNormalization, null);
+    // Der PM-Abschnitt 5 ("Empfehlung an Jamal") bleibt erhalten: die
+    // Entscheidungsspur darf niemals der Verdichtung zum Opfer fallen.
+    assert.ok(result.resultText.includes(PM_MARKER_LINES[4]));
+    assert.strictEqual(fakeWorkspace.calls.cleanupCalls.length, 1);
+  });
+
+  await check("V7.9.8/C: budgetkonforme Recherche- und PM-Ergebnisse bleiben byteidentisch", async () => {
+    const cases = [
+      { label: "Recherche", input: researchRunInput, text: buildStageResultText(RESEARCH_MARKER_LINES), stage: "RESEARCH" },
+      { label: "PM", input: pmRunInput, text: buildStageResultText(PM_MARKER_LINES), stage: "PROJECT_MANAGER" },
+      // Auch ein markerloser Text bleibt unterhalb des Budgets unverändert
+      // (Rückwärtskompatibilität zu älteren, unstrukturierten Antworten).
+      { label: "Recherche ohne Marker", input: researchRunInput, text: "Kurzbefund: knapp und vollständig.", stage: "RESEARCH" },
+      { label: "PM ohne Marker", input: pmRunInput, text: "Gesamturteil: tragfähig. Empfehlung: Jamal entscheidet.", stage: "PROJECT_MANAGER" },
+    ];
+    for (const testCase of cases) {
+      assert.ok(testCase.text.length <= 4500);
+      const fakeAdapter = makeFakeCodexAdapter({ resultText: testCase.text });
+      const result = await codexRunner.runPilotAgentCodexAnalysisTask(
+        testCase.input({
+          executionRunId: `run-byte-identical-${testCase.stage}-${testCase.text.length}`,
+          codexAdapterImpl: fakeAdapter,
+          workspaceModuleImpl: makeFakeWorkspaceModule({ workspaceId: `ws-byte-identical-${testCase.text.length}` }),
+        }),
+      );
+      assert.strictEqual(result.ok, true, `${testCase.label} muss erfolgreich bleiben`);
+      assert.strictEqual(result.resultText, testCase.text, `${testCase.label}: der Text muss byteidentisch gespeichert werden`);
+      assert.strictEqual(result.resultNormalization.compactionApplied, false, `${testCase.label}: keine Verdichtung`);
+      assert.strictEqual(result.resultNormalization.droppedItemCount, 0);
+      assert.strictEqual(result.resultNormalization.droppedSentenceCount, 0);
+      assert.strictEqual(result.resultNormalization.contractStage, testCase.stage);
+      assert.strictEqual(result.resultNormalization.rawCharCount, testCase.text.length);
+      assert.strictEqual(result.resultNormalization.storedCharCount, testCase.text.length);
+    }
+  });
+
+  await check("V7.9.8/D: strukturloser Rohtext über dem Budget wird in beiden neuen Stufen kontrolliert abgelehnt", async () => {
+    const cases = [
+      { input: researchRunInput, reasonCode: "RESEARCH_RESULT_STRUCTURE_INVALID", label: "Rechercheergebnis", followUp: "Schritt 2 nicht gestartet" },
+      { input: pmRunInput, reasonCode: "PM_RESULT_STRUCTURE_INVALID", label: "Projektmanager-Ergebnis", followUp: "Kette wurde nicht abgeschlossen" },
+    ];
+    for (const testCase of cases) {
+      const fakeWorkspace = makeFakeWorkspaceModule({ workspaceId: `ws-structureless-${testCase.reasonCode}` });
+      const rawText = "Ein Satz ohne jede Abschnittsstruktur. ".repeat(200);
+      assert.ok(rawText.length > 4500 && rawText.length <= docResult.STAGE_RESULT_RAW_MAX_CHARS);
+      const result = await codexRunner.runPilotAgentCodexAnalysisTask(
+        testCase.input({
+          executionRunId: `run-structureless-${testCase.reasonCode}`,
+          codexAdapterImpl: makeFakeCodexAdapter({ resultText: rawText }),
+          workspaceModuleImpl: fakeWorkspace,
+        }),
+      );
+      assert.strictEqual(result.ok, false);
+      assert.strictEqual(result.failed, true);
+      assert.strictEqual(result.resultText, null, "ein ungültiges Ergebnis darf niemals gespeichert werden");
+      assert.strictEqual(result.diagnostics.reasonCode, testCase.reasonCode);
+      assert.strictEqual(result.diagnostics.runnerPhase, "RESULT_VALIDATION");
+      assert.ok(result.errorMessage.includes(testCase.label));
+      assert.ok(result.errorMessage.includes(testCase.followUp));
+      assert.ok(result.errorMessage.includes("fehlend: Abschnitt 1, Abschnitt 2, Abschnitt 3, Abschnitt 4, Abschnitt 5"));
+      assert.strictEqual(result.resultNormalization.structureValid, false);
+      assert.strictEqual(result.documentationNormalization, null);
+      assert.strictEqual(fakeWorkspace.calls.cleanupCalls.length, 1, "Cleanup erfolgt auch im Fehlerfall");
+      // Kein fachliches Erfolgssignal, kein Folgeschritt, keine Freigabe.
+      assert.notStrictEqual(result.ok, true);
+      assert.strictEqual(result.cancelled, false);
+    }
+  });
+
+  await check("V7.9.8/D: ein einzelner überlanger Satz wird in beiden neuen Stufen abgelehnt und niemals abgeschnitten", async () => {
+    const cases = [
+      { input: researchRunInput, markerLines: RESEARCH_MARKER_LINES, reasonCode: "RESEARCH_RESULT_STILL_TOO_LARGE" },
+      { input: pmRunInput, markerLines: PM_MARKER_LINES, reasonCode: "PM_RESULT_STILL_TOO_LARGE" },
+    ];
+    for (const testCase of cases) {
+      const hugeSentence = `${"w".repeat(8999)}.`;
+      const rawText = [
+        testCase.markerLines[0],
+        "Kurzfassung liegt vor.",
+        "",
+        testCase.markerLines[1],
+        `1. ${hugeSentence}`,
+        "2. Zweiter belegter Punkt ist nachvollziehbar.",
+        "",
+        testCase.markerLines[2],
+        "1. Ein Punkt bleibt bestehen.",
+        "2. Ein zweiter Punkt bleibt bestehen.",
+        "",
+        testCase.markerLines[3],
+        "1. Erster Vorschlag mit hoher Priorität.",
+        "2. Zweiter Vorschlag mit mittlerer Priorität.",
+        "",
+        testCase.markerLines[4],
+        "Grundlage ist ausschließlich das gelesene Material.",
+      ].join("\n");
+      const fakeWorkspace = makeFakeWorkspaceModule({ workspaceId: `ws-huge-sentence-${testCase.reasonCode}` });
+      const result = await codexRunner.runPilotAgentCodexAnalysisTask(
+        testCase.input({
+          executionRunId: `run-huge-sentence-${testCase.reasonCode}`,
+          codexAdapterImpl: makeFakeCodexAdapter({ resultText: rawText }),
+          workspaceModuleImpl: fakeWorkspace,
+        }),
+      );
+      assert.strictEqual(result.ok, false);
+      assert.strictEqual(result.resultText, null, "es wird nichts abgeschnitten und nichts übernommen");
+      assert.strictEqual(result.diagnostics.reasonCode, testCase.reasonCode);
+      assert.strictEqual(result.diagnostics.runnerPhase, "RESULT_VALIDATION");
+      assert.ok(result.errorMessage.includes("Es wurde nichts abgeschnitten und nichts gespeichert."));
+      assert.strictEqual(fakeWorkspace.calls.cleanupCalls.length, 1);
+    }
+  });
+
+  await check("V7.9.8/D: eine verbotene Aktionsbehauptung in einem später weggelassenen Punkt wird trotzdem erkannt", async () => {
+    // Die Behauptung steht im FÜNFTEN Punkt von Abschnitt 3 – dieser Punkt
+    // wird von der Verdichtung als Erster vollständig weggelassen. Die
+    // Sicherheitsprüfung läuft deshalb bewusst auf dem ROHTEXT, vor jeder
+    // Reduktion.
+    const claimLine = "5. Ich habe die Datei geändert und anschließend committed.";
+    const base = buildStageResultText(RESEARCH_MARKER_LINES, 7000);
+    const rawText = base.replace(
+      `\n${RESEARCH_MARKER_LINES[3]}`,
+      `\n${claimLine}\n\n${RESEARCH_MARKER_LINES[3]}`,
+    );
+    assert.ok(rawText.includes(claimLine));
+    assert.ok(rawText.length > 4500, "der Rohtext muss über dem Budget liegen, damit tatsächlich verdichtet würde");
+    // Gegenprobe: ohne die Sicherheitsprüfung auf dem Rohtext wäre die
+    // Behauptung im gespeicherten Ergebnis nicht mehr enthalten.
+    const normalized = docResult.normalizeStageResult(docResult.RESULT_CONTRACT_STAGES.RESEARCH, rawText);
+    assert.strictEqual(normalized.ok, true);
+    assert.ok(!normalized.normalizedText.includes("committed"), "die Behauptung wäre nach der Verdichtung verschwunden");
+
+    const fakeWorkspace = makeFakeWorkspaceModule({ workspaceId: "ws-research-forbidden" });
+    const result = await codexRunner.runPilotAgentCodexAnalysisTask(
+      researchRunInput({
+        executionRunId: "run-research-forbidden",
+        codexAdapterImpl: makeFakeCodexAdapter({ resultText: rawText }),
+        workspaceModuleImpl: fakeWorkspace,
+      }),
+    );
+    assert.strictEqual(result.ok, false, "die behauptete verbotene Aktion muss den Lauf ablehnen");
+    assert.strictEqual(result.resultText, null);
+    assert.strictEqual(result.diagnostics.reasonCode, "FORBIDDEN_ACTION_CLAIMED");
+    assert.strictEqual(fakeWorkspace.calls.cleanupCalls.length, 1);
+  });
+
+  await check("V7.9.8: der Recherche- und der PM-Vertrag stehen wortgleich im Prompt und bleiben stufenexklusiv", async () => {
+    const researchPrompt = codexRunner.buildAgentSpecificCodexPromptEnvelope(
+      basePromptInput({ resultContractStage: docResult.RESULT_CONTRACT_STAGES.RESEARCH }),
+    ).prompt;
+    const pmPrompt = codexRunner.buildAgentSpecificCodexPromptEnvelope(
+      pmPromptInput({ resultContractStage: docResult.RESULT_CONTRACT_STAGES.PROJECT_MANAGER }),
+    ).prompt;
+    const docPrompt = codexRunner.buildAgentSpecificCodexPromptEnvelope(documentationPromptInput()).prompt;
+    // Ohne angeforderten Stufenvertrag enthält der Prompt (unverändert zu
+    // Phase 7) keinerlei Abschnittsvertrag.
+    const singleRunPrompt = codexRunner.buildAgentSpecificCodexPromptEnvelope(basePromptInput()).prompt;
+
+    assert.ok(researchPrompt.includes("Verbindliche Ausgabeform für diese Recherchestufe (Schritt 1):"));
+    assert.ok(pmPrompt.includes("Verbindliche Ausgabeform für diese Projektmanagerstufe (Schritt 3):"));
+    RESEARCH_MARKER_LINES.forEach((markerLine) => {
+      assert.ok(researchPrompt.includes(markerLine), `Recherche-Prompt fehlt: "${markerLine}"`);
+      assert.ok(!pmPrompt.includes(markerLine), "PM-Prompt darf keine Recherche-Markerzeile enthalten");
+      assert.ok(!docPrompt.includes(markerLine), "Dokumentations-Prompt darf keine Recherche-Markerzeile enthalten");
+      assert.ok(!singleRunPrompt.includes(markerLine), "ein Lauf ohne Stufenvertrag darf keine Markerzeile enthalten");
+    });
+    PM_MARKER_LINES.forEach((markerLine) => {
+      assert.ok(pmPrompt.includes(markerLine), `PM-Prompt fehlt: "${markerLine}"`);
+      assert.ok(!researchPrompt.includes(markerLine), "Recherche-Prompt darf keine PM-Markerzeile enthalten");
+      assert.ok(!docPrompt.includes(markerLine), "Dokumentations-Prompt darf keine PM-Markerzeile enthalten");
+    });
+    [researchPrompt, pmPrompt, docPrompt].forEach((prompt) => {
+      assert.ok(prompt.includes("- Zielgröße des gesamten Ergebnisses: 2200-3000 Zeichen."));
+      assert.ok(prompt.includes("Beende jeden Satz vollständig."));
+      assert.ok(prompt.includes("überzählige Punkte und Sätze werden regelbasiert vollständig weggelassen, niemals innerhalb eines Satzes gekürzt"));
+    });
+    assert.ok(!singleRunPrompt.includes("Zielgröße des gesamten Ergebnisses"), "der Phase-7-Einzellauf bleibt unverändert ohne Ergebnisbudget");
+    // Der PM-Vertrag darf keine Freigabe an sich ziehen.
+    assert.ok(pmPrompt.includes("Erteile darin keine Freigabe – die Entscheidung trifft ausschließlich Jamal."));
   });
 
   await check("Phase 7 – 35. Workspace-Erstellung scheitert: kein Codex-Aufruf, sicherer Fehler, kein Cleanup-Aufruf nötig (Workspace existiert nicht)", async () => {

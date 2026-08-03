@@ -141,9 +141,76 @@ const RESEARCH_RESULT_TEXT =
 // existieren im Prompt nicht mehr. Die Prüfabsicht bleibt unverändert: der
 // Dokumentationsvertrag darf ausschließlich in Schritt 2 auftauchen.
 const DOC_STEP2_STRUCTURE_HEADER = "Verbindliche Ausgabeform für diese Dokumentationsstufe (Schritt 2):";
-const DOC_STEP2_TARGET_SIZE_LINE = "Zielgröße des gesamten Ergebnisses: 2200-3000 Zeichen.";
-const DOC_STEP2_LIMIT_SENTENCE =
+// V7.9.8: Zielgröße und Limitregel gelten jetzt für ALLE drei Stufen (der
+// Wortlaut ist bewusst einmal formuliert, siehe
+// pilot-agent-codex-runner.js#STAGE_OUTPUT_BUDGET_TAIL_LINES). Sie sind
+// deshalb kein Unterscheidungsmerkmal der Dokumentationsstufe mehr; die
+// Stufen unterscheiden sich über Kopfzeile, Markerzeilen und
+// Abschnittsgrenzen (siehe unten).
+const STAGE_TARGET_SIZE_LINE = "Zielgröße des gesamten Ergebnisses: 2200-3000 Zeichen.";
+const STAGE_LIMIT_SENTENCE =
   "Die Zentrale erzwingt die Ergebnisgröße technisch: überzählige Punkte und Sätze werden regelbasiert vollständig weggelassen, niemals innerhalb eines Satzes gekürzt.";
+const RESEARCH_STEP1_STRUCTURE_HEADER = "Verbindliche Ausgabeform für diese Recherchestufe (Schritt 1):";
+const PM_STEP3_STRUCTURE_HEADER = "Verbindliche Ausgabeform für diese Projektmanagerstufe (Schritt 3):";
+// Die jeweils STUFENEIGENEN Markerzeilen. Kein Titel kommt in zwei Stufen
+// vor – genau das macht die drei Verträge unterscheidbar.
+const RESEARCH_STEP1_MARKER_LINES = Object.freeze([
+  "ABSCHNITT 1 KURZFAZIT",
+  "ABSCHNITT 2 BELEGTE KERNBEFUNDE",
+  "ABSCHNITT 3 REIBUNGSVERLUSTE",
+  "ABSCHNITT 4 PRIORISIERTE VERBESSERUNGEN",
+  "ABSCHNITT 5 GRENZEN UND UNSICHERHEITEN",
+]);
+const DOC_STEP2_MARKER_LINES = Object.freeze([
+  "ABSCHNITT 1 KURZERGEBNIS",
+  "ABSCHNITT 2 BESTAETIGTE KERNBEFUNDE",
+  "ABSCHNITT 3 OFFENE PUNKTE UND GRENZEN",
+  "ABSCHNITT 4 PRIORISIERTE EMPFEHLUNGEN",
+  "ABSCHNITT 5 HERKUNFTSHINWEIS",
+]);
+const PM_STEP3_MARKER_LINES = Object.freeze([
+  "ABSCHNITT 1 GESAMTURTEIL",
+  "ABSCHNITT 2 WICHTIGSTE BELEGTE STAERKEN",
+  "ABSCHNITT 3 WICHTIGSTE BELEGTE SCHWAECHEN",
+  "ABSCHNITT 4 PRIORISIERTE ENTSCHEIDUNGEN",
+  "ABSCHNITT 5 EMPFEHLUNG AN JAMAL",
+]);
+
+// Baut eine gültige, vertragskonforme Antwort für eine beliebige Stufe. Mit
+// `targetRawChars` wird die Rohgröße exakt getroffen; die Auffüllung erfolgt
+// über einen zusätzlichen fünften Punkt in Abschnitt 2, der durch die
+// Item-Deckelung regelbasiert vollständig weggelassen wird.
+function buildStageResultText(markerLines, targetRawChars) {
+  const base = [
+    markerLines[0],
+    "Kurzfassung liegt vor. Der Befund ist belegt.",
+    "",
+    markerLines[1],
+    "1. Erster belegter Punkt ist nachvollziehbar.",
+    "2. Zweiter belegter Punkt ist nachvollziehbar.",
+    "3. Dritter belegter Punkt ist nachvollziehbar.",
+    "",
+    markerLines[2],
+    "1. Ein Punkt bleibt bestehen.",
+    "2. Ein zweiter Punkt bleibt bestehen.",
+    "",
+    markerLines[3],
+    "1. Erster Vorschlag mit Nutzen und hoher Priorität.",
+    "2. Zweiter Vorschlag mit Nutzen und mittlerer Priorität.",
+    "3. Dritter Vorschlag mit Nutzen und niedriger Priorität.",
+    "",
+    markerLines[4],
+    "Grundlage ist ausschließlich das tatsächlich gelesene Material.",
+  ].join("\n");
+  if (!targetRawChars) return base;
+  const marker = "\n4. ";
+  const fillerLength = targetRawChars - base.length - marker.length - 1;
+  assert.ok(fillerLength > 0, `Zielrohgröße ${targetRawChars} ist zu klein für den Basistext`);
+  const insertAt = base.indexOf(`\n\n${markerLines[2]}`);
+  const text = `${base.slice(0, insertAt)}${marker}${"y".repeat(fillerLength)}.${base.slice(insertAt)}`;
+  assert.strictEqual(text.length, targetRawChars, "Testhelfer muss die Rohgröße exakt treffen");
+  return text;
+}
 
 // Gültige, vertragskonforme Dokumentationsantwort für Kettenschritt 2. Mit
 // `targetRawChars` wird die Rohgröße exakt getroffen; die Auffüllung erfolgt
@@ -517,8 +584,17 @@ async function run() {
     assert.ok(step1PromptCall.prompt.includes(orderInput().qualityCriteria[0]));
     assert.ok(!step1PromptCall.prompt.includes("VORGÄNGERERGEBNIS"), "Schritt 1 hat keinen Vorgänger, der Prompt darf keinen Vorgängerblock enthalten");
     assert.ok(!step1PromptCall.prompt.includes(DOC_STEP2_STRUCTURE_HEADER), "Schritt 1 darf keine Schritt-2-Dokumentationsstruktur enthalten");
-    assert.ok(!step1PromptCall.prompt.includes(DOC_STEP2_TARGET_SIZE_LINE), "Schritt 1 darf keine Dokumentations-Zielgröße erzwingen");
-    assert.ok(!step1PromptCall.prompt.includes(DOC_STEP2_LIMIT_SENTENCE), "Schritt 1 darf keine Schritt-2-Limitregel enthalten");
+    DOC_STEP2_MARKER_LINES.forEach((markerLine) =>
+      assert.ok(!step1PromptCall.prompt.includes(markerLine), `Schritt 1 darf die Dokumentations-Markerzeile "${markerLine}" nicht enthalten`),
+    );
+    // V7.9.8: Schritt 1 hat jetzt einen EIGENEN, maschinenlesbaren
+    // Abschnittsvertrag – mit eigener Kopfzeile und eigenen Markerzeilen.
+    assert.ok(step1PromptCall.prompt.includes(RESEARCH_STEP1_STRUCTURE_HEADER), "Schritt 1 muss den Recherchevertrag enthalten");
+    RESEARCH_STEP1_MARKER_LINES.forEach((markerLine) =>
+      assert.ok(step1PromptCall.prompt.includes(markerLine), `Recherche-Prompt fehlt: "${markerLine}"`),
+    );
+    assert.ok(step1PromptCall.prompt.includes(STAGE_TARGET_SIZE_LINE), "Schritt 1 muss eine verbindliche Zielgröße nennen");
+    assert.ok(step1PromptCall.prompt.includes(STAGE_LIMIT_SENTENCE), "Schritt 1 muss die technische Durchsetzung ankündigen");
   });
 
   await check("V7.8.0: zwei unterschiedliche Pilotaufträge erzeugen unterschiedliche Agentenergebnisse", async () => {
@@ -691,21 +767,22 @@ async function run() {
     assert.ok(promptSentToStep2.includes(orderA.order.desiredOutcome), "der Ergebniswunsch muss auch in Schritt 2 enthalten sein");
     [
       DOC_STEP2_STRUCTURE_HEADER,
-      "ABSCHNITT 1 KURZERGEBNIS",
-      "ABSCHNITT 2 BESTAETIGTE KERNBEFUNDE",
-      "ABSCHNITT 3 OFFENE PUNKTE UND GRENZEN",
-      "ABSCHNITT 4 PRIORISIERTE EMPFEHLUNGEN",
-      "ABSCHNITT 5 HERKUNFTSHINWEIS",
+      ...DOC_STEP2_MARKER_LINES,
       "- Abschnitt 1: maximal 3 kurze Sätze.",
       "- Abschnitt 2: maximal 4 nummerierte Kernbefunde.",
       "- Abschnitt 3: maximal 3 nummerierte offene Punkte oder Grenzen.",
       "- Abschnitt 4: genau 3 nummerierte Empfehlungen, je Empfehlung Maßnahme, Nutzen und Priorität.",
       "- Abschnitt 5: maximal 2 Sätze.",
-      DOC_STEP2_TARGET_SIZE_LINE,
-      DOC_STEP2_LIMIT_SENTENCE,
+      STAGE_TARGET_SIZE_LINE,
+      STAGE_LIMIT_SENTENCE,
       "Keine zusätzlichen Überschriften, keine Anhänge, keine Tabellen.",
       "Wiederhole weder den vollständigen Kernauftrag noch den vollständigen Vorgängertext.",
     ].forEach((mustContain) => assert.ok(promptSentToStep2.includes(mustContain), `Dokumentations-Prompt fehlt: "${mustContain}"`));
+    // V7.9.8: der Dokumentationsvertrag bleibt exklusiv – keine Markerzeile
+    // der beiden anderen Stufen darf in Schritt 2 auftauchen.
+    [...RESEARCH_STEP1_MARKER_LINES, ...PM_STEP3_MARKER_LINES].forEach((markerLine) =>
+      assert.ok(!promptSentToStep2.includes(markerLine), `Schritt 2 darf die fremde Markerzeile "${markerLine}" nicht enthalten`),
+    );
 
     // Die tatsächlich verwendeten erlaubten Dateien/Werkzeuge stammen
     // ausschließlich aus dem fest verdrahteten Preset des AKTUELLEN
@@ -752,8 +829,16 @@ async function run() {
     assert.ok(promptSentToStep3.includes(orderA.order.title), "der unveränderte Kernauftrag muss auch in Schritt 3 enthalten sein");
     assert.ok(promptSentToStep3.includes(orderA.order.desiredOutcome), "der Ergebniswunsch muss auch in Schritt 3 enthalten sein");
     assert.ok(!promptSentToStep3.includes(DOC_STEP2_STRUCTURE_HEADER), "Schritt 3 darf keine Schritt-2-Dokumentationsstruktur enthalten");
-    assert.ok(!promptSentToStep3.includes(DOC_STEP2_TARGET_SIZE_LINE), "Schritt 3 darf keine Dokumentations-Zielgröße erzwingen");
-    assert.ok(!promptSentToStep3.includes(DOC_STEP2_LIMIT_SENTENCE), "Schritt 3 darf keine Schritt-2-Limitregel enthalten");
+    DOC_STEP2_MARKER_LINES.forEach((markerLine) =>
+      assert.ok(!promptSentToStep3.includes(markerLine), `Schritt 3 darf die Dokumentations-Markerzeile "${markerLine}" nicht enthalten`),
+    );
+    // V7.9.8: Schritt 3 hat jetzt einen EIGENEN Abschnittsvertrag.
+    assert.ok(promptSentToStep3.includes(PM_STEP3_STRUCTURE_HEADER), "Schritt 3 muss den Projektmanagervertrag enthalten");
+    PM_STEP3_MARKER_LINES.forEach((markerLine) =>
+      assert.ok(promptSentToStep3.includes(markerLine), `PM-Prompt fehlt: "${markerLine}"`),
+    );
+    assert.ok(promptSentToStep3.includes(STAGE_TARGET_SIZE_LINE), "Schritt 3 muss eine verbindliche Zielgröße nennen");
+    assert.ok(promptSentToStep3.includes(STAGE_LIMIT_SENTENCE), "Schritt 3 muss die technische Durchsetzung ankündigen");
   });
 
   await check("V7.8.0: erfolgreiche Kette bucht Rollen je Stufe, ohne progress.rolesPassed zu verändern (nur chainRoleProgress steigt)", () => {
@@ -890,11 +975,18 @@ async function run() {
     assert.strictEqual(runsForOrder.length, 1, "nach dem Abbruch darf kein zusätzlicher Schrittlauf erzeugt sein");
   });
 
-  await check("V7.8.0: ein Vorgängerergebnis mit exakt 5369 Zeichen wird vollständig in Schritt 2 übernommen (ohne Kürzung)", async () => {
-    const orderExact = pilotService.createPilotOrder(db, orderInput({ title: "Auftrag: exakter 5369-Zeichen-Vorgänger" }));
+  // V7.9.8 – angepasste Größe, unveränderte Prüfabsicht: seit V7.9.8 kann ein
+  // GESPEICHERTES Schritt-1-Ergebnis strukturell nie mehr über 4500 Zeichen
+  // liegen (der Vertrag verdichtet oder lehnt kontrolliert ab). Ein
+  // gespeicherter Vorgänger mit 5369 Zeichen ist damit nicht mehr
+  // herstellbar. Geprüft wird deshalb dieselbe Zusicherung an der jetzt
+  // maßgeblichen Obergrenze: ein Vorgängerergebnis mit exakt 4500 Zeichen
+  // wird vollständig und ohne jede Kürzung an Schritt 2 übergeben.
+  await check("V7.8.0/V7.9.8: ein Vorgängerergebnis mit exakt 4500 Zeichen wird vollständig in Schritt 2 übernommen (ohne Kürzung)", async () => {
+    const orderExact = pilotService.createPilotOrder(db, orderInput({ title: "Auftrag: exakter 4500-Zeichen-Vorgänger" }));
     driveOrderToInExecution(db, orderExact.order.id);
     const exactChain = chainService.prepareChain(db, { pilotOrderId: orderExact.order.id, actorUserId: "owner-1" });
-    const exactResultText = "R".repeat(5369);
+    const exactResultText = "R".repeat(4500);
     await requestAndStart(db, {
       chainId: exactChain.id,
       chainStep: 1,
@@ -908,8 +1000,8 @@ async function run() {
     });
     const step2 = afterStep2.steps.find((entry) => entry.stepNumber === 2);
     assert.ok(step2);
-    assert.strictEqual(step2.predecessorCharCount, 5369);
-    assert.strictEqual(step2.predecessorIncludedCharCount, 5369);
+    assert.strictEqual(step2.predecessorCharCount, 4500);
+    assert.strictEqual(step2.predecessorIncludedCharCount, 4500);
     assert.strictEqual(step2.predecessorTruncated, false);
     const promptSent = step2Adapter.calls[0].prompt;
     assert.ok(promptSent.includes(exactResultText), "der vollständige Vorgängertext muss im Adapter-Prompt enthalten sein");
@@ -938,8 +1030,9 @@ async function run() {
     const step2Adapter = fakeSuccessfulCodexAdapter(rawDocText);
     const { result: afterStep2 } = await requestAndStart(db, { chainId: normChain.id, chainStep: 2, adapter: step2Adapter });
 
-    // Die Roh-Annahmegrenze wird ausschließlich für die Dokumentationsstufe
-    // angehoben (der Adapter selbst bleibt unverändert).
+    // Die Roh-Annahmegrenze wird für jede Stufe MIT Vertrag angehoben (der
+    // Adapter selbst bleibt unverändert, seine Vorgabe von 6000 Zeichen gilt
+    // weiterhin für jeden Lauf ohne Stufenvertrag).
     assert.strictEqual(step2Adapter.calls[0].maxResultChars, 12000);
 
     const step2 = afterStep2.steps.find((entry) => entry.stepNumber === 2);
@@ -982,7 +1075,9 @@ async function run() {
     assert.strictEqual(step3.stepStatus, "SUCCEEDED");
     assert.strictEqual(step3.predecessorTruncated, false, "der verdichtete Text wird vollständig an Schritt 3 übergeben");
     assert.ok(step3Adapter.calls[0].prompt.includes(step2Run.resultRawText), "Schritt 3 erhält den gespeicherten Text vollständig");
-    assert.strictEqual(step3Adapter.calls[0].maxResultChars, undefined, "für Schritt 3 bleibt die Adaptergrenze unverändert");
+    // V7.9.8: Schritt 3 besitzt jetzt ebenfalls einen Stufenvertrag und damit
+    // dasselbe Rohbudget (vorher: keine Vorgabe, Adapterstandard 6000).
+    assert.strictEqual(step3Adapter.calls[0].maxResultChars, 12000, "Schritt 3 darf einen verdichtbaren Rohtext annehmen");
   });
 
   await check("V7.8.1: ein strukturloses, zu großes Dokumentationsergebnis terminalisiert die Kette kontrolliert, ohne Schritt 3 zu starten", async () => {
@@ -1031,40 +1126,182 @@ async function run() {
     assert.strictEqual(step1Run.resultSummary.documentationNormalization, undefined, "Schritt 1 erhält keine Dokumentationsmetadaten");
   });
 
-  await check("V7.8.1: Schritt 1 und Schritt 3 bleiben mit einem langen Ergebnis unverändert (keine Verdichtung, keine Metadaten)", async () => {
-    const orderUnchanged = pilotService.createPilotOrder(db, orderInput({ title: "Auftrag: V7.8.1 Schritt 1 und 3 unverändert" }));
+  // V7.9.8 – ersetzt die frühere V7.8.1-Zusicherung "Schritt 1 und Schritt 3
+  // bleiben auch über 4500 Zeichen unverändert". Genau diese Lücke war die
+  // Ursache der gescheiterten Praxisläufe. Neu gilt für BEIDE Stufen: unter
+  // dem Zielbudget bleibt alles byteidentisch (auch ohne Abschnittsstruktur),
+  // darüber greift der Stufenvertrag – und ein strukturloser Text wird
+  // kontrolliert abgelehnt statt still gekürzt.
+  await check("V7.9.8: budgetkonforme Schritt-1- und Schritt-3-Ergebnisse bleiben byteidentisch (keine Verdichtung, keine Dokumentationsmetadaten)", async () => {
+    const orderUnchanged = pilotService.createPilotOrder(db, orderInput({ title: "Auftrag: V7.9.8 budgetkonforme Stufen 1 und 3" }));
     driveOrderToInExecution(db, orderUnchanged.order.id);
     const chainUnchanged = chainService.prepareChain(db, { pilotOrderId: orderUnchanged.order.id, actorUserId: "owner-1" });
-    // Deutlich über dem Dokumentationsbudget (4500), aber unter der
-    // unveränderten technischen Grenze von 6000 Zeichen.
-    const longStep1Text = `Kurzbefund: ${"Beobachtung mit Substanz. ".repeat(200)}`.slice(0, 5500);
-    assert.ok(longStep1Text.length > 4500 && longStep1Text.length < 6000);
+    // Exakt am Zielbudget (4500) und damit die härteste byteidentische Grenze
+    // – bewusst ohne Abschnittsstruktur, um zu belegen, dass der Vertrag
+    // budgetkonforme Antworten NICHT umschreibt.
+    const budgetStep1Text = `Kurzbefund: ${"Beobachtung mit Substanz. ".repeat(200)}`.slice(0, 4500);
+    assert.strictEqual(budgetStep1Text.length, 4500);
     const { result: afterStep1 } = await requestAndStart(db, {
       chainId: chainUnchanged.id,
       chainStep: 1,
-      adapter: fakeSuccessfulCodexAdapter(longStep1Text),
+      adapter: fakeSuccessfulCodexAdapter(budgetStep1Text),
     });
     const step1 = afterStep1.steps.find((entry) => entry.stepNumber === 1);
     const step1Run = agentExecutionService.getAgentExecutionRunById(db, orderUnchanged.order.id, step1.executionRunId);
-    assert.strictEqual(step1Run.resultRawText, longStep1Text, "Schritt 1 speichert seinen Rohtext byteidentisch");
-    assert.strictEqual(step1Run.resultSummary.documentationNormalization, undefined);
+    assert.strictEqual(step1Run.resultRawText, budgetStep1Text, "Schritt 1 speichert seinen Rohtext byteidentisch");
+    assert.strictEqual(step1Run.resultSummary.documentationNormalization, undefined, "Schritt 1 erhält keine Dokumentationsmetadaten");
+    const step1Normalization = step1Run.resultSummary.resultNormalization;
+    assert.ok(step1Normalization, "die Auditspur der Recherchestufe muss auch ohne Verdichtung vorliegen");
+    assert.strictEqual(step1Normalization.contractStage, "RESEARCH");
+    assert.strictEqual(step1Normalization.compactionApplied, false);
+    assert.strictEqual(step1Normalization.rawCharCount, 4500);
+    assert.strictEqual(step1Normalization.storedCharCount, 4500);
+    assert.strictEqual(step1Normalization.droppedItemCount, 0);
+    assert.strictEqual(step1Normalization.droppedSentenceCount, 0);
 
     await requestAndStart(db, {
       chainId: chainUnchanged.id,
       chainStep: 2,
       adapter: fakeSuccessfulCodexAdapter(buildDocumentationResultText()),
     });
-    const longStep3Text = `Gesamturteil: konsistent. ${"Begründung mit Substanz. ".repeat(200)}`.slice(0, 5500);
+    const budgetStep3Text = `Gesamturteil: konsistent. ${"Begründung mit Substanz. ".repeat(100)}`.slice(0, 2400);
     const { result: afterStep3 } = await requestAndStart(db, {
       chainId: chainUnchanged.id,
       chainStep: 3,
-      adapter: fakeSuccessfulCodexAdapter(longStep3Text),
+      adapter: fakeSuccessfulCodexAdapter(budgetStep3Text),
     });
     assert.strictEqual(afterStep3.chainStatus, "COMPLETED");
     const step3 = afterStep3.steps.find((entry) => entry.stepNumber === 3);
     const step3Run = agentExecutionService.getAgentExecutionRunById(db, orderUnchanged.order.id, step3.executionRunId);
-    assert.strictEqual(step3Run.resultRawText, longStep3Text, "Schritt 3 speichert seinen Rohtext byteidentisch");
-    assert.strictEqual(step3Run.resultSummary.documentationNormalization, undefined);
+    assert.strictEqual(step3Run.resultRawText, budgetStep3Text, "Schritt 3 speichert seinen Rohtext byteidentisch");
+    assert.strictEqual(step3Run.resultSummary.documentationNormalization, undefined, "Schritt 3 erhält keine Dokumentationsmetadaten");
+    assert.strictEqual(step3Run.resultSummary.resultNormalization.contractStage, "PROJECT_MANAGER");
+    assert.strictEqual(step3Run.resultSummary.resultNormalization.compactionApplied, false);
+  });
+
+  await check("V7.9.8/E: überlange, gültig strukturierte Ergebnisse in Schritt 1 UND Schritt 3 werden verdichtet gespeichert; Kette wird erst nach regulärem Schritt 3 COMPLETED", async () => {
+    const orderStages = pilotService.createPilotOrder(db, orderInput({ title: "Auftrag: V7.9.8 Ergebnisbudget Schritt 1 und 3" }));
+    driveOrderToInExecution(db, orderStages.order.id);
+    const stageChain = chainService.prepareChain(db, { pilotOrderId: orderStages.order.id, actorUserId: "owner-1" });
+
+    // Schritt 1: 7584 Zeichen – genau die Rohgröße des gescheiterten ersten
+    // echten Drei-Agenten-Praxislaufs.
+    const rawResearchText = buildStageResultText(RESEARCH_STEP1_MARKER_LINES, 7584);
+    assert.strictEqual(rawResearchText.length, 7584);
+    const step1Adapter = fakeSuccessfulCodexAdapter(rawResearchText);
+    const { result: afterStep1 } = await requestAndStart(db, { chainId: stageChain.id, chainStep: 1, adapter: step1Adapter });
+    assert.strictEqual(step1Adapter.calls[0].maxResultChars, 12000, "Schritt 1 darf einen verdichtbaren Rohtext annehmen");
+
+    const step1 = afterStep1.steps.find((entry) => entry.stepNumber === 1);
+    assert.strictEqual(step1.stepStatus, "SUCCEEDED");
+    const step1Run = agentExecutionService.getAgentExecutionRunById(db, orderStages.order.id, step1.executionRunId);
+    assert.strictEqual(step1Run.status, "SUCCEEDED");
+    assert.ok(step1Run.resultRawText.length <= 4500, `gespeichert wurden ${step1Run.resultRawText.length} Zeichen`);
+    assert.strictEqual(step1Run.resultTruncated, false, "eine Speicherkürzung darf durch die Verdichtung gar nicht mehr nötig werden");
+    assert.ok(/[.!?]$/.test(step1Run.resultRawText.trim()), "das gespeicherte Ergebnis darf nicht mitten im Satz enden");
+    assert.ok(!step1Run.resultRawText.includes("…") && !step1Run.resultRawText.includes("..."), "keine Auslassungszeichen als Inhaltsersatz");
+    assert.ok(step1Run.resultRawText.startsWith(RESEARCH_STEP1_MARKER_LINES[0]));
+    const researchNormalization = step1Run.resultSummary.resultNormalization;
+    assert.ok(researchNormalization, "resultNormalization muss persistiert sein");
+    assert.strictEqual(researchNormalization.contractStage, "RESEARCH");
+    assert.strictEqual(researchNormalization.contractVersion, "V7.9.8-RESEARCH-5-SECTIONS");
+    assert.strictEqual(researchNormalization.structureValid, true);
+    assert.strictEqual(researchNormalization.compactionApplied, true);
+    assert.strictEqual(researchNormalization.rawCharCount, 7584);
+    assert.strictEqual(researchNormalization.storedCharCount, step1Run.resultRawText.length);
+    assert.ok(researchNormalization.droppedItemCount >= 1);
+    assert.strictEqual(step1Run.resultSummary.documentationNormalization, undefined, "Schritt 1 erhält keine Dokumentationsmetadaten");
+
+    // Der Digest der Kette gehört zum gespeicherten, nicht zum Rohtext.
+    assert.strictEqual(
+      step1.resultDigest,
+      crypto.createHash("sha256").update(step1Run.resultRawText, "utf8").digest("hex"),
+      "der Digest muss zum gespeicherten (verdichteten) Text passen",
+    );
+
+    // Schritt 2 erhält den verdichteten Vorgängertext VOLLSTÄNDIG.
+    const step2Adapter = fakeSuccessfulCodexAdapter(buildDocumentationResultText());
+    const { result: afterStep2 } = await requestAndStart(db, { chainId: stageChain.id, chainStep: 2, adapter: step2Adapter });
+    const step2 = afterStep2.steps.find((entry) => entry.stepNumber === 2);
+    assert.strictEqual(step2.stepStatus, "SUCCEEDED");
+    assert.strictEqual(step2.predecessorTruncated, false);
+    assert.strictEqual(step2.predecessorCharCount, step1Run.resultRawText.length);
+    assert.strictEqual(step2.predecessorIncludedCharCount, step1Run.resultRawText.length);
+    assert.strictEqual(afterStep2.blockReason, null, "PREDECESSOR_CONTEXT_TOO_LARGE darf nicht auftreten");
+    assert.ok(step2Adapter.calls[0].prompt.includes(step1Run.resultRawText), "Schritt 2 erhält das Schritt-1-Ergebnis vollständig");
+
+    // Zwischenstand: die Kette wartet auf eine EIGENE Freigabe für Schritt 3.
+    assert.strictEqual(afterStep2.chainStatus, "WAITING_FOR_PM_APPROVAL");
+    assert.strictEqual(afterStep2.waitingForJamal, true);
+    const pendingStep3 = afterStep2.steps.find((entry) => entry.stepNumber === 3);
+    assert.strictEqual(pendingStep3.stepStatus, "PENDING");
+    assert.strictEqual(pendingStep3.executionRunId, null, "Schritt 3 darf durch die Verdichtung nicht automatisch gestartet werden");
+
+    // Schritt 3: 6002 Zeichen – genau der belegte Regressionsfall.
+    const rawPmText = buildStageResultText(PM_STEP3_MARKER_LINES, 6002);
+    assert.strictEqual(rawPmText.length, 6002);
+    const step3Adapter = fakeSuccessfulCodexAdapter(rawPmText);
+    const { result: afterStep3 } = await requestAndStart(db, { chainId: stageChain.id, chainStep: 3, adapter: step3Adapter });
+    const step3 = afterStep3.steps.find((entry) => entry.stepNumber === 3);
+    assert.strictEqual(step3.stepStatus, "SUCCEEDED");
+    const step3Run = agentExecutionService.getAgentExecutionRunById(db, orderStages.order.id, step3.executionRunId);
+    assert.strictEqual(step3Run.status, "SUCCEEDED");
+    assert.notStrictEqual(step3Run.resultSummary.diagnostics?.reasonCode, "RESULT_TOO_LARGE");
+    assert.ok(step3Run.resultRawText.length <= 4500, `gespeichert wurden ${step3Run.resultRawText.length} Zeichen`);
+    assert.strictEqual(step3Run.resultTruncated, false);
+    assert.ok(/[.!?]$/.test(step3Run.resultRawText.trim()), "das gespeicherte PM-Ergebnis darf nicht mitten im Satz enden");
+    assert.ok(step3Run.resultRawText.startsWith(PM_STEP3_MARKER_LINES[0]));
+    const pmNormalization = step3Run.resultSummary.resultNormalization;
+    assert.strictEqual(pmNormalization.contractStage, "PROJECT_MANAGER");
+    assert.strictEqual(pmNormalization.contractVersion, "V7.9.8-PM-5-SECTIONS");
+    assert.strictEqual(pmNormalization.compactionApplied, true);
+    assert.strictEqual(pmNormalization.rawCharCount, 6002);
+    assert.strictEqual(pmNormalization.storedCharCount, step3Run.resultRawText.length);
+    assert.strictEqual(step3Run.resultSummary.documentationNormalization, undefined, "Schritt 3 erhält keine Dokumentationsmetadaten");
+
+    // COMPLETED erst nach dem regulären, einzeln freigegebenen Schritt 3.
+    assert.strictEqual(afterStep3.chainStatus, "COMPLETED");
+    assert.strictEqual(afterStep3.steps.filter((entry) => entry.stepStatus === "SUCCEEDED").length, 3);
+    // Jede Stufe hat eine eigene Freigabe verbraucht (drei getrennte Tokens).
+    const approvalSteps = db
+      .prepare("SELECT metadata FROM auth_audit_events WHERE eventType = 'CHAIN_STEP_APPROVAL_REQUESTED' ORDER BY timestamp ASC")
+      .all()
+      .map((row) => JSON.parse(row.metadata))
+      .filter((metadata) => metadata.chainId === stageChain.id)
+      .map((metadata) => metadata.chainStep);
+    assert.deepStrictEqual(approvalSteps, [1, 2, 3], "jede Stufe benötigt weiterhin eine eigene Jamal-Freigabe");
+  });
+
+  await check("V7.9.8/D: ein strukturloses, zu großes Recherche-Ergebnis terminalisiert die Kette kontrolliert, ohne Schritt 2 zu starten", async () => {
+    const orderBadResearch = pilotService.createPilotOrder(db, orderInput({ title: "Auftrag: V7.9.8 ungültige Recherchestruktur" }));
+    driveOrderToInExecution(db, orderBadResearch.order.id);
+    const badResearchChain = chainService.prepareChain(db, { pilotOrderId: orderBadResearch.order.id, actorUserId: "owner-1" });
+    const structurelessResearch = "Ein Rechercheergebnis ohne jede Abschnittsstruktur. ".repeat(150);
+    assert.ok(structurelessResearch.length > 4500 && structurelessResearch.length < 12000);
+    const { result: afterStep1 } = await requestAndStart(db, {
+      chainId: badResearchChain.id,
+      chainStep: 1,
+      adapter: fakeSuccessfulCodexAdapter(structurelessResearch),
+    });
+
+    assert.strictEqual(afterStep1.chainStatus, "FAILED");
+    assert.strictEqual(afterStep1.waitingForJamal, false);
+    const failedStep1 = afterStep1.steps.find((entry) => entry.stepNumber === 1);
+    assert.strictEqual(failedStep1.stepStatus, "FAILED");
+    assert.strictEqual(failedStep1.roleHandoffBooked, false);
+    const failedRun = agentExecutionService.getAgentExecutionRunById(db, orderBadResearch.order.id, failedStep1.executionRunId);
+    assert.strictEqual(failedRun.status, "FAILED");
+    assert.strictEqual(failedRun.resultRawText, null, "ein ungültiges Ergebnis darf niemals gespeichert werden");
+    assert.ok(failedRun.errorMessage.includes("Fünf-Abschnittsstruktur"));
+    assert.strictEqual(failedRun.resultSummary.diagnostics.reasonCode, "RESEARCH_RESULT_STRUCTURE_INVALID");
+    assert.strictEqual(failedRun.resultSummary.diagnostics.runnerPhase, "RESULT_VALIDATION");
+
+    const finalView = chainService.getChainView(db, badResearchChain.id);
+    finalView.steps.forEach((entry) => assert.notStrictEqual(entry.stepStatus, "RUNNING", `Schritt ${entry.stepNumber} darf nicht RUNNING bleiben`));
+    const step2 = finalView.steps.find((entry) => entry.stepNumber === 2);
+    assert.strictEqual(step2.executionRunId, null, "Schritt 2 darf nicht automatisch gestartet worden sein");
+    assert.strictEqual(step2.stepStatus, "PENDING");
+    assert.throws(() => chainService.requestStepApproval(db, { chainId: badResearchChain.id, chainStep: 2, actorUserId: "owner-1" }));
   });
 
   // -------------------------------------------------------------------

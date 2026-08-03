@@ -549,6 +549,23 @@ function makeFakeBackend() {
       }
       chain.revision += 1;
     },
+    // V7.9.8: derselbe Zugriff auf das stufenneutrale Feld `resultNormalization`,
+    // das jetzt für alle drei Stufen geschrieben wird.
+    setResultNormalization: (chainId, stepNumber, normalization) => {
+      const order = orders.get(CANONICAL_ID);
+      const chain = findChain(order, chainId);
+      if (!chain) return;
+      const step = findStep(chain, stepNumber);
+      if (!step || !step.executionRunId) return;
+      const run = (order.agentExecutionRuns || []).find((entry) => entry.id === step.executionRunId);
+      if (!run) return;
+      if (normalization === null) {
+        delete run.resultSummary.resultNormalization;
+      } else {
+        run.resultSummary.resultNormalization = normalization;
+      }
+      chain.revision += 1;
+    },
     markChainAsLegacy: (chainId) => {
       const order = orders.get(CANONICAL_ID);
       const chain = findChain(order, chainId);
@@ -897,6 +914,107 @@ async function run() {
     await ui.reloadSelectedOrder();
     assert.ok(!diagnosticsHtml().includes("wurde regelbasiert auf die verbindliche Ergebnisgröße reduziert"));
     assert.match(diagnosticsHtml(), /PM-Gesamturteil/, "die übrige Kettenanzeige bleibt vollständig erhalten");
+  });
+
+  // -------------------------------------------------------------------
+  // V7.9.8 ("Ergebnisbudget für Recherche- und Projektmanager-Stufe
+  // technisch erzwingen"): derselbe Hinweis muss für ALLE DREI Stufen
+  // funktionieren und die jeweilige Stufe korrekt benennen.
+  // -------------------------------------------------------------------
+  await check("V7.9.8: der Reduktionshinweis benennt die Recherchestufe und zeigt Roh- sowie gespeicherte Größe", async () => {
+    backend.setResultNormalization(secondChainId, 1, {
+      contractStage: "RESEARCH",
+      contractVersion: "V7.9.8-RESEARCH-5-SECTIONS",
+      structureValid: true,
+      compactionApplied: true,
+      droppedItemCount: 3,
+      droppedSentenceCount: 1,
+      droppedIncompleteTailSentence: false,
+      rawCharCount: 7584,
+      storedCharCount: 4288,
+      normalizedCharCount: 4288,
+      budgetMaxChars: 4500,
+    });
+    await ui.reloadSelectedOrder();
+    const html = diagnosticsHtml();
+    assert.ok(
+      html.includes(
+        "Das Rechercheergebnis wurde regelbasiert auf die verbindliche Ergebnisgröße reduziert " +
+          "(3 Punkte, 1 Sätze weggelassen; Rohgröße 7584, gespeichert 4288 Zeichen). Keine Kürzung innerhalb eines Satzes.",
+      ),
+      "der Reduktionshinweis der Recherchestufe muss sichtbar sein",
+    );
+    // Keine Rohantwort, kein abgeschnittener Inhalt, keine technischen Interna
+    // auf der ersten Ebene.
+    assert.ok(!html.includes("V7.9.8-RESEARCH-5-SECTIONS"), "die Vertragsversion ist ein technisches Internum und bleibt unsichtbar");
+    assert.ok(!html.includes("budgetMaxChars"), "keine technischen Feldnamen in der Anzeige");
+  });
+
+  await check("V7.9.8: der Reduktionshinweis benennt die Projektmanagerstufe", async () => {
+    backend.setResultNormalization(secondChainId, 3, {
+      contractStage: "PROJECT_MANAGER",
+      contractVersion: "V7.9.8-PM-5-SECTIONS",
+      structureValid: true,
+      compactionApplied: true,
+      droppedItemCount: 2,
+      droppedSentenceCount: 0,
+      droppedIncompleteTailSentence: false,
+      rawCharCount: 6002,
+      storedCharCount: 4106,
+      normalizedCharCount: 4106,
+      budgetMaxChars: 4500,
+    });
+    await ui.reloadSelectedOrder();
+    assert.ok(
+      diagnosticsHtml().includes(
+        "Das Projektmanager-Ergebnis wurde regelbasiert auf die verbindliche Ergebnisgröße reduziert " +
+          "(2 Punkte, 0 Sätze weggelassen; Rohgröße 6002, gespeichert 4106 Zeichen). Keine Kürzung innerhalb eines Satzes.",
+      ),
+      "der Reduktionshinweis der PM-Stufe muss sichtbar sein",
+    );
+  });
+
+  await check("V7.9.8: ohne Verdichtung erscheint in den neuen Stufen kein Hinweis; ältere Läufe ohne das neue Feld bleiben lesbar", async () => {
+    backend.setResultNormalization(secondChainId, 1, {
+      contractStage: "RESEARCH",
+      contractVersion: "V7.9.8-RESEARCH-5-SECTIONS",
+      structureValid: true,
+      compactionApplied: false,
+      droppedItemCount: 0,
+      droppedSentenceCount: 0,
+      droppedIncompleteTailSentence: false,
+      rawCharCount: 2480,
+      storedCharCount: 2480,
+      normalizedCharCount: 2480,
+      budgetMaxChars: 4500,
+    });
+    backend.setResultNormalization(secondChainId, 3, null);
+    await ui.reloadSelectedOrder();
+    const html = diagnosticsHtml();
+    assert.ok(!html.includes("Das Rechercheergebnis wurde regelbasiert"), "ohne Verdichtung darf kein Hinweis erscheinen");
+    assert.ok(!html.includes("Das Projektmanager-Ergebnis wurde regelbasiert"), "ein Lauf ohne das Feld bleibt hinweisfrei");
+    assert.match(html, /PM-Gesamturteil/, "die übrige Kettenanzeige bleibt vollständig erhalten");
+  });
+
+  await check("V7.9.8: ein älterer Dokumentationslauf ohne contractStage behält seinen bisherigen Wortlaut", async () => {
+    backend.setResultNormalization(secondChainId, 1, null);
+    // Genau die Metadatenform von vor V7.9.8: kein contractStage, kein
+    // storedCharCount, ausschließlich documentationNormalization.
+    backend.setDocumentationNormalization(secondChainId, 2, {
+      contractVersion: "V7.8.1-DOC-5-SECTIONS",
+      structureValid: true,
+      compactionApplied: true,
+      droppedItemCount: 4,
+      droppedSentenceCount: 2,
+      droppedIncompleteTailSentence: false,
+      rawCharCount: 7684,
+      normalizedCharCount: 4312,
+      budgetMaxChars: 4500,
+    });
+    await ui.reloadSelectedOrder();
+    assert.ok(diagnosticsHtml().includes(COMPACTION_NOTICE), "der V7.8.1-Wortlaut muss unverändert erscheinen");
+    backend.setDocumentationNormalization(secondChainId, 2, null);
+    await ui.reloadSelectedOrder();
   });
 
   // -------------------------------------------------------------------
@@ -1284,6 +1402,31 @@ async function run() {
     const presentation = ui.resolveFailurePresentation("SOME_FUTURE_UNKNOWN_CODE_XYZ");
     assert.strictEqual(presentation.reasonCode, "UNKNOWN");
     assert.strictEqual(presentation.cause, "Der Schritt ist technisch fehlgeschlagen. Die genaue Ursache ist derzeit nicht eindeutig bestimmbar.");
+  });
+
+  // V7.9.8: die vier neuen, stufeneigenen Befunde müssen benannt werden – ohne
+  // eigene Einträge würden sie kontrolliert auf UNKNOWN fallen und die Ursache
+  // wäre im Cockpit nicht mehr erkennbar (siehe V7.9.4-4 direkt darüber).
+  await check("V7.9.8: die vier neuen Recherche-/PM-Befunde werden im Cockpit benannt statt auf UNKNOWN abgebildet", async () => {
+    const expectations = [
+      { reasonCode: "RESEARCH_RESULT_STRUCTURE_INVALID", cause: "Das Rechercheergebnis hatte nicht die erwartete Struktur." },
+      { reasonCode: "RESEARCH_RESULT_STILL_TOO_LARGE", cause: "Das Rechercheergebnis blieb auch nach Reduktion über der Grenze." },
+      { reasonCode: "PM_RESULT_STRUCTURE_INVALID", cause: "Das Projektmanager-Ergebnis hatte nicht die erwartete Struktur." },
+      { reasonCode: "PM_RESULT_STILL_TOO_LARGE", cause: "Das Projektmanager-Ergebnis blieb auch nach Reduktion über der Grenze." },
+    ];
+    expectations.forEach((expectation) => {
+      const presentation = ui.resolveFailurePresentation(expectation.reasonCode);
+      assert.strictEqual(presentation.reasonCode, expectation.reasonCode, `${expectation.reasonCode} darf nicht auf UNKNOWN fallen`);
+      assert.strictEqual(presentation.cause, expectation.cause);
+      assert.ok(presentation.action, `${expectation.reasonCode}: eine Handlungsempfehlung muss vorliegen`);
+      // Keine automatische Wiederholung, kein Folgestart: die Empfehlung
+      // verlangt ausdrücklich eine erneute, manuelle Freigabe bzw. einen
+      // manuellen Neustart.
+      assert.ok(/Bitte/.test(presentation.action));
+    });
+    // Der bestehende Dokumentationsbefund aus V7.8.1 bleibt unverändert.
+    const documentation = ui.resolveFailurePresentation("DOCUMENTATION_RESULT_STRUCTURE_INVALID");
+    assert.strictEqual(documentation.cause, "Das Dokumentationsergebnis hatte nicht die erwartete Struktur.");
   });
 
   await check("V7.9.4-4b: unbekannte Rohwerte in step.failureReasonCode UND diagnostics.reasonCode werden nie unkontrolliert in der Kettenfehlerkarte gerendert", async () => {

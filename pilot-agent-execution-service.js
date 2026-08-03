@@ -322,6 +322,27 @@ const PILOT_AGENT_TASK_PRESETS = Object.freeze({
   }),
 });
 
+// V7.9.8 ("Ergebnisbudget für Recherche- und Projektmanager-Stufe technisch
+// erzwingen"): welcher Ergebnis-Stufenvertrag gilt für welches Preset?
+//
+// Bewusst eine Zuordnung über die PRESET-ID und nicht über pilotRole/agentKey:
+// die Pilotrolle RECHERCHE_ANALYSE mit agentKey "review-agent" wird
+// zusätzlich vom bestehenden Phase-7-Einzellauf-Preset
+// "codex-analyze-pilot-structure" verwendet (siehe oben). Eine Ableitung aus
+// der Rolle hätte diesen bestehenden Einzellauf ungefragt mitverändert –
+// er bleibt so byteidentisch. Der Dokumentationsvertrag steht bewusst NICHT
+// in dieser Tabelle: er wird im Runner unverändert über agentKey/pilotRole
+// erkannt (V7.8.1) und darf durch diese Erweiterung nicht abgeschwächt
+// werden.
+const RESULT_CONTRACT_STAGE_BY_PRESET_ID = Object.freeze({
+  "codex-chain-research-analysis": codexRunner.RESULT_CONTRACT_STAGES.RESEARCH,
+  "codex-pm-evaluate-chain": codexRunner.RESULT_CONTRACT_STAGES.PROJECT_MANAGER,
+});
+
+function resultContractStageForPreset(preset) {
+  return RESULT_CONTRACT_STAGE_BY_PRESET_ID[preset && preset.presetId] || undefined;
+}
+
 // V7.8.0: die Dateiauswahl für die Drei-Agenten-Kette wird EINMAL zentral
 // definiert und anschließend für alle drei Stufen wiederverwendet. Keine
 // automatische Dateierweiterung durch ein Modell.
@@ -948,6 +969,12 @@ async function startAgentExecutionRun(db, options = {}) {
         // vorangestellt wird (falls gesetzt ausschließlich aus der
         // Kettenorchestrierung, niemals frei aus dem Client-Body).
         mandate: options.mandate,
+        // V7.9.8: verbindlicher Ergebnis-Stufenvertrag für Kettenschritt 1
+        // bzw. 3 – ausschließlich serverseitig aus der Preset-ID abgeleitet
+        // (siehe RESULT_CONTRACT_STAGE_BY_PRESET_ID oben), niemals aus einer
+        // Client-Eingabe. Für jedes andere Preset bleibt der Wert undefined
+        // und der Lauf verhält sich unverändert.
+        resultContractStage: resultContractStageForPreset(preset),
         // Ausschließlich für Tests: injizierte Ersatzimplementierungen für
         // den echten Codex-Kindprozess/Dateisystemzugriff (siehe
         // pilot-agent-codex-runner.js/execution-codex-adapter.js). Im
@@ -1158,13 +1185,19 @@ function persistSucceededAgentExecutionRun(db, { runId, pilotOrderId, preset, ex
           // Auditmetadaten der deterministischen Budgetdurchsetzung des
           // Dokumentationsschritts (siehe pilot-agent-documentation-result.js
           // und pilot-agent-codex-runner.js). Ausschließlich für die
-          // Dokumentationsstufe vorhanden; jeder andere Lauf (Schritt 1,
-          // Schritt 3, Phase-7-Einzellauf) bleibt dadurch byteidentisch zum
-          // bisherigen resultSummary. Bewusst in der bereits bestehenden
-          // resultSummaryJson-Spalte – keine neue Spalte, keine Migration.
+          // Dokumentationsstufe vorhanden; der Name bleibt unverändert, damit
+          // bestehende Leser (API/Cockpit) unberührt bleiben. Bewusst in der
+          // bereits bestehenden resultSummaryJson-Spalte – keine neue Spalte,
+          // keine Migration.
           ...(execResult.documentationNormalization
             ? { documentationNormalization: execResult.documentationNormalization }
             : {}),
+          // V7.9.8: derselbe Metadatensatz stufenneutral – vorhanden für JEDE
+          // Stufe mit Ergebnisvertrag (Schritt 1, 2 und 3) und damit der
+          // kanonische Name für neue Leser. Ein Lauf ohne Stufenvertrag
+          // (Phase-7-Einzellauf, lokaler Lauf) bleibt byteidentisch zum
+          // bisherigen resultSummary.
+          ...(execResult.resultNormalization ? { resultNormalization: execResult.resultNormalization } : {}),
         }
       : {
           observations: execResult.observations,

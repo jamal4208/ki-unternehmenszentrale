@@ -4,6 +4,45 @@
 
 `server.js` registriert über `server-http-router.js` **89 GET-Routen** und **52 additive POST-Routen** (Execution Bridge seit Phase C gesichert + V7.1 Phase A Dokumente/Backup gesichert `59f985f` + V7.1 Phase B HeyGen-Connector-Pilot gesichert `ff43089` + V7.1 Phase B.1 Mandantenbasis/Ergebnisrückführung gesichert `37e8a28` + V7.1 Phase C Canva-Connector-Pilot gesichert `52b2d02` + V7.1 Phase C.1 Pilot-Ergebnisakte/Kundenfeedback-Schleife und V7.1 Phase C.1.1 skalierbares Reviewmodell gemeinsam gesichert `6621d93` + V7.2 Phase A Schritt 2 Auth-Routen/Route-Gates + V7.2 Phase A Schritt 3 Owner-Verwaltung/Kundenportal-API + V7.2 Phase A Schritt 4 Betriebsabnahme + V7.2 Phase B Schritt 1 Arbeitsauftrags-API + V7.2 Phase C Schritt 1 Agentenlauf-/Ergebnis-Endpunkte + V7.2 Phase C Schritt 2 Änderungswunsch-/Freigabe-/Versions-Endpunkte innerhalb bestehender Präfixe + V7.3 Jamal-Arbeitsmodus-Zustand/-Aktionen + V7.4 Canva-Produktionskorridor-Zustand/-Aktionen gesichert `f2b0909` + V7.5 Agentenleitstand-/Unternehmensleitlinien-Routen gesichert `6ffa3f8` + V7.6.1 Office-/Finance-Routen gesichert `5b59b17` + V7.6.3 Health-Referenzlauf-Routen (lokal umgesetzt, ungesichert)). Andere HTTP-Methoden bleiben 405. GET-Routen bleiben read-only. Die POST-Routen schreiben ausschließlich lokal (App-Support-Metadaten bzw. die Auth-Datenbank bzw. – nach Jamal-Freigabe – ein Fixture-Testrepository); niemals in Health und niemals mit Commit/Push/Deployment.
 
+## V7.9.8 – Ergebnisbudget für die Recherche- und die Projektmanager-Stufe technisch erzwungen (keine neue Route, ein additives read-only Unterobjekt)
+
+Routenzahlen bleiben unverändert (**89 GET, 52 POST**). Es gibt keine neue Route, keinen neuen Browserparameter und keine neue Aktion. Der Ausgabehaushalt aus V7.8.1 gilt jetzt für alle drei Kettenstufen; die bereits bestehende Antwortstruktur eines Agentenlaufs (`agentExecutionRuns[]` in der Overview sowie die Einzellauf-/Kettenansichten) trägt dafür ein zusätzliches, rein informatives read-only Unterobjekt in `resultSummary`:
+
+`resultSummary.resultNormalization`:
+
+| Feld | Typ | Bedeutung |
+|---|---|---|
+| `contractStage` | string | angewendeter Stufenvertrag: `"RESEARCH"` (Schritt 1), `"DOCUMENTATION"` (Schritt 2) oder `"PROJECT_MANAGER"` (Schritt 3) |
+| `contractVersion` | string | Version des Ausgabevertrags: `"V7.9.8-RESEARCH-5-SECTIONS"`, `"V7.8.1-DOC-5-SECTIONS"` oder `"V7.9.8-PM-5-SECTIONS"` |
+| `structureValid` | boolean | ob die verbindliche Fünf-Abschnittsstruktur der Stufe erkannt wurde |
+| `contractFallbackAccepted` | boolean | true, wenn ein markerloses Ergebnis unverändert durchgelassen wurde, weil es das Budget bereits einhielt |
+| `rawCharCount` | number | Zeichenzahl der ursprünglichen Modellantwort |
+| `storedCharCount` | number | Zeichenzahl des tatsächlich gespeicherten Ergebnisses |
+| `normalizedCharCount` | number | identischer Wert wie `storedCharCount`; der Name aus V7.8.1 bleibt für bestehende Auswertungen erhalten |
+| `sectionCharCounts` | object | Zeichenzahl je Abschnitt (Schlüssel `"1"` bis `"5"`) |
+| `droppedItemCount` | number | Anzahl vollständig weggelassener nummerierter Punkte |
+| `droppedSentenceCount` | number | Anzahl vollständig weggelassener Sätze |
+| `droppedIncompleteTailSentence` | boolean | true, wenn ein unvollständiger Schlusssatz als Ganzes weggelassen wurde |
+| `compactionApplied` | boolean | true, wenn tatsächlich etwas weggelassen wurde (steuert die Cockpit-Hinweiszeile) |
+| `budgetMaxChars` | number | verbindliche maximale gespeicherte Größe (4500, für alle drei Stufen identisch) |
+| `missingSections` | number[] | fehlende bzw. nach der Verdichtung leere Pflichtabschnitte |
+| `duplicateSectionNumbers` | number[] | mehrfach vorhandene Abschnittsnummern (Inhalt wird zusammengeführt, nicht verworfen) |
+| `preambleCharCount` | number | Zeichenzahl des verworfenen Textes vor Abschnitt 1 |
+
+Grenzen und Zusicherungen: das Feld enthält ausschließlich Zählwerte und Metadaten, niemals Prompttext, Fachinhalt, Secrets oder Tokens. Es ist ausschließlich für Läufe **mit** Stufenvertrag vorhanden – das sind die drei Kettenstufen. Der bestehende Phase-7-Einzellauf besitzt keinen Stufenvertrag, behält sein bisheriges `resultSummary` unverändert und liefert das Feld nicht (`undefined`); dasselbe gilt für alle Läufe von vor V7.9.8. Für Dokumentationsläufe wird zusätzlich das seit V7.8.1 bestehende, wortgleiche `resultSummary.documentationNormalization` unverändert weitergeschrieben (siehe unten); Läufe von Schritt 1 und Schritt 3 tragen dieses Feld ausdrücklich nicht. Keine neue Spalte, keine neue Migration (siehe `MIGRATION_PLAN.md`).
+
+Unveränderte Grenzen: `MAX_READ_ONLY_RESULT_CHARS` bleibt exakt 6000, `MAX_PREDECESSOR_CONTEXT_CHARS` bleibt daran gekoppelt. Angehoben wurde ausschließlich die Rohannahme des Adapters innerhalb eines Laufs mit Stufenvertrag (`maxResultChars` = 12000), damit die Verdichtung überhaupt ausgeführt werden kann; gespeichert werden weiterhin höchstens 4500 Zeichen.
+
+Fehlerverhalten über die bestehende Route `start-chain-step`: hält ein Ergebnis die Fünf-Abschnittsstruktur seiner Stufe nicht ein oder bleibt es auch nach der vollständigen regelbasierten Reduktion über 4500 Zeichen, endet der Schritt kontrolliert als `FAILED` mit `runnerPhase` = `RESULT_VALIDATION` und einem stufeneigenen `resultSummary.diagnostics.reasonCode`:
+
+| Stufe | Struktur ungültig | trotz Reduktion zu groß |
+|---|---|---|
+| Schritt 1 (Recherche) | `RESEARCH_RESULT_STRUCTURE_INVALID` | `RESEARCH_RESULT_STILL_TOO_LARGE` |
+| Schritt 2 (Dokumentation) | `DOCUMENTATION_RESULT_STRUCTURE_INVALID` | `DOCUMENTATION_RESULT_STILL_TOO_LARGE` |
+| Schritt 3 (Projektmanager) | `PM_RESULT_STRUCTURE_INVALID` | `PM_RESULT_STILL_TOO_LARGE` |
+
+In allen sechs Fällen wird nichts abgeschnitten, nichts gespeichert und keine Folgestufe gestartet; die Freigabe der nächsten Stufe bleibt ausschließlich bei Jamal.
+
 ## V7.8.1 – Ergebnisbudget von Schritt 2 technisch erzwungen (keine neue Route, ein additives read-only Unterobjekt)
 
 Routenzahlen bleiben unverändert (**89 GET, 52 POST**). Es gibt keine neue Route, keinen neuen Parameter und keine neue Aktion. Ausschließlich die bereits bestehende Antwortstruktur eines Agentenlaufs (`agentExecutionRuns[]` in der Overview sowie die Einzellauf-/Kettenansichten) trägt für **Läufe der Dokumentationsstufe** ein zusätzliches, rein informatives read-only Unterobjekt in `resultSummary`:
