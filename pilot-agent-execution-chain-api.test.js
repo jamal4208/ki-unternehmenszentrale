@@ -333,6 +333,42 @@ async function run() {
     assert.strictEqual(result.statusCode, 400);
   });
 
+  // V7.9.9 ("auftragsbezogene Dateiauswahl auf die Nutzerperspektive
+  // erweitern"), Testfall A/F über die HTTP-Schicht: die Allowlist und die
+  // empfohlene Standardauswahl kommen ausschließlich vom Server; ein
+  // clientseitig frei gewählter Pfad wird abgewiesen (400).
+  await check("V7.9.9-A/F: Overview liefert Allowlist und empfohlene Nutzerperspektiv-Auswahl serverseitig; ein Pfad außerhalb der Allowlist wird über HTTP abgewiesen", async () => {
+    const agentExecutionService = require("./pilot-agent-execution-service");
+    const overviewResult = await invoke({ method: "GET", url: `/api/pilot-work-order/orders/${orderId}`, headers: authedJsonHeaders(ownerSession) });
+    assert.strictEqual(overviewResult.statusCode, 200);
+    assert.deepStrictEqual(
+      overviewResult.json.overview.chainSelectableFiles,
+      agentExecutionService.CHAIN_SELECTABLE_FILES.slice(),
+      "Overview muss exakt die serverseitige Allowlist liefern",
+    );
+    assert.deepStrictEqual(
+      overviewResult.json.overview.chainRecommendedFiles,
+      agentExecutionService.CHAIN_RECOMMENDED_USER_PERSPECTIVE_FILES.slice(),
+      "Overview muss exakt die serverseitige Standardauswahl liefern",
+    );
+    ["pilot-work-order-ui.js", "V1_BETRIEBSHANDBUCH.md", "pilot-work-order-service.js", "pilot-work-order-routes.js"].forEach((relativePath) => {
+      assert.ok(overviewResult.json.overview.chainSelectableFiles.includes(relativePath), `${relativePath} muss über HTTP auswählbar sein`);
+    });
+
+    for (const invalidPath of [".env", ".env.local", ".env.example", ".git/config", "data/auth.sqlite", "../secret.txt", "/etc/passwd", "node_modules/example.js", "server.js"]) {
+      const rejected = await invoke({
+        method: "POST",
+        url: `/api/pilot-work-order/orders/${orderId}/prepare-agent-chain`,
+        headers: authedJsonHeaders(ownerSession),
+        bodyObj: { selectedFiles: [invalidPath] },
+      });
+      assert.strictEqual(rejected.statusCode, 400, `${invalidPath} muss über HTTP mit 400 abgewiesen werden`);
+      assert.notStrictEqual(rejected.json.ok, true);
+    }
+    const stillNoChain = await invoke({ method: "GET", url: `/api/pilot-work-order/orders/${orderId}`, headers: authedJsonHeaders(ownerSession) });
+    assert.strictEqual(stillNoChain.json.overview.agentChains.length, 0, "kein abgewiesener Versuch darf eine Kette angelegt haben");
+  });
+
   let chainId;
   await check("1./2. Kette vorbereiten mit selectedFiles fixiert genau diese Auswahl und ist danach über GET sichtbar", async () => {
     const result = await invoke({

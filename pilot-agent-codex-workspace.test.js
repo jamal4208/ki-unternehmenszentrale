@@ -377,6 +377,56 @@ function run() {
     fs.rmSync(multiFileRoot, { recursive: true, force: true });
   });
 
+  // V7.9.9 ("auftragsbezogene Dateiauswahl auf die Nutzerperspektive
+  // erweitern") – Testfall D des Auftrags: die neu aufgenommene
+  // Markdown-Datei V1_BETRIEBSHANDBUCH.md muss zulässig sein und
+  // gemeinsam mit den drei anderen empfohlenen Dateien byteidentisch in
+  // den isolierten Read-Only-Workspace übernommen werden. Bewusst gegen
+  // das ECHTE Repository als Quelle (ausschließlich lesend, wie im
+  // Praxislauf), aber mit dem Repository als forbiddenRoot – der
+  // Workspace muss nachweislich außerhalb liegen. Kein Codex-Aufruf, kein
+  // Kettenlauf, keine Schreiboperation im Repository.
+  check("V7.9.9-D: V1_BETRIEBSHANDBUCH.md ist als Markdown zulässig und wird mit den empfohlenen Dateien sicher in den isolierten Read-only-Workspace übernommen", () => {
+    const agentExecutionService = require("./pilot-agent-execution-service");
+    const repoRoot = fs.realpathSync(agentExecutionService.REPO_ROOT);
+    const recommendedFiles = agentExecutionService.CHAIN_RECOMMENDED_USER_PERSPECTIVE_FILES.slice();
+    assert.ok(recommendedFiles.includes("V1_BETRIEBSHANDBUCH.md"));
+
+    // Die Markdown-Datei besteht dieselbe Segmentprüfung wie jede
+    // JavaScript-Datei – es gibt bewusst keine Endungs-Sonderregel.
+    assert.strictEqual(workspaceModule.assertSafeAllowedRelativePath("V1_BETRIEBSHANDBUCH.md"), "V1_BETRIEBSHANDBUCH.md");
+
+    const ws = workspaceModule.createIsolatedReadOnlyWorkspace({
+      sourceRoot: repoRoot,
+      allowedFiles: recommendedFiles,
+      executionRunId: "run-v799-user-perspective",
+      forbiddenRoots: [repoRoot],
+    });
+    try {
+      assert.deepStrictEqual(ws.copiedFiles, recommendedFiles, "genau die vier empfohlenen Dateien müssen kopiert werden");
+      assert.ok(
+        !ws.workspaceDir.startsWith(`${repoRoot}${path.sep}`) && ws.workspaceDir !== repoRoot,
+        "der Workspace muss außerhalb des Repositories liegen",
+      );
+      assert.ok(ws.totalBytes > 0 && ws.totalBytes <= workspaceModule.MAX_TOTAL_BYTES);
+
+      const handbookInWorkspace = path.join(ws.workspaceDir, "V1_BETRIEBSHANDBUCH.md");
+      assert.ok(fs.existsSync(handbookInWorkspace) && fs.statSync(handbookInWorkspace).isFile());
+      assert.ok(
+        fs.readFileSync(handbookInWorkspace).equals(fs.readFileSync(path.join(repoRoot, "V1_BETRIEBSHANDBUCH.md"))),
+        "die Markdown-Datei muss byteidentisch übernommen werden",
+      );
+
+      // Keine weitere Datei aus dem echten Repository ist im Workspace
+      // gelandet (insbesondere kein .env, kein .git, kein data-Verzeichnis).
+      assert.deepStrictEqual(fs.readdirSync(ws.workspaceDir).sort(), recommendedFiles.slice().sort());
+      assert.deepStrictEqual(workspaceModule.verifyWorkspaceUnchanged(ws.workspaceDir, ws.baselineHashes), []);
+    } finally {
+      workspaceModule.cleanupWorkspace(ws.workspaceDir);
+    }
+    assert.ok(!fs.existsSync(ws.workspaceDir), "der Workspace muss nach dem Test wieder entfernt sein");
+  });
+
   fs.rmSync(sourceRoot, { recursive: true, force: true });
 
   console.log(`pilot-agent-codex-workspace.test.js: ${passed} Prüfpunkte erfolgreich`);

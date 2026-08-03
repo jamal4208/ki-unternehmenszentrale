@@ -105,6 +105,139 @@ async function run() {
   });
 
   // -------------------------------------------------------------------
+  // V7.9.9 ("auftragsbezogene Dateiauswahl auf die Nutzerperspektive
+  // erweitern") – Testfälle A, B, C, E, F des Auftrags. Die Allowlist
+  // bleibt eine geschlossene, serverseitige Liste; hier wird sie gegen
+  // das echte Dateisystem und gegen die bestehenden Grenzen des
+  // isolierten Read-Only-Workspace geprüft.
+  // -------------------------------------------------------------------
+  const codexWorkspace = require("./pilot-agent-codex-workspace");
+  const RECOMMENDED_USER_PERSPECTIVE_FILES = [
+    "pilot-work-order-ui.js",
+    "V1_BETRIEBSHANDBUCH.md",
+    "pilot-work-order-service.js",
+    "pilot-work-order-routes.js",
+  ];
+
+  await check("V7.9.9-A: die vier empfohlenen Nutzerperspektiv-Dateien sind serverseitig auswählbar und bilden genau die Standardauswahl", () => {
+    RECOMMENDED_USER_PERSPECTIVE_FILES.forEach((relativePath) => {
+      assert.ok(
+        agentExecutionService.CHAIN_SELECTABLE_FILES.includes(relativePath),
+        `${relativePath} muss in CHAIN_SELECTABLE_FILES enthalten sein`,
+      );
+    });
+    assert.deepStrictEqual(
+      agentExecutionService.CHAIN_RECOMMENDED_USER_PERSPECTIVE_FILES.slice(),
+      RECOMMENDED_USER_PERSPECTIVE_FILES,
+      "die Standardauswahl darf ausschließlich aus genau diesen vier Dateien bestehen",
+    );
+    // Die Standardauswahl ist niemals eine Rechteerweiterung: jede
+    // empfohlene Datei muss auch die normale Validierung bestehen.
+    assert.deepStrictEqual(
+      agentExecutionService.resolveChainSelectedFiles(RECOMMENDED_USER_PERSPECTIVE_FILES.slice()),
+      RECOMMENDED_USER_PERSPECTIVE_FILES,
+    );
+    // Additiv: die bisherigen vier technischen Dateien bleiben auswählbar,
+    // damit keine bestehende Kette nachträglich unlesbar wird.
+    ["pilot-agent-execution-chain-service.js", "pilot-work-order-service.js", "pilot-agent-runner.js", "auth-db-migrations.js"].forEach(
+      (legacyPath) => {
+        assert.ok(agentExecutionService.CHAIN_SELECTABLE_FILES.includes(legacyPath), `${legacyPath} darf nicht entfallen`);
+      },
+    );
+    assert.ok(Object.isFrozen(agentExecutionService.CHAIN_SELECTABLE_FILES));
+    assert.ok(Object.isFrozen(agentExecutionService.CHAIN_RECOMMENDED_USER_PERSPECTIVE_FILES));
+  });
+
+  await check("V7.9.9-B/C: jeder Allowlist-Eintrag ist ein relativer, existierender, regulärer Pfad innerhalb der Projektwurzel ohne verbotenes Segment und unter dem Einzeldateilimit", () => {
+    const repoRoot = fs.realpathSync(agentExecutionService.REPO_ROOT);
+    assert.ok(agentExecutionService.CHAIN_SELECTABLE_FILES.length > 0);
+    agentExecutionService.CHAIN_SELECTABLE_FILES.forEach((relativePath) => {
+      assert.strictEqual(typeof relativePath, "string");
+      assert.ok(relativePath.trim().length > 0, "leerer Pfad ist unzulässig");
+      assert.ok(!path.isAbsolute(relativePath), `${relativePath} muss relativ sein`);
+      assert.ok(!relativePath.includes(".."), `${relativePath} darf keine Traversierung enthalten`);
+      assert.ok(!relativePath.includes("*") && !relativePath.includes("?"), `${relativePath} darf keine Wildcard enthalten`);
+      assert.ok(!relativePath.includes("\0"), `${relativePath} darf kein Nullbyte enthalten`);
+      // Identische Segmentprüfung wie im isolierten Read-Only-Workspace
+      // (verbotene Segmente: .git, .env, .env.local, node_modules,
+      // .DS_Store, data).
+      const normalized = codexWorkspace.assertSafeAllowedRelativePath(relativePath);
+      assert.strictEqual(normalized, relativePath);
+
+      const absolutePath = path.join(repoRoot, relativePath);
+      assert.ok(fs.existsSync(absolutePath), `${relativePath} muss tatsächlich existieren`);
+      const realPath = fs.realpathSync(absolutePath);
+      assert.ok(fs.statSync(realPath).isFile(), `${relativePath} muss eine reguläre Datei sein`);
+      assert.ok(realPath.startsWith(`${repoRoot}${path.sep}`), `${relativePath} muss innerhalb der Projektwurzel liegen`);
+      assert.ok(
+        fs.statSync(realPath).size <= codexWorkspace.MAX_FILE_BYTES,
+        `${relativePath} muss unter dem Einzeldateilimit von ${codexWorkspace.MAX_FILE_BYTES} Bytes liegen`,
+      );
+    });
+    // Testfall C explizit: die größte neu aufgenommene Datei.
+    const uiBytes = fs.statSync(path.join(repoRoot, "pilot-work-order-ui.js")).size;
+    assert.ok(uiBytes > 0 && uiBytes <= codexWorkspace.MAX_FILE_BYTES, `pilot-work-order-ui.js (${uiBytes} Bytes) muss unter dem Einzeldateilimit liegen`);
+  });
+
+  await check("V7.9.9-E: die empfohlene Vierer-Auswahl und sogar die vollständige Allowlist bleiben unter dem Gesamtgrößenlimit", () => {
+    const repoRoot = fs.realpathSync(agentExecutionService.REPO_ROOT);
+    const bytesFor = (files) => files.reduce((sum, relativePath) => sum + fs.statSync(path.join(repoRoot, relativePath)).size, 0);
+    const recommendedBytes = bytesFor(RECOMMENDED_USER_PERSPECTIVE_FILES);
+    assert.ok(
+      recommendedBytes <= codexWorkspace.MAX_TOTAL_BYTES,
+      `empfohlene Auswahl (${recommendedBytes} Bytes) muss unter dem Gesamtgrößenlimit von ${codexWorkspace.MAX_TOTAL_BYTES} Bytes bleiben`,
+    );
+    const fullBytes = bytesFor(agentExecutionService.CHAIN_SELECTABLE_FILES.slice());
+    assert.ok(
+      fullBytes <= codexWorkspace.MAX_TOTAL_BYTES,
+      `vollständige Allowlist (${fullBytes} Bytes) muss unter dem Gesamtgrößenlimit bleiben`,
+    );
+  });
+
+  await check("V7.9.9-F: Pfade außerhalb der Allowlist werden weiterhin abgelehnt (explizite Gegenproben)", () => {
+    const counterChecks = [
+      ".env",
+      ".env.local",
+      ".env.example",
+      ".git/config",
+      "data/auth.sqlite",
+      "../secret.txt",
+      "/etc/passwd",
+      "node_modules/example.js",
+      "server.js",
+      "V1_BETRIEBSHANDBUCH.md/../.env",
+      "./pilot-work-order-ui.js",
+      "PILOT-WORK-ORDER-UI.JS",
+      "*.js",
+      "docs",
+    ];
+    counterChecks.forEach((invalidPath) => {
+      assert.ok(
+        !agentExecutionService.CHAIN_SELECTABLE_FILES.includes(invalidPath),
+        `${invalidPath} darf nicht in der Allowlist stehen`,
+      );
+      assert.throws(
+        () => agentExecutionService.resolveChainSelectedFiles([invalidPath]),
+        /selectedFiles enth\u00e4lt nicht erlaubte Dateien/,
+        `${invalidPath} muss abgewiesen werden`,
+      );
+      // Auch gemischt mit einer gültigen Auswahl darf ein einziger
+      // unerlaubter Pfad die gesamte Auswahl abweisen (kein stilles
+      // Herausfiltern).
+      assert.throws(
+        () => agentExecutionService.resolveChainSelectedFiles(["pilot-work-order-ui.js", invalidPath]),
+        /selectedFiles enth\u00e4lt nicht erlaubte Dateien/,
+        `${invalidPath} muss auch in gemischter Auswahl abgewiesen werden`,
+      );
+    });
+    assert.ok(!agentExecutionService.CHAIN_SELECTABLE_FILES.includes("server.js"), "server.js bleibt bewusst außerhalb der Allowlist");
+    // Randleerzeichen werden (unverändert seit V7.8.0) getrimmt und danach
+    // exakt gegen die Allowlist geprüft – kein Umgehungsweg, sondern eine
+    // Normalisierung auf genau denselben erlaubten Eintrag.
+    assert.deepStrictEqual(agentExecutionService.resolveChainSelectedFiles(["  pilot-work-order-ui.js  "]), ["pilot-work-order-ui.js"]);
+  });
+
+  // -------------------------------------------------------------------
   // Zwei unabhängige Pilotaufträge, beide bis IN_EXECUTION geführt
   // (Voraussetzung für einen Agentenlauf, siehe Schwerpunkt 3).
   // -------------------------------------------------------------------

@@ -1949,11 +1949,11 @@
     return '<br><span class="pilot-work-order-action-error">' + escapeHtml(documentationCompactionNoticeText(normalization)) + "</span>";
   }
 
-  function chainSelectableFilesFromOverview(overview) {
-    var entries = overview && Array.isArray(overview.chainSelectableFiles) ? overview.chainSelectableFiles : [];
+  function normalizedFileListFrom(entries) {
+    var source = Array.isArray(entries) ? entries : [];
     var result = [];
     var seen = {};
-    entries.forEach(function (entry) {
+    source.forEach(function (entry) {
       if (!isNonEmptyString(entry)) return;
       var value = entry.trim();
       if (!value || seen[value]) return;
@@ -1963,10 +1963,32 @@
     return result;
   }
 
+  function chainSelectableFilesFromOverview(overview) {
+    return normalizedFileListFrom(overview && overview.chainSelectableFiles);
+  }
+
+  // V7.9.9: die für die Nutzerperspektive empfohlene Teilmenge kommt
+  // ausschließlich aus der serverseitigen Antwort (chainRecommendedFiles).
+  // Sie wird zusätzlich gegen die auswählbaren Dateien gefiltert – das
+  // Cockpit zeigt und sendet niemals einen Pfad, den der Server nicht
+  // ohnehin freigegeben hat. Fehlt das Feld (älterer Serverstand), bleibt
+  // das bisherige V7.8.0-Verhalten erhalten.
+  function chainRecommendedFilesFromOverview(overview) {
+    var selectableFiles = chainSelectableFilesFromOverview(overview);
+    return normalizedFileListFrom(overview && overview.chainRecommendedFiles).filter(function (entry) {
+      return selectableFiles.indexOf(entry) !== -1;
+    });
+  }
+
   function getChainFileSelectionForOverview(overview) {
     var selectableFiles = chainSelectableFilesFromOverview(overview);
+    var recommendedFiles = chainRecommendedFilesFromOverview(overview);
     if (!Array.isArray(state.chainSelectedFiles)) {
-      state.chainSelectedFiles = selectableFiles.slice();
+      // Deterministische Standardvorauswahl, keine Auswahlentscheidung durch
+      // ein Sprachmodell: bevorzugt genau die empfohlenen
+      // Nutzerperspektiv-Dateien, sonst (kein Feld vorhanden) unverändert
+      // die vollständige Allowlist wie bisher.
+      state.chainSelectedFiles = recommendedFiles.length > 0 ? recommendedFiles.slice() : selectableFiles.slice();
     } else {
       var selectedSeen = {};
       var filteredSelection = [];
@@ -1979,7 +2001,11 @@
       });
       state.chainSelectedFiles = filteredSelection;
     }
-    return { selectableFiles: selectableFiles, selectedFiles: state.chainSelectedFiles.slice() };
+    return {
+      selectableFiles: selectableFiles,
+      recommendedFiles: recommendedFiles,
+      selectedFiles: state.chainSelectedFiles.slice(),
+    };
   }
 
   function toggleChainSelectedFile(filePath, checked) {
@@ -2452,9 +2478,18 @@
       return html;
     }
     if (selection.selectableFiles.length > 0) {
-      html += '<div class="pilot-chain-file-selection"><p><strong>Dateiauswahl f\u00fcr alle drei Stufen:</strong></p><ul>';
+      html += '<div class="pilot-chain-file-selection"><p><strong>Dateiauswahl f\u00fcr alle drei Stufen:</strong></p>';
+      if (selection.recommendedFiles.length > 0) {
+        html +=
+          "<p>Vorausgew\u00e4hlt sind die f\u00fcr die Nutzerperspektive empfohlenen Dateien (" +
+          escapeHtml(selection.recommendedFiles.join(", ")) +
+          "). Die Auswahl ist frei \u00e4nderbar; die Liste selbst ist serverseitig geschlossen. " +
+          "Eine Auswahl allein bereitet keine Kette vor, gibt nichts frei und startet nichts.</p>";
+      }
+      html += "<ul>";
       selection.selectableFiles.forEach(function (filePath) {
         var checked = selection.selectedFiles.indexOf(filePath) !== -1;
+        var recommended = selection.recommendedFiles.indexOf(filePath) !== -1;
         html +=
           "<li><label>" +
           '<input type="checkbox" data-action="toggle-chain-selected-file" data-file-path="' +
@@ -2464,6 +2499,7 @@
           (state.chainActionInFlight || orderChainLocked ? " disabled" : "") +
           " /> " +
           escapeHtml(filePath) +
+          (recommended ? " \u2013 empfohlen f\u00fcr die Nutzerperspektive" : "") +
           "</label></li>";
       });
       html += "</ul></div>";
@@ -2887,6 +2923,11 @@
       confirmJamalConfirmation: confirmJamalConfirmation,
       requestCodexApproval: requestCodexApproval,
       runCodexAgentExecution: runCodexAgentExecution,
+      // V7.9.9: additiv exportiert, damit
+      // pilot-agent-execution-chain-ui.test.js nachweisen kann, dass ein
+      // Klick auf eine Datei ausschließlich den lokalen Auswahlzustand
+      // ändert und keinen POST (Vorbereiten/Freigabe/Start) auslöst.
+      toggleChainSelectedFile: toggleChainSelectedFile,
       prepareAgentChain: prepareAgentChain,
       requestChainStepApproval: requestChainStepApproval,
       startChainStep: startChainStep,

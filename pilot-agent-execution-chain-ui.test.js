@@ -54,11 +54,26 @@ const CHAIN_STEP_DEFINITIONS = [
   { stepNumber: 2, agentKey: "documentation-agent", presetId: "codex-document-chain-result" },
   { stepNumber: 3, agentKey: "orchestrator-agent", presetId: "codex-pm-evaluate-chain" },
 ];
+// Deckungsgleich mit der serverseitigen Allowlist
+// (pilot-agent-execution-service.js#CHAIN_SELECTABLE_FILES) inklusive der
+// V7.9.9-Erweiterung; die Fixtur wird unten gegen die echte Konstante
+// abgeglichen, damit sie nicht auseinanderlaufen kann.
 const CHAIN_SELECTABLE_FILES = [
   "pilot-agent-execution-chain-service.js",
   "pilot-work-order-service.js",
   "pilot-agent-runner.js",
   "auth-db-migrations.js",
+  "pilot-work-order-ui.js",
+  "V1_BETRIEBSHANDBUCH.md",
+  "pilot-work-order-routes.js",
+];
+// V7.9.9: die vom Server empfohlene, deterministische Standardvorauswahl
+// für die Nutzerperspektive.
+const CHAIN_RECOMMENDED_FILES = [
+  "pilot-work-order-ui.js",
+  "V1_BETRIEBSHANDBUCH.md",
+  "pilot-work-order-service.js",
+  "pilot-work-order-routes.js",
 ];
 
 const RESULT_TEXT_BY_STEP = {
@@ -143,6 +158,7 @@ function makeFakeBackend() {
       agentExecutionRuns: order.agentExecutionRuns || [],
       agentChains: order.agentChains || [],
       chainSelectableFiles: CHAIN_SELECTABLE_FILES.slice(),
+      chainRecommendedFiles: CHAIN_RECOMMENDED_FILES.slice(),
       openDecision: null,
       risksAndLimits: [],
       nextStep: "Weiter im Ablauf.",
@@ -699,6 +715,87 @@ async function run() {
     assert.match(diagnosticsHtml(), /data-action="prepare-agent-chain"/);
     assert.doesNotMatch(diagnosticsHtml(), /data-action="prepare-agent-chain" disabled/);
     assert.match(diagnosticsHtml(), /Jamal legt die Dateiauswahl hier einmal f\u00fcr alle drei Stufen fest/);
+  });
+
+  await check("V7.9.9-K: das Cockpit zeigt alle serverseitig auswählbaren Dateien und wählt genau die vier empfohlenen Nutzerperspektiv-Dateien deterministisch vor", async () => {
+    // Die Fixtur oben muss der echten serverseitigen Quelle der Wahrheit
+    // entsprechen – sonst prüft dieser Test eine Fiktion.
+    const agentExecutionService = require("./pilot-agent-execution-service");
+    assert.deepStrictEqual(agentExecutionService.CHAIN_SELECTABLE_FILES.slice(), CHAIN_SELECTABLE_FILES);
+    assert.deepStrictEqual(agentExecutionService.CHAIN_RECOMMENDED_USER_PERSPECTIVE_FILES.slice(), CHAIN_RECOMMENDED_FILES);
+
+    const html = diagnosticsHtml();
+    CHAIN_SELECTABLE_FILES.forEach((filePath) => {
+      assert.ok(
+        html.includes('data-action="toggle-chain-selected-file" data-file-path="' + filePath + '"'),
+        `${filePath} muss im Cockpit auswählbar angezeigt werden`,
+      );
+    });
+    // Genau die vier empfohlenen Dateien sind vorausgewählt (checked),
+    // die drei übrigen ausdrücklich nicht.
+    CHAIN_SELECTABLE_FILES.forEach((filePath) => {
+      const checkboxMatch = html.match(new RegExp('<input type="checkbox" data-action="toggle-chain-selected-file" data-file-path="' + filePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + '"[^>]*'));
+      assert.ok(checkboxMatch, `Checkbox für ${filePath} muss vorhanden sein`);
+      const isChecked = checkboxMatch[0].includes(" checked");
+      assert.strictEqual(isChecked, CHAIN_RECOMMENDED_FILES.indexOf(filePath) !== -1, `Vorauswahl von ${filePath} ist nicht wie erwartet`);
+    });
+    assert.deepStrictEqual(ui.getState().chainSelectedFiles, CHAIN_RECOMMENDED_FILES);
+    // Nachvollziehbare Erklärung im Cockpit, keine stille Vorauswahl.
+    assert.match(html, /Vorausgew\u00e4hlt sind die f\u00fcr die Nutzerperspektive empfohlenen Dateien/);
+    assert.match(html, /empfohlen f\u00fcr die Nutzerperspektive/);
+    assert.match(html, /Die Auswahl ist frei \u00e4nderbar; die Liste selbst ist serverseitig geschlossen/);
+    // Keine freie Pfadeingabe im Cockpit: ausschließlich Checkboxen aus der
+    // Serverliste, kein Text-/Datei-Eingabefeld für Pfade.
+    const selectionBlock = html.match(/<div class="pilot-chain-file-selection">[\s\S]*?<\/div>/);
+    assert.ok(selectionBlock, "der Auswahlblock muss vorhanden sein");
+    assert.doesNotMatch(selectionBlock[0], /<input(?![^>]*type="checkbox")/);
+    assert.doesNotMatch(selectionBlock[0], /<textarea|<select/);
+  });
+
+  await check("V7.9.9-L: weder die Standardvorauswahl noch ein Klick auf eine Datei löst einen POST zum Vorbereiten, Freigeben oder Starten aus", async () => {
+    fetchCalls.length = 0;
+    // Erneutes Rendern mit aktiver Standardvorauswahl: kein Request.
+    ui.render();
+    assert.deepStrictEqual(fetchCalls, [], "die Standardvorauswahl darf keinen Request auslösen");
+
+    // Ein Klick auf eine bisher nicht ausgewählte Datei ändert nur den
+    // lokalen Zustand.
+    ui.toggleChainSelectedFile("pilot-agent-runner.js", true);
+    assert.ok(ui.getState().chainSelectedFiles.indexOf("pilot-agent-runner.js") !== -1);
+    // Und ein Klick zum Abwählen ebenso.
+    ui.toggleChainSelectedFile("pilot-agent-runner.js", false);
+    assert.strictEqual(ui.getState().chainSelectedFiles.indexOf("pilot-agent-runner.js"), -1);
+    // Ein nicht auswählbarer Pfad wird auch lokal ignoriert (kein
+    // clientseitig frei bestimmbarer Dateipfad).
+    ui.toggleChainSelectedFile("../secret.txt", true);
+    ui.toggleChainSelectedFile(".env", true);
+    // Die Auswahl enthält wieder genau die vier empfohlenen Dateien. Die
+    // Reihenfolge wird durch das bestehende V7.8.0-Verhalten auf die
+    // Allowlist-Reihenfolge normalisiert (kein clientseitig frei
+    // bestimmbarer Pfad und keine Dublette gelangen hinein).
+    assert.deepStrictEqual(
+      ui.getState().chainSelectedFiles.slice().sort(),
+      CHAIN_RECOMMENDED_FILES.slice().sort(),
+    );
+    assert.deepStrictEqual(
+      ui.getState().chainSelectedFiles,
+      CHAIN_SELECTABLE_FILES.filter(function (entry) {
+        return CHAIN_RECOMMENDED_FILES.indexOf(entry) !== -1;
+      }),
+    );
+
+    assert.deepStrictEqual(
+      fetchCalls.filter((entry) => entry.method === "POST").map((entry) => entry.url),
+      [],
+      "kein Klick auf eine Datei darf einen POST auslösen",
+    );
+    ["prepare-agent-chain", "request-chain-step-approval", "start-chain-step", "approve", "start-agent-execution"].forEach((fragment) => {
+      assert.strictEqual(
+        fetchCalls.filter((entry) => entry.url.includes(fragment)).length,
+        0,
+        `${fragment} darf durch eine Dateiauswahl nicht aufgerufen werden`,
+      );
+    });
   });
 
   await check("V7.8.0: wenn lokal keine Datei ausgewählt ist, bleibt 'Neue Agentenkette vorbereiten' deaktiviert und sendet keinen API-Aufruf", async () => {

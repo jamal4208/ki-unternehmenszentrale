@@ -346,12 +346,67 @@ function resultContractStageForPreset(preset) {
 // V7.8.0: die Dateiauswahl für die Drei-Agenten-Kette wird EINMAL zentral
 // definiert und anschließend für alle drei Stufen wiederverwendet. Keine
 // automatische Dateierweiterung durch ein Modell.
+//
+// V7.9.9 ("auftragsbezogene Dateiauswahl auf die Nutzerperspektive
+// erweitern"): die Liste wurde AUSSCHLIESSLICH ADDITIV um drei Einträge
+// erweitert (pilot-work-order-ui.js, V1_BETRIEBSHANDBUCH.md,
+// pilot-work-order-routes.js; pilot-work-order-service.js war bereits
+// enthalten). Bewusst additiv und bewusst KEINE zweite, auftragsbezogene
+// Auswahlgruppe im Datenmodell:
+//   - Entfernen eines bestehenden Eintrags würde jede Altkette unlesbar
+//     machen, die diesen Eintrag gespeichert hat – getChainView/startStep
+//     validieren die GESPEICHERTE Auswahl erneut gegen genau diese Liste
+//     (pilot-agent-execution-chain-service.js). Additiv bleibt daher jede
+//     bestehende Kette unverändert gültig.
+//   - Eine echte Auswahlgruppe je Auftrag bräuchte ein zusätzliches,
+//     persistiertes Gruppenfeld an Kette und Route sowie eine Migration –
+//     das ist für V7.9.9 nicht der kleinste sichere Weg (siehe
+//     MIGRATION_PLAN.md, offener Folgepunkt).
+//
+// Die Liste bleibt eine geschlossene, serverseitige Allowlist: relative
+// Repositorypfade, keine Wildcards, kein Verzeichnis, keine freie
+// Pfadeingabe, kein clientseitig bestimmter Pfad.
 const CHAIN_SELECTABLE_FILES = Object.freeze([
   "pilot-agent-execution-chain-service.js",
   "pilot-work-order-service.js",
   "pilot-agent-runner.js",
   "auth-db-migrations.js",
+  "pilot-work-order-ui.js",
+  "V1_BETRIEBSHANDBUCH.md",
+  "pilot-work-order-routes.js",
 ]);
+
+// V7.9.9: deterministische, NICHT durch ein Sprachmodell bestimmte
+// Standardauswahl für einen auf die Nutzerperspektive gerichteten
+// Praxisauftrag ("Bewerte die Zentrale aus Sicht eines täglichen
+// Nutzers"): sichtbare Bedienung (Cockpit-UI), versprochener
+// Betriebsablauf (Betriebshandbuch), Auftrags-/Statuslogik dahinter
+// (Service) und die bedienbare Schnittstelle (Routen).
+//
+// Diese Konstante ist AUSSCHLIESSLICH eine Anzeige-/Vorauswahlempfehlung
+// für das Cockpit. Sie erweitert KEINE Rechte: jede tatsächlich
+// übermittelte Auswahl läuft unverändert durch
+// resolveChainSelectedFiles gegen CHAIN_SELECTABLE_FILES. Sie löst
+// weder eine Kettenvorbereitung noch eine Freigabe oder Ausführung aus.
+const CHAIN_RECOMMENDED_USER_PERSPECTIVE_FILES = Object.freeze([
+  "pilot-work-order-ui.js",
+  "V1_BETRIEBSHANDBUCH.md",
+  "pilot-work-order-service.js",
+  "pilot-work-order-routes.js",
+]);
+
+// Strukturelle Zusicherung beim Laden des Moduls: die empfohlene
+// Standardauswahl darf niemals einen Pfad enthalten, der nicht in der
+// geschlossenen Allowlist steht. Ein Tippfehler oder eine spätere
+// Änderung fällt dadurch sofort beim Serverstart auf und nicht erst im
+// Praxislauf.
+CHAIN_RECOMMENDED_USER_PERSPECTIVE_FILES.forEach((relativePath) => {
+  if (!CHAIN_SELECTABLE_FILES.includes(relativePath)) {
+    throw new Error(
+      `CHAIN_RECOMMENDED_USER_PERSPECTIVE_FILES enthält den nicht in CHAIN_SELECTABLE_FILES freigegebenen Pfad "${relativePath}".`,
+    );
+  }
+});
 
 function resolveChainSelectedFiles(input) {
   if (input === undefined || input === null) {
@@ -1413,6 +1468,7 @@ module.exports = {
   PilotAgentExecutionError,
   PILOT_AGENT_TASK_PRESETS,
   CHAIN_SELECTABLE_FILES,
+  CHAIN_RECOMMENDED_USER_PERSPECTIVE_FILES,
   RUNNER_KINDS,
   REPO_ROOT,
   rowToAgentExecutionRunView,

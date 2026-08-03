@@ -1535,6 +1535,144 @@ async function run() {
     assert.deepStrictEqual(JSON.parse(step2Run.allowedFilesJson), step2Preset.allowedFiles);
   });
 
+  // -------------------------------------------------------------------
+  // V7.9.9 ("auftragsbezogene Dateiauswahl auf die Nutzerperspektive
+  // erweitern") – Testfälle G, H, I, J, M des Auftrags. Es wird KEIN
+  // echter Codex-Lauf ausgeführt (fakeSuccessfulCodexAdapter), keine
+  // bestehende Kette fortgeführt und keine Freigabe automatisiert.
+  // -------------------------------------------------------------------
+  const RECOMMENDED_USER_PERSPECTIVE_FILES = [
+    "pilot-work-order-ui.js",
+    "V1_BETRIEBSHANDBUCH.md",
+    "pilot-work-order-service.js",
+    "pilot-work-order-routes.js",
+  ];
+  let userPerspectiveChainId;
+
+  await check("V7.9.9-G/J: die Nutzerperspektiv-Auswahl wird beim Vorbereiten exakt gespeichert, eine leere Auswahl wird abgewiesen", () => {
+    const orderUserPerspective = pilotService.createPilotOrder(
+      db,
+      orderInput({ title: "Auftrag: Zentrale aus Sicht eines täglichen Nutzers bewerten" }),
+    );
+    driveOrderToInExecution(db, orderUserPerspective.order.id);
+
+    // J: ohne Auswahl (leeres Array) kann keine Kette vorbereitet werden.
+    assert.throws(
+      () => chainService.prepareChain(db, { pilotOrderId: orderUserPerspective.order.id, actorUserId: "owner-1", selectedFiles: [] }),
+      /selectedFiles darf nicht leer sein/,
+    );
+    // Ein nicht freigegebener Pfad wird weiterhin abgewiesen – auch beim
+    // Vorbereiten über die Serviceschicht.
+    assert.throws(
+      () =>
+        chainService.prepareChain(db, {
+          pilotOrderId: orderUserPerspective.order.id,
+          actorUserId: "owner-1",
+          selectedFiles: ["server.js"],
+        }),
+      /selectedFiles enth\u00e4lt nicht erlaubte Dateien/,
+    );
+    assert.strictEqual(
+      db.prepare("SELECT COUNT(*) AS anzahl FROM pilot_agent_execution_chains WHERE pilotOrderId = ?").get(orderUserPerspective.order.id).anzahl,
+      0,
+      "ein abgewiesener Vorbereitungsversuch darf keine Kette anlegen",
+    );
+
+    // G: die übergebene Auswahl wird exakt und unverändert fixiert.
+    const preparedChain = chainService.prepareChain(db, {
+      pilotOrderId: orderUserPerspective.order.id,
+      actorUserId: "owner-1",
+      selectedFiles: RECOMMENDED_USER_PERSPECTIVE_FILES.slice(),
+    });
+    assert.strictEqual(preparedChain.selectedFilesFixed, true);
+    assert.deepStrictEqual(preparedChain.selectedFiles, RECOMMENDED_USER_PERSPECTIVE_FILES);
+    const storedRow = db.prepare("SELECT selectedFilesJson FROM pilot_agent_execution_chains WHERE id = ?").get(preparedChain.id);
+    assert.deepStrictEqual(JSON.parse(storedRow.selectedFilesJson), RECOMMENDED_USER_PERSPECTIVE_FILES);
+    assert.deepStrictEqual(chainService.getChainView(db, preparedChain.id).selectedFiles, RECOMMENDED_USER_PERSPECTIVE_FILES);
+
+    // M: das Vorbereiten selbst erteilt keine Freigabe und startet keine Stufe.
+    assert.strictEqual(preparedChain.chainStatus, "PREPARED");
+    assert.ok(preparedChain.steps.every((step) => step.stepStatus === "PENDING" && step.approvalStatus === "NOT_REQUESTED"));
+    assert.ok(preparedChain.steps.every((step) => step.executionRunId === null || step.executionRunId === undefined));
+
+    userPerspectiveChainId = preparedChain.id;
+  });
+
+  await check("V7.9.9-H/M: alle drei Kettenstufen erhalten exakt dieselbe fixierte Nutzerperspektiv-Auswahl und keine Stufe folgt automatisch", async () => {
+    const usedAllowedFilesPerStep = [];
+    for (const chainStep of [1, 2, 3]) {
+      const viewBefore = chainService.getChainView(db, userPerspectiveChainId);
+      const stepBefore = viewBefore.steps[chainStep - 1];
+      assert.strictEqual(stepBefore.stepStatus, "PENDING", `Stufe ${chainStep} darf vorher nicht automatisch gelaufen sein`);
+      assert.strictEqual(stepBefore.approvalStatus, "NOT_REQUESTED", `Stufe ${chainStep} darf keine automatische Freigabe besitzen`);
+
+      const { result } = await requestAndStart(db, {
+        chainId: userPerspectiveChainId,
+        chainStep,
+        adapter: fakeSuccessfulCodexAdapter(`Nutzerperspektive Stufe ${chainStep} erfolgreich abgeschlossen.`),
+      });
+      const stepRun = authDb.getPilotAgentExecutionRunById(db, result.steps[chainStep - 1].executionRunId);
+      usedAllowedFilesPerStep.push(JSON.parse(stepRun.allowedFilesJson));
+
+      // Die gespeicherte Auswahl der Kette bleibt über jede Stufe hinweg
+      // unverändert (die Kette wird durch einen Lauf nicht umgeschrieben).
+      assert.deepStrictEqual(
+        JSON.parse(db.prepare("SELECT selectedFilesJson FROM pilot_agent_execution_chains WHERE id = ?").get(userPerspectiveChainId).selectedFilesJson),
+        RECOMMENDED_USER_PERSPECTIVE_FILES,
+      );
+      if (chainStep < 3) {
+        const nextStep = result.steps[chainStep];
+        assert.strictEqual(nextStep.stepStatus, "PENDING", "die Folgestufe darf nicht automatisch gestartet sein");
+        assert.strictEqual(nextStep.approvalStatus, "NOT_REQUESTED", "die Folgestufe darf keine automatische Freigabe erhalten");
+      }
+    }
+
+    usedAllowedFilesPerStep.forEach((allowedFiles, index) => {
+      assert.deepStrictEqual(allowedFiles, RECOMMENDED_USER_PERSPECTIVE_FILES, `Stufe ${index + 1} muss exakt die fixierte Auswahl verwenden`);
+    });
+    assert.strictEqual(new Set(usedAllowedFilesPerStep.map((files) => JSON.stringify(files))).size, 1, "alle drei Stufen müssen identisch sein");
+
+    const completedView = chainService.getChainView(db, userPerspectiveChainId);
+    assert.deepStrictEqual(completedView.selectedFiles, RECOMMENDED_USER_PERSPECTIVE_FILES, "die fixierte Auswahl bleibt nach Abschluss sichtbar");
+    assert.strictEqual(completedView.selectedFilesFixed, true);
+  });
+
+  await check("V7.9.9-I: eine vor der Erweiterung vorbereitete Altkette bleibt mit ihrer alten Auswahl unverändert lesbar", async () => {
+    const legacySelection = ["pilot-agent-execution-chain-service.js", "pilot-agent-runner.js", "auth-db-migrations.js"];
+    const orderLegacy = pilotService.createPilotOrder(db, orderInput({ title: "Auftrag: Altkette mit alter technischer Auswahl" }));
+    driveOrderToInExecution(db, orderLegacy.order.id);
+    const legacyChain = chainService.prepareChain(db, {
+      pilotOrderId: orderLegacy.order.id,
+      actorUserId: "owner-1",
+      selectedFiles: legacySelection.slice(),
+    });
+    const storedBefore = db.prepare("SELECT selectedFilesJson FROM pilot_agent_execution_chains WHERE id = ?").get(legacyChain.id).selectedFilesJson;
+
+    // Die V7.9.9-Erweiterung ist rein additiv: eine bereits gespeicherte,
+    // ausschließlich aus den alten technischen Dateien bestehende Auswahl
+    // bleibt gültig, unverändert lesbar und wird NICHT nachträglich um die
+    // neuen Dateien ergänzt.
+    const legacyView = chainService.getChainView(db, legacyChain.id);
+    assert.deepStrictEqual(legacyView.selectedFiles, legacySelection);
+    assert.strictEqual(legacyView.selectedFilesFixed, true);
+    RECOMMENDED_USER_PERSPECTIVE_FILES.filter((entry) => !legacySelection.includes(entry)).forEach((newFile) => {
+      assert.ok(!legacyView.selectedFiles.includes(newFile), `${newFile} darf einer Altkette nicht nachträglich hinzugefügt werden`);
+    });
+
+    const { result: legacyAfterStep1 } = await requestAndStart(db, {
+      chainId: legacyChain.id,
+      chainStep: 1,
+      adapter: fakeSuccessfulCodexAdapter("Altkette mit alter Auswahl Schritt 1 erfolgreich."),
+    });
+    const legacyStep1Run = authDb.getPilotAgentExecutionRunById(db, legacyAfterStep1.steps[0].executionRunId);
+    assert.deepStrictEqual(JSON.parse(legacyStep1Run.allowedFilesJson), legacySelection);
+    assert.strictEqual(
+      db.prepare("SELECT selectedFilesJson FROM pilot_agent_execution_chains WHERE id = ?").get(legacyChain.id).selectedFilesJson,
+      storedBefore,
+      "die gespeicherte Auswahl einer bestehenden Kette darf sich nicht verändern",
+    );
+  });
+
   await check("V7.8.0: Qualitätskriterien mit Randleerzeichen verursachen keinen MANDATE_DIGEST_MISMATCH über alle drei Stufen", async () => {
     const orderWithSpacedCriteria = pilotService.createPilotOrder(
       db,

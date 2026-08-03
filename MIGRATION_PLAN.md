@@ -1,5 +1,22 @@
 # MIGRATION PLAN
 
+## V7.9.9 – Auftragsbezogene Dateiauswahl auf die Nutzerperspektive erweitern: **keine neue Migration**
+
+**Ausdrücklich keine neue Migration, keine neue Spalte, keine neue Tabelle, kein neuer CHECK-Wertebereich, keine Datenbereinigung.** Migrationen 1–24 bleiben unverändert; die höchste Migrationsversion bleibt **24**. Keine bestehende Datenbank wurde verändert oder bereinigt.
+
+Geändert wurde ausschließlich der Inhalt zweier serverseitiger Codekonstanten sowie ein additives, rein lesendes Antwortfeld:
+
+| Bereich | Regel |
+|---|---|
+| `pilot-agent-execution-service.js` | `CHAIN_SELECTABLE_FILES` **ausschließlich additiv** um `pilot-work-order-ui.js`, `V1_BETRIEBSHANDBUCH.md` und `pilot-work-order-routes.js` erweitert (jetzt sieben Einträge); neue Konstante `CHAIN_RECOMMENDED_USER_PERSPECTIVE_FILES` (genau vier Einträge) mit struktureller Teilmengen-Zusicherung beim Modulladen; `resolveChainSelectedFiles` fachlich unverändert |
+| `pilot-work-order-service.js` | additives, rein lesendes Overview-Feld `chainRecommendedFiles` aus derselben serverseitigen Quelle der Wahrheit |
+| `pilot-work-order-ui.js` | deterministische Standardvorauswahl aus `chainRecommendedFiles`, verständliche Kennzeichnung der Empfehlung; keine freie Pfadeingabe, keine Auswahlentscheidung durch ein Sprachmodell |
+
+- **Rückwärtskompatibilität (wichtigster Grund für die additive Lösung):** `pilot-agent-execution-chain-service.js` validiert die in `pilot_agent_execution_chains.selectedFilesJson` **gespeicherte** Auswahl bei jedem `getChainView` und jedem `startStep` erneut gegen `CHAIN_SELECTABLE_FILES`. Ein *entfernter* Eintrag hätte damit jede Altkette unlesbar gemacht, die diesen Eintrag gespeichert hat. Da ausschließlich hinzugefügt wurde, bleibt jede bestehende Kette gültig, unverändert lesbar und wird **nicht** nachträglich um die neuen Dateien ergänzt. Eine Altkette ohne fixierte Auswahl (`selectedFilesJson IS NULL`) bleibt unverändert als Altkette markiert und verwendet weiterhin die Preset-Dateien je Stufe. Kein Datenbestand muss nachgezogen werden.
+- **Vorwärtskompatibilität:** `chainRecommendedFiles` ist ein zusätzliches Antwortfeld; ein älterer Client, der es nicht kennt, ignoriert es. Fehlt das Feld in einer Antwort (älterer Serverstand), fällt das Cockpit auf das bisherige V7.8.0-Verhalten „vollständige Liste vorausgewählt" zurück.
+- **Rollback:** rein codeseitig durch Zurücknehmen der geänderten Dateien. Es gibt keinen Schemaanteil, der zurückgerollt werden müsste. Zu beachten ist ausschließlich: eine *nach* V7.9.9 vorbereitete Kette, die einen der drei neuen Pfade gespeichert hat, wäre nach einem vollständigen Rollback der Allowlist nicht mehr lesbar – seit der erfolgreichen Browser- und Praxisabnahme existiert lokal genau eine solche Kette (`pilot-agent-chain-e5b928e1-1a61-477b-a90b-dc9e01622228` mit der empfohlenen Vierer-Auswahl), ein Rollback der Allowlist muss diese Kette daher ausdrücklich mit bedenken. Der Datenbestand selbst bleibt davon unberührt; es ist weiterhin kein Schema- oder Datenrollback nötig.
+- **Offener Folgepunkt (bewusst nicht in V7.9.9 umgesetzt):** eine *echte*, im Datenmodell getrennte auftragsbezogene Auswahlgruppe (Variante B des Auftrags) würde ein zusätzliches persistiertes Gruppenfeld an `pilot_agent_execution_chains` sowie an der Vorbereitungsroute und damit eine neue Migration erfordern. Das wäre keine kleine, sichere Änderung und ist deshalb ausdrücklich zurückgestellt. Bis dahin bleibt die Trennung rein logisch: eine geschlossene Allowlist plus eine deterministische, serverseitig festgelegte Standardvorauswahl.
+
 ## V7.9.8 – Ergebnisbudget für die Recherche- und die Projektmanager-Stufe technisch erzwingen: **keine neue Migration**
 
 **Ausdrücklich keine neue Migration, keine neue Spalte, keine neue Tabelle, kein neuer CHECK-Wertebereich.** Migrationen 1–24 bleiben unverändert; die höchste Migrationsversion bleibt **24**. Der bestehende 8.000-Zeichen-CHECK auf dem gespeicherten Ergebnistext bleibt unverändert und wird durch das Stufenbudget von 4.500 Zeichen ohnehin deutlich unterschritten.

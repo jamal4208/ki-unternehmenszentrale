@@ -682,6 +682,26 @@ function getChainSelectableFilesSnapshot() {
   return [];
 }
 
+// V7.9.9: rein lesende Empfehlung, welche Teilmenge der Allowlist das
+// Cockpit für einen auf die Nutzerperspektive gerichteten Praxislauf
+// vorauswählt. Kommt bewusst ebenfalls ausschließlich aus der
+// serverseitigen Quelle der Wahrheit
+// (pilot-agent-execution-service.js#CHAIN_RECOMMENDED_USER_PERSPECTIVE_FILES),
+// damit das Cockpit keine eigene, potenziell abweichende Dateiliste führt.
+// Erweitert keine Rechte: die tatsächlich übermittelte Auswahl wird beim
+// Vorbereiten unverändert erneut gegen die Allowlist geprüft.
+function getChainRecommendedFilesSnapshot() {
+  try {
+    const executionService = require("./pilot-agent-execution-service");
+    if (Array.isArray(executionService.CHAIN_RECOMMENDED_USER_PERSPECTIVE_FILES)) {
+      return executionService.CHAIN_RECOMMENDED_USER_PERSPECTIVE_FILES.slice();
+    }
+  } catch (_error) {
+    // Siehe getChainSelectableFilesSnapshot: defensiv leer beim Bootstrap.
+  }
+  return [];
+}
+
 function loadChainRoleProgress(db, pilotOrderId) {
   const bookedRoles = new Set();
   try {
@@ -759,6 +779,7 @@ function buildOverview(db, orderRow) {
     agentExecutionRuns,
     codexAvailability,
     chainSelectableFiles: getChainSelectableFilesSnapshot(),
+    chainRecommendedFiles: getChainRecommendedFilesSnapshot(),
     openDecision,
     risksAndLimits,
     nextStep: NEXT_STEP_BY_STATUS[order.status] || NEXT_STEP_BY_STATUS.DRAFT,

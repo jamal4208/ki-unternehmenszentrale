@@ -4,6 +4,32 @@
 
 `server.js` registriert über `server-http-router.js` **89 GET-Routen** und **52 additive POST-Routen** (Execution Bridge seit Phase C gesichert + V7.1 Phase A Dokumente/Backup gesichert `59f985f` + V7.1 Phase B HeyGen-Connector-Pilot gesichert `ff43089` + V7.1 Phase B.1 Mandantenbasis/Ergebnisrückführung gesichert `37e8a28` + V7.1 Phase C Canva-Connector-Pilot gesichert `52b2d02` + V7.1 Phase C.1 Pilot-Ergebnisakte/Kundenfeedback-Schleife und V7.1 Phase C.1.1 skalierbares Reviewmodell gemeinsam gesichert `6621d93` + V7.2 Phase A Schritt 2 Auth-Routen/Route-Gates + V7.2 Phase A Schritt 3 Owner-Verwaltung/Kundenportal-API + V7.2 Phase A Schritt 4 Betriebsabnahme + V7.2 Phase B Schritt 1 Arbeitsauftrags-API + V7.2 Phase C Schritt 1 Agentenlauf-/Ergebnis-Endpunkte + V7.2 Phase C Schritt 2 Änderungswunsch-/Freigabe-/Versions-Endpunkte innerhalb bestehender Präfixe + V7.3 Jamal-Arbeitsmodus-Zustand/-Aktionen + V7.4 Canva-Produktionskorridor-Zustand/-Aktionen gesichert `f2b0909` + V7.5 Agentenleitstand-/Unternehmensleitlinien-Routen gesichert `6ffa3f8` + V7.6.1 Office-/Finance-Routen gesichert `5b59b17` + V7.6.3 Health-Referenzlauf-Routen (lokal umgesetzt, ungesichert)). Andere HTTP-Methoden bleiben 405. GET-Routen bleiben read-only. Die POST-Routen schreiben ausschließlich lokal (App-Support-Metadaten bzw. die Auth-Datenbank bzw. – nach Jamal-Freigabe – ein Fixture-Testrepository); niemals in Health und niemals mit Commit/Push/Deployment.
 
+## V7.9.9 – Auftragsbezogene Dateiauswahl auf die Nutzerperspektive erweitert (keine neue Route, ein additives read-only Overview-Feld)
+
+Routenzahlen bleiben unverändert (**89 GET, 52 POST**). Es gibt keine neue Route, keinen neuen Parameter der bestehenden Route `prepare-agent-chain` und keine neue Aktion. Geändert wurde ausschließlich der Inhalt der serverseitigen Allowlist sowie ein zusätzliches, rein lesendes Overview-Feld.
+
+**Serverseitige Allowlist (`pilot-agent-execution-service.js#CHAIN_SELECTABLE_FILES`), jetzt sieben Einträge – ausschließlich additiv erweitert:**
+
+| Eintrag | seit | Rolle im Nutzerperspektiv-Auftrag |
+|---|---|---|
+| `pilot-agent-execution-chain-service.js` | V7.8.0 | Kettenmechanik (unverändert auswählbar) |
+| `pilot-work-order-service.js` | V7.8.0 | Auftrags-/Statuslogik; zugleich empfohlen |
+| `pilot-agent-runner.js` | V7.8.0 | lokaler Runner (unverändert auswählbar) |
+| `auth-db-migrations.js` | V7.8.0 | Datenmodell (unverändert auswählbar) |
+| `pilot-work-order-ui.js` | **V7.9.9** | sichtbare Bedienung im Cockpit |
+| `V1_BETRIEBSHANDBUCH.md` | **V7.9.9** | versprochener Betriebsablauf |
+| `pilot-work-order-routes.js` | **V7.9.9** | bedienbare HTTP-Schnittstelle |
+
+Kein bestehender Eintrag wurde entfernt: `getChainView`/`startStep` validieren die *gespeicherte* Auswahl jeder Kette erneut gegen genau diese Liste, ein Entfernen hätte bestehende Ketten unlesbar gemacht.
+
+**Neues, additives read-only Overview-Feld** (`GET /api/pilot-work-order/orders/:id` und jede Antwort, die `overview` mitliefert):
+
+| Feld | Typ | Bedeutung |
+|---|---|---|
+| `chainRecommendedFiles` | string[] | deterministische, serverseitig festgelegte Standardvorauswahl des Cockpits für einen Nutzerperspektiv-Auftrag: genau `["pilot-work-order-ui.js", "V1_BETRIEBSHANDBUCH.md", "pilot-work-order-service.js", "pilot-work-order-routes.js"]`. Stets eine Teilmenge von `chainSelectableFiles` (beim Modulladen strukturell erzwungen). |
+
+Zusicherungen: Das Feld ist eine reine Anzeige-/Vorauswahlempfehlung und **keine Rechteerweiterung**. Der Vertrag von `POST .../prepare-agent-chain` bleibt unverändert: `selectedFiles` ist weiterhin optional, muss ein Array relativer Pfade sein, darf nicht leer sein und wird unverändert über `resolveChainSelectedFiles` gegen `CHAIN_SELECTABLE_FILES` geprüft (jeder Pfad außerhalb der Liste → HTTP 400, auch gemischt mit gültigen Pfaden; kein stilles Herausfiltern). Fehlt `selectedFiles` vollständig, gilt weiterhin die bisherige V7.8.0-Regel „vollständige Allowlist" – das Cockpit sendet die Auswahl jedoch immer explizit. Es gibt **keine freie Pfadeingabe**, keine Wildcards, kein Verzeichnis, keinen rekursiven Pfad und keinen clientseitig vertrauenswürdigen Dateipfad. Weiterhin abgewiesen: `.env`, `.env.local`, `.env.example`, `.git/config`, `data/auth.sqlite`, `../secret.txt`, `/etc/passwd`, `node_modules/example.js`, `server.js`. Keine neue Spalte, keine Migration (siehe `MIGRATION_PLAN.md`), keine Änderung der Kettenstatusmaschine, keine automatische Freigabe und keine automatische Ausführung.
+
 ## V7.9.8 – Ergebnisbudget für die Recherche- und die Projektmanager-Stufe technisch erzwungen (keine neue Route, ein additives read-only Unterobjekt)
 
 Routenzahlen bleiben unverändert (**89 GET, 52 POST**). Es gibt keine neue Route, keinen neuen Browserparameter und keine neue Aktion. Der Ausgabehaushalt aus V7.8.1 gilt jetzt für alle drei Kettenstufen; die bereits bestehende Antwortstruktur eines Agentenlaufs (`agentExecutionRuns[]` in der Overview sowie die Einzellauf-/Kettenansichten) trägt dafür ein zusätzliches, rein informatives read-only Unterobjekt in `resultSummary`:
