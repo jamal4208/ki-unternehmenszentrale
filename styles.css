@@ -10366,6 +10366,26 @@ details.local-agent-assignment-details > summary {
   color: var(--accent, inherit);
 }
 
+/* V8.5 – "Entscheidungen im Chefmodus besser vorbereiten": eindeutig
+   beschriftete, optionale Informationszeilen (Zu entscheiden, Empfehlung,
+   Wichtig zu beachten, Verfügbare Aktion). Bewusst ruhig, keine Ampeln/
+   Farben, gleiche Zurückhaltung wie .chef-today-row-meta. */
+.chef-today-row-line {
+  font-size: var(--text-sm, 13px);
+  color: inherit;
+}
+
+.chef-today-row-line-label {
+  font-weight: var(--font-medium);
+}
+
+.chef-today-row-decision .chef-today-row-line-label,
+.chef-today-row-recommendation .chef-today-row-line-label,
+.chef-today-row-risk .chef-today-row-line-label,
+.chef-today-row-action .chef-today-row-line-label {
+  color: var(--muted);
+}
+
 .chef-today-more-hint {
   margin: 4px 0 0;
   font-size: var(--text-xs, 12px);

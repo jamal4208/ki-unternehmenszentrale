@@ -167,6 +167,45 @@ function clearFailingDetailFetches() {
   backendFailingDetailIds = new Set();
 }
 
+// V8.5 ("Entscheidungen im Chefmodus besser vorbereiten") – zusätzliche,
+// rein additive Fake-Backend-Steuerung für die beiden bereits bestehenden
+// Overview-Felder `handoffs` und `risksAndLimits` (siehe
+// pilot-work-order-service.js#buildOverview). Standard: leere Liste, wie im
+// echten Dienst ohne Rollenübergaben. Betrifft ausschließlich die
+// Testsicht auf die unveränderte HTTP-Route
+// GET /api/pilot-work-order/orders/:id.
+let backendHandoffsByOrderId = {};
+let backendRisksAndLimitsByOrderId = {};
+
+function setHandoffs(orderId, handoffs) {
+  backendHandoffsByOrderId[orderId] = handoffs;
+}
+
+function setRisksAndLimits(orderId, risksAndLimits) {
+  backendRisksAndLimitsByOrderId[orderId] = risksAndLimits;
+}
+
+function clearHandoffAndRiskOverrides() {
+  backendHandoffsByOrderId = {};
+  backendRisksAndLimitsByOrderId = {};
+}
+
+// Fixture-Erzeugung eines Dokumentations-Handoffs, wortgleich zur echten
+// Feldstruktur aus pilot-work-order-service.js#rowToHandoffView – nur die
+// für V8.5 tatsächlich gelesenen Felder (toPilotRole, pmFilterStatus,
+// resultOrRecommendation) sind fachlich relevant.
+function makeDocumentationHandoff(overrides) {
+  return Object.assign(
+    {
+      id: "handoff-test",
+      toPilotRole: "DOKUMENTATION",
+      pmFilterStatus: "PASSED",
+      resultOrRecommendation: "Die Dokumentation empfiehlt die Freigabe.",
+    },
+    overrides || {},
+  );
+}
+
 // V8.4 – liefert einen ISO-Zeitstempel, dessen LOKALER Kalendertag exakt
 // `daysAgo` Tage vor dem heutigen lokalen Kalendertag liegt (unabhängig von
 // der aktuellen Uhrzeit im Testlauf, da bewusst mittags/lokal 9 Uhr
@@ -222,6 +261,12 @@ global.fetch = function fetchStub(url, options) {
               ? backendOpenDecisionByOrderId[orderId]
               : null,
             nextStep: "NEXT_STEP_BY_STATUS-Text (technisch, wird von chef-today-ui.js nicht dargestellt)",
+            handoffs: Object.prototype.hasOwnProperty.call(backendHandoffsByOrderId, orderId)
+              ? backendHandoffsByOrderId[orderId]
+              : [],
+            risksAndLimits: Object.prototype.hasOwnProperty.call(backendRisksAndLimitsByOrderId, orderId)
+              ? backendRisksAndLimitsByOrderId[orderId]
+              : [],
           },
         }
       : { ok: false };
@@ -834,13 +879,16 @@ async function run() {
   });
 
   await check(
-    "V8.4: die Schaltfl\u00e4che \u201e\u00d6ffnen\u201c bleibt Teil des bestehenden, einzigen Zeilen-Buttons (kein zweites Bedienelement)",
+    "V8.4/V8.5: die Schaltfl\u00e4che \u201eEntscheidung \u00f6ffnen\u201c bleibt Teil des bestehenden, einzigen Zeilen-Buttons (kein zweites Bedienelement)",
     () => {
       const section = sectionHtml("today");
       const rowButtons = section.match(/<button type="button" class="chef-today-row"/g) || [];
       const allButtons = section.match(/<button/g) || [];
       assert.strictEqual(rowButtons.length, allButtons.length, "es entsteht kein zweites Bedienelement je Zeile");
-      assert.ok(section.includes('<span class="chef-today-row-open">\u00d6ffnen</span>'), "\u201e\u00d6ffnen\u201c muss sichtbar sein");
+      assert.ok(
+        section.includes('<span class="chef-today-row-open">Entscheidung \u00f6ffnen</span>'),
+        "\u201eEntscheidung \u00f6ffnen\u201c muss sichtbar sein",
+      );
       assert.doesNotMatch(section, /Freigeben|Ablehnen|Genehmigen|Zur\u00fcckweisen/);
     },
   );
@@ -1047,6 +1095,370 @@ async function run() {
 
   await check("V8.4-Korrektur: weiterhin kein schreibender Request \u00fcber den gesamten Korrekturlauf hinweg", () => {
     assert.deepStrictEqual(postCalls(), []);
+  });
+
+  // -------------------------------------------------------------------
+  // V8.5 ("Entscheidungen im Chefmodus besser vorbereiten") – Empfehlung,
+  // Risiko/Grenze und verfügbare Aktion je Eintrag in "Heute wichtig".
+  // Nummerierung der Prüfpunkte folgt dem Arbeitspaket (TESTANFORDERUNGEN).
+  // -------------------------------------------------------------------
+
+  await check("V8.5 (1): READY_FOR_REVIEW mit bestandenem Dokumentations-Handoff zeigt die Empfehlung", async () => {
+    setOrders([
+      { id: "v85-rec-passed", title: "Ergebnis mit bestandenem Handoff", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+    ]);
+    setHandoffs("v85-rec-passed", [makeDocumentationHandoff({ resultOrRecommendation: "Die Dokumentation empfiehlt die Freigabe." })]);
+    await reload();
+    const section = sectionHtml("today");
+    assert.ok(
+      section.includes('<span class="chef-today-row-line-label">Empfehlung:</span>'),
+      "die Empfehlungszeile muss beschriftet sichtbar sein",
+    );
+    assert.ok(section.includes("Die Dokumentation empfiehlt die Freigabe."));
+    assert.strictEqual(ui.recommendationTextFor(ui.getState().orders[0]), "Die Dokumentation empfiehlt die Freigabe.");
+    clearHandoffAndRiskOverrides();
+  });
+
+  await check("V8.5 (2): READY_FOR_REVIEW ohne Dokumentations-Handoff zeigt keine Empfehlungszeile", async () => {
+    setOrders([
+      { id: "v85-rec-none", title: "Ergebnis ohne Handoff", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+    ]);
+    await reload();
+    const section = sectionHtml("today");
+    assert.doesNotMatch(section, /Empfehlung:/, "ohne belastbaren Handoff darf keine Empfehlungszeile erscheinen");
+    assert.strictEqual(ui.recommendationTextFor(ui.getState().orders[0]), null);
+    clearHandoffAndRiskOverrides();
+  });
+
+  await check("V8.5 (3): READY_FOR_REVIEW mit REJECTED-Handoff zeigt keine Empfehlung", async () => {
+    setOrders([
+      { id: "v85-rec-rejected", title: "Ergebnis mit abgelehntem Handoff", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+    ]);
+    setHandoffs("v85-rec-rejected", [makeDocumentationHandoff({ pmFilterStatus: "REJECTED", resultOrRecommendation: "Abgelehnter Text." })]);
+    await reload();
+    const section = sectionHtml("today");
+    assert.doesNotMatch(section, /Empfehlung:/);
+    assert.doesNotMatch(section, /Abgelehnter Text\./);
+    clearHandoffAndRiskOverrides();
+  });
+
+  await check("V8.5 (4): READY_FOR_REVIEW mit leerem resultOrRecommendation zeigt keine Empfehlung", async () => {
+    setOrders([
+      { id: "v85-rec-empty", title: "Ergebnis mit leerem Handofftext", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+    ]);
+    setHandoffs("v85-rec-empty", [makeDocumentationHandoff({ resultOrRecommendation: "   " })]);
+    await reload();
+    const section = sectionHtml("today");
+    assert.doesNotMatch(section, /Empfehlung:/);
+    clearHandoffAndRiskOverrides();
+  });
+
+  await check("V8.5 (5): BLOCKED zeigt trotz vorhandener alter Handoffs keine Empfehlung", async () => {
+    setOrders([
+      { id: "v85-rec-blocked", title: "Blockiert mit altem Handoff", status: "BLOCKED", updatedAt: new Date().toISOString() },
+    ]);
+    setHandoffs("v85-rec-blocked", [makeDocumentationHandoff({ resultOrRecommendation: "Alte Empfehlung aus fr\u00fcherer Bearbeitungsphase." })]);
+    await reload();
+    const section = sectionHtml("today");
+    assert.doesNotMatch(section, /Empfehlung:/);
+    assert.doesNotMatch(section, /Alte Empfehlung/);
+    clearHandoffAndRiskOverrides();
+  });
+
+  await check("V8.5 (6): RETURNED zeigt trotz vorhandener alter Handoffs keine Empfehlung", async () => {
+    setOrders([
+      { id: "v85-rec-returned", title: "Zur\u00fcckgegeben mit altem Handoff", status: "RETURNED", updatedAt: new Date().toISOString() },
+    ]);
+    setHandoffs("v85-rec-returned", [makeDocumentationHandoff({ resultOrRecommendation: "Alte Empfehlung aus fr\u00fcherer Bearbeitungsphase." })]);
+    await reload();
+    const section = sectionHtml("today");
+    assert.doesNotMatch(section, /Empfehlung:/);
+    assert.doesNotMatch(section, /Alte Empfehlung/);
+    clearHandoffAndRiskOverrides();
+  });
+
+  await check("V8.5 (7): READY_FOR_REVIEW zeigt maximal einen Risiko-/Grenztext", async () => {
+    setOrders([
+      { id: "v85-risk-max-one", title: "Ergebnis mit mehreren Hinweisen", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+    ]);
+    setRisksAndLimits("v85-risk-max-one", ["Erster Hinweis.", "Zweiter Hinweis.", "Dritter Hinweis."]);
+    await reload();
+    const section = sectionHtml("today");
+    const riskLines = section.match(/Wichtig zu beachten:/g) || [];
+    assert.strictEqual(riskLines.length, 1, "es darf h\u00f6chstens ein Risiko-/Grenztext erscheinen");
+    assert.ok(section.includes("Dritter Hinweis."), "der letzte Eintrag muss verwendet werden");
+    clearHandoffAndRiskOverrides();
+  });
+
+  await check("V8.5 (8): READY_FOR_JAMAL_APPROVAL zeigt belastbaren Risiko-/Grenztext, sofern vorhanden", async () => {
+    setOrders([
+      { id: "v85-risk-approval", title: "Freigabe mit Risikohinweis", status: "READY_FOR_JAMAL_APPROVAL", updatedAt: new Date().toISOString() },
+    ]);
+    setRisksAndLimits("v85-risk-approval", ["Die Datenbasis ist noch unvollst\u00e4ndig."]);
+    await reload();
+    const section = sectionHtml("today");
+    assert.ok(section.includes("Die Datenbasis ist noch unvollst\u00e4ndig."));
+    clearHandoffAndRiskOverrides();
+  });
+
+  await check("V8.5 (9): BLOCKED zeigt trotz risksAndLimits keinen Risiko-/Grenztext", async () => {
+    setOrders([
+      { id: "v85-risk-blocked", title: "Blockiert mit altem Risiko", status: "BLOCKED", updatedAt: new Date().toISOString() },
+    ]);
+    setRisksAndLimits("v85-risk-blocked", ["Altes Risiko aus fr\u00fcherer Bearbeitungsphase."]);
+    await reload();
+    const section = sectionHtml("today");
+    assert.doesNotMatch(section, /Wichtig zu beachten:/);
+    assert.doesNotMatch(section, /Altes Risiko/);
+    clearHandoffAndRiskOverrides();
+  });
+
+  await check("V8.5 (10): RETURNED zeigt trotz risksAndLimits keinen Risiko-/Grenztext", async () => {
+    setOrders([
+      { id: "v85-risk-returned", title: "Zur\u00fcckgegeben mit altem Risiko", status: "RETURNED", updatedAt: new Date().toISOString() },
+    ]);
+    setRisksAndLimits("v85-risk-returned", ["Altes Risiko aus fr\u00fcherer Bearbeitungsphase."]);
+    await reload();
+    const section = sectionHtml("today");
+    assert.doesNotMatch(section, /Wichtig zu beachten:/);
+    assert.doesNotMatch(section, /Altes Risiko/);
+    clearHandoffAndRiskOverrides();
+  });
+
+  await check("V8.5 (11): der letzte nicht leere risksAndLimits-Eintrag wird verwendet", async () => {
+    setOrders([
+      { id: "v85-risk-last", title: "Ergebnis mit leerem letzten Eintrag", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+    ]);
+    setRisksAndLimits("v85-risk-last", ["Erster Hinweis.", "Letzter belastbarer Hinweis.", "   "]);
+    await reload();
+    const section = sectionHtml("today");
+    assert.ok(section.includes("Letzter belastbarer Hinweis."));
+    assert.doesNotMatch(section, /Erster Hinweis\./);
+    clearHandoffAndRiskOverrides();
+  });
+
+  await check("V8.5 (12): ung\u00fcltige risksAndLimits-Werte werden defensiv ignoriert", () => {
+    ui.getState().todayOverviewByOrderId["v85-risk-invalid"] = {
+      openDecision: null,
+      nextStep: null,
+      handoffs: [],
+      risksAndLimits: [null, 42, {}, "   ", "Echter Hinweis."],
+    };
+    assert.strictEqual(ui.riskTextFor({ id: "v85-risk-invalid", status: "READY_FOR_REVIEW" }), "Echter Hinweis.");
+    delete ui.getState().todayOverviewByOrderId["v85-risk-invalid"];
+  });
+
+  await check("V8.5 (13): verf\u00fcgbare Aktion RETURNED korrekt", () => {
+    assert.strictEqual(ui.primaryActionLabelFor({ status: "RETURNED" }), "Erneut als Entwurf starten");
+  });
+
+  await check("V8.5 (14): verf\u00fcgbare Aktion READY_FOR_REVIEW korrekt", () => {
+    assert.strictEqual(ui.primaryActionLabelFor({ status: "READY_FOR_REVIEW" }), "Ergebnis abnehmen");
+  });
+
+  await check(
+    "V8.5 (15): verf\u00fcgbare Aktion BLOCKED korrekt (spiegelt wortgleich den tats\u00e4chlichen Button-Text \u201eEntsperren (zur\u00fcckgeben)\u201c)",
+    () => {
+      assert.strictEqual(ui.primaryActionLabelFor({ status: "BLOCKED" }), "Entsperren (zur\u00fcckgeben)");
+    },
+  );
+
+  await check("V8.5 (16): verf\u00fcgbare Aktion READY_FOR_JAMAL_APPROVAL korrekt", () => {
+    assert.strictEqual(ui.primaryActionLabelFor({ status: "READY_FOR_JAMAL_APPROVAL" }), "Ausf\u00fchrung freigeben");
+    assert.strictEqual(ui.primaryActionLabelFor({ status: "DRAFT" }), null, "keine weiteren Statuswerte erfunden");
+    assert.strictEqual(ui.primaryActionLabelFor(null), null);
+  });
+
+  await check("V8.5 (17): keine erfundene zweite Option sichtbar (genau eine verf\u00fcgbare Aktion je Eintrag)", async () => {
+    setOrders([
+      { id: "v85-action-returned", title: "Zur\u00fcckgegeben", status: "RETURNED", updatedAt: new Date().toISOString() },
+      { id: "v85-action-review", title: "Pr\u00fcfung", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+      { id: "v85-action-blocked", title: "Blockiert", status: "BLOCKED", updatedAt: new Date().toISOString() },
+      { id: "v85-action-approval", title: "Freigabe", status: "READY_FOR_JAMAL_APPROVAL", updatedAt: new Date().toISOString() },
+    ]);
+    await reload();
+    const section = sectionHtml("today");
+    const actionLines = section.match(/Verf\u00fcgbare Aktion:/g) || [];
+    assert.strictEqual(actionLines.length, 4, "genau eine verf\u00fcgbare Aktion je Eintrag, keine zweite");
+    assert.ok(section.includes("Erneut als Entwurf starten"));
+    assert.ok(section.includes("Ergebnis abnehmen"));
+    assert.ok(section.includes("Entsperren (zur\u00fcckgeben)"));
+    assert.ok(section.includes("Ausf\u00fchrung freigeben"));
+    assert.doesNotMatch(section, /Optionen/, "keine Darstellung als Options-Plural");
+  });
+
+  await check("V8.5 (18): keine direkte Aktionsschaltfl\u00e4che auf der Startkarte (nur der bestehende Zeilen-Button)", () => {
+    const section = sectionHtml("today");
+    const rowButtons = section.match(/<button type="button" class="chef-today-row"/g) || [];
+    const allButtons = section.match(/<button/g) || [];
+    assert.strictEqual(rowButtons.length, allButtons.length, "es entsteht kein zweites Bedienelement je Zeile");
+    assert.doesNotMatch(section, /data-action="(approve-completion|approve-for-execution|unblock-order|reopen-from-returned)"/);
+  });
+
+  await check("V8.5 (19): \u201eEntscheidung \u00f6ffnen\u201c nutzt weiterhin ausschlie\u00dflich das bestehende openOrder()", () => {
+    pilotControls = ui.getState().orders.map((order) => makePilotControl("select-order", order.id));
+    pilotClicks.length = 0;
+    fetchCalls.length = 0;
+    const opened = ui.openOrder("v85-action-blocked");
+    assert.strictEqual(opened, true);
+    assert.deepStrictEqual(pilotClicks, [{ action: "select-order", orderId: "v85-action-blocked" }]);
+    assert.deepStrictEqual(fetchCalls, [], "\u201eEntscheidung \u00f6ffnen\u201c l\u00f6st selbst keinen Abruf aus");
+  });
+
+  await check("V8.5 (20): keine technischen Statuscodes im sichtbaren Text der neuen Zeilen", () => {
+    const visibleText = sectionHtml("today").replace(/<[^>]*>/g, " ");
+    assert.doesNotMatch(visibleText, /READY_FOR|RETURNED|BLOCKED|IN_EXECUTION/);
+  });
+
+  await check("V8.5 (21): keine IDs oder Revisionen im sichtbaren Text der neuen Zeilen", () => {
+    const visibleText = sectionHtml("today").replace(/<[^>]*>/g, " ");
+    assert.doesNotMatch(visibleText, /v85-action-|Rev\./);
+  });
+
+  await check("V8.5 (22): keine PM-Filter-Codes im sichtbaren Text", async () => {
+    setOrders([
+      { id: "v85-nofiltercode", title: "Ergebnis mit Handoff", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+    ]);
+    setHandoffs("v85-nofiltercode", [makeDocumentationHandoff({ resultOrRecommendation: "Die Freigabe ist fachlich begr\u00fcndet." })]);
+    await reload();
+    const visibleText = sectionHtml("today").replace(/<[^>]*>/g, " ");
+    assert.doesNotMatch(visibleText, /PASSED|REJECTED|pmFilterStatus|toPilotRole|DOKUMENTATION/);
+    clearHandoffAndRiskOverrides();
+  });
+
+  await check("V8.5 (23): normale Klammertexte in Empfehlung und Risiko bleiben erhalten", async () => {
+    setOrders([
+      { id: "v85-brackets", title: "Ergebnis mit fachlichem Klammertext", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+    ]);
+    setHandoffs("v85-brackets", [makeDocumentationHandoff({ resultOrRecommendation: "Freigabe empfohlen (Vier-Augen-Prinzip beachtet)." })]);
+    setRisksAndLimits("v85-brackets", ["Datenbasis unvollst\u00e4ndig (siehe Anhang)."]);
+    await reload();
+    const section = sectionHtml("today");
+    assert.ok(section.includes("Freigabe empfohlen (Vier-Augen-Prinzip beachtet)."));
+    assert.ok(section.includes("Datenbasis unvollst\u00e4ndig (siehe Anhang)."));
+    clearHandoffAndRiskOverrides();
+  });
+
+  await check(
+    "V8.5 (24): ein fehlgeschlagener Overview-Abruf zerst\u00f6rt die Karte nicht (Empfehlung/Risiko entfallen ersatzlos)",
+    async () => {
+      setOrders([
+        { id: "v85-fetch-fails", title: "Ergebnis mit fehlschlagendem Abruf", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+      ]);
+      markDetailFetchFailing("v85-fetch-fails");
+      fetchCalls.length = 0;
+      await assert.doesNotReject(async () => reload());
+      assert.strictEqual(ui.getState().error, null);
+      const section = sectionHtml("today");
+      assert.ok(section.includes("Ergebnis mit fehlschlagendem Abruf"));
+      assert.doesNotMatch(section, /Empfehlung:/);
+      assert.doesNotMatch(section, /Wichtig zu beachten:/);
+      clearFailingDetailFetches();
+    },
+  );
+
+  await check("V8.5 (25): die bestehende Abrufgrenze von f\u00fcnf Overviews bleibt unver\u00e4ndert", async () => {
+    setOrders(
+      Array.from({ length: 8 }, (unused, index) => ({
+        id: `v85-limit-${index + 1}`,
+        title: `Wichtiger Vorgang ${index + 1}`,
+        status: "READY_FOR_REVIEW",
+        updatedAt: new Date().toISOString(),
+      })),
+    );
+    fetchCalls.length = 0;
+    await reload();
+    const detailCalls = fetchCalls.filter((entry) => /^\/api\/pilot-work-order\/orders\/.+/.test(entry.url));
+    assert.strictEqual(ui.TODAY_OVERVIEW_FETCH_LIMIT, 5);
+    assert.strictEqual(detailCalls.length, 5);
+  });
+
+  await check("V8.5 (26): alle wichtigen Auftr\u00e4ge bleiben trotz Abrufgrenze vollst\u00e4ndig sichtbar", () => {
+    assert.strictEqual(rowTitles("today").length, 8);
+    const section = sectionHtml("today");
+    for (let index = 1; index <= 8; index += 1) {
+      assert.ok(section.includes(`Wichtiger Vorgang ${index}`), `Vorgang ${index} muss sichtbar bleiben`);
+    }
+  });
+
+  await check("V8.5 (28): weiterhin kein schreibender Request \u00fcber den gesamten V8.5-Testlauf hinweg", () => {
+    assert.deepStrictEqual(postCalls(), []);
+  });
+
+  await check("V8.5 (29): Original-Overview- und Handoff-Daten werden durch die Ableitung nicht mutiert", async () => {
+    const originalHandoff = makeDocumentationHandoff({ resultOrRecommendation: "Unver\u00e4nderter Ausgangstext." });
+    const originalRisks = ["Unver\u00e4nderter Risikotext."];
+    setOrders([
+      { id: "v85-no-mutation", title: "Ergebnis ohne Mutation", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+    ]);
+    setHandoffs("v85-no-mutation", [originalHandoff]);
+    setRisksAndLimits("v85-no-mutation", originalRisks);
+    await reload();
+    ui.recommendationTextFor(ui.getState().orders[0]);
+    ui.riskTextFor(ui.getState().orders[0]);
+    ui.render();
+    assert.strictEqual(originalHandoff.resultOrRecommendation, "Unver\u00e4nderter Ausgangstext.");
+    assert.deepStrictEqual(originalRisks, ["Unver\u00e4nderter Risikotext."]);
+    assert.strictEqual(
+      ui.getState().todayOverviewByOrderId["v85-no-mutation"].handoffs[0].resultOrRecommendation,
+      "Unver\u00e4nderter Ausgangstext.",
+    );
+    clearHandoffAndRiskOverrides();
+  });
+
+  await check("V8.5 (30): optionale Zeilen werden bei fehlenden Daten vollst\u00e4ndig weggelassen (kein Platzhaltertext)", async () => {
+    setOrders([
+      { id: "v85-no-placeholder", title: "Ergebnis ohne Empfehlung und Risiko", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+    ]);
+    await reload();
+    const section = sectionHtml("today");
+    assert.doesNotMatch(section, /Keine Empfehlung vorhanden/);
+    assert.doesNotMatch(section, /Kein Risiko vorhanden/);
+    assert.doesNotMatch(section, /Empfehlung:/);
+    assert.doesNotMatch(section, /Wichtig zu beachten:/);
+    clearHandoffAndRiskOverrides();
+  });
+
+  await check(
+    "V8.5 (Begrenzung, Auftrag Abschnitt F): sehr lange Freitexte werden auf der Startkarte rein darstellend begrenzt, die reine Ableitungsfunktion liefert weiterhin den vollen Text",
+    async () => {
+      const longText = "Ausf\u00fchrliche Begr\u00fcndung. ".repeat(30).trim();
+      assert.ok(longText.length > ui.CHEF_TODAY_ROW_TEXT_DISPLAY_LIMIT, "der Testtext muss die Anzeigegrenze tats\u00e4chlich \u00fcberschreiten");
+      setOrders([
+        { id: "v85-long-text", title: "Ergebnis mit sehr langem Text", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+      ]);
+      setHandoffs("v85-long-text", [makeDocumentationHandoff({ resultOrRecommendation: longText })]);
+      await reload();
+      assert.strictEqual(
+        ui.recommendationTextFor(ui.getState().orders[0]),
+        longText,
+        "die reine Ableitungsfunktion liefert weiterhin den vollst\u00e4ndigen, unver\u00e4nderten Text",
+      );
+      const section = sectionHtml("today");
+      assert.ok(!section.includes(longText), "die Anzeige selbst darf den vollen Text nicht unbegrenzt zeigen");
+      assert.ok(section.includes("\u2026"), "eine gek\u00fcrzte Anzeige muss erkennbar sein (Ellipse)");
+      clearHandoffAndRiskOverrides();
+    },
+  );
+
+  await check("V8.5: erneut alle bereits ge\u00f6ffneten Auftragsarten (Regression) – Reihenfolge und Kategorie bleiben unver\u00e4ndert", async () => {
+    setOrders([
+      { id: "v85-order-returned", title: "Auftrag zur\u00fcckgegeben", status: "RETURNED", updatedAt: new Date().toISOString() },
+      { id: "v85-order-review", title: "Auftrag in Pr\u00fcfung", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+      { id: "v85-order-blocked", title: "Auftrag blockiert", status: "BLOCKED", updatedAt: new Date().toISOString() },
+      { id: "v85-order-approval", title: "Auftrag wartet auf Freigabe", status: "READY_FOR_JAMAL_APPROVAL", updatedAt: new Date().toISOString() },
+    ]);
+    await reload();
+    assert.deepStrictEqual(rowTitles("today"), [
+      "Auftrag zur\u00fcckgegeben",
+      "Auftrag in Pr\u00fcfung",
+      "Auftrag blockiert",
+      "Auftrag wartet auf Freigabe",
+    ]);
+    const section = sectionHtml("today");
+    ["Entscheidung notwendig", "Ergebnis wartet auf Pr\u00fcfung", "Auftrag blockiert", "Freigabe erforderlich"].forEach((reason) => {
+      assert.ok(section.includes(reason), `Kategorie \u201e${reason}\u201c muss weiterhin sichtbar sein`);
+    });
   });
 
   console.log(`chef-today-ui.test.js: ${passed} Prüfpunkte erfolgreich`);

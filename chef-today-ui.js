@@ -74,6 +74,33 @@
  * `pilot-work-order-service.js`, `buildOverview()` und das Feld
  * `openDecision` selbst bleiben unangetastet – die technische Detailansicht
  * zeigt weiterhin den unveränderten Originaltext.
+ *
+ * V8.5 ("Entscheidungen im Chefmodus besser vorbereiten", additiv zu V8.4):
+ * jede Zeile in "Heute wichtig" macht jetzt zusätzlich sichtbar, WAS zu
+ * entscheiden ist (bereits vorhandener whyTextFor()-Text, jetzt mit
+ * sichtbarem Label "Zu entscheiden"), OB eine belastbare Empfehlung bzw.
+ * ein belastbarer Risiko-/Grenzhinweis vorliegt (recommendationTextFor()/
+ * riskTextFor(), beide reine, ausschließlich lesende Funktionen), und WELCHE
+ * tatsächliche Primäraktion in der bestehenden Pilotauftrags-Karte dafür
+ * vorgesehen ist (primaryActionLabelFor(), eine reine, statische
+ * Status-zu-Klartext-Ableitung – niemals ein neuer Button, niemals eine
+ * ausgelöste Aktion). Alle drei Ableitungen lesen ausschließlich bereits
+ * vorhandene Overview-Felder (`handoffs`, `risksAndLimits`, `status`),
+ * niemals eine neue Route, niemals eine zweite Statusquelle. Für BLOCKED und
+ * RETURNED bleiben Empfehlung und Risiko/Grenze bewusst immer `null` (siehe
+ * recommendationTextFor()/riskTextFor()): die konkrete blockOrder(reason)-
+ * bzw. returnOrder(note)-Information wird von der bestehenden Serviceschicht
+ * heute nicht persistiert, ältere Handoff-Daten könnten veraltet oder
+ * unpassend sein. Lieber keine Information als eine möglicherweise falsche.
+ * Die sichtbare Beschriftung "Öffnen" heißt jetzt "Entscheidung öffnen" –
+ * unverändert derselbe Button, derselbe Navigationspfad (openOrder()).
+ *
+ * Bekannte, bewusst nicht in V8.5 behobene Lücken (unverändert zu V8.4 bzw.
+ * gesondert dokumentiert in CURRENT_STATUS.md): der Freitext aus
+ * blockOrder(reason)/returnOrder(note) bleibt weiterhin nicht persistiert;
+ * READY_FOR_REVIEW und READY_FOR_JAMAL_APPROVAL besitzen im UI weiterhin nur
+ * je eine Primäraktion, keine Rückgabe-Schaltfläche (serverseitige
+ * Rückgaberouten existieren, sind aber nicht verdrahtet).
  */
 
 (function () {
@@ -248,6 +275,123 @@
     return (order && CHEF_TODAY_WHY_FALLBACK_BY_STATUS[order.status]) || "";
   }
 
+  // -----------------------------------------------------------------------
+  // V8.5 ("Entscheidungen im Chefmodus besser vorbereiten") – Empfehlung,
+  // Risiko/Grenze und verfügbare Aktion. Alle drei Funktionen sind reine
+  // Lesefunktionen auf dem bereits geladenen state.todayOverviewByOrderId
+  // (siehe loadTodayOverviews() oben) bzw. auf order.status – keine neue
+  // Regel, keine neue Priorisierung, keine Statusänderung.
+  // -----------------------------------------------------------------------
+
+  // Dieselbe Rolle, an die die bestehende Pilotauftrags-Karte
+  // (pilot-work-order-ui.js#documentationHandoffsFromOverview) ihre
+  // Dokumentations-Rollenübergaben richtet. Bewusst wortgleich, keine neue
+  // Rollenbezeichnung.
+  var DOCUMENTATION_PILOT_ROLE = "DOKUMENTATION";
+
+  // Fachlich exakt dieselbe Filterung wie
+  // pilot-work-order-ui.js#documentationHandoffsFromOverview: alle
+  // Rollenübergaben dieses Auftrags, die an die Dokumentation gerichtet
+  // sind, in unveränderter Reihenfolge.
+  function documentationHandoffsFor(order) {
+    var overview = order ? state.todayOverviewByOrderId[order.id] : null;
+    var handoffs = overview && Array.isArray(overview.handoffs) ? overview.handoffs : [];
+    return handoffs.filter(function (handoff) {
+      return Boolean(handoff) && handoff.toPilotRole === DOCUMENTATION_PILOT_ROLE;
+    });
+  }
+
+  // Spiegelt fachlich hasPassedDocumentationHandoff() UND
+  // latestDocumentationHandoff() aus pilot-work-order-ui.js in einem
+  // Schritt: die zuletzt eingereichte Dokumentations-Rollenübergabe, die
+  // tatsächlich vom Projektmanager-Filter angenommen wurde
+  // (pmFilterStatus === "PASSED"). Keine abweichende neue Definition –
+  // lediglich dieselben zwei bestehenden Prüfungen kombiniert, weil die
+  // Startkarte (anders als der reine Vorhanden-Check in
+  // hasPassedDocumentationHandoff()) den tatsächlichen Ergebnistext
+  // braucht.
+  function latestPassedDocumentationHandoff(order) {
+    var documentationHandoffs = documentationHandoffsFor(order);
+    for (var index = documentationHandoffs.length - 1; index >= 0; index -= 1) {
+      var handoff = documentationHandoffs[index];
+      if (handoff && handoff.pmFilterStatus === "PASSED") return handoff;
+    }
+    return null;
+  }
+
+  // Empfehlung (Auftrag Abschnitt "B. Empfehlung"): ausschließlich aus einem
+  // belastbaren, tatsächlich angenommenen Dokumentations-Handoff. Für
+  // BLOCKED und RETURNED immer `null` (alte Handoffs wären hier
+  // möglicherweise veraltet oder unpassend – lieber keine Information als
+  // eine möglicherweise falsche). Für READY_FOR_JAMAL_APPROVAL gilt exakt
+  // dieselbe Regel wie für READY_FOR_REVIEW (keine neue, abweichende
+  // Sonderregel) – in der typischen Lage vor Ausführungsstart existiert vor
+  // diesem Zeitpunkt noch kein Dokumentations-Handoff, die Zeile entfällt
+  // dann ersatzlos.
+  function recommendationTextFor(order) {
+    if (!order) return null;
+    if (order.status !== "READY_FOR_REVIEW" && order.status !== "READY_FOR_JAMAL_APPROVAL") return null;
+    var handoff = latestPassedDocumentationHandoff(order);
+    if (!handoff) return null;
+    if (typeof handoff.resultOrRecommendation !== "string") return null;
+    if (handoff.resultOrRecommendation.trim().length === 0) return null;
+    return sanitizeChefDecisionText(handoff.resultOrRecommendation);
+  }
+
+  // Risiko/Grenze (Auftrag Abschnitt "C. Risiko oder Grenze"): ausschließlich
+  // aus dem bereits bestehenden, servergebauten overview.risksAndLimits
+  // (pilot-work-order-service.js#buildOverview, bereits dedupliziert). Für
+  // BLOCKED und RETURNED immer `null`. Bevorzugt den letzten nicht leeren,
+  // nach der Bereinigung noch sinnvollen Text – keine Interpretation, keine
+  // Zusammenfassung, maximal ein Text.
+  function riskTextFor(order) {
+    if (!order) return null;
+    if (order.status !== "READY_FOR_REVIEW" && order.status !== "READY_FOR_JAMAL_APPROVAL") return null;
+    var overview = state.todayOverviewByOrderId[order.id];
+    var risksAndLimits = overview && Array.isArray(overview.risksAndLimits) ? overview.risksAndLimits : [];
+    for (var index = risksAndLimits.length - 1; index >= 0; index -= 1) {
+      var candidate = risksAndLimits[index];
+      if (typeof candidate !== "string") continue;
+      var sanitized = sanitizeChefDecisionText(candidate);
+      if (sanitized) return sanitized;
+    }
+    return null;
+  }
+
+  // Verfügbare Aktion (Auftrag Abschnitt "D. Verfügbare Aktion"): eine reine,
+  // statische Status-zu-Klartext-Ableitung. Die Werte spiegeln wortgleich
+  // die vier tatsächlichen Primäraktionen aus
+  // pilot-work-order-ui.js#renderPrimaryAction – kein DOM-Zugriff, keine
+  // Aktion, kein neuer Statuswert. BLOCKED spiegelt bewusst den tatsächlichen
+  // Button-Text "Entsperren (zurückgeben)" (nicht "Entsperren und
+  // zurückgeben") – so lautet der reale, im UI verdrahtete Text.
+  var PRIMARY_ACTION_LABEL_BY_STATUS = {
+    RETURNED: "Erneut als Entwurf starten",
+    READY_FOR_REVIEW: "Ergebnis abnehmen",
+    BLOCKED: "Entsperren (zur\u00fcckgeben)",
+    READY_FOR_JAMAL_APPROVAL: "Ausf\u00fchrung freigeben",
+  };
+
+  function primaryActionLabelFor(order) {
+    return (order && PRIMARY_ACTION_LABEL_BY_STATUS[order.status]) || null;
+  }
+
+  // Rein darstellende, nachvollziehbare Begrenzung (Auftrag Abschnitt "F.
+  // Umfang und Ruhe"): Freitexte aus Handoffs (resultOrRecommendation,
+  // riskOrLimit) können bis zu 4000 Zeichen lang sein (siehe
+  // pilot-work-order-service.js#truncate). Auf der ruhigen Startkarte wird
+  // ausschließlich die ANZEIGE gekürzt – keine sinnverändernde
+  // Zusammenfassung, kein neuer Text. Der vollständige, unveränderte Text
+  // bleibt in recommendationTextFor()/riskTextFor() sowie in der
+  // bestehenden Detailansicht (Pilotauftrags-Karte) erhalten.
+  var CHEF_TODAY_ROW_TEXT_DISPLAY_LIMIT = 200;
+
+  function truncateForRowDisplay(text) {
+    if (typeof text !== "string") return text;
+    if (text.length <= CHEF_TODAY_ROW_TEXT_DISPLAY_LIMIT) return text;
+    return text.slice(0, CHEF_TODAY_ROW_TEXT_DISPLAY_LIMIT - 1).trim() + "\u2026";
+  }
+
   // V8.4 – laufende Nummer des lokalen Kalendertags. Date.UTC() liegt immer
   // exakt auf einer Tagesgrenze (kein DST-Sprung wie bei lokalen
   // Mitternachtswerten), deshalb ist die Differenz zweier Kalendertage
@@ -324,6 +468,16 @@
                 // service.js#NEXT_STEP_BY_STATUS) – nur defensiv gehalten,
                 // falls ein künftiges Arbeitspaket ihn fachlich aufbereitet.
                 nextStep: overview.nextStep || null,
+                // V8.5 – ausschließlich zum Lesen übernommen (siehe
+                // recommendationTextFor()/riskTextFor() unten), niemals
+                // mutiert: dieselben Arrays, die auch die bestehende
+                // Pilotauftrags-Karte (pilot-work-order-ui.js) für ihre
+                // eigene, unveränderte Primäraktions- und Handoff-Logik
+                // liest. Ein fehlendes oder ungültiges Feld wird defensiv zu
+                // einer leeren Liste – keine zweite Statusquelle, keine neue
+                // Bedeutung dieser Felder.
+                handoffs: Array.isArray(overview.handoffs) ? overview.handoffs : [],
+                risksAndLimits: Array.isArray(overview.risksAndLimits) ? overview.risksAndLimits : [],
               };
             }
           })
@@ -391,27 +545,49 @@
     );
   }
 
-  // V8.4 – eine Zeile in "Heute wichtig": Klartext-Kategorie (unverändert
-  // aus TODAY_REASON_BY_STATUS), Titel, der ausführlichere "Warum"-Satz,
-  // die Wartedauer (falls ermittelbar) und eine sichtbare Beschriftung
-  // "Öffnen". Die ganze Zeile bleibt EIN bestehender Button
+  // V8.5 – eine optionale, eindeutig beschriftete Informationszeile
+  // innerhalb einer Auftragszeile (siehe renderTodayRow()). Fehlt der Text
+  // (null/leer), wird nichts gerendert – keine leere Überschrift, kein
+  // erfundener Platzhaltertext wie "Keine Empfehlung vorhanden".
+  function renderTodayRowLine(className, label, text) {
+    if (!text) return "";
+    return (
+      '<span class="chef-today-row-line ' +
+      className +
+      '"><span class="chef-today-row-line-label">' +
+      escapeHtml(label + ":") +
+      '</span> <span class="chef-today-row-line-text">' +
+      escapeHtml(truncateForRowDisplay(text)) +
+      "</span></span>"
+    );
+  }
+
+  // V8.4/V8.5 – eine Zeile in "Heute wichtig". Sichtbare Reihenfolge (Auftrag
+  // Abschnitt "E. Rendering"): Kategorie, Auftragstitel, "Zu entscheiden"
+  // (bestehender whyTextFor()-Text, jetzt beschriftet), optional
+  // "Empfehlung" (recommendationTextFor()), optional "Wichtig zu beachten"
+  // (riskTextFor()), Wartedauer, "Verfügbare Aktion"
+  // (primaryActionLabelFor()) und die sichtbare Beschriftung "Entscheidung
+  // öffnen". Die ganze Zeile bleibt EIN bestehender Button
   // (data-chef-today-action="open-order", siehe bindActionHandlersOnce) –
-  // "Öffnen" ist hier ausschließlich sichtbarer Text, kein zweites,
-  // eigenständiges Bedienelement und kein neuer Navigationspfad.
+  // jede Beschriftung ist ausschließlich sichtbarer Text, kein zweites,
+  // eigenständiges Bedienelement, keine Aktion, kein neuer Navigationspfad.
   function renderTodayRow(order) {
     var wait = waitLabelFor(order);
     return (
       '<button type="button" class="chef-today-row" data-chef-today-action="open-order" data-order-id="' +
       escapeHtml(order.id) +
-      '"><span class="chef-today-row-title">' +
-      escapeHtml(order.title) +
-      '</span><span class="chef-today-row-meta">' +
+      '"><span class="chef-today-row-meta">' +
       escapeHtml(reasonFor(order)) +
-      '</span><span class="chef-today-row-why">' +
-      escapeHtml(whyTextFor(order)) +
+      '</span><span class="chef-today-row-title">' +
+      escapeHtml(order.title) +
       "</span>" +
+      renderTodayRowLine("chef-today-row-decision", "Zu entscheiden", whyTextFor(order)) +
+      renderTodayRowLine("chef-today-row-recommendation", "Empfehlung", recommendationTextFor(order)) +
+      renderTodayRowLine("chef-today-row-risk", "Wichtig zu beachten", riskTextFor(order)) +
       (wait ? '<span class="chef-today-row-wait">' + escapeHtml(wait) + "</span>" : "") +
-      '<span class="chef-today-row-open">\u00d6ffnen</span>' +
+      renderTodayRowLine("chef-today-row-action", "Verf\u00fcgbare Aktion", primaryActionLabelFor(order)) +
+      '<span class="chef-today-row-open">Entscheidung \u00f6ffnen</span>' +
       "</button>"
     );
   }
@@ -696,6 +872,12 @@
       whyTextFor: whyTextFor,
       sanitizeChefDecisionText: sanitizeChefDecisionText,
       waitLabelFor: waitLabelFor,
+      recommendationTextFor: recommendationTextFor,
+      riskTextFor: riskTextFor,
+      primaryActionLabelFor: primaryActionLabelFor,
+      PRIMARY_ACTION_LABEL_BY_STATUS: PRIMARY_ACTION_LABEL_BY_STATUS,
+      CHEF_TODAY_ROW_TEXT_DISPLAY_LIMIT: CHEF_TODAY_ROW_TEXT_DISPLAY_LIMIT,
+      truncateForRowDisplay: truncateForRowDisplay,
       openOrder: openOrder,
       openRecommendedWork: openRecommendedWork,
       openNewOrder: openNewOrder,
