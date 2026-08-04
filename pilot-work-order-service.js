@@ -223,7 +223,15 @@ const NEXT_STEP_BY_STATUS = Object.freeze({
   DRAFT: "Pilotauftrag prüfen und für Jamals Freigabe vorbereiten (markReadyForApproval).",
   READY_FOR_JAMAL_APPROVAL: "Jamal entscheidet über die Freigabe zur Ausführung (approveForExecution mit confirmed: true).",
   APPROVED_FOR_EXECUTION: "Ausführung starten (startExecution) – Rollenübergaben können danach beginnen.",
-  IN_EXECUTION: "Nächste Rollenübergabe einreichen (submitHandoff) oder zur Abschlussprüfung vorlegen (submitForReview).",
+  // V8.0.1 ("Rollenübergabe nach abgeschlossener Drei-Agenten-Kette bedienbar
+  // machen"): dieser Text bleibt bewusst STATISCH je Status (keine zweite
+  // Statusmaschine) und beschreibt deshalb neutral BEIDE möglichen nächsten
+  // Schritte während IN_EXECUTION. Welcher davon tatsächlich bedienbar ist
+  // (Rollenübergabe vorbereiten vs. zur Abschlussprüfung vorlegen), leitet
+  // ausschließlich die Oberfläche (pilot-work-order-ui.js#renderPrimaryAction)
+  // aus den bereits vorhandenen Overview-Feldern (handoffs) ab – kein
+  // zusätzliches Serverfeld, keine neue Statusmaschine.
+  IN_EXECUTION: "Rollenübergabe einreichen oder zur Abschlussprüfung vorlegen.",
   READY_FOR_REVIEW: "Jamal entscheidet über den Abschluss (approveCompletion mit confirmed: true) oder gibt zur Überarbeitung zurück.",
   COMPLETED: "Pilotlauf abgeschlossen – kein weiterer Schritt in diesem Lauf.",
   RETURNED: "Ursache klären, danach erneut in den Entwurf überführen (reopenFromReturned).",

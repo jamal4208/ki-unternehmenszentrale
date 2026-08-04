@@ -1705,6 +1705,147 @@ async function run() {
     assert.notStrictEqual(digestCompleted.blockReason, "MANDATE_DIGEST_MISMATCH");
   });
 
+  // -------------------------------------------------------------------
+  // V8.0.1 ("Rollenübergabe nach abgeschlossener Drei-Agenten-Kette
+  // bedienbar machen") – isolierter End-zu-End-Nachweis über die echte
+  // Service-/Kettenlogik: neue, eigenständige Datenbank (keine
+  // Wiederverwendung von `db`/`chain` oben), von der Kettenanlage bis zur
+  // echten Auftragsabnahme, ausschließlich über bewusste, einzeln
+  // aufgerufene Service-Funktionen. Weder submitHandoff noch chainManaged
+  // noch roleHandoffBooked werden dabei verändert.
+  // -------------------------------------------------------------------
+  await check(
+    "V8.0.1 E2E: eine COMPLETED-Kette erzeugt weiterhin keine klassische Rollenübergabe; Jamals bewusster submitHandoff erzeugt genau eine pilot_handoffs-Zeile (PASSED), danach führen submitForReview und approveCompletion zur echten Abnahme",
+    async () => {
+      const { db: e2eDb } = makeIsolatedDb("pilot-work-order-v8-0-1-e2e-");
+      const e2eOrder = pilotService.createPilotOrder(e2eDb, orderInput({ title: "Auftrag: V8.0.1 Rollenübergabe-Endpunkt" }));
+      const e2eOrderId = e2eOrder.order.id;
+      driveOrderToInExecution(e2eDb, e2eOrderId);
+
+      const e2eChain = chainService.prepareChain(e2eDb, { pilotOrderId: e2eOrderId, actorUserId: "owner-1" });
+
+      const { result: e2eAfterStep1 } = await requestAndStart(e2eDb, {
+        chainId: e2eChain.id,
+        chainStep: 1,
+        adapter: fakeSuccessfulCodexAdapter(RESEARCH_RESULT_TEXT),
+      });
+      assert.strictEqual(e2eAfterStep1.steps[0].stepStatus, "SUCCEEDED", "Stufe 1 muss einzeln erfolgreich abgeschlossen werden");
+
+      const { result: e2eAfterStep2 } = await requestAndStart(e2eDb, {
+        chainId: e2eChain.id,
+        chainStep: 2,
+        adapter: fakeSuccessfulCodexAdapter("Kurzbefund: Dokumentation abgeschlossen.\nErgebnis: bereit zur Bewertung."),
+      });
+      assert.strictEqual(e2eAfterStep2.steps[1].stepStatus, "SUCCEEDED", "Stufe 2 muss einzeln erfolgreich abgeschlossen werden");
+
+      const { result: e2eAfterStep3 } = await requestAndStart(e2eDb, {
+        chainId: e2eChain.id,
+        chainStep: 3,
+        adapter: fakeSuccessfulCodexAdapter("Gesamturteil: konsistent und vollständig.\nEmpfehlung: zur Abschlussprüfung vorlegen."),
+      });
+      assert.strictEqual(e2eAfterStep3.steps[2].stepStatus, "SUCCEEDED", "Stufe 3 muss einzeln erfolgreich abgeschlossen werden");
+      assert.strictEqual(e2eAfterStep3.chainStatus, "COMPLETED", "die Kette selbst muss vollständig abgeschlossen sein");
+      e2eAfterStep3.steps.forEach((step) => {
+        assert.strictEqual(step.roleHandoffBooked, true, `Schritt ${step.stepNumber} muss als Ketten-Rollenverbuchung markiert sein`);
+      });
+
+      // Bestätigte Ursachenlage: die Kette selbst erzeugt KEINE Zeile in
+      // pilot_handoffs (Auftrag Abschnitt 3) – exakt die bekannte
+      // Integrationslücke, die V8.0.1 überbrückt, ohne sie an der Quelle zu
+      // verändern.
+      assert.strictEqual(
+        authDb.listPilotHandoffs(e2eDb, e2eOrderId).length,
+        0,
+        "vor Jamals bewusstem Klick darf keine klassische Rollenübergabe existieren",
+      );
+      const overviewBeforeHandoff = pilotService.getPilotOrderOverview(e2eDb, e2eOrderId);
+      assert.strictEqual(overviewBeforeHandoff.status, "IN_EXECUTION");
+
+      // submitForReview lehnt konsequent ab, solange keine angenommene
+      // Dokumentationsübergabe existiert (bestätigt dieselbe Ursachenlage
+      // aus der entgegengesetzten Richtung).
+      assert.throws(
+        () => pilotService.submitForReview(e2eDb, { pilotOrderId: e2eOrderId }),
+        /kein vom Projektmanager-Filter angenommenes Dokumentations-Ergebnis/,
+        "ohne angenommene Dokumentationsübergabe darf keine Abschlussprüfung möglich sein",
+      );
+
+      // Jamal löst die Rollenübergabe jetzt bewusst aus – über die
+      // UNVERÄNDERTE bestehende submitHandoff-Funktion, mit dem
+      // tatsächlichen Ergebnis von Kettenschritt 3 als Grundlage (exakt der
+      // neue Bedienweg aus pilot-work-order-ui.js#submitHandoffDraft).
+      const pmStep = e2eAfterStep3.steps[2];
+      const pmRun = authDb.getPilotAgentExecutionRunById(e2eDb, pmStep.executionRunId);
+      assert.ok(pmRun && pmRun.resultRawText, "das tatsächliche Ergebnis von Kettenschritt 3 muss lesbar sein");
+      const handoffResult = pilotService.submitHandoff(e2eDb, {
+        pilotOrderId: e2eOrderId,
+        expectedRevision: overviewBeforeHandoff.order.revision,
+        fromPilotRole: "RECHERCHE_ANALYSE",
+        toPilotRole: "DOKUMENTATION",
+        shortFinding: `Kette ${e2eChain.id}, Schritt 3 (Projektmanager-Agent) erfolgreich abgeschlossen (Lauf ${pmRun.id}).`,
+        resultOrRecommendation: pmRun.resultRawText,
+        basisUsed: `Ergebnis von Kettenschritt 3 (Projektmanager-Agent) der Kette ${e2eChain.id} (Lauf ${pmRun.id}).`,
+        riskOrLimit: "Keine bekannten Blocker für diesen Testauftrag.",
+        nextStep: "Zur Abschlussprüfung vorlegen.",
+        actorUserId: "owner-1",
+      });
+      assert.strictEqual(handoffResult.filterResult.passed, true, "der deterministische PM-Filter muss diese vollständige Übergabe annehmen");
+      assert.strictEqual(handoffResult.handoff.pmFilterStatus, "PASSED");
+      assert.strictEqual(handoffResult.handoff.toPilotRole, "DOKUMENTATION");
+      const handoffsAfterSubmit = authDb.listPilotHandoffs(e2eDb, e2eOrderId);
+      assert.strictEqual(handoffsAfterSubmit.length, 1, "genau eine pilot_handoffs-Zeile darf entstehen");
+
+      // Ein wiederholter Versuch mit einer bewusst veralteten
+      // expectedRevision (z. B. ein verzögerter Zweitversuch) erzeugt einen
+      // sauberen Konflikt statt einer stillen Doppelanlage.
+      assert.throws(
+        () =>
+          pilotService.submitHandoff(e2eDb, {
+            pilotOrderId: e2eOrderId,
+            expectedRevision: overviewBeforeHandoff.order.revision - 1,
+            fromPilotRole: "RECHERCHE_ANALYSE",
+            toPilotRole: "DOKUMENTATION",
+            shortFinding: "Zweitversuch.",
+            resultOrRecommendation: "Zweitversuch.",
+            basisUsed: "Zweitversuch.",
+            riskOrLimit: "Zweitversuch.",
+            nextStep: "Zweitversuch.",
+            actorUserId: "owner-1",
+          }),
+        /geändert/,
+      );
+      assert.strictEqual(
+        authDb.listPilotHandoffs(e2eDb, e2eOrderId).length,
+        1,
+        "ein sauber abgelehnter Zweitversuch darf keine weitere Zeile erzeugen (keine Doppelanlage)",
+      );
+
+      // Erst jetzt darf submitForReview gelingen – weiterhin ein eigener,
+      // von Jamal bewusst ausgelöster Schritt.
+      const reviewOverview = pilotService.submitForReview(e2eDb, { pilotOrderId: e2eOrderId, actorUserId: "owner-1" });
+      assert.strictEqual(reviewOverview.status, "READY_FOR_REVIEW");
+
+      // Die finale Abnahme bleibt ein eigener, ausdrücklich bestätigter
+      // Schritt – kein automatischer Abschluss durch submitForReview.
+      assert.throws(
+        () => pilotService.approveCompletion(e2eDb, { pilotOrderId: e2eOrderId }),
+        /confirmed === true/,
+        "ohne confirmed:true darf keine finale Abnahme stattfinden",
+      );
+      const completed = pilotService.approveCompletion(e2eDb, { pilotOrderId: e2eOrderId, confirmed: true, actorUserId: "owner-1" });
+      assert.strictEqual(completed.status, "COMPLETED");
+
+      // Die Kette selbst hat zu keinem Zeitpunkt eine klassische
+      // Rollenübergabe ausgelöst: der einzige entstandene Datensatz stammt
+      // ausschließlich aus Jamals bewusstem submitHandoff-Aufruf oben
+      // (executionRunId bleibt bei einer manuell eingereichten Übergabe
+      // null, siehe pilot-work-order-service.js#submitHandoff).
+      const finalHandoffs = authDb.listPilotHandoffs(e2eDb, e2eOrderId);
+      assert.strictEqual(finalHandoffs.length, 1, "über den gesamten Ablauf darf nur diese eine klassische Rollenübergabe entstanden sein");
+      assert.strictEqual(finalHandoffs[0].executionRunId, null, "die manuell eingereichte Übergabe ist keine automatische Agentenlauf-Übergabe");
+    },
+  );
+
   console.log(`pilot-agent-execution-chain.test.js: ${passed} Prüfpunkte erfolgreich`);
 }
 

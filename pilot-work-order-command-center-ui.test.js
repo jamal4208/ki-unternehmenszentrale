@@ -110,6 +110,49 @@ function setDraftSentenceValue(text) {
   domElements["pilot-order-draft-sentence"].value = text;
 }
 
+// V8.0.1 ("Rollenübergabe nach abgeschlossener Drei-Agenten-Kette bedienbar
+// machen"): dieselben Feld-IDs wie HANDOFF_DRAFT_FIELD_TARGETS in
+// pilot-work-order-ui.js. Die Felder sind Kindknoten von
+// #pilot-work-order-output; jedes Setzen von dessen innerHTML muss sie
+// (wie in einem echten Browser) auf "" zurücksetzen (siehe
+// makeHandoffDraftAwareOutputElement unten) – nur so kann der
+// Capture-/Restore-Mechanismus in pilot-work-order-ui.js überhaupt
+// nachgewiesen werden (gleiches Muster wie CREATE_FORM_FIELD_IDS oben).
+const HANDOFF_DRAFT_FIELD_IDS = [
+  "pilot-handoff-draft-short-finding",
+  "pilot-handoff-draft-result",
+  "pilot-handoff-draft-basis",
+  "pilot-handoff-draft-risk",
+  "pilot-handoff-draft-next-step",
+  "pilot-handoff-draft-decision-needed",
+];
+
+function makeHandoffDraftAwareOutputElement() {
+  const el = { value: "" };
+  let html = "";
+  Object.defineProperty(el, "innerHTML", {
+    get() {
+      return html;
+    },
+    set(newHtml) {
+      html = newHtml;
+      HANDOFF_DRAFT_FIELD_IDS.forEach((id) => {
+        if (domElements[id]) domElements[id].value = "";
+      });
+    },
+  });
+  return el;
+}
+
+// #pilot-work-order-output selbst muss das neue Reset-Verhalten bekommen
+// (bislang ein reines makeElement()); die Handoff-Entwurfsfelder werden
+// als eigenständige, dauerhafte Einträge ergänzt (gleiches Muster wie die
+// pilot-order-create-*-Felder oben).
+domElements["pilot-work-order-output"] = makeHandoffDraftAwareOutputElement();
+HANDOFF_DRAFT_FIELD_IDS.forEach((id) => {
+  domElements[id] = makeElement();
+});
+
 function getCreateFormFieldValues() {
   const values = {};
   [
@@ -175,6 +218,12 @@ function makeFakeBackend() {
   // aber Handoff fehlgeschlagen" getestet werden kann.
   let nextAgentExecutionHandoffStatus = "SUCCEEDED";
   let nextAgentExecutionHandoffErrorMessage = null;
+  // V8.0.1: standardmäßig PASSED (deckt sich mit dem echten deterministischen
+  // Filter, solange alle Pflichtfelder ausgefüllt sind, siehe
+  // pilot-work-order-service.js#runProjectManagerFilter); für den
+  // REJECTED-Testfall gezielt umschaltbar, ohne den restlichen Vertrag zu
+  // verändern.
+  let nextHandoffPmFilterOutcome = "PASSED";
 
   function nowIso() {
     return new Date().toISOString();
@@ -225,6 +274,12 @@ function makeFakeBackend() {
   function overviewFor(order) {
     return {
       codexAvailability: { available: codexAvailable, authenticated: codexAuthenticated, version: "codex-cli 0.999.0-test", authLabel: codexAuthenticated ? "ChatGPT" : null },
+      // V8.0.1 ("Rollenübergabe nach abgeschlossener Drei-Agenten-Kette
+      // bedienbar machen"): bildet exakt das additive Feld aus
+      // pilot-work-order-routes.js#withAgentChains nach (jede für diesen
+      // Auftrag vorbereitete Kette samt Schritten) – ausschließlich lesend,
+      // von Tests über backend.orders.get(id).agentChains gesetzt.
+      agentChains: order.agentChains || [],
       order: {
         id: order.id,
         title: order.title,
@@ -424,6 +479,64 @@ function makeFakeBackend() {
         order.agentExecutionRuns = (order.agentExecutionRuns || []).concat([run]);
         return respond(200, { ok: true, agentExecutionRun: run, overview: overviewFor(order) });
       }
+      // V8.0.1 ("Rollenübergabe nach abgeschlossener Drei-Agenten-Kette
+      // bedienbar machen"): bildet den HTTP-Vertrag der bestehenden,
+      // UNVERÄNDERTEN submit-handoff-Route
+      // (pilot-work-order-service.js#submitHandoff) nach – Pflichtfelder,
+      // expectedRevision, deterministischer PM-Filter (per Testfixtur
+      // erzwingbar über setNextHandoffPmFilterOutcome), REJECTED verschiebt
+      // den Auftrag nach RETURNED (exakt wie im echten Service), PASSED
+      // belässt ihn in IN_EXECUTION.
+      if (action === "submit-handoff") {
+        if (order.status !== "IN_EXECUTION") {
+          return respond(409, {
+            ok: false,
+            message: `Rollenübergaben sind nur während IN_EXECUTION möglich (aktuell ${order.status}).`,
+            pilotOrderId: orderId,
+            currentStatus: order.status,
+          });
+        }
+        if (body.expectedRevision !== undefined && body.expectedRevision !== order.revision) {
+          return respond(409, {
+            ok: false,
+            message: `Der Pilotauftrag "${orderId}" wurde zwischenzeitlich verändert (erwartete Revision ${body.expectedRevision}, aktuell ${order.revision}).`,
+            pilotOrderId: orderId,
+            expectedRevision: body.expectedRevision,
+            currentRevision: order.revision,
+          });
+        }
+        const requiredTextFields = ["shortFinding", "resultOrRecommendation", "basisUsed", "riskOrLimit", "nextStep"];
+        const missing = requiredTextFields.filter((field) => !body[field] || !String(body[field]).trim());
+        if (missing.length > 0) {
+          return respond(400, { ok: false, message: `Rollenübergabe ist unvollständig, es fehlen: ${missing.join(", ")}.` });
+        }
+        idCounter += 1;
+        const pmFilterStatus = nextHandoffPmFilterOutcome;
+        const pmFilterReasons = pmFilterStatus === "REJECTED" ? ["Testfixtur: erzwungene Ablehnung durch den Projektmanager-Filter."] : [];
+        const handoff = {
+          id: `pilot-handoff-test-${idCounter}`,
+          fromPilotRole: body.fromPilotRole || "JAMAL",
+          toPilotRole: body.toPilotRole,
+          toPilotRoleLabel: body.toPilotRole === "DOKUMENTATION" ? "Dokumentations-Agent" : body.toPilotRole,
+          shortFinding: body.shortFinding,
+          resultOrRecommendation: body.resultOrRecommendation,
+          basisUsed: body.basisUsed,
+          riskOrLimit: body.riskOrLimit,
+          nextStep: body.nextStep,
+          decisionNeeded: body.decisionNeeded || null,
+          pmFilterStatus,
+          pmFilterReasons,
+          createdAt: nowIso(),
+        };
+        order.handoffs = (order.handoffs || []).concat([handoff]);
+        if (pmFilterStatus === "REJECTED") {
+          order.status = "RETURNED";
+          order.statusLabel = STATUS_LABELS.RETURNED;
+        }
+        order.revision += 1;
+        order.updatedAt = nowIso();
+        return respond(200, { ok: true, handoff, overview: overviewFor(order) });
+      }
       const transition = TRANSITIONS[action];
       if (!transition) return respond(404, { ok: false, message: "Nicht gefunden." });
       if (body.expectedRevision !== undefined && body.expectedRevision !== order.revision) {
@@ -475,6 +588,9 @@ function makeFakeBackend() {
     setNextCodexDiagnostics: (value) => {
       nextCodexDiagnostics = value;
     },
+    setNextHandoffPmFilterOutcome: (value) => {
+      nextHandoffPmFilterOutcome = value;
+    },
   };
 }
 
@@ -491,6 +607,12 @@ let forceNextFetchNetworkFailure = false;
 // das In-Memory-Fake-Backend selbst verändern zu müssen. Gleiches Muster
 // wie forceNextFetchNetworkFailure oben.
 let forceNextCreateOrderResponse = null;
+// V8.0.1 ("Rollenübergabe nach abgeschlossener Drei-Agenten-Kette bedienbar
+// machen"): gleiches Muster wie forceNextCreateOrderResponse oben – erzwingt
+// für den NÄCHSTEN submit-handoff-POST einen bestimmten HTTP-Statuscode
+// (400/409), ohne das In-Memory-Fake-Backend selbst (Pflichtfeld-/
+// Revisionsprüfung) verändern zu müssen.
+let forceNextSubmitHandoffResponse = null;
 global.fetch = (url, opts) => {
   fetchCalls.push({ url, method: (opts && opts.method) || "GET", body: opts && opts.body ? JSON.parse(opts.body) : undefined });
   if (forceNextFetchNetworkFailure) {
@@ -500,6 +622,11 @@ global.fetch = (url, opts) => {
   if (forceNextCreateOrderResponse && (opts && opts.method) === "POST" && url === "/api/pilot-work-order/orders") {
     const { status, body } = forceNextCreateOrderResponse;
     forceNextCreateOrderResponse = null;
+    return Promise.resolve({ status, json: () => Promise.resolve(body) });
+  }
+  if (forceNextSubmitHandoffResponse && (opts && opts.method) === "POST" && /\/submit-handoff$/.test(url)) {
+    const { status, body } = forceNextSubmitHandoffResponse;
+    forceNextSubmitHandoffResponse = null;
     return Promise.resolve({ status, json: () => Promise.resolve(body) });
   }
   return backend.handle(url, opts);
@@ -1786,6 +1913,263 @@ async function run() {
     assert.ok(call);
     assert.notStrictEqual(call.body.confirmed, true, "ein direkter Aufruf ohne die Bestätigungsfläche darf niemals confirmed:true senden");
     assert.strictEqual(ui.getState().overview.status, "READY_FOR_JAMAL_APPROVAL", "kein Statuswechsel ohne die Bestätigungsfläche");
+  });
+
+  // -------------------------------------------------------------------
+  // V8.0.1 ("Rollenübergabe nach abgeschlossener Drei-Agenten-Kette
+  // bedienbar machen"): ein eigenständiger, dedizierter Testauftrag wird
+  // direkt in IN_EXECUTION mit einer bereits COMPLETED-Kette (Schritt 3 /
+  // Projektmanager-Agent erfolgreich) angelegt, damit sowohl die
+  // Vorbefüllung als auch die volle Bedienstrecke (Öffnen, Ändern,
+  // Einreichen, Fehlerfälle, Auftragswechsel) geprüft werden können.
+  // -------------------------------------------------------------------
+
+  let handoffOrderId;
+  let handoffChainId;
+  let handoffPmRunId;
+
+  await check(
+    "V8.0.1-1. IN_EXECUTION ohne angenommene Dokumentationsübergabe: Abschlussknopf nicht sichtbar, 'Rollenübergabe vorbereiten' sichtbar",
+    async () => {
+      idCounter += 1;
+      handoffOrderId = `pilot-order-test-handoff-${idCounter}`;
+      handoffChainId = `pilot-agent-chain-test-${idCounter}`;
+      handoffPmRunId = `pilot-agent-run-test-pm-${idCounter}`;
+      setRawOrder(handoffOrderId, {
+        title: "Auftrag H: Handoff-Testauftrag",
+        status: "IN_EXECUTION",
+        statusLabel: STATUS_LABELS.IN_EXECUTION,
+        revision: 5,
+        handoffs: [],
+        agentExecutionRuns: [
+          {
+            id: handoffPmRunId,
+            presetId: "codex-pm-evaluate-chain",
+            pilotRole: "PROJEKTMANAGER",
+            pilotRoleLabel: "Projektmanager-Agent",
+            status: "SUCCEEDED",
+            resultRawText: "# Projektmanager-Bewertung\n\nGesamturteil: passt.\n\nEmpfehlung: annehmen.",
+            resultSummary: { analyzedFiles: ["a.md", "b.md"] },
+          },
+        ],
+        agentChains: [
+          {
+            id: handoffChainId,
+            chainStatus: "COMPLETED",
+            steps: [
+              { stepNumber: 1, stepStatus: "SUCCEEDED", executionRunId: "run-h-1", roleHandoffBooked: true },
+              { stepNumber: 2, stepStatus: "SUCCEEDED", executionRunId: "run-h-2", roleHandoffBooked: true },
+              { stepNumber: 3, stepStatus: "SUCCEEDED", executionRunId: handoffPmRunId, roleHandoffBooked: true },
+            ],
+          },
+        ],
+      });
+      await ui.selectOrder(handoffOrderId);
+      const html = domElements["pilot-work-order-output"].innerHTML;
+      assert.doesNotMatch(html, /data-action="submit-for-review"/, "ohne angenommene Dokumentationsübergabe darf kein Abschlussknopf sichtbar sein");
+      assert.match(html, /data-action="prepare-handoff-draft"/);
+      assert.match(html, /Rollen\u00fcbergabe vorbereiten/);
+    },
+  );
+
+  await check(
+    "V8.0.1-2. Klick auf 'Rollenübergabe vorbereiten': kein Request, Entwurf sichtbar, Pflichtfelder vorausgefüllt, Hinweis sichtbar",
+    async () => {
+      fetchCalls.length = 0;
+      ui.openHandoffDraft();
+      assert.strictEqual(fetchCalls.length, 0, "das reine Öffnen des Entwurfs darf keinen Request auslösen");
+      const state = ui.getState();
+      assert.ok(state.handoffDraft, "der Entwurf muss lokal geöffnet sein");
+      assert.strictEqual(state.handoffDraft.pilotOrderId, handoffOrderId);
+      const html = domElements["pilot-work-order-output"].innerHTML;
+      assert.match(html, /Diese \u00dcbergabe wird erst mit deinem Klick eingereicht\./);
+      assert.match(html, /Recherche-\/Analyse-Agent/);
+      assert.match(html, /Dokumentations-Agent/);
+      assert.match(html, new RegExp(handoffPmRunId), "die Grundlage muss den tatsächlichen Lauf von Kettenschritt 3 referenzieren");
+      assert.match(
+        domElements["pilot-handoff-draft-result"].value,
+        /Gesamturteil: passt\./,
+        "das Ergebnisfeld muss unverändert aus Kettenschritt 3 (Projektmanager-Agent) vorbefüllt sein",
+      );
+      assert.notStrictEqual(domElements["pilot-handoff-draft-short-finding"].value, "", "Kurzbefund muss vorausgefüllt sein");
+      assert.notStrictEqual(domElements["pilot-handoff-draft-basis"].value, "", "Grundlage muss vorausgefüllt sein");
+      assert.notStrictEqual(domElements["pilot-handoff-draft-next-step"].value, "", "nächster Schritt muss vorausgefüllt sein");
+    },
+  );
+
+  await check("V8.0.1-3. eine manuelle Änderung im Entwurf bleibt nach render() erhalten", () => {
+    domElements["pilot-handoff-draft-risk"].value = "Manuell erg\u00e4nztes Risiko: keine bekannten Blocker.";
+    ui.render();
+    assert.strictEqual(domElements["pilot-handoff-draft-risk"].value, "Manuell erg\u00e4nztes Risiko: keine bekannten Blocker.");
+  });
+
+  await check("V8.0.1-4./5. HTTP 400: alle Feldwerte bleiben erhalten, der Einreichen-Knopf wird wieder nutzbar", async () => {
+    forceNextSubmitHandoffResponse = { status: 400, body: { ok: false, message: "Rollenübergabe ist unvollständig, es fehlen: shortFinding." } };
+    fetchCalls.length = 0;
+    const valuesBefore = {};
+    HANDOFF_DRAFT_FIELD_IDS.forEach((id) => {
+      valuesBefore[id] = domElements[id].value;
+    });
+    await ui.submitHandoffDraft();
+    const postCalls = fetchCalls.filter((c) => c.method === "POST" && c.url.includes("submit-handoff"));
+    assert.strictEqual(postCalls.length, 1, "genau ein POST submit-handoff je Klick");
+    HANDOFF_DRAFT_FIELD_IDS.forEach((id) => {
+      assert.strictEqual(domElements[id].value, valuesBefore[id], `Feld ${id} muss nach HTTP 400 erhalten bleiben`);
+    });
+    const state = ui.getState();
+    assert.ok(state.handoffDraft, "der Entwurf muss nach einem Fehler geöffnet bleiben");
+    assert.strictEqual(state.handoffDraft.submitting, false, "der Knopf muss nach dem Fehler wieder nutzbar sein");
+    assert.ok(state.handoffDraft.error && state.handoffDraft.error.length > 0, "es muss eine verständliche Fehlermeldung angezeigt werden");
+    assert.strictEqual(state.overview.status, "IN_EXECUTION", "der Status darf sich durch einen 400er nicht ändern");
+    assert.strictEqual(state.overview.handoffs.length, 0, "kein Handoff darf bei HTTP 400 entstanden sein");
+  });
+
+  await check("V8.0.1-6./7. HTTP 409: alle Feldwerte bleiben erhalten, der Einreichen-Knopf wird wieder nutzbar", async () => {
+    forceNextSubmitHandoffResponse = {
+      status: 409,
+      body: { ok: false, message: `Der Pilotauftrag "${handoffOrderId}" wurde zwischenzeitlich verändert.`, pilotOrderId: handoffOrderId },
+    };
+    fetchCalls.length = 0;
+    const valuesBefore = {};
+    HANDOFF_DRAFT_FIELD_IDS.forEach((id) => {
+      valuesBefore[id] = domElements[id].value;
+    });
+    await ui.submitHandoffDraft();
+    const postCalls = fetchCalls.filter((c) => c.method === "POST" && c.url.includes("submit-handoff"));
+    assert.strictEqual(postCalls.length, 1);
+    HANDOFF_DRAFT_FIELD_IDS.forEach((id) => {
+      assert.strictEqual(domElements[id].value, valuesBefore[id], `Feld ${id} muss nach HTTP 409 erhalten bleiben`);
+    });
+    const state = ui.getState();
+    assert.ok(state.handoffDraft, "der Entwurf muss nach einem Konflikt geöffnet bleiben");
+    assert.strictEqual(state.handoffDraft.submitting, false);
+    assert.ok(state.handoffDraft.error && state.handoffDraft.error.length > 0);
+    assert.strictEqual(state.overview.status, "IN_EXECUTION");
+    assert.strictEqual(state.overview.handoffs.length, 0, "kein Handoff darf bei HTTP 409 entstanden sein");
+  });
+
+  await check("V8.0.1-8./9. Netzwerkfehler: alle Feldwerte bleiben erhalten, der Einreichen-Knopf wird wieder nutzbar", async () => {
+    forceNextFetchNetworkFailure = true;
+    fetchCalls.length = 0;
+    const valuesBefore = {};
+    HANDOFF_DRAFT_FIELD_IDS.forEach((id) => {
+      valuesBefore[id] = domElements[id].value;
+    });
+    await ui.submitHandoffDraft();
+    assert.strictEqual(fetchCalls.length, 1, "kein automatischer Retry, genau ein tatsächlich gesendeter Versuch");
+    HANDOFF_DRAFT_FIELD_IDS.forEach((id) => {
+      assert.strictEqual(domElements[id].value, valuesBefore[id], `Feld ${id} muss nach einem Netzwerkfehler erhalten bleiben`);
+    });
+    const state = ui.getState();
+    assert.ok(state.handoffDraft, "der Entwurf muss nach einem Netzwerkfehler geöffnet bleiben");
+    assert.strictEqual(state.handoffDraft.submitting, false);
+    assert.ok(state.handoffDraft.error && state.handoffDraft.error.length > 0);
+    assert.strictEqual(state.overview.status, "IN_EXECUTION");
+  });
+
+  await check(
+    "V8.0.1-10. Auftragswechsel setzt einen offenen Handoff-Entwurf zurück, ohne dabei einen Request auszulösen",
+    async () => {
+      assert.ok(ui.getState().handoffDraft, "zu Beginn dieses Prüfpunkts muss der Entwurf noch geöffnet sein");
+      fetchCalls.length = 0;
+      await ui.selectOrder(CANONICAL_ID);
+      const postCalls = fetchCalls.filter((c) => c.method === "POST");
+      assert.strictEqual(postCalls.length, 0, "ein bloßer Auftragswechsel darf keinen POST auslösen");
+      assert.strictEqual(ui.getState().handoffDraft, null, "der Entwurf muss beim Auftragswechsel zurückgesetzt werden");
+      await ui.selectOrder(handoffOrderId);
+      assert.strictEqual(ui.getState().handoffDraft, null, "auch nach der Rückkehr zum Auftrag darf kein alter Entwurf mehr offen sein");
+    },
+  );
+
+  await check(
+    "V8.0.1-11./12. Einreichen: genau ein POST submit-handoff mit korrektem expectedRevision, Doppelklick erzeugt genau einen POST",
+    async () => {
+      ui.openHandoffDraft();
+      domElements["pilot-handoff-draft-risk"].value = "Kein bekanntes Risiko f\u00fcr diese Testauftrags-Rollen\u00fcbergabe.";
+      const expectedRevision = ui.getState().overview.order.revision;
+      fetchCalls.length = 0;
+      const first = ui.submitHandoffDraft();
+      assert.strictEqual(ui.getState().handoffDraft.submitting, true, "während des Einreichens muss der Zustand als 'submitting' erkennbar sein");
+      assert.match(domElements["pilot-work-order-output"].innerHTML, /data-action="submit-handoff-draft" disabled/);
+      const second = ui.submitHandoffDraft();
+      await Promise.all([first, second]);
+      const postCalls = fetchCalls.filter((c) => c.method === "POST" && c.url.includes("submit-handoff"));
+      assert.strictEqual(postCalls.length, 1, "ein zweiter, gleichzeitig ausgelöster Klick darf keinen zweiten POST senden");
+      assert.strictEqual(postCalls[0].body.expectedRevision, expectedRevision, "expectedRevision muss aus dem aktuellen Overview stammen");
+      assert.strictEqual(postCalls[0].body.fromPilotRole, "RECHERCHE_ANALYSE");
+      assert.strictEqual(postCalls[0].body.toPilotRole, "DOKUMENTATION");
+    },
+  );
+
+  await check(
+    "V8.0.1-13. Erfolg (PASSED): Overview wird neu geladen, PM-Filterstatus PASSED sichtbar, Abschlussknopf erst danach sichtbar, kein automatisches submit-for-review",
+    () => {
+      const state = ui.getState();
+      assert.strictEqual(state.handoffDraft, null, "der Entwurf muss nach erfolgreichem Einreichen geschlossen sein");
+      assert.strictEqual(state.overview.status, "IN_EXECUTION", "kein automatisches submitForReview/submit-for-review durch die Einreichung selbst");
+      assert.strictEqual(state.overview.handoffs.length, 1, "genau eine Rollenübergabe darf entstanden sein");
+      assert.strictEqual(state.overview.handoffs[0].toPilotRole, "DOKUMENTATION");
+      assert.strictEqual(state.overview.handoffs[0].pmFilterStatus, "PASSED");
+      const html = domElements["pilot-work-order-output"].innerHTML;
+      assert.match(html, /data-action="submit-for-review"/, "erst jetzt darf der Abschlussknopf sichtbar sein");
+      assert.doesNotMatch(html, /data-action="prepare-handoff-draft"/);
+      const submitForReviewCalls = fetchCalls.filter((c) => c.url.includes("submit-for-review"));
+      assert.strictEqual(submitForReviewCalls.length, 0, "kein automatischer POST submit-for-review durch die Rollenübergabe selbst");
+    },
+  );
+
+  // -------------------------------------------------------------------
+  // V8.0.1-14.: REJECTED – verständlicher Hinweis, kein Abschlussknopf,
+  // kein automatischer Retry. Ein eigener, unabhängiger Testauftrag
+  // vermeidet jede Rückwirkung auf den oben abgeschlossenen PASSED-Ablauf.
+  // Der reale submitHandoff-Service verschiebt den Auftrag bei REJECTED
+  // nach RETURNED (siehe pilot-work-order-service.js#submitHandoff) – ein
+  // erneutes IN_EXECUTION mit einer bereits vorhandenen REJECTED-
+  // Dokumentationsübergabe entsteht dadurch erst nach einem späteren
+  // reopenFromReturned + erneuter Freigabe (Auftrag Abschnitt 13: "ältere
+  // abgeschlossene Ketten können nachträglich abgeschlossen werden").
+  // Genau diesen realistischen Folgezustand bildet dieser Testauftrag
+  // direkt nach, ohne die gesamte Statuskette erneut durchlaufen zu
+  // müssen.
+  // -------------------------------------------------------------------
+
+  await check("V8.0.1-14. REJECTED: verständlicher Hinweis, kein Abschlussknopf, kein automatischer Retry", async () => {
+    idCounter += 1;
+    const rejectedOrderId = `pilot-order-test-handoff-rejected-${idCounter}`;
+    setRawOrder(rejectedOrderId, {
+      title: "Auftrag H2: REJECTED-Testauftrag",
+      status: "IN_EXECUTION",
+      statusLabel: STATUS_LABELS.IN_EXECUTION,
+      revision: 2,
+      handoffs: [
+        {
+          id: `pilot-handoff-test-rejected-${idCounter}`,
+          fromPilotRole: "RECHERCHE_ANALYSE",
+          toPilotRole: "DOKUMENTATION",
+          toPilotRoleLabel: "Dokumentations-Agent",
+          shortFinding: "Testbefund.",
+          resultOrRecommendation: "Testergebnis.",
+          basisUsed: "Testgrundlage.",
+          riskOrLimit: "Testrisiko.",
+          nextStep: "Testschritt.",
+          decisionNeeded: null,
+          pmFilterStatus: "REJECTED",
+          pmFilterReasons: ["Ergebnis passt zum Auftrag"],
+          createdAt: new Date().toISOString(),
+        },
+      ],
+      agentExecutionRuns: [],
+      agentChains: [],
+    });
+    fetchCalls.length = 0;
+    await ui.selectOrder(rejectedOrderId);
+    const html = domElements["pilot-work-order-output"].innerHTML;
+    assert.doesNotMatch(html, /data-action="submit-for-review"/, "bei REJECTED darf kein Abschlussknopf sichtbar sein");
+    assert.match(html, /abgelehnt/, "es muss ein verständlicher Hinweis auf die Ablehnung sichtbar sein");
+    assert.match(html, /Ergebnis passt zum Auftrag/, "der PM-Filter-Ablehnungsgrund muss sichtbar sein");
+    assert.match(html, /data-action="prepare-handoff-draft"/, "ein neuer, bewusst ausgelöster Entwurf muss weiterhin möglich sein");
+    const postCalls = fetchCalls.filter((c) => c.method === "POST");
+    assert.strictEqual(postCalls.length, 0, "die reine Anzeige der Ablehnung darf keinen automatischen erneuten Versuch auslösen");
   });
 
   console.log(`pilot-work-order-command-center-ui.test.js: ${passed} Prüfpunkte erfolgreich`);

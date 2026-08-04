@@ -144,6 +144,17 @@
     draftResult: null,
     draftFilledValues: null,
     draftSentenceAtBuild: null,
+    // V8.0.1 ("Rollenübergabe nach abgeschlossener Drei-Agenten-Kette
+    // bedienbar machen"): rein lokaler, nicht persistierter Entwurf einer
+    // KLASSISCHEN Rollenübergabe (submit-handoff), unabhängig vom
+    // Kettenkonzept (chainStartBridge/chainStepApprovalTokens oben). Wird
+    // ausschließlich durch openHandoffDraft() gesetzt (kein Request beim
+    // Öffnen) und durch submitHandoffDraft() bei Erfolg wieder auf null
+    // gesetzt. Form: { pilotOrderId, sourceLabel, submitting, error }. Die
+    // eigentlichen Feldwerte leben – wie beim bestehenden Anlageformular
+    // (siehe DRAFT_FIELD_TARGETS/CREATE_FORM_FIELD_IDS oben) – bewusst im
+    // DOM (HANDOFF_DRAFT_FIELD_TARGETS unten), nicht in diesem Objekt.
+    handoffDraft: null,
   };
 
   var STATUS_POLLING_INTERVAL_MS = 5000;
@@ -598,6 +609,12 @@
     // ohne jeden API-Aufruf (kein Status ändert sich dadurch) – dieselbe
     // Grundregel wie für codexApprovalToken/chainStepApprovalTokens oben.
     state.jamalConfirmation = null;
+    // V8.0.1 ("Auftragswechsel setzt einen offenen Handoff-Entwurf zurück"):
+    // ein Rollenübergabe-Entwurf gehört ausschließlich zum zuvor
+    // ausgewählten Auftrag – kein API-Aufruf, kein Statuswechsel, reines
+    // Verwerfen des lokalen Zustands (gleiche Grundregel wie
+    // jamalConfirmation oben).
+    state.handoffDraft = null;
     // Korrekturlauf F5 (V8.0): der flüchtige V8.0-Vorschlagszustand des
     // Anlageformulars (draftResult/draftFilledValues/draftSentenceAtBuild)
     // gehört ausschließlich zum zuvor geöffneten Auftrag – ohne diesen
@@ -952,6 +969,327 @@
         state.actionInFlight = false;
         render();
       });
+  }
+
+  // ---------------------------------------------------------------------
+  // V8.0.1 ("Rollenübergabe nach abgeschlossener Drei-Agenten-Kette
+  // bedienbar machen"): behebt die bekannte Integrationslücke zwischen der
+  // Kette (bucht ausschließlich intern roleHandoffBooked, erzeugt NIEMALS
+  // automatisch eine Zeile in pilot_handoffs – siehe
+  // pilot-agent-execution-chain-service.js#finalizeChainStepSuccess/
+  // pilot-agent-execution-service.js#finalizeAgentExecutionRun) und dem
+  // klassischen Abschlussweg (submitForReview verlangt weiterhin
+  // mindestens eine ANGENOMMENE klassische Rollenübergabe mit
+  // toPilotRole=DOKUMENTATION/pmFilterStatus=PASSED, siehe
+  // pilot-work-order-service.js#submitForReview). Diese Datei fügt
+  // AUSSCHLIESSLICH einen bedienbaren Aufrufer der bereits bestehenden,
+  // unveränderten submit-handoff-Route hinzu:
+  //   - keine automatische Rollenübergabe,
+  //   - keine automatische PM-Filter-Annahme außerhalb dieses Pfads,
+  //   - keine automatische Abschlussprüfung (submit-for-review) und
+  //   - keine automatische finale Abnahme.
+  // Jamal muss den Entwurf ausdrücklich öffnen, prüfen/ändern und
+  // einreichen (siehe openHandoffDraft/submitHandoffDraft unten).
+  // ---------------------------------------------------------------------
+
+  // Klassische Rollenzuordnung, exakt wie bei jedem bisherigen
+  // automatischen Handoff-Versuch eines Agentenlaufs (siehe
+  // pilot-agent-execution-service.js#attemptHandoffForSucceededRun:
+  // handoffFromPilotRole/handoffToPilotRole sind dort für jedes bestehende
+  // Preset fest RECHERCHE_ANALYSE -> DOKUMENTATION) – keine freie
+  // Rollen-ID-Eingabe, keine neue Rollenkombination.
+  var HANDOFF_DRAFT_FROM_ROLE = "RECHERCHE_ANALYSE";
+  var HANDOFF_DRAFT_TO_ROLE = "DOKUMENTATION";
+  var HANDOFF_DRAFT_FROM_ROLE_LABEL = "Recherche-/Analyse-Agent";
+  var HANDOFF_DRAFT_TO_ROLE_LABEL = "Dokumentations-Agent";
+
+  // Konservativer, klar erkennbarer Platzhalter (Auftrag Abschnitt 9): wird
+  // ausschließlich für Pflichtfelder eingesetzt, die aus dem Kettenergebnis
+  // NICHT eindeutig/mechanisch ableitbar sind. Niemals eine erfundene
+  // Aussage, niemals eine stille Annahme – Jamal muss dies vor dem
+  // Einreichen ausdrücklich prüfen.
+  var HANDOFF_DRAFT_PLACEHOLDER = "[BITTE PRÜFEN UND AUSFÜLLEN \u2013 aus dem Kettenergebnis nicht eindeutig ableitbar]";
+
+  var HANDOFF_DRAFT_FIELD_TARGETS = [
+    { id: "pilot-handoff-draft-short-finding", key: "shortFinding", label: "Kurzbefund" },
+    { id: "pilot-handoff-draft-result", key: "resultOrRecommendation", label: "Ergebnis/Empfehlung" },
+    { id: "pilot-handoff-draft-basis", key: "basisUsed", label: "Grundlage" },
+    { id: "pilot-handoff-draft-risk", key: "riskOrLimit", label: "Risiken/Grenzen" },
+    { id: "pilot-handoff-draft-next-step", key: "nextStep", label: "N\u00e4chster Schritt" },
+    { id: "pilot-handoff-draft-decision-needed", key: "decisionNeeded", label: "Ben\u00f6tigte Entscheidung (optional)" },
+  ];
+  var HANDOFF_DRAFT_FIELD_IDS = HANDOFF_DRAFT_FIELD_TARGETS.map(function (entry) {
+    return entry.id;
+  });
+  var HANDOFF_DRAFT_REQUIRED_KEYS = ["shortFinding", "resultOrRecommendation", "basisUsed", "riskOrLimit", "nextStep"];
+
+  // Alle klassischen Rollenübergaben dieses Auftrags, die (wie von
+  // submitForReview vorausgesetzt) an die Dokumentation gerichtet sind.
+  function documentationHandoffsFromOverview(overview) {
+    var handoffs = (overview && overview.handoffs) || [];
+    return handoffs.filter(function (handoff) {
+      return handoff.toPilotRole === "DOKUMENTATION";
+    });
+  }
+
+  // Exakt dieselbe Voraussetzung wie
+  // pilot-work-order-service.js#submitForReview (hasPassedDocumentationHandoff):
+  // mindestens EINE angenommene Dokumentations-Rollenübergabe, unabhängig
+  // von ihrer Position in der Liste.
+  function hasPassedDocumentationHandoff(overview) {
+    return documentationHandoffsFromOverview(overview).some(function (handoff) {
+      return handoff.pmFilterStatus === "PASSED";
+    });
+  }
+
+  // Die zuletzt eingereichte Dokumentations-Rollenübergabe (für die
+  // REJECTED-Anzeige, Auftrag Abschnitt 8.A.3) – unabhängig davon, ob
+  // bereits eine frühere PASSED-Übergabe existiert (ein erneuter,
+  // fehlgeschlagener Versuch soll weiterhin verständlich erklärt werden).
+  function latestDocumentationHandoff(overview) {
+    var list = documentationHandoffsFromOverview(overview);
+    return list.length > 0 ? list[list.length - 1] : null;
+  }
+
+  // Bevorzugte Quelle für den Entwurf (Auftrag Abschnitt 9): das Ergebnis
+  // von Kettenschritt 3 (Projektmanager-Agent) der zuletzt vollständig
+  // abgeschlossenen Kette dieses Auftrags. Rein lesend, verändert nichts.
+  function findLatestCompletedChainPmResult(overview) {
+    var chains = overview && Array.isArray(overview.agentChains) ? overview.agentChains : [];
+    for (var i = chains.length - 1; i >= 0; i -= 1) {
+      var chain = chains[i];
+      if (chain.chainStatus !== "COMPLETED") continue;
+      var step = findChainStepByNumber(chain, 3);
+      if (!step || step.stepStatus !== "SUCCEEDED" || !step.executionRunId) continue;
+      var run = findAgentExecutionRunById(overview, step.executionRunId);
+      if (!run || run.status !== "SUCCEEDED") continue;
+      return { chain: chain, step: step, run: run };
+    }
+    return null;
+  }
+
+  // Baut die Ausgangswerte des Entwurfs mechanisch aus dem Kettenergebnis
+  // (Auftrag Abschnitt 9): keine neue KI-Zusammenfassung, keine
+  // automatische Kürzung, keine erfundene Information. shortFinding/
+  // basisUsed referenzieren ausschließlich bereits bekannte, strukturierte
+  // Fakten (Ketten-/Lauf-ID, analysierte Dateien); resultOrRecommendation
+  // ist das tatsächliche, unveränderte Ergebnis (resultRawText). riskOrLimit
+  // ist aus dem freien Ergebnistext nicht eindeutig als einzelnes Feld
+  // abgrenzbar und bleibt deshalb bewusst ein klar erkennbarer Platzhalter.
+  function buildHandoffDraftFields(pmResult) {
+    if (!pmResult) {
+      return {
+        values: {
+          shortFinding: HANDOFF_DRAFT_PLACEHOLDER,
+          resultOrRecommendation: HANDOFF_DRAFT_PLACEHOLDER,
+          basisUsed: HANDOFF_DRAFT_PLACEHOLDER,
+          riskOrLimit: HANDOFF_DRAFT_PLACEHOLDER,
+          nextStep: "Projektmanager-Filter pr\u00fcft das Ergebnis; bei Annahme kann zur Abschlusspr\u00fcfung vorgelegt werden.",
+          decisionNeeded: "",
+        },
+        sourceLabel:
+          "Kein abgeschlossenes Kettenergebnis (Schritt 3, Projektmanager-Agent) f\u00fcr diesen Auftrag gefunden. " +
+          "Bitte alle Felder vor dem Einreichen pr\u00fcfen und ausf\u00fcllen.",
+      };
+    }
+    var chain = pmResult.chain;
+    var run = pmResult.run;
+    var analyzedFiles =
+      run.resultSummary && Array.isArray(run.resultSummary.analyzedFiles) ? run.resultSummary.analyzedFiles : [];
+    var resultText = isNonEmptyString(run.resultRawText) ? run.resultRawText.trim() : "";
+    return {
+      values: {
+        shortFinding: "Kette " + chain.id + ", Schritt 3 (Projektmanager-Agent) erfolgreich abgeschlossen (Lauf " + run.id + ").",
+        resultOrRecommendation: resultText || HANDOFF_DRAFT_PLACEHOLDER,
+        basisUsed:
+          "Ergebnis von Kettenschritt 3 (Projektmanager-Agent) der Kette " + chain.id + " (Lauf " + run.id + ")" +
+          (analyzedFiles.length > 0 ? ", analysierte Dateien: " + analyzedFiles.join(", ") + "." : "."),
+        riskOrLimit: HANDOFF_DRAFT_PLACEHOLDER,
+        nextStep: "Projektmanager-Filter pr\u00fcft das Ergebnis; bei Annahme kann zur Abschlusspr\u00fcfung vorgelegt werden.",
+        decisionNeeded: "",
+      },
+      sourceLabel: "Ergebnis von Kettenschritt 3 (Projektmanager-Agent), Lauf " + run.id + ".",
+    };
+  }
+
+  function captureHandoffDraftFieldValues() {
+    var values = {};
+    HANDOFF_DRAFT_FIELD_IDS.forEach(function (id) {
+      var el = byId(id);
+      if (el) values[id] = el.value;
+    });
+    return values;
+  }
+
+  function restoreHandoffDraftFieldValues(values) {
+    if (!values) return;
+    HANDOFF_DRAFT_FIELD_IDS.forEach(function (id) {
+      if (!Object.prototype.hasOwnProperty.call(values, id)) return;
+      var el = byId(id);
+      if (el) el.value = values[id];
+    });
+  }
+
+  function isHandoffDraftOpenForOrder(orderId) {
+    return Boolean(state.handoffDraft) && state.handoffDraft.pilotOrderId === orderId;
+  }
+
+  // Öffnet den Entwurf für GENAU den aktuell ausgewählten Auftrag. Setzt
+  // ausschließlich lokalen Zustand und (nach dem Neuaufbau des DOM) die
+  // Ausgangswerte der Formularfelder – KEIN fetch, KEIN POST, KEINE
+  // Datenbankänderung (Auftrag Abschnitt 8.B/13: "keine automatische
+  // Statusänderung durch bloßes Öffnen des Entwurfs").
+  function openHandoffDraft() {
+    if (!state.selectedPilotOrderId || !state.overview) return;
+    var pilotOrderId = state.selectedPilotOrderId;
+    var built = buildHandoffDraftFields(findLatestCompletedChainPmResult(state.overview));
+    state.handoffDraft = {
+      pilotOrderId: pilotOrderId,
+      sourceLabel: built.sourceLabel,
+      submitting: false,
+      error: null,
+    };
+    render();
+    // Die Formularfelder existieren erst NACH diesem render() im DOM (siehe
+    // renderHandoffDraftPanel unten) – jetzt die Ausgangswerte einsetzen
+    // (gleiches Muster wie buildWorkDraft() für das Anlageformular oben).
+    if (state.handoffDraft && state.handoffDraft.pilotOrderId === pilotOrderId) {
+      HANDOFF_DRAFT_FIELD_TARGETS.forEach(function (fieldEntry) {
+        var el = byId(fieldEntry.id);
+        if (el) el.value = built.values[fieldEntry.key] || "";
+      });
+    }
+  }
+
+  // Verwerfen: ausschließlich lokalen Zustand verwerfen, niemals ein
+  // Request. Ein laufender Einreichungsversuch blockiert das Verwerfen
+  // (keine widersprüchliche Doppelaktion).
+  function cancelHandoffDraft() {
+    if (state.handoffDraft && state.handoffDraft.submitting) return;
+    state.handoffDraft = null;
+    render();
+  }
+
+  // Die EINZIGE Stelle in dieser Datei, die jemals die submit-handoff-Route
+  // aufruft. Liest die aktuell im DOM stehenden Feldwerte (nicht den
+  // ursprünglichen Vorschlag) ein – eine manuelle Änderung Jamals wird
+  // dadurch immer eingereicht. Genau ein POST je Klick (submitting-Schutz,
+  // gleiches Muster wie confirmJamalConfirmation/runOrderAction oben). Bei
+  // HTTP 400/409/Netzwerkfehler bleibt der Entwurf mitsamt allen Feldwerten
+  // vollständig erhalten und der Knopf wird wieder nutzbar – KEIN
+  // automatischer Retry, KEIN automatisches submitForReview.
+  function submitHandoffDraft() {
+    var draft = state.handoffDraft;
+    if (!draft || draft.submitting) return Promise.resolve();
+    if (state.selectedPilotOrderId !== draft.pilotOrderId || !state.overview) return Promise.resolve();
+    var pilotOrderId = draft.pilotOrderId;
+    var expectedRevision = state.overview.order.revision;
+    var fieldValues = {};
+    HANDOFF_DRAFT_FIELD_TARGETS.forEach(function (fieldEntry) {
+      var el = byId(fieldEntry.id);
+      fieldValues[fieldEntry.key] = el ? String(el.value || "") : "";
+    });
+    var missingLabels = HANDOFF_DRAFT_FIELD_TARGETS.filter(function (fieldEntry) {
+      return HANDOFF_DRAFT_REQUIRED_KEYS.indexOf(fieldEntry.key) !== -1 && !isNonEmptyString(fieldValues[fieldEntry.key]);
+    }).map(function (fieldEntry) {
+      return fieldEntry.label;
+    });
+    if (missingLabels.length > 0) {
+      draft.error = "Bitte vervollst\u00e4ndigen: " + missingLabels.join(", ") + ".";
+      render();
+      return Promise.resolve();
+    }
+    draft.submitting = true;
+    draft.error = null;
+    render();
+    var body = {
+      fromPilotRole: HANDOFF_DRAFT_FROM_ROLE,
+      toPilotRole: HANDOFF_DRAFT_TO_ROLE,
+      shortFinding: fieldValues.shortFinding,
+      resultOrRecommendation: fieldValues.resultOrRecommendation,
+      basisUsed: fieldValues.basisUsed,
+      riskOrLimit: fieldValues.riskOrLimit,
+      nextStep: fieldValues.nextStep,
+      decisionNeeded: fieldValues.decisionNeeded,
+      expectedRevision: expectedRevision,
+    };
+    return postAction(pilotOrderId, "submit-handoff", body)
+      .then(function (response) {
+        if (state.handoffDraft !== draft) return;
+        if (state.selectedPilotOrderId !== pilotOrderId) return;
+        if (response.statusCode === 200 && response.data && response.data.ok) {
+          // Erfolg (Auftrag Abschnitt 8.C): Entwurf schließen, Overview neu
+          // laden (zeigt den neuen PM-Filterstatus, siehe renderHandoffs
+          // unten) – KEIN automatisches submit-for-review, KEINE
+          // automatische Abnahme.
+          state.handoffDraft = null;
+          state.actionError = null;
+          state.conflict = null;
+          return reloadSelectedOrder();
+        }
+        // 400/409/jeder andere Fehlerstatus (Auftrag Abschnitt 8.D): der
+        // Entwurf bleibt bewusst GEÖFFNET, alle Feldwerte bleiben
+        // unangetastet im DOM stehen (kein render()-Pfad überschreibt sie,
+        // siehe renderSelectedOrderOutput#capture/restore unten) – nur
+        // `submitting` wird zurückgesetzt und eine verständliche
+        // Fehlermeldung angezeigt. Kein automatischer Retry.
+        draft.submitting = false;
+        draft.error =
+          (response.data && response.data.message) ||
+          "Die Rollen\u00fcbergabe konnte nicht eingereicht werden. Der bisherige Status bleibt unver\u00e4ndert.";
+        render();
+      })
+      .catch(function () {
+        if (state.handoffDraft !== draft) return;
+        if (state.selectedPilotOrderId !== pilotOrderId) return;
+        draft.submitting = false;
+        draft.error = "Die Rollen\u00fcbergabe konnte wegen eines Verbindungsproblems nicht eingereicht werden. Bitte erneut versuchen.";
+        render();
+      });
+  }
+
+  function renderHandoffDraftField(fieldEntry, disabled) {
+    return (
+      '<label class="pilot-handoff-draft-field">' +
+      escapeHtml(fieldEntry.label) +
+      '<textarea id="' +
+      fieldEntry.id +
+      '"' +
+      (disabled ? " disabled" : "") +
+      "></textarea></label>"
+    );
+  }
+
+  // Rendert den vollständigen, änderbaren Übergabe-Entwurf (Auftrag
+  // Abschnitt 8.B): benennt Von-Rolle, An-Rolle, Grundlage der Vorbefüllung,
+  // alle Pflichtfelder der bestehenden submit-handoff-Route sowie den
+  // ausdrücklichen Hinweis, dass noch nichts eingereicht wurde.
+  function renderHandoffDraftPanel(draft) {
+    var submitting = draft.submitting;
+    var html = '<div class="pilot-handoff-draft" role="group" aria-label="Rollen\u00fcbergabe vorbereiten">';
+    html += '<p class="pilot-handoff-draft-title"><strong>Rollen\u00fcbergabe vorbereiten</strong></p>';
+    html += '<dl class="pilot-work-order-facts">';
+    html += "<div><dt>Von Rolle</dt><dd>" + escapeHtml(HANDOFF_DRAFT_FROM_ROLE_LABEL) + "</dd></div>";
+    html += "<div><dt>An Rolle</dt><dd>" + escapeHtml(HANDOFF_DRAFT_TO_ROLE_LABEL) + "</dd></div>";
+    html += "<div><dt>Grundlage</dt><dd>" + escapeHtml(draft.sourceLabel) + "</dd></div>";
+    html += "</dl>";
+    HANDOFF_DRAFT_FIELD_TARGETS.forEach(function (fieldEntry) {
+      html += renderHandoffDraftField(fieldEntry, submitting);
+    });
+    if (draft.error) {
+      html += '<p class="pilot-work-order-action-error">' + escapeHtml(draft.error) + "</p>";
+    }
+    html += "<p><em>Diese \u00dcbergabe wird erst mit deinem Klick eingereicht.</em></p>";
+    html += '<div class="pilot-handoff-draft-buttons">';
+    html += '<button type="button" data-action="cancel-handoff-draft"' + (submitting ? " disabled" : "") + ">Verwerfen</button>";
+    html +=
+      '<button type="button" class="primary-button" data-action="submit-handoff-draft"' +
+      (submitting ? " disabled" : "") +
+      ">" +
+      (submitting ? "Wird eingereicht\u2026" : "Rollen\u00fcbergabe einreichen") +
+      "</button>";
+    html += "</div></div>";
+    return html;
   }
 
   // ---------------------------------------------------------------------
@@ -1658,6 +1996,19 @@
         "</div>"
       );
     }
+    // V8.0.1 ("Rollenübergabe nach abgeschlossener Drei-Agenten-Kette
+    // bedienbar machen"): ein geöffneter Handoff-Entwurf ersetzt für GENAU
+    // diesen Auftrag die normale Primäraktion – kein doppelt sichtbares
+    // Nebeneinander von Button und Entwurf (gleiches Muster wie die
+    // Jamal-Bestätigungsfläche oben).
+    if (status === "IN_EXECUTION" && isHandoffDraftOpenForOrder(overview.order.id)) {
+      return (
+        '<div class="pilot-work-order-primary-action">' +
+        "<p><strong>N\u00e4chster Schritt:</strong> " + escapeHtml(overview.nextStep) + "</p>" +
+        renderHandoffDraftPanel(state.handoffDraft) +
+        "</div>"
+      );
+    }
     var button = "";
     var disabledAttr = state.actionInFlight ? " disabled" : "";
     if (status === "DRAFT") {
@@ -1667,7 +2018,26 @@
     } else if (status === "APPROVED_FOR_EXECUTION") {
       button = '<button type="button" data-action="start-execution"' + disabledAttr + ">Ausf\u00fchrung starten</button>";
     } else if (status === "IN_EXECUTION") {
-      button = '<button type="button" data-action="submit-for-review"' + disabledAttr + ">Zur Abschlusspr\u00fcfung vorlegen</button>";
+      // V8.0.1: "Zur Abschlussprüfung vorlegen" darf erst sichtbar sein,
+      // wenn mindestens eine ANGENOMMENE Dokumentations-Rollenübergabe
+      // vorliegt (exakt dieselbe Voraussetzung wie service.js#
+      // submitForReview) – vorher wäre der Klick serverseitig ohnehin
+      // abgelehnt worden (Auftrag Abschnitt 3/8.A).
+      if (hasPassedDocumentationHandoff(overview)) {
+        button = '<button type="button" data-action="submit-for-review"' + disabledAttr + ">Zur Abschlusspr\u00fcfung vorlegen</button>";
+      } else {
+        var lastDocHandoff = latestDocumentationHandoff(overview);
+        if (lastDocHandoff && lastDocHandoff.pmFilterStatus === "REJECTED") {
+          button +=
+            '<p class="pilot-work-order-action-error">Die letzte Rollen\u00fcbergabe an die Dokumentation wurde vom ' +
+            "Projektmanager-Filter abgelehnt" +
+            (lastDocHandoff.pmFilterReasons && lastDocHandoff.pmFilterReasons.length > 0
+              ? " (" + escapeHtml(lastDocHandoff.pmFilterReasons.join("; ")) + ")"
+              : "") +
+            ". Es erfolgt kein automatischer erneuter Versuch \u2013 bitte einen neuen Entwurf vorbereiten.</p>";
+        }
+        button += '<button type="button" data-action="prepare-handoff-draft"' + disabledAttr + ">Rollen\u00fcbergabe vorbereiten</button>";
+      }
     } else if (status === "READY_FOR_REVIEW") {
       button = '<button type="button" data-action="approve-completion"' + disabledAttr + ">Ergebnis abnehmen</button>";
     } else if (status === "RETURNED") {
@@ -3050,6 +3420,16 @@
   function renderSelectedOrderOutput() {
     var output = byId("pilot-work-order-output");
     if (output) {
+      // V8.0.1 ("Manuelle Änderung im Entwurf bleibt nach render()
+      // erhalten"): dasselbe Grundmuster wie CREATE_FORM_FIELD_IDS oben –
+      // ein echter Browser ersetzt beim Setzen von innerHTML sämtliche
+      // Kindknoten (die Entwurfsfelder würden sonst bei JEDEM render(),
+      // z. B. durch das kontrollierte Status-Polling, auf ihren
+      // Ausgangswert zurückfallen). Werte VOR dem Neuaufbau sichern und
+      // danach zurückschreiben – ausschließlich relevant, wenn der Entwurf
+      // gerade für den aktuell angezeigten Auftrag geöffnet ist.
+      var handoffDraftOpenHere = state.overview && isHandoffDraftOpenForOrder(state.overview.order.id);
+      var preservedHandoffDraftValues = handoffDraftOpenHere ? captureHandoffDraftFieldValues() : null;
       if (state.overviewLoading && !state.overview) {
         output.innerHTML = "<p>Lade Pilotauftrag\u2026</p>";
       } else if (state.overviewError && !state.overview) {
@@ -3070,6 +3450,9 @@
         output.innerHTML = html;
       } else {
         output.innerHTML = "<p>Kein Pilotauftrag ausgew\u00e4hlt.</p>";
+      }
+      if (handoffDraftOpenHere) {
+        restoreHandoffDraftFieldValues(preservedHandoffDraftValues);
       }
     }
 
@@ -3172,6 +3555,14 @@
         requestChainStepApproval(target.getAttribute("data-chain-id"), Number(target.getAttribute("data-chain-step")));
       } else if (action === "start-chain-step") {
         startChainStep(target.getAttribute("data-chain-id"), Number(target.getAttribute("data-chain-step")));
+      } else if (action === "prepare-handoff-draft") {
+        // V8.0.1: öffnet ausschließlich den lokalen Entwurf – kein Request
+        // (siehe openHandoffDraft oben).
+        openHandoffDraft();
+      } else if (action === "cancel-handoff-draft") {
+        cancelHandoffDraft();
+      } else if (action === "submit-handoff-draft") {
+        submitHandoffDraft();
       } else if (isKnownPrimaryAction(action)) {
         runOrderAction(action, {});
       }
@@ -3242,6 +3633,16 @@
       buildWorkDraft: buildWorkDraft,
       DRAFT_SENTENCE_FIELD_ID: DRAFT_SENTENCE_FIELD_ID,
       CREATE_FORM_FIELD_IDS: CREATE_FORM_FIELD_IDS,
+      // V8.0.1 ("Rollenübergabe nach abgeschlossener Drei-Agenten-Kette
+      // bedienbar machen"): additiv exportiert, damit
+      // pilot-work-order-command-center-ui.test.js den neuen, bewusst
+      // reibungsbehafteten Handoff-Entwurfsweg direkt prüfen kann (kein
+      // fetch/POST beim Öffnen, genau ein POST beim Einreichen).
+      openHandoffDraft: openHandoffDraft,
+      cancelHandoffDraft: cancelHandoffDraft,
+      submitHandoffDraft: submitHandoffDraft,
+      hasPassedDocumentationHandoff: hasPassedDocumentationHandoff,
+      HANDOFF_DRAFT_FIELD_TARGETS: HANDOFF_DRAFT_FIELD_TARGETS,
     };
   }
 })();
