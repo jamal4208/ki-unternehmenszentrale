@@ -145,4 +145,112 @@ check("die Karte hat eigene, additive CSS-Klassen (kein Umbau bestehender Karten
   assert.match(css, /\.pilot-work-order-primary-action/);
 });
 
+// ---------------------------------------------------------------------------
+// V8.7 Stufe B ("gespeicherte Entscheidungsgründe in der
+// Pilotauftrags-Detailansicht sichtbar machen") – Prüfpunkte 44–58.
+// Reine Quelltext-/Wortlautprüfung, gleiches Muster wie oben.
+// ---------------------------------------------------------------------------
+
+check("44. die neuen, additiven CSS-Klassen für die Gründe-Anzeige existieren", () => {
+  assert.match(css, /\.pilot-decision-reason-card/);
+  assert.match(css, /\.pilot-decision-reason-text/);
+  assert.match(css, /\.pilot-decision-reason-history/);
+});
+
+check("45. escapeHtml() wird in den neuen Renderfunktionen für jeden sichtbaren dynamischen Grundwert verwendet", () => {
+  const cardFnMatch = js.match(/function renderDecisionReasonCard\(overview\)\s*\{[\s\S]*?\n  \}/);
+  assert.ok(cardFnMatch, "renderDecisionReasonCard muss auffindbar sein");
+  assert.match(cardFnMatch[0], /escapeHtml\(current\.text\)/);
+  assert.match(cardFnMatch[0], /escapeHtml\(formatTimestamp\(current\.setAt\)\)/);
+
+  const historyFnMatch = js.match(/function renderDecisionReasonHistory\(overview\)\s*\{[\s\S]*?\n  \}/);
+  assert.ok(historyFnMatch, "renderDecisionReasonHistory muss auffindbar sein");
+  assert.match(historyFnMatch[0], /escapeHtml\(entry\.text\)/);
+  assert.match(historyFnMatch[0], /escapeHtml\(formatTimestamp\(entry\.setAt\)\)/);
+});
+
+check("46./47. white-space: pre-wrap und overflow-wrap: anywhere sind im neuen Grundtext-Stil vorhanden", () => {
+  const textRuleMatch = css.match(/\.pilot-decision-reason-text\s*\{[^}]*\}/);
+  assert.ok(textRuleMatch, ".pilot-decision-reason-text muss auffindbar sein");
+  assert.match(textRuleMatch[0], /white-space:\s*pre-wrap/);
+  assert.match(textRuleMatch[0], /overflow-wrap:\s*anywhere/);
+});
+
+check("48./49./50. kein max-height, kein text-overflow und kein nowrap im gesamten neuen Klassenraum .pilot-decision-reason-*", () => {
+  const rules = css.match(/\.pilot-decision-reason-[a-z-]+\s*\{[^}]*\}/g) || [];
+  assert.ok(rules.length > 0, "es müssen .pilot-decision-reason-*-Regeln vorhanden sein");
+  rules.forEach((rule) => {
+    assert.doesNotMatch(rule, /max-height/);
+    assert.doesNotMatch(rule, /text-overflow/);
+    assert.doesNotMatch(rule, /nowrap/);
+  });
+});
+
+check("keine Ersetzung von Zeilenumbrüchen durch <br> im Grundtext (Rohtext bleibt unverändert, CSS übernimmt den Umbruch)", () => {
+  const cardFnMatch = js.match(/function renderDecisionReasonCard\(overview\)\s*\{[\s\S]*?\n  \}/);
+  const historyFnMatch = js.match(/function renderDecisionReasonHistory\(overview\)\s*\{[\s\S]*?\n  \}/);
+  assert.doesNotMatch(cardFnMatch[0], /replace\(.*\\n/);
+  assert.doesNotMatch(cardFnMatch[0], /<br/);
+  assert.doesNotMatch(historyFnMatch[0], /<br/);
+});
+
+check("51. setByUserId wird in der Renderlogik nicht verwendet (weder gelesen noch ausgegeben)", () => {
+  assert.doesNotMatch(js, /\.setByUserId/);
+});
+
+check("52. fromStatus/toStatus werden in der Renderlogik nicht verwendet", () => {
+  assert.doesNotMatch(js, /current\.fromStatus/);
+  assert.doesNotMatch(js, /current\.toStatus/);
+  assert.doesNotMatch(js, /entry\.fromStatus/);
+  assert.doesNotMatch(js, /entry\.toStatus/);
+});
+
+check("53. orderRevision wird ausschließlich für den Ausschlussvergleich verwendet, niemals für sichtbares HTML", () => {
+  const deriveFnMatch = js.match(/function deriveDecisionReasonHistoryEntries\(overview\)\s*\{[\s\S]*?\n  \}/);
+  assert.ok(deriveFnMatch, "deriveDecisionReasonHistoryEntries muss auffindbar sein");
+  assert.match(deriveFnMatch[0], /entry\.orderRevision !== currentRevision/);
+  const cardFnMatch = js.match(/function renderDecisionReasonCard\(overview\)\s*\{[\s\S]*?\n  \}/);
+  const historyFnMatch = js.match(/function renderDecisionReasonHistory\(overview\)\s*\{[\s\S]*?\n  \}/);
+  assert.doesNotMatch(cardFnMatch[0], /["']\s*\+\s*current\.orderRevision|current\.orderRevision\s*\+\s*["']/);
+  assert.doesNotMatch(historyFnMatch[0], /["']\s*\+\s*entry\.orderRevision|entry\.orderRevision\s*\+\s*["']/);
+});
+
+check("54./55. keine neue Route, kein POST/PATCH/DELETE im Zusammenhang mit den Entscheidungsgründen", () => {
+  assert.doesNotMatch(js, /\/decision-reason/i);
+  const apiCalls = js.match(/\/api\/[a-z0-9\-\/]+/gi) || [];
+  apiCalls.forEach((call) => assert.match(call, /^\/api\/pilot-work-order\//));
+});
+
+check("56. keine neue Primäraktion: renderPrimaryAction() bleibt unverändert, der neue Bereich enthält keinen Button/kein data-action", () => {
+  const cardFnMatch = js.match(/function renderDecisionReasonCard\(overview\)\s*\{[\s\S]*?\n  \}/);
+  const historyFnMatch = js.match(/function renderDecisionReasonHistory\(overview\)\s*\{[\s\S]*?\n  \}/);
+  assert.doesNotMatch(cardFnMatch[0], /<button/);
+  assert.doesNotMatch(cardFnMatch[0], /data-action/);
+  assert.doesNotMatch(historyFnMatch[0], /<button/);
+  assert.doesNotMatch(historyFnMatch[0], /data-action/);
+  assert.match(js, /renderChainStatusCard\(overview\) \+\s*\n\s*renderDecisionReasonCard\(overview\) \+\s*\n\s*renderPrimaryAction\(overview\);/);
+});
+
+check("57. die neuen deutschen Literale folgen der bestehenden \\uXXXX-Konvention", () => {
+  assert.match(js, /Warum der Auftrag blockiert ist/);
+  assert.match(js, /Warum der Auftrag zur\\u00fcckgegeben wurde/);
+  assert.match(js, /F\\u00fcr diesen Auftrag wurde kein konkreter Grund gespeichert\./);
+  assert.match(js, /Fr\\u00fchere Gr\\u00fcnde/);
+  assert.match(js, /G\\u00fcltig seit: /);
+});
+
+check("58. keine Änderung am Chefmodus (chef-today-ui.js/.test.js werden von V8.7 Stufe B nicht berührt, kein aktiver Feldzugriff)", () => {
+  assert.doesNotMatch(js, /chef-today/);
+  const chefJs = readFile("chef-today-ui.js");
+  assert.doesNotMatch(chefJs, /pilot-decision-reason/);
+  // Der bestehende, unveränderte Kopfkommentar aus V8.7 Stufe A ERWÄHNT die
+  // beiden Feldnamen bewusst (siehe dort: "liest diese Felder... bewusst
+  // noch NICHT") – das ist unverändert korrekt und keine Berührung durch
+  // Stufe B. Geprüft wird deshalb ausschließlich, dass kein tatsächlicher
+  // Feldzugriff (".currentDecisionReason"/".decisionReasonHistory") und
+  // keine neue Rückgabe-/Blockier-Schaltfläche hinzugekommen ist.
+  assert.doesNotMatch(chefJs, /\.currentDecisionReason/);
+  assert.doesNotMatch(chefJs, /\.decisionReasonHistory/);
+});
+
 console.log(`pilot-work-order-ui.test.js: ${passed} Prüfpunkte erfolgreich`);

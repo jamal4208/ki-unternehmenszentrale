@@ -301,6 +301,16 @@ function makeFakeBackend() {
       statusLabel: order.statusLabel,
       handoffs: order.handoffs,
       agentExecutionRuns: order.agentExecutionRuns || [],
+      // V8.7 Stufe B ("gespeicherte Entscheidungsgründe sichtbar machen"):
+      // bildet exakt das additive Overview-Feld aus buildOverview() in
+      // pilot-work-order-service.js (Stufe A) nach. Bewusst KEIN Fallback
+      // auf null/[] hier – bleiben order.currentDecisionReason/
+      // order.decisionReasonHistory beim jeweiligen Testauftrag ungesetzt,
+      // liefert dieses Fake-Backend genauso undefined wie ein älterer
+      // Fake-Backend-/Antwortstand (siehe Testfälle zur defensiven
+      // Feldbehandlung in pilot-work-order-ui.js).
+      currentDecisionReason: order.currentDecisionReason,
+      decisionReasonHistory: order.decisionReasonHistory,
       openDecision: null,
       risksAndLimits: [],
       nextStep: "Weiter im Ablauf.",
@@ -2171,6 +2181,451 @@ async function run() {
     const postCalls = fetchCalls.filter((c) => c.method === "POST");
     assert.strictEqual(postCalls.length, 0, "die reine Anzeige der Ablehnung darf keinen automatischen erneuten Versuch auslösen");
   });
+
+  // -------------------------------------------------------------------
+  // V8.7 Stufe B ("gespeicherte Entscheidungsgründe in der
+  // Pilotauftrags-Detailansicht sichtbar machen"): Prüfpunkte 1–43.
+  // Ausschließlich bestehende Testmuster (setRawOrder, ui.selectOrder,
+  // domElements[...].innerHTML, ui.escapeHtml, ui.render()) – kein neuer
+  // Request, keine neue Route, kein neuer Primär-Button.
+  // -------------------------------------------------------------------
+
+  function buildLongDecisionReasonText() {
+    var prefix =
+      "Ausf\u00fchrlicher Grund (Testfixtur) mit \"Anf\u00fchrungszeichen\", Klammern (wie hier) und Uml\u00e4uten \u00e4\u00f6\u00fc\u00df.\n" +
+      "Zweite Zeile nach einem echten Zeilenumbruch, damit der Text insgesamt sehr lang wird und ohne K\u00fcrzung vollst\u00e4ndig sichtbar bleiben muss.\n";
+    var text = prefix;
+    while (text.length < 500) {
+      text += "Weiterer F\u00fcllsatz zur Testl\u00e4nge. ";
+    }
+    return text.slice(0, 500);
+  }
+  const longDecisionReasonText = buildLongDecisionReasonText();
+  assert.strictEqual(longDecisionReasonText.length, 500, "Testfixtur muss exakt 500 Zeichen lang sein");
+
+  const secretActorId = "user-secret-do-not-show";
+
+  function extractDecisionReasonCardHtml(html) {
+    const start = html.indexOf('<div class="pilot-decision-reason-card">');
+    if (start === -1) return "";
+    const end = html.indexOf('<div class="pilot-work-order-primary-action">', start);
+    return end === -1 ? html.slice(start) : html.slice(start, end);
+  }
+
+  function extractDecisionReasonHistoryHtml(html) {
+    const start = html.indexOf('<div class="pilot-decision-reason-history">');
+    if (start === -1) return "";
+    const end = html.indexOf("<h4>Audit-Trail", start);
+    return end === -1 ? html.slice(start) : html.slice(start, end);
+  }
+
+  const writeCallCountBeforeDecisionReasonTests = backend.getWriteCallCount();
+
+  // Testauftrag A: BLOCKED mit aktuellem Block-Grund (500-Zeichen-Text mit
+  // Zeilenumbruch, Umlauten, Klammern, Anführungszeichen) und zwei
+  // historischen Gründen (einer davon zufällig auf derselben Revision wie
+  // der aktuelle Grund selbst – siehe Stufe A: das ist exakt der Eintrag,
+  // der als currentDecisionReason bestimmt wurde und deshalb NICHT
+  // zusätzlich als früherer Grund erscheinen darf).
+  idCounter += 1;
+  const blockedWithReasonId = `pilot-order-test-decision-reason-blocked-${idCounter}`;
+  setRawOrder(blockedWithReasonId, {
+    title: "Auftrag mit aktuellem Block-Grund",
+    status: "BLOCKED",
+    statusLabel: STATUS_LABELS.BLOCKED,
+    revision: 5,
+    currentDecisionReason: {
+      kind: "BLOCK",
+      text: longDecisionReasonText,
+      setAt: "2026-02-03T09:15:00.000Z",
+      setByUserId: secretActorId,
+      fromStatus: "IN_EXECUTION",
+      toStatus: "BLOCKED",
+      orderRevision: 5,
+    },
+    decisionReasonHistory: [
+      {
+        kind: "RETURN",
+        text: "Fr\u00fcherer R\u00fcckgabegrund (Testfixtur, \u00e4ltere Revision).",
+        setAt: "2026-01-01T08:00:00.000Z",
+        setByUserId: secretActorId,
+        fromStatus: "READY_FOR_REVIEW",
+        toStatus: "RETURNED",
+        orderRevision: 2,
+      },
+      {
+        kind: "BLOCK",
+        text: "Fr\u00fcherer Block-Grund (Testfixtur), zwischenzeitlich entsperrt.",
+        setAt: "2026-01-15T12:00:00.000Z",
+        setByUserId: secretActorId,
+        fromStatus: "IN_EXECUTION",
+        toStatus: "BLOCKED",
+        orderRevision: 4,
+      },
+      {
+        kind: "BLOCK",
+        text: longDecisionReasonText,
+        setAt: "2026-02-03T09:15:00.000Z",
+        setByUserId: secretActorId,
+        fromStatus: "IN_EXECUTION",
+        toStatus: "BLOCKED",
+        orderRevision: 5,
+      },
+    ],
+  });
+
+  await check(
+    "1./2./4./5./6./7./9./10./11./12./13./14./15./16./17./18./D./Position. BLOCKED mit aktuellem Block-Grund: korrekte Überschrift, vollständiger 500-Zeichen-Text mit Zeilenumbruch/Umlauten/Klammern/Anführungszeichen, keine IDs/Statuscodes/Rohwerte, Historienhinweis, Position vor der bestehenden Aktion",
+    async () => {
+      fetchCalls.length = 0;
+      await ui.selectOrder(blockedWithReasonId);
+      const html = domElements["pilot-work-order-output"].innerHTML;
+      const cardHtml = extractDecisionReasonCardHtml(html);
+      assert.ok(cardHtml.length > 0, "die neue Grund-Karte muss oben gerendert werden");
+
+      // 1./18. korrekte, statusbezogene Überschrift als Klartext.
+      assert.match(cardHtml, /<h4>Warum der Auftrag blockiert ist<\/h4>/);
+
+      // 4. Zeitzeile "Gültig seit" mit dem bestehenden formatierten Datum.
+      assert.match(cardHtml, /G\u00fcltig seit: 2026-02-03 09:15/);
+
+      // 2./5./6. vollständiger 500-Zeichen-Text, keine Kürzung, kein Auslassungszeichen.
+      assert.ok(cardHtml.includes(ui.escapeHtml(longDecisionReasonText)), "der vollständige, escapte Grundtext muss unverändert enthalten sein");
+      assert.doesNotMatch(cardHtml, /\u2026/, "kein Auslassungszeichen wegen Kürzung");
+      assert.doesNotMatch(cardHtml, /\.\.\./, "keine drei Punkte wegen Kürzung");
+
+      // 7. Zeilenumbrüche bleiben im Text erhalten (kein <br>-Ersatz).
+      assert.ok(cardHtml.includes("\n"), "ein echter Zeilenumbruch muss im Grundtext erhalten bleiben");
+      assert.doesNotMatch(cardHtml, /<br\s*\/?>/i, "kein <br> als Ersatz für Zeilenumbrüche");
+
+      // 9./10./11. Umlaute, Klammern, Anführungszeichen bleiben sichtbar erhalten.
+      assert.ok(cardHtml.includes("\u00e4\u00f6\u00fc\u00df"), "Umlaute müssen erhalten bleiben");
+      assert.ok(cardHtml.includes("(wie hier)"), "Klammern müssen erhalten bleiben");
+      assert.ok(cardHtml.includes("&quot;Anf\u00fchrungszeichen&quot;"), "Anführungszeichen müssen als sichtbarer (escapter) Text erhalten bleiben");
+
+      // 12. keine Revision im Grundabschnitt (gleiches Anzeigemuster wie sonst für Revision, hier bewusst NICHT vorhanden).
+      assert.doesNotMatch(cardHtml, />5</, "die Auftragsrevision darf im Grundabschnitt nicht sichtbar sein");
+      assert.doesNotMatch(cardHtml, /orderRevision/);
+
+      // 13. setByUserId nicht sichtbar (weder als ID noch als Namensbehauptung).
+      assert.ok(!html.includes(secretActorId), "setByUserId darf an keiner Stelle der Ausgabe sichtbar sein");
+      assert.doesNotMatch(cardHtml, /setByUserId/);
+
+      // 14./15./16. fromStatus/toStatus und Statuscodes nicht sichtbar.
+      assert.doesNotMatch(cardHtml, /\bIN_EXECUTION\b/);
+      assert.doesNotMatch(cardHtml, /\bBLOCKED\b/);
+      assert.doesNotMatch(cardHtml, /\bRETURNED\b/);
+      assert.doesNotMatch(cardHtml, /fromStatus/);
+      assert.doesNotMatch(cardHtml, /toStatus/);
+
+      // 17. keine Rohwerte BLOCK/RETURN sichtbar (nur die deutschen Klartexte).
+      assert.doesNotMatch(cardHtml, /\bBLOCK\b/);
+      assert.doesNotMatch(cardHtml, /\bRETURN\b/);
+
+      // D. Hinweis auf die Historie, weil frühere Gründe existieren.
+      assert.match(cardHtml, /Fr\u00fchere Gr\u00fcnde findest du unten in den Details\./);
+
+      // Position: die Karte steht zwischen der Kettenstatuskarte und der
+      // bestehenden Primäraktion (renderChainStatusCard(overview) → …
+      // Grundkarte … → renderPrimaryAction(overview)).
+      const cardIndex = html.indexOf('<div class="pilot-decision-reason-card">');
+      const primaryActionIndex = html.indexOf('<div class="pilot-work-order-primary-action">');
+      assert.ok(cardIndex >= 0 && primaryActionIndex > cardIndex, "die Grundkarte muss unmittelbar vor der bestehenden Primäraktion stehen");
+
+      // 35./36. kein Button, kein data-action im neuen Bereich.
+      assert.doesNotMatch(cardHtml, /<button/i);
+      assert.doesNotMatch(cardHtml, /data-action/);
+
+      // 37. bestehende BLOCKED-Primäraktion bleibt unverändert (unmittelbar danach).
+      assert.match(html, /data-action="unblock-order">Entsperren \(zur\u00fcckgeben\)<\/button>/);
+
+      // 41. kein Grundtext in der Risikoanzeige (renderRisks steht VOR der Grundkarte).
+      const risksHtmlPortion = html.slice(0, cardIndex);
+      assert.ok(!risksHtmlPortion.includes(longDecisionReasonText.slice(0, 40)), "der Grundtext darf nicht in der Risikoanzeige erscheinen");
+
+      // 40. keine zusätzliche Route: ausschließlich der bestehende GET auf den Auftrag.
+      assert.ok(fetchCalls.every((call) => call.method === "GET"), "das reine Anzeigen darf keinen Schreib-Request auslösen");
+    },
+  );
+
+  await check(
+    "24./25./26./27./28./29./30./32. Historie unten: nur historische Einträge (aktueller Eintrag ausgeschlossen), neueste zuerst, korrekte Überschrift/Einleitung/Eintragsköpfe, vollständiger Text",
+    () => {
+      const diagnosticsHtml = domElements["pilot-work-order-diagnostics-output"].innerHTML;
+      const historyHtml = extractDecisionReasonHistoryHtml(diagnosticsHtml);
+      assert.ok(historyHtml.length > 0, "die Historie muss im unteren Nachschaubereich stehen");
+
+      // 28. Überschrift und Einleitung.
+      assert.match(historyHtml, /<h4>Fr\u00fchere Gr\u00fcnde<\/h4>/);
+      assert.match(historyHtml, /Diese Gr\u00fcnde geh\u00f6ren zu fr\u00fcheren Entscheidungen und gelten heute nicht mehr\./);
+
+      // 24./26. genau zwei historische Einträge (der dritte, mit derselben
+      // Revision wie currentDecisionReason, darf NICHT zusätzlich erscheinen).
+      const blockiertAmCount = (historyHtml.match(/Blockiert am/g) || []).length;
+      const zurueckgegebenAmCount = (historyHtml.match(/Zur\u00fcckgegeben am/g) || []).length;
+      assert.strictEqual(blockiertAmCount, 1, "genau ein historischer Block-Eintrag darf erscheinen");
+      assert.strictEqual(zurueckgegebenAmCount, 1, "genau ein historischer Rückgabe-Eintrag darf erscheinen");
+      assert.ok(!historyHtml.includes(ui.escapeHtml(longDecisionReasonText)), "der aktuelle Grundtext darf nicht zusätzlich in der Historie erscheinen");
+
+      // 25./29./30. neueste zuerst: der Block-Eintrag vom 15.01. steht vor dem Rückgabe-Eintrag vom 01.01.
+      const blockiertIndex = historyHtml.indexOf("Blockiert am 2026-01-15 12:00");
+      const zurueckgegebenIndex = historyHtml.indexOf("Zur\u00fcckgegeben am 2026-01-01 08:00");
+      assert.ok(blockiertIndex >= 0 && zurueckgegebenIndex >= 0, "beide Eintragsköpfe müssen mit Klartext-Datum vorhanden sein");
+      assert.ok(blockiertIndex < zurueckgegebenIndex, "der neuere historische Grund muss zuerst erscheinen");
+
+      // 32. vollständiger historischer Grundtext.
+      assert.match(historyHtml, /Fr\u00fcherer Block-Grund \(Testfixtur\), zwischenzeitlich entsperrt\./);
+      assert.match(historyHtml, /Fr\u00fcherer R\u00fcckgabegrund \(Testfixtur, \u00e4ltere Revision\)\./);
+
+      // 35./36. kein Button, kein data-action in der Historie.
+      assert.doesNotMatch(historyHtml, /<button/i);
+      assert.doesNotMatch(historyHtml, /data-action/);
+
+      // Position: die Historie steht direkt vor dem bestehenden Audit-Trail.
+      const historyIndex = diagnosticsHtml.indexOf('<div class="pilot-decision-reason-history">');
+      const auditIndex = diagnosticsHtml.indexOf("<h4>Audit-Trail");
+      assert.ok(historyIndex >= 0 && auditIndex > historyIndex, "die Historie muss unmittelbar vor dem bestehenden Audit-Trail stehen");
+    },
+  );
+
+  await check("33./34./39. wiederholtes Rendern ist seiteneffektfrei: identischer Inhalt, keine Mutation von overview/History, writeCallCount bleibt unverändert", () => {
+    const stateBefore = ui.getState();
+    const outputBefore = domElements["pilot-work-order-output"].innerHTML;
+    const diagnosticsBefore = domElements["pilot-work-order-diagnostics-output"].innerHTML;
+    const historySnapshotBefore = JSON.stringify(stateBefore.overview.decisionReasonHistory);
+    const currentSnapshotBefore = JSON.stringify(stateBefore.overview.currentDecisionReason);
+
+    ui.render();
+
+    const outputAfter = domElements["pilot-work-order-output"].innerHTML;
+    const diagnosticsAfter = domElements["pilot-work-order-diagnostics-output"].innerHTML;
+    assert.strictEqual(outputAfter, outputBefore, "wiederholtes Rendern muss identischen Inhalt ergeben");
+    assert.strictEqual(diagnosticsAfter, diagnosticsBefore, "wiederholtes Rendern muss identischen Inhalt ergeben (unterer Bereich)");
+
+    assert.strictEqual(JSON.stringify(ui.getState().overview.decisionReasonHistory), historySnapshotBefore, "decisionReasonHistory darf nicht mutiert werden");
+    assert.strictEqual(JSON.stringify(ui.getState().overview.currentDecisionReason), currentSnapshotBefore, "currentDecisionReason darf nicht mutiert werden");
+
+    const rawOrder = backend.orders.get(blockedWithReasonId);
+    assert.strictEqual(rawOrder.decisionReasonHistory.length, 3, "das Original-Backend-Array darf nicht verändert werden");
+    assert.strictEqual(rawOrder.currentDecisionReason.setByUserId, secretActorId, "das Original-Objekt darf nicht verändert werden");
+
+    assert.strictEqual(backend.getWriteCallCount(), writeCallCountBeforeDecisionReasonTests, "reines Anzeigen/Rendern darf niemals einen Schreib-Request auslösen");
+  });
+
+  // Testauftrag B: RETURNED mit aktuellem Rückgabe-Grund (3./18. sowie
+  // erneuter Nachweis 12.–17. für den RETURN-Zweig, 38. bestehende
+  // RETURNED-Primäraktion bleibt unverändert).
+  idCounter += 1;
+  const returnedWithReasonId = `pilot-order-test-decision-reason-returned-${idCounter}`;
+  setRawOrder(returnedWithReasonId, {
+    title: "Auftrag mit aktuellem R\u00fcckgabe-Grund",
+    status: "RETURNED",
+    statusLabel: STATUS_LABELS.RETURNED,
+    revision: 3,
+    currentDecisionReason: {
+      kind: "RETURN",
+      text: "R\u00fcckgabegrund: Ergebnis entspricht noch nicht den Qualit\u00e4tskriterien (Testfixtur).",
+      setAt: "2026-03-01T14:30:00.000Z",
+      setByUserId: secretActorId,
+      fromStatus: "READY_FOR_REVIEW",
+      toStatus: "RETURNED",
+      orderRevision: 3,
+    },
+    decisionReasonHistory: [
+      {
+        kind: "RETURN",
+        text: "R\u00fcckgabegrund: Ergebnis entspricht noch nicht den Qualit\u00e4tskriterien (Testfixtur).",
+        setAt: "2026-03-01T14:30:00.000Z",
+        setByUserId: secretActorId,
+        fromStatus: "READY_FOR_REVIEW",
+        toStatus: "RETURNED",
+        orderRevision: 3,
+      },
+    ],
+  });
+
+  await check("3./4./18./38. RETURNED mit aktuellem Rückgabe-Grund zeigt korrekte Überschrift, Zeitzeile, keinen zusätzlichen historischen Eintrag (nur der aktuelle existiert) und lässt die bestehende RETURNED-Primäraktion unverändert", async () => {
+    fetchCalls.length = 0;
+    await ui.selectOrder(returnedWithReasonId);
+    const html = domElements["pilot-work-order-output"].innerHTML;
+    const cardHtml = extractDecisionReasonCardHtml(html);
+    assert.match(cardHtml, /<h4>Warum der Auftrag zur\u00fcckgegeben wurde<\/h4>/);
+    assert.match(cardHtml, /G\u00fcltig seit: 2026-03-01 14:30/);
+    assert.ok(cardHtml.includes(ui.escapeHtml("Ergebnis entspricht noch nicht den Qualit\u00e4tskriterien (Testfixtur).")));
+    // kein Hinweis auf frühere Gründe, weil der einzige History-Eintrag dem aktuellen Grund entspricht.
+    assert.doesNotMatch(cardHtml, /Fr\u00fchere Gr\u00fcnde findest du unten/);
+    const diagnosticsHtml = domElements["pilot-work-order-diagnostics-output"].innerHTML;
+    assert.doesNotMatch(diagnosticsHtml, /<div class="pilot-decision-reason-history">/, "ohne echten historischen Eintrag darf kein Historienbereich erscheinen");
+
+    // 38. bestehende RETURNED-Primäraktion bleibt unverändert.
+    assert.match(html, /data-action="reopen-from-returned">Erneut als Entwurf starten<\/button>/);
+  });
+
+  // Testauftrag C: BLOCKED ohne gespeicherten Grund (systemseitig gestoppt,
+  // ältere Bestandsantwort – currentDecisionReason/decisionReasonHistory
+  // bleiben bewusst undefined statt null/[]).
+  idCounter += 1;
+  const blockedWithoutReasonId = `pilot-order-test-decision-reason-blocked-missing-${idCounter}`;
+  setRawOrder(blockedWithoutReasonId, {
+    title: "\u00e4lterer systemseitig blockierter Testauftrag",
+    status: "BLOCKED",
+    statusLabel: STATUS_LABELS.BLOCKED,
+    revision: 7,
+  });
+
+  await check("19./21./22. BLOCKED ohne Grundeintrag zeigt den verbindlichen Ersatztext, erfindet nichts, fehlende Felder (undefined) zerstören die Ansicht nicht", async () => {
+    fetchCalls.length = 0;
+    await ui.selectOrder(blockedWithoutReasonId);
+    assert.strictEqual(ui.getState().overview.currentDecisionReason, undefined, "die Testfixtur bildet bewusst eine ältere Antwort ohne dieses Feld nach");
+    assert.strictEqual(ui.getState().overview.decisionReasonHistory, undefined);
+    const html = domElements["pilot-work-order-output"].innerHTML;
+    const cardHtml = extractDecisionReasonCardHtml(html);
+    assert.match(cardHtml, /<h4>Warum der Auftrag blockiert ist<\/h4>/);
+    assert.match(cardHtml, /F\u00fcr diesen Auftrag wurde kein konkreter Grund gespeichert\./);
+    assert.match(cardHtml, /Bei \u00e4lteren oder automatisch gestoppten Auftr\u00e4gen kann diese Angabe fehlen\. Es wird bewusst nichts erg\u00e4nzt oder vermutet\./);
+    assert.doesNotMatch(cardHtml, /Fr\u00fchere Gr\u00fcnde findest du unten/, "ohne jede Historie darf kein Hinweis auf frühere Gründe erscheinen");
+    // weiterhin die normale Kopfzeile/Fakten sichtbar – keine zerstörte Ansicht.
+    assert.match(html, /Blockiert/);
+  });
+
+  // Testauftrag D: RETURNED ohne gespeicherten Grund (Spiegelfall zu C, 20.).
+  idCounter += 1;
+  const returnedWithoutReasonId = `pilot-order-test-decision-reason-returned-missing-${idCounter}`;
+  setRawOrder(returnedWithoutReasonId, {
+    title: "\u00e4lterer zur\u00fcckgegebener Testauftrag ohne Grund",
+    status: "RETURNED",
+    statusLabel: STATUS_LABELS.RETURNED,
+    revision: 6,
+  });
+
+  await check("20. RETURNED ohne Grundeintrag zeigt den verbindlichen Ersatztext mit passender Überschrift", async () => {
+    await ui.selectOrder(returnedWithoutReasonId);
+    const cardHtml = extractDecisionReasonCardHtml(domElements["pilot-work-order-output"].innerHTML);
+    assert.match(cardHtml, /<h4>Warum der Auftrag zur\u00fcckgegeben wurde<\/h4>/);
+    assert.match(cardHtml, /F\u00fcr diesen Auftrag wurde kein konkreter Grund gespeichert\./);
+  });
+
+  await check("23. ein normaler Status ohne Grund zeigt keinen neuen Abschnitt", async () => {
+    idCounter += 1;
+    const normalOrderId = `pilot-order-test-decision-reason-normal-${idCounter}`;
+    setRawOrder(normalOrderId, {
+      title: "Normaler Testauftrag ohne Grund",
+      status: "IN_EXECUTION",
+      statusLabel: STATUS_LABELS.IN_EXECUTION,
+      revision: 1,
+      agentChains: [],
+    });
+    await ui.selectOrder(normalOrderId);
+    const html = domElements["pilot-work-order-output"].innerHTML;
+    const diagnosticsHtml = domElements["pilot-work-order-diagnostics-output"].innerHTML;
+    assert.doesNotMatch(html, /pilot-decision-reason/, "ein normaler Auftrag ohne jeden Grund darf keinen neuen Abschnitt oben zeigen");
+    assert.doesNotMatch(diagnosticsHtml, /pilot-decision-reason/, "ein normaler Auftrag ohne jeden Grund darf keinen neuen Abschnitt unten zeigen");
+  });
+
+  // Testauftrag E: kein aktueller Grund (currentDecisionReason === null),
+  // aber zwei historische Gründe UND eine unbekannte, defensiv abgefangene
+  // Grundart – Status ist bewusst COMPLETED (weder BLOCKED noch RETURNED),
+  // damit die obere Karte nachweislich NICHTS zeigt, während die Historie
+  // unten trotzdem vollständig erscheint (27./31.).
+  idCounter += 1;
+  const historyOnlyOrderId = `pilot-order-test-decision-reason-history-only-${idCounter}`;
+  setRawOrder(historyOnlyOrderId, {
+    title: "Abgeschlossener Auftrag mit ausschließlich historischen Gründen",
+    status: "COMPLETED",
+    statusLabel: STATUS_LABELS.COMPLETED,
+    revision: 9,
+    currentDecisionReason: null,
+    decisionReasonHistory: [
+      {
+        kind: "RETURN",
+        text: "Historischer R\u00fcckgabegrund ohne aktuelle G\u00fcltigkeit.",
+        setAt: "2026-01-10T09:00:00.000Z",
+        setByUserId: secretActorId,
+        fromStatus: "READY_FOR_REVIEW",
+        toStatus: "RETURNED",
+        orderRevision: 3,
+      },
+      {
+        kind: "BLOCK",
+        text: "Historischer Block-Grund ohne aktuelle G\u00fcltigkeit.",
+        setAt: "2026-01-20T09:00:00.000Z",
+        setByUserId: secretActorId,
+        fromStatus: "IN_EXECUTION",
+        toStatus: "BLOCKED",
+        orderRevision: 5,
+      },
+      {
+        kind: "SOME_FUTURE_KIND",
+        text: "Grundtext einer bislang unbekannten Grundart.",
+        setAt: "2026-01-25T09:00:00.000Z",
+        setByUserId: secretActorId,
+        fromStatus: "BLOCKED",
+        toStatus: "RETURNED",
+        orderRevision: 6,
+      },
+    ],
+  });
+
+  await check(
+    "27./31. ohne aktuellen Grund (null) gelten alle History-Einträge als historisch, inklusive defensiv abgefangener unbekannter Grundart ohne technischen Rohwert; die obere Karte bleibt bei einem nicht blockierten/zurückgegebenen Status leer",
+    async () => {
+      await ui.selectOrder(historyOnlyOrderId);
+      const html = domElements["pilot-work-order-output"].innerHTML;
+      assert.doesNotMatch(html, /pilot-decision-reason-card/, "ohne aktuellen Grund und ohne BLOCKED/RETURNED-Status darf oben nichts erscheinen");
+
+      const diagnosticsHtml = domElements["pilot-work-order-diagnostics-output"].innerHTML;
+      const historyHtml = extractDecisionReasonHistoryHtml(diagnosticsHtml);
+      assert.ok(historyHtml.length > 0, "die Historie muss trotzdem unten erscheinen");
+      assert.match(historyHtml, /Blockiert am 2026-01-20 09:00/);
+      assert.match(historyHtml, /Zur\u00fcckgegeben am 2026-01-10 09:00/);
+      // 31. unbekannte Grundart → defensiver Klartext, kein technischer Rohwert.
+      assert.match(historyHtml, /Entscheidung am 2026-01-25 09:00/);
+      assert.doesNotMatch(historyHtml, /SOME_FUTURE_KIND/);
+      assert.match(historyHtml, /Grundtext einer bislang unbekannten Grundart\./);
+    },
+  );
+
+  // Testauftrag F: HTML-artiger Grundtext (8.) sowie expliziter Nachweis,
+  // dass openDecision unverändert bleibt und keinen Grundtext enthält (42.).
+  idCounter += 1;
+  const htmlLikeReasonOrderId = `pilot-order-test-decision-reason-html-like-${idCounter}`;
+  const htmlLikeReasonText = 'Auftrag <b>wichtig</b> pr\u00fcfen & "sofort" (Test) <script>alert(1)</script> <img src=x onerror=alert(1)>';
+  setRawOrder(htmlLikeReasonOrderId, {
+    title: "Auftrag mit HTML-artigem Grundtext",
+    status: "BLOCKED",
+    statusLabel: STATUS_LABELS.BLOCKED,
+    revision: 2,
+    currentDecisionReason: {
+      kind: "BLOCK",
+      text: htmlLikeReasonText,
+      setAt: "2026-04-01T10:00:00.000Z",
+      setByUserId: secretActorId,
+      fromStatus: "IN_EXECUTION",
+      toStatus: "BLOCKED",
+      orderRevision: 2,
+    },
+    decisionReasonHistory: [],
+  });
+
+  await check("8./42. HTML-artiger Grundtext wird maskiert und nicht als Element gerendert; openDecision bleibt unverändert und enthält keinen Grundtext", async () => {
+    await ui.selectOrder(htmlLikeReasonOrderId);
+    const html = domElements["pilot-work-order-output"].innerHTML;
+    const cardHtml = extractDecisionReasonCardHtml(html);
+
+    // 8. keine echten HTML-Elemente aus dem Grundtext, ausschließlich maskierter Text.
+    assert.ok(cardHtml.includes(ui.escapeHtml(htmlLikeReasonText)), "der Grundtext muss vollständig, aber ausschließlich escaped enthalten sein");
+    assert.doesNotMatch(cardHtml, /<script>/i);
+    assert.doesNotMatch(cardHtml, /<b>wichtig<\/b>/i);
+    assert.doesNotMatch(cardHtml, /<img\s/i);
+    assert.match(cardHtml, /&lt;script&gt;/);
+    assert.match(cardHtml, /&lt;b&gt;wichtig&lt;\/b&gt;/);
+
+    // 42. openDecision bleibt unverändert (dieses Fake-Backend liefert stets null) und enthält keinen Grundtext.
+    assert.strictEqual(ui.getState().overview.openDecision, null);
+    assert.doesNotMatch(html, /Offene Entscheidung<\/dt><dd>[^<]*wichtig/, "der Grundtext darf nicht in die Anzeige der offenen Entscheidung gelangen");
+  });
+
+  assert.strictEqual(backend.getWriteCallCount(), writeCallCountBeforeDecisionReasonTests, "V8.7 Stufe B darf über die gesamte Testreihe hinweg keinen einzigen Schreib-Request auslösen");
 
   console.log(`pilot-work-order-command-center-ui.test.js: ${passed} Prüfpunkte erfolgreich`);
 }

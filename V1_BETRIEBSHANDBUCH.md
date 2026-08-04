@@ -234,6 +234,15 @@ Der Controller (`scripts/zentral-ctl.js`) ist ein separates lokales Werkzeug und
 - **Zielgenaues Springen (P1.1):** der Sprung landet nicht mehr nur am Anfang der Pilotauftrags-Karte, sondern direkt am tatsächlichen Ziel – bei „Neuen Auftrag anlegen" am sichtbaren Anlageformular (mit Fokus auf dem Titelfeld), bei einem bestehenden Vorgang am zugehörigen Detail-/Arbeitsbereich bzw. mindestens an der markierten Auftragszeile. Das gilt unabhängig davon, wie lang die Auftragsliste ist.
 - **Bewusste Grenze:** die Startseite lädt einmal beim Öffnen und aktualisiert sich nicht selbst. Nach Arbeit in der Pilotauftrags-Karte zeigt sie bis zum nächsten Seitenaufruf den vorherigen Stand. In P1 betrachtet sie ausschließlich Pilotaufträge – Health-Referenzlauf, Jamal-Arbeitsmodus und Kundenaufträge fließen nicht ein.
 
+## 15d. Wie Jamal den Grund einer Blockierung oder Rückgabe liest (V8.7 Stufe B)
+
+- **Zweck:** Seit V8.7 Stufe A wird der bei einer Blockierung oder Rückgabe eingegebene Freitext dauerhaft gespeichert. Stufe B macht diesen Grund in der bestehenden Pilotauftrags-Detailansicht sichtbar – ohne eine neue Ansicht, ohne einen neuen Bedienzustand.
+- **Oben arbeiten:** ist ein Auftrag aktuell blockiert oder zurückgegeben, steht direkt über der bestehenden Aktion eine ruhige Karte mit der Überschrift „Warum der Auftrag blockiert ist" bzw. „Warum der Auftrag zurückgegeben wurde", der Zeitzeile „Gültig seit: …" und dem vollständigen gespeicherten Grundtext. Die bestehende Aktion (z. B. „Entsperren (zurückgeben)" oder „Erneut als Entwurf starten") steht unverändert unmittelbar darunter.
+- **Ehrlicher Ersatztext statt Vermutung:** fehlt bei einem aktuell blockierten oder zurückgegebenen Auftrag ein konkreter Grund (zum Beispiel bei älteren oder automatisch gestoppten Aufträgen), zeigt die Karte ausdrücklich, dass kein konkreter Grund gespeichert wurde – es wird bewusst nichts ergänzt oder vermutet.
+- **Unten nachschauen:** frühere Gründe stehen weiterhin im bestehenden unteren Nachschaubereich, direkt vor dem Audit-Trail, unter der Überschrift „Frühere Gründe". Sie erscheinen ausschließlich, wenn tatsächlich mindestens ein früherer Grund existiert, und sind erkennbar als nicht mehr aktuell gekennzeichnet – neueste zuerst.
+- **Bewusst nicht sichtbar:** wer den Grund gesetzt hat (keine ID, keine Namensbehauptung), der technische Statusweg (kein „von … nach …"), Revisionen oder sonstige technische Kennungen. Die Reihenfolge/Aktualität bestimmt ausschließlich der Server.
+- **Lesen löst nie eine Aktion aus:** das Anzeigen des Grundes ist reines Nachlesen – kein Request, keine Statusänderung, kein neuer Button.
+
 ## 16. Audit-Verlauf
 
 - Append-only Ereignisse (Prepare, Freigabe, Start, Ergebnis, Annahme/Ablehnung, Abbruch, Timeout)

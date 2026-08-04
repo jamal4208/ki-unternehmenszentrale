@@ -3782,6 +3782,145 @@
     return "<h4>Rollen\u00fcbergaben (bisherige Ergebnisse)</h4><ol>" + items + "</ol>";
   }
 
+  // V8.7 Stufe B ("gespeicherte Entscheidungsgründe in der
+  // Pilotauftrags-Detailansicht sichtbar machen"): rein darstellende,
+  // seiteneffektfreie Aufbereitung von overview.currentDecisionReason/
+  // overview.decisionReasonHistory (siehe buildOverview() in
+  // pilot-work-order-service.js, Stufe A). Die Aktualität bestimmt
+  // ausschließlich der Server über currentDecisionReason – die UI berechnet
+  // niemals selbst über overview.revision oder eine Suche in der Historie,
+  // welcher Grund gerade gültig ist. setByUserId, fromStatus und toStatus
+  // werden bewusst nicht angezeigt; orderRevision dient ausschließlich dem
+  // Ausschluss des aktuellen Eintrags aus der Historie, niemals sichtbarem
+  // HTML.
+
+  // Grundart zu Klartext – ausschließlich für die obere Karte (aktueller
+  // Grund). Ein unbekannter/fehlender Wert liefert null; der Aufrufer zeigt
+  // dann den defensiven Ersatzkopf "Entscheidung am <Datum>" (siehe unten),
+  // niemals einen rohen Kind-Wert.
+  function decisionReasonTopHeading(kind) {
+    if (kind === "BLOCK") return "Warum der Auftrag blockiert ist";
+    if (kind === "RETURN") return "Warum der Auftrag zur\u00fcckgegeben wurde";
+    return null;
+  }
+
+  // Gleiche Klartext-Zuordnung, aber ausgehend vom aktuellen Auftragsstatus
+  // (Fall C: kein konkreter aktueller Grund gespeichert).
+  function decisionReasonHeadingForStatus(status) {
+    if (status === "BLOCKED") return "Warum der Auftrag blockiert ist";
+    if (status === "RETURNED") return "Warum der Auftrag zur\u00fcckgegeben wurde";
+    return null;
+  }
+
+  // Eintragskopf für einen historischen Grund (Fall E/F). Eine unbekannte
+  // Grundart zeigt niemals den technischen Rohwert, sondern ausschließlich
+  // den defensiven Klartext "Entscheidung am <Datum>".
+  function decisionReasonHistoryEntryHeading(kind, formattedDate) {
+    if (kind === "BLOCK") return "Blockiert am " + formattedDate;
+    if (kind === "RETURN") return "Zur\u00fcckgegeben am " + formattedDate;
+    return "Entscheidung am " + formattedDate;
+  }
+
+  // Historische Gründe defensiv ableiten: overview.decisionReasonHistory
+  // kann bei älteren Fake-Backends/Bestandsantworten undefined statt []
+  // sein (siehe Array.isArray-Prüfung). Vor dem Filtern/Sortieren wird das
+  // Array kopiert (slice()) – das Originalarray und overview selbst bleiben
+  // unverändert. Ist currentDecisionReason null, gilt jeder vorhandene
+  // Eintrag als historisch; andernfalls wird genau der Eintrag
+  // ausgeschlossen, dessen orderRevision der des bereits serverseitig
+  // bestimmten currentDecisionReason entspricht (kein eigener
+  // Aktualitäts-Check über Status/Text). Ergebnis: neueste zuerst.
+  function deriveDecisionReasonHistoryEntries(overview) {
+    var rawHistory = overview && overview.decisionReasonHistory;
+    if (!Array.isArray(rawHistory)) return [];
+    var current = (overview && overview.currentDecisionReason) || null;
+    var currentRevision = current ? current.orderRevision : null;
+    var historicalEntries = rawHistory.slice().filter(function (entry) {
+      if (!entry) return false;
+      if (!current) return true;
+      return entry.orderRevision !== currentRevision;
+    });
+    return historicalEntries.sort(function (a, b) {
+      var revA = typeof a.orderRevision === "number" ? a.orderRevision : -Infinity;
+      var revB = typeof b.orderRevision === "number" ? b.orderRevision : -Infinity;
+      return revB - revA;
+    });
+  }
+
+  // Obere Arbeitsebene, zwischen renderChainStatusCard() und
+  // renderPrimaryAction(): Grund verstehen → bestehende Aktion sehen.
+  // Rendert nichts, wenn weder ein aktueller Grund noch ein blockierter/
+  // zurückgegebener Status ohne Grund vorliegt (kein neuer Abschnitt bei
+  // einem normalen Auftrag ohne Grund).
+  function renderDecisionReasonCard(overview) {
+    if (!overview) return "";
+    var current = overview.currentDecisionReason || null;
+    var hasHistory = deriveDecisionReasonHistoryEntries(overview).length > 0;
+    var historyHint = hasHistory
+      ? '<p class="pilot-decision-reason-history-hint">Fr\u00fchere Gr\u00fcnde findest du unten in den Details.</p>'
+      : "";
+
+    if (current) {
+      var topHeading = decisionReasonTopHeading(current.kind);
+      var formattedSetAt = escapeHtml(formatTimestamp(current.setAt));
+      var headingHtml =
+        topHeading !== null
+          ? "<h4>" + topHeading + "</h4><p class=\"pilot-decision-reason-timeline\">G\u00fcltig seit: " + formattedSetAt + "</p>"
+          : "<h4>Entscheidung am " + formattedSetAt + "</h4>";
+      return (
+        '<div class="pilot-decision-reason-card">' +
+        headingHtml +
+        '<p class="pilot-decision-reason-text">' + escapeHtml(current.text) + "</p>" +
+        historyHint +
+        "</div>"
+      );
+    }
+
+    if (isBlockedOrReturnedStatusForDecisionReason(overview.status)) {
+      var statusHeading = decisionReasonHeadingForStatus(overview.status);
+      return (
+        '<div class="pilot-decision-reason-card">' +
+        "<h4>" + statusHeading + "</h4>" +
+        '<p class="pilot-decision-reason-text">F\u00fcr diesen Auftrag wurde kein konkreter Grund gespeichert.</p>' +
+        '<p class="pilot-decision-reason-hint">Bei \u00e4lteren oder automatisch gestoppten Auftr\u00e4gen kann diese Angabe fehlen. Es wird bewusst nichts erg\u00e4nzt oder vermutet.</p>' +
+        historyHint +
+        "</div>"
+      );
+    }
+
+    return "";
+  }
+
+  function isBlockedOrReturnedStatusForDecisionReason(status) {
+    return status === "BLOCKED" || status === "RETURNED";
+  }
+
+  // Unterer Nachschaubereich, direkt vor renderAuditTrail(): frühere
+  // Gründe gelten heute nicht mehr. Rendert nichts, wenn keine historischen
+  // Einträge existieren (kein zusätzlicher aufklappbarer Bereich, kein
+  // neuer Bedienzustand).
+  function renderDecisionReasonHistory(overview) {
+    var entries = deriveDecisionReasonHistoryEntries(overview);
+    if (entries.length === 0) return "";
+    var items = entries
+      .map(function (entry) {
+        var heading = decisionReasonHistoryEntryHeading(entry.kind, escapeHtml(formatTimestamp(entry.setAt)));
+        return (
+          "<li><strong>" + heading + "</strong>" +
+          '<p class="pilot-decision-reason-text">' + escapeHtml(entry.text) + "</p>" +
+          "</li>"
+        );
+      })
+      .join("");
+    return (
+      '<div class="pilot-decision-reason-history">' +
+      "<h4>Fr\u00fchere Gr\u00fcnde</h4>" +
+      '<p class="pilot-decision-reason-history-intro">Diese Gr\u00fcnde geh\u00f6ren zu fr\u00fcheren Entscheidungen und gelten heute nicht mehr.</p>' +
+      "<ol>" + items + "</ol>" +
+      "</div>"
+    );
+  }
+
   // Phase 5 (Auftrag Abschnitt 4 "Auftragsdetail"/"8. Audit-Trail"): eine
   // kompakte, auftragsbezogene Verlaufsübersicht aus bereits vorhandenen
   // Overview-Daten (Anlage, jede Rollenübergabe samt Projektmanager-
@@ -3842,6 +3981,7 @@
           renderRisks(overview) +
           renderConflictBanner(state.conflict) +
           renderChainStatusCard(overview) +
+          renderDecisionReasonCard(overview) +
           renderPrimaryAction(overview);
         if (state.actionError) {
           html += '<p class="pilot-work-order-action-error">' + escapeHtml(state.actionError) + "</p>";
@@ -3865,6 +4005,7 @@
           renderAgentExecutionSection(state.overview) +
           renderAgentChainSection(state.overview) +
           renderHandoffs(state.overview) +
+          renderDecisionReasonHistory(state.overview) +
           renderAuditTrail(state.overview) +
           renderMeta(state.overview);
       } else {

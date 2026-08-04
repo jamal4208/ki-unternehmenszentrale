@@ -9806,6 +9806,86 @@ details.local-agent-assignment-details > summary {
   font-style: italic;
 }
 
+/* V8.7 Stufe B ("gespeicherte Entscheidungsgründe in der
+   Pilotauftrags-Detailansicht sichtbar machen"): rein additiver
+   Klassenraum für den bereits serverseitig persistierten Blockierungs-/
+   Rückgabegrund (Stufe A). Bewusst ruhig gehalten – ein gespeicherter
+   Grund ist eine normale Arbeitsinformation, kein Fehler- oder
+   Alarmzustand: kein Alarmrot, keine Warnbox, kein Warnsymbol, keine
+   Animation. Gleiches Grundmuster wie .pilot-work-order-primary-action
+   (gedämpfter Kartenhintergrund, bestehende Radien/Abstände). */
+.pilot-decision-reason-card {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--card-border-soft, var(--line));
+  border-radius: var(--radius-card, var(--radius));
+  background: var(--card-bg-muted);
+}
+
+.pilot-decision-reason-card h4 {
+  margin: 0;
+}
+
+.pilot-decision-reason-timeline {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-xs, 12px);
+}
+
+.pilot-decision-reason-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.pilot-decision-reason-history-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-xs, 12px);
+}
+
+/* Vollständiger Grundtext, ohne Kürzung (bis 500 Zeichen laut Vorgabe):
+   Zeilenumbrüche ausschließlich über CSS, keine Ersetzung durch <br>,
+   kein Scrollcontainer, kein max-height, keine horizontale Überbreite. */
+.pilot-decision-reason-text {
+  margin: 0;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 68ch;
+  line-height: 1.6;
+}
+
+/* Unterer Nachschaubereich – Historie optisch zurückhaltender als der
+   aktuelle Grund oben (kleinere Einleitung, kein eigener Kartenrahmen,
+   fügt sich in die bestehende Diagnostik-Detailliste ein). */
+.pilot-decision-reason-history {
+  display: grid;
+  gap: 8px;
+}
+
+.pilot-decision-reason-history h4 {
+  margin: 0;
+}
+
+.pilot-decision-reason-history-intro {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.pilot-decision-reason-history ol {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.pilot-decision-reason-history li {
+  display: grid;
+  gap: 4px;
+}
+
 /* V7.7.1 ("Explizite Jamal-Ausführungsfreigabe bedienbar machen"): die
    Bestätigungsfläche für approve-for-execution/approve-completion ersetzt
    an dieser Stelle die normale Primäraktions-Schaltfläche (siehe
