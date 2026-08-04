@@ -29,6 +29,51 @@
  * bestehende Titelfeld. Es entsteht dabei kein zweites Formular, keine neue
  * Anlage- oder Statuslogik und kein neuer Schreibpfad – siehe openOrder()
  * und openNewOrder() unten.
+ *
+ * V8.4 ("Chefmodus 'Heute wichtig'", additiv zu P1/P1.1): Bereich A zeigte
+ * bisher nur Titel und einen kurzen Kategorie-Klartext (z. B. "Auftrag
+ * blockiert"). Jamal fehlte dabei, WARUM sein Eingreifen nötig ist, SEIT
+ * WANN der Vorgang wartet, und dass er über "Öffnen" in die bestehende
+ * Pilotauftrags-Karte gelangt. V8.4 lädt dafür je entscheidungsrelevantem
+ * Auftrag (höchstens fünf, technische Obergrenze, siehe
+ * TODAY_OVERVIEW_FETCH_LIMIT) zusätzlich das bereits bestehende
+ * Einzel-Overview nach (dieselbe Route, die loadRunningProgress() für
+ * laufende Vorgänge schon seit P1 nutzt) und liest daraus ausschließlich
+ * das bereits vorhandene Feld `openDecision` – niemals eine neue
+ * Statusmaschine, niemals eine neue Priorisierung. Ohne `openDecision`
+ * (kein Overview geladen, oder Feld leer) gilt ein statusspezifischer,
+ * fest hinterlegter Fallback-Satz (CHEF_TODAY_WHY_FALLBACK_BY_STATUS). Die
+ * Wartedauer (Heute/Gestern/Seit X Tagen) kommt ausschließlich aus dem
+ * bereits vorhandenen Feld `order.updatedAt` der ohnehin geladenen Liste –
+ * dafür ist kein zusätzlicher Abruf nötig, deshalb bleibt sie für JEDEN
+ * entscheidungsrelevanten Auftrag sichtbar, auch jenseits der
+ * Detailabruf-Grenze. Ein fehlgeschlagener Einzelabruf wird defensiv
+ * abgefangen (siehe loadTodayOverviews()) und fällt auf den Fallback-Satz
+ * zurück – er macht die Startkarte nicht unbrauchbar. Öffnen bleibt
+ * ausschließlich openOrder(); es entsteht kein neuer Navigationspfad und
+ * keine Entscheidung wird direkt aus der Startkarte ausgeführt.
+ *
+ * Bekannte, bewusst nicht in V8.4 behobene Lücke: der Freitext aus
+ * blockOrder(reason) und returnOrder(note) wird von der bestehenden
+ * Serviceschicht heute nicht dauerhaft gespeichert (kein Feld in
+ * buildOverview()) – deshalb kann V8.4 diesen konkreten Grund nicht
+ * anzeigen und verwendet stattdessen den statusspezifischen Fallback-Satz.
+ * Diese Lücke ist Gegenstand eines künftigen, eigenen Arbeitspakets (siehe
+ * CURRENT_STATUS.md).
+ *
+ * V8.4-Korrekturlauf ("Chefsprache in den sichtbaren Warum-Sätzen"): die
+ * isolierte Browserabnahme wies nach, dass zwei reale `openDecision`-Texte
+ * aus buildOverview() (READY_FOR_REVIEW, READY_FOR_JAMAL_APPROVAL) einen
+ * technischen Statuscode in Klammern enthalten (" (COMPLETED)" bzw.
+ * " (APPROVED_FOR_EXECUTION)") – auf der ersten Chefmodus-Ebene unerwünscht.
+ * Die bisherigen Tests nutzten dafür ausschließlich frei erfundene
+ * Fake-Backend-Texte ohne diese Zusätze und erkannten den Befund deshalb
+ * nicht. Die Korrektur bleibt ausschließlich Darstellungslogik: whyTextFor()
+ * bereinigt das unverändert gelesene `openDecision` jetzt zusätzlich über
+ * sanitizeChefDecisionText() (siehe dort), bevor es sichtbar gerendert wird.
+ * `pilot-work-order-service.js`, `buildOverview()` und das Feld
+ * `openDecision` selbst bleiben unangetastet – die technische Detailansicht
+ * zeigt weiterhin den unveränderten Originaltext.
  */
 
 (function () {
@@ -52,10 +97,33 @@
   var DONE_STATUS = "COMPLETED";
   var RUNNING_LIMIT = 5;
 
+  // V8.4 – defensive technische Obergrenze für Einzel-Overview-Nachladungen
+  // je Seitenaufruf (siehe Modulkopf). Unabhängig von RUNNING_LIMIT, auch
+  // wenn beide zufällig denselben Wert haben: unterschiedliche Zwecke,
+  // unterschiedliche Auswahl (selectToday() statt selectRunning()).
+  var TODAY_OVERVIEW_FETCH_LIMIT = 5;
+
+  // V8.4 – der sichtbare "Warum"-Satz, wenn kein `openDecision` aus dem
+  // Einzel-Overview vorliegt (kein Abruf mehr innerhalb der Obergrenze,
+  // Feld leer, oder der Abruf ist fehlgeschlagen). Bewusst ausführlichere,
+  // eigenständige Sätze – ergänzend zur bestehenden, unveränderten
+  // Kategorie aus TODAY_REASON_BY_STATUS, nicht deren Ersatz.
+  var CHEF_TODAY_WHY_FALLBACK_BY_STATUS = {
+    RETURNED: "Der Auftrag wurde zur\u00fcckgegeben und wartet auf deine n\u00e4chste Entscheidung.",
+    READY_FOR_REVIEW: "Das Ergebnis wartet auf deine Pr\u00fcfung.",
+    BLOCKED: "Der Auftrag ist blockiert und wartet auf deine Entscheidung.",
+    READY_FOR_JAMAL_APPROVAL: "Der Auftrag wartet auf deine Freigabe.",
+  };
+
   var state = {
     orders: [],
     // Fortschritt je laufendem Vorgang, unverändert aus overview.progress.
     progressByOrderId: {},
+    // V8.4 – ausschließlich ergänzende Erklärung/Zeitpunkt je entscheidungs-
+    // relevantem Auftrag, nachgeladen aus dem bestehenden Einzel-Overview.
+    // Niemals eine zweite Quelle für Status oder Titel: Kategorie und
+    // Auswahl bleiben ausschließlich Sache der Liste (state.orders).
+    todayOverviewByOrderId: {},
     loading: true,
     error: null,
   };
@@ -132,6 +200,78 @@
     return (order && TODAY_REASON_BY_STATUS[order.status]) || "";
   }
 
+  // V8.4-Korrekturlauf – feste, kleine Liste bekannter technischer
+  // Klammerzusätze aus dem bestehenden `openDecision` (siehe
+  // pilot-work-order-service.js#buildOverview). Bewusst KEINE pauschale
+  // Klammerentfernung: normale fachliche Klammertexte (z. B.
+  // "(Vier-Augen-Prinzip)") sind hiervon nicht betroffen und bleiben
+  // erhalten, weil sie nicht in dieser Liste stehen.
+  var KNOWN_TECHNICAL_DECISION_SUFFIXES = [" (COMPLETED)", " (APPROVED_FOR_EXECUTION)"];
+
+  // V8.4-Korrekturlauf – entfernt ausschließlich die oben gelisteten,
+  // bekannten technischen Zusätze aus einem sichtbaren openDecision-Text.
+  // Reine Funktion: das übergebene Original bleibt unverändert (String-
+  // Operationen in JavaScript sind ohnehin nie mutierend), die technische
+  // Detailansicht kann das unveränderte `openDecision` also weiterhin
+  // unverändert anzeigen. Defensiv:
+  // - null/undefined/leer -> null (Aufrufer nutzt dann den Status-Fallback)
+  // - mehrfach vorkommende bekannte Zusätze werden vollständig entfernt
+  // - danach keine doppelten Leerzeichen, keine Leerzeichen vor Satzzeichen
+  // - bleibt nach der Bereinigung nichts Sinnvolles übrig -> ebenfalls null
+  // - ein unbekannter, normaler Text (inkl. normaler Klammerinhalte) bleibt
+  //   unverändert
+  function sanitizeChefDecisionText(text) {
+    if (text == null) return null;
+    var cleaned = String(text);
+    KNOWN_TECHNICAL_DECISION_SUFFIXES.forEach(function (suffix) {
+      while (cleaned.indexOf(suffix) !== -1) {
+        cleaned = cleaned.split(suffix).join("");
+      }
+    });
+    cleaned = cleaned.replace(/[ \t]+/g, " ");
+    cleaned = cleaned.replace(/[ \t]+([.,;:!?])/g, "$1");
+    cleaned = cleaned.trim();
+    return cleaned.length > 0 ? cleaned : null;
+  }
+
+  // V8.4 – der sichtbare "Warum"-Satz: zuerst das bestehende Feld
+  // `openDecision` aus dem nachgeladenen Einzel-Overview (nur vorhanden,
+  // wenn dieser Auftrag innerhalb von TODAY_OVERVIEW_FETCH_LIMIT lag und
+  // der Abruf erfolgreich war), kontrolliert bereinigt über
+  // sanitizeChefDecisionText() (V8.4-Korrekturlauf), andernfalls der
+  // statusspezifische Fallback-Satz. Keine eigene Textgenerierung, keine
+  // Kombination beider Quellen.
+  function whyTextFor(order) {
+    var overview = order ? state.todayOverviewByOrderId[order.id] : null;
+    var sanitized = overview ? sanitizeChefDecisionText(overview.openDecision) : null;
+    if (sanitized) return sanitized;
+    return (order && CHEF_TODAY_WHY_FALLBACK_BY_STATUS[order.status]) || "";
+  }
+
+  // V8.4 – laufende Nummer des lokalen Kalendertags. Date.UTC() liegt immer
+  // exakt auf einer Tagesgrenze (kein DST-Sprung wie bei lokalen
+  // Mitternachtswerten), deshalb ist die Differenz zweier Kalendertage
+  // immer ein exaktes Vielfaches von 86400000 – keine Rundung nötig.
+  function localDayNumber(date) {
+    return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86400000;
+  }
+
+  // V8.4 – deterministische Wartedauer ausschließlich aus dem bestehenden
+  // Feld `updatedAt` (identisch, ob aus der Liste oder aus dem Overview:
+  // beide liefern denselben, unveränderten Datenbankwert). Keine Uhrzeit,
+  // keine Minuten-/Stundenanzeige. Ein fehlender oder ungültiger Wert löst
+  // keinen Fehler aus – die Wartedauer entfällt dann ersatzlos.
+  function waitLabelFor(order) {
+    var raw = order && order.updatedAt;
+    if (!raw) return "";
+    var updated = new Date(raw);
+    if (isNaN(updated.getTime())) return "";
+    var diffDays = localDayNumber(new Date()) - localDayNumber(updated);
+    if (diffDays <= 0) return "Heute";
+    if (diffDays === 1) return "Gestern";
+    return "Seit " + diffDays + " Tagen";
+  }
+
   function progressTextFor(order) {
     var progress = order ? state.progressByOrderId[order.id] : null;
     if (!progress) return "Fortschritt wird geladen\u2026";
@@ -160,6 +300,41 @@
     );
   }
 
+  // V8.4 – höchstens TODAY_OVERVIEW_FETCH_LIMIT Einzel-Overviews für die
+  // entscheidungsrelevanten Aufträge (dieselbe bestehende Leseroute wie
+  // loadRunningProgress()). Jeder einzelne Abruf ist defensiv abgesichert:
+  // ein fehlgeschlagener Abruf (Netzwerkfehler, Timeout, unerwarteter
+  // Serverfehler) lässt den betroffenen Auftrag einfach ohne
+  // `openDecision` zurück – whyTextFor() fällt dann auf den Fallback-Satz
+  // zurück. Ein fehlerhafter Detailabruf macht die Startkarte damit nie
+  // unbrauchbar; Promise.all() selbst kann wegen der einzelnen .catch()
+  // nicht mehr ablehnen.
+  function loadTodayOverviews() {
+    var candidates = selectToday(state.orders).slice(0, TODAY_OVERVIEW_FETCH_LIMIT);
+    return Promise.all(
+      candidates.map(function (order) {
+        return fetchJson("/api/pilot-work-order/orders/" + encodeURIComponent(order.id))
+          .then(function (response) {
+            var overview = response.statusCode === 200 && response.data && response.data.ok ? response.data.overview : null;
+            if (overview) {
+              state.todayOverviewByOrderId[order.id] = {
+                openDecision: overview.openDecision || null,
+                // nextStep wird bewusst nicht dargestellt (enthält
+                // technische Funktionsnamen, siehe pilot-work-order-
+                // service.js#NEXT_STEP_BY_STATUS) – nur defensiv gehalten,
+                // falls ein künftiges Arbeitspaket ihn fachlich aufbereitet.
+                nextStep: overview.nextStep || null,
+              };
+            }
+          })
+          .catch(function () {
+            /* V8.4: defensiv – ein fehlgeschlagener Einzelabruf darf die
+               Startkarte nicht unbrauchbar machen (siehe Modulkopf). */
+          });
+      }),
+    );
+  }
+
   function load() {
     state.loading = true;
     render();
@@ -171,7 +346,7 @@
         } else {
           state.error = "Der Tagesstand konnte nicht geladen werden.";
         }
-        return loadRunningProgress();
+        return Promise.all([loadRunningProgress(), loadTodayOverviews()]);
       })
       .catch(function () {
         state.error = "Der Tagesstand konnte nicht geladen werden.";
@@ -216,21 +391,57 @@
     );
   }
 
+  // V8.4 – eine Zeile in "Heute wichtig": Klartext-Kategorie (unverändert
+  // aus TODAY_REASON_BY_STATUS), Titel, der ausführlichere "Warum"-Satz,
+  // die Wartedauer (falls ermittelbar) und eine sichtbare Beschriftung
+  // "Öffnen". Die ganze Zeile bleibt EIN bestehender Button
+  // (data-chef-today-action="open-order", siehe bindActionHandlersOnce) –
+  // "Öffnen" ist hier ausschließlich sichtbarer Text, kein zweites,
+  // eigenständiges Bedienelement und kein neuer Navigationspfad.
+  function renderTodayRow(order) {
+    var wait = waitLabelFor(order);
+    return (
+      '<button type="button" class="chef-today-row" data-chef-today-action="open-order" data-order-id="' +
+      escapeHtml(order.id) +
+      '"><span class="chef-today-row-title">' +
+      escapeHtml(order.title) +
+      '</span><span class="chef-today-row-meta">' +
+      escapeHtml(reasonFor(order)) +
+      '</span><span class="chef-today-row-why">' +
+      escapeHtml(whyTextFor(order)) +
+      "</span>" +
+      (wait ? '<span class="chef-today-row-wait">' + escapeHtml(wait) + "</span>" : "") +
+      '<span class="chef-today-row-open">\u00d6ffnen</span>' +
+      "</button>"
+    );
+  }
+
   function renderTodaySection(orders) {
     var items = selectToday(orders);
     if (items.length === 0) {
       return renderSection("today", "Heute wichtig", renderEmpty("Heute wartet nichts auf deine Entscheidung."));
     }
+    // V8.4 – die Abrufgrenze (TODAY_OVERVIEW_FETCH_LIMIT) begrenzt nur die
+    // Anzahl der nachgeladenen Einzel-Overviews, nie die Sichtbarkeit:
+    // JEDER entscheidungsrelevante Auftrag bleibt in dieser Liste stehen
+    // (weiterhin die bestehende, unveränderte Reihenfolge). Ein ruhiger
+    // Hinweis macht lediglich transparent, dass mehr Overviews vorhanden
+    // sein könnten, als nachgeladen wurden – keine neue Priorisierung.
+    var hint =
+      items.length > TODAY_OVERVIEW_FETCH_LIMIT
+        ? '<p class="chef-today-more-hint">Weitere wichtige Vorg\u00e4nge vorhanden.</p>'
+        : "";
     return renderSection(
       "today",
       "Heute wichtig",
       '<div class="chef-today-list">' +
         items
           .map(function (order) {
-            return renderRow(order, reasonFor(order));
+            return renderTodayRow(order);
           })
           .join("") +
-        "</div>",
+        "</div>" +
+        hint,
     );
   }
 
@@ -463,9 +674,11 @@
     module.exports = {
       TODAY_STATUS_ORDER: TODAY_STATUS_ORDER,
       TODAY_REASON_BY_STATUS: TODAY_REASON_BY_STATUS,
+      CHEF_TODAY_WHY_FALLBACK_BY_STATUS: CHEF_TODAY_WHY_FALLBACK_BY_STATUS,
       RUNNING_STATUS: RUNNING_STATUS,
       DONE_STATUS: DONE_STATUS,
       RUNNING_LIMIT: RUNNING_LIMIT,
+      TODAY_OVERVIEW_FETCH_LIMIT: TODAY_OVERVIEW_FETCH_LIMIT,
       getState: function () {
         return state;
       },
@@ -480,6 +693,9 @@
       selectRunning: selectRunning,
       buildAgenda: buildAgenda,
       selectRecommendedNextWork: selectRecommendedNextWork,
+      whyTextFor: whyTextFor,
+      sanitizeChefDecisionText: sanitizeChefDecisionText,
+      waitLabelFor: waitLabelFor,
       openOrder: openOrder,
       openRecommendedWork: openRecommendedWork,
       openNewOrder: openNewOrder,

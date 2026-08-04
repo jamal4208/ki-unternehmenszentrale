@@ -142,6 +142,43 @@ let backendOrders = [];
 const backendProgress = {};
 const fetchCalls = [];
 
+// V8.4 – zusätzliche, rein additive Fake-Backend-Steuerung für das bereits
+// bestehende Feld `overview.openDecision` (Standard: kein Eintrag, also
+// `null`, wie im echten Dienst ohne offene Entscheidung) und zur
+// Simulation eines fehlschlagenden Einzelabrufs (Netzwerkfehler). Beides
+// betrifft ausschließlich die Testsicht auf die unveränderte HTTP-Route
+// GET /api/pilot-work-order/orders/:id.
+let backendOpenDecisionByOrderId = {};
+let backendFailingDetailIds = new Set();
+
+function setOpenDecision(orderId, text) {
+  backendOpenDecisionByOrderId[orderId] = text;
+}
+
+function clearOpenDecisionOverrides() {
+  backendOpenDecisionByOrderId = {};
+}
+
+function markDetailFetchFailing(orderId) {
+  backendFailingDetailIds.add(orderId);
+}
+
+function clearFailingDetailFetches() {
+  backendFailingDetailIds = new Set();
+}
+
+// V8.4 – liefert einen ISO-Zeitstempel, dessen LOKALER Kalendertag exakt
+// `daysAgo` Tage vor dem heutigen lokalen Kalendertag liegt (unabhängig von
+// der aktuellen Uhrzeit im Testlauf, da bewusst mittags/lokal 9 Uhr
+// verankert – kein Risiko einer Mitternachtsgrenze zwischen Testaufbau und
+// Auswertung).
+function isoAtLocalDaysAgo(daysAgo) {
+  const now = new Date();
+  const local = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 0, 0);
+  local.setDate(local.getDate() - daysAgo);
+  return local.toISOString();
+}
+
 function setOrders(orders) {
   backendOrders = orders.map((order, index) => ({
     id: order.id || `pilot-order-test-${index + 1}`,
@@ -160,6 +197,14 @@ function setOrders(orders) {
 global.fetch = function fetchStub(url, options) {
   const opts = options || {};
   fetchCalls.push({ url, method: opts.method || "GET", body: opts.body });
+  if (url.startsWith("/api/pilot-work-order/orders/")) {
+    const failingOrderId = decodeURIComponent(url.slice("/api/pilot-work-order/orders/".length));
+    if (backendFailingDetailIds.has(failingOrderId)) {
+      // V8.4: simulierter Netzwerkfehler eines einzelnen Detailabrufs –
+      // fetchJson()/loadTodayOverviews() müssen das defensiv abfangen.
+      return Promise.reject(new Error("V8.4-Test: simulierter Netzwerkfehler beim Einzelabruf"));
+    }
+  }
   let payload = null;
   if (url === "/api/pilot-work-order/orders") {
     payload = { ok: true, orders: backendOrders.map((order) => ({ ...order })) };
@@ -167,7 +212,18 @@ global.fetch = function fetchStub(url, options) {
     const orderId = decodeURIComponent(url.slice("/api/pilot-work-order/orders/".length));
     const order = backendOrders.find((entry) => entry.id === orderId);
     payload = order
-      ? { ok: true, overview: { order: { ...order }, status: order.status, progress: backendProgress[order.id] } }
+      ? {
+          ok: true,
+          overview: {
+            order: { ...order },
+            status: order.status,
+            progress: backendProgress[order.id],
+            openDecision: Object.prototype.hasOwnProperty.call(backendOpenDecisionByOrderId, orderId)
+              ? backendOpenDecisionByOrderId[orderId]
+              : null,
+            nextStep: "NEXT_STEP_BY_STATUS-Text (technisch, wird von chef-today-ui.js nicht dargestellt)",
+          },
+        }
       : { ok: false };
   }
   return Promise.resolve({
@@ -256,7 +312,11 @@ async function run() {
   });
 
   await check("das Skript nutzt ausschlie\u00dflich bestehende Leserouten (keine neue Route)", () => {
-    const urls = js.match(/"\/api\/[^"]*"/g) || [];
+    // V8.4: dieselbe Einzelroute wird jetzt an zwei Stellen aufgerufen
+    // (loadRunningProgress() seit P1, loadTodayOverviews() neu seit V8.4) –
+    // deshalb hier auf eindeutige URL-Literale prüfen statt auf die reine
+    // Trefferliste.
+    const urls = Array.from(new Set(js.match(/"\/api\/[^"]*"/g) || []));
     assert.deepStrictEqual(urls.sort(), ['"/api/pilot-work-order/orders"', '"/api/pilot-work-order/orders/"'].sort());
   });
 
@@ -628,6 +688,364 @@ async function run() {
   });
 
   await check("\u00fcber den gesamten Ablauf wurde kein einziger schreibender Aufruf gesendet", () => {
+    assert.deepStrictEqual(postCalls(), []);
+  });
+
+  // -------------------------------------------------------------------
+  // V8.4 – Chefmodus "Heute wichtig": Warum-Satz, Wartedauer, Abrufgrenze.
+  // Isolierte Funktionsprüfungen (whyTextFor/waitLabelFor) ergänzen die
+  // Zustandswechsel-Prüfungen gegen das Fake-Backend darunter.
+  // -------------------------------------------------------------------
+
+  await check("V8.4: Fallback READY_FOR_REVIEW korrekt (isolierte Funktionspr\u00fcfung)", () => {
+    assert.strictEqual(
+      ui.whyTextFor({ id: "v84-unit-missing-1", status: "READY_FOR_REVIEW" }),
+      "Das Ergebnis wartet auf deine Pr\u00fcfung.",
+    );
+  });
+
+  await check("V8.4: Fallback READY_FOR_JAMAL_APPROVAL korrekt (isolierte Funktionspr\u00fcfung)", () => {
+    assert.strictEqual(
+      ui.whyTextFor({ id: "v84-unit-missing-2", status: "READY_FOR_JAMAL_APPROVAL" }),
+      "Der Auftrag wartet auf deine Freigabe.",
+    );
+  });
+
+  await check("V8.4: Fallback BLOCKED korrekt (isolierte Funktionspr\u00fcfung)", () => {
+    assert.strictEqual(
+      ui.whyTextFor({ id: "v84-unit-missing-3", status: "BLOCKED" }),
+      "Der Auftrag ist blockiert und wartet auf deine Entscheidung.",
+    );
+  });
+
+  await check("V8.4: Fallback RETURNED korrekt (isolierte Funktionspr\u00fcfung)", () => {
+    assert.strictEqual(
+      ui.whyTextFor({ id: "v84-unit-missing-4", status: "RETURNED" }),
+      "Der Auftrag wurde zur\u00fcckgegeben und wartet auf deine n\u00e4chste Entscheidung.",
+    );
+  });
+
+  await check("V8.4: openDecision hat Vorrang vor dem Fallback-Satz (isolierte Funktionspr\u00fcfung)", () => {
+    ui.getState().todayOverviewByOrderId["v84-unit-open-decision"] = {
+      openDecision: "Individuelle Entscheidung aus dem Einzel-Overview.",
+      nextStep: null,
+    };
+    assert.strictEqual(
+      ui.whyTextFor({ id: "v84-unit-open-decision", status: "BLOCKED" }),
+      "Individuelle Entscheidung aus dem Einzel-Overview.",
+    );
+    delete ui.getState().todayOverviewByOrderId["v84-unit-open-decision"];
+  });
+
+  await check("V8.4: Wartedauer \u201eHeute\u201c", () => {
+    assert.strictEqual(ui.waitLabelFor({ updatedAt: new Date().toISOString() }), "Heute");
+  });
+
+  await check("V8.4: Wartedauer \u201eGestern\u201c", () => {
+    assert.strictEqual(ui.waitLabelFor({ updatedAt: isoAtLocalDaysAgo(1) }), "Gestern");
+  });
+
+  await check("V8.4: Wartedauer \u201eSeit X Tagen\u201c", () => {
+    assert.strictEqual(ui.waitLabelFor({ updatedAt: isoAtLocalDaysAgo(5) }), "Seit 5 Tagen");
+  });
+
+  await check("V8.4: ung\u00fcltiges oder fehlendes updatedAt wird defensiv behandelt (keine Anzeige, kein Fehler)", () => {
+    assert.strictEqual(ui.waitLabelFor({ updatedAt: "kein-datum" }), "");
+    assert.strictEqual(ui.waitLabelFor({ updatedAt: null }), "");
+    assert.strictEqual(ui.waitLabelFor({}), "");
+    assert.doesNotThrow(() => ui.waitLabelFor(null));
+  });
+
+  await check("V8.4: Overview wird nur f\u00fcr entscheidungsrelevante Eintr\u00e4ge geladen (keine anderen Status)", async () => {
+    setOrders([
+      { id: "v84-order-draft", title: "Entwurf", status: "DRAFT" },
+      { id: "v84-order-returned", title: "Zur\u00fcckgegeben", status: "RETURNED", updatedAt: new Date().toISOString() },
+      { id: "v84-order-review", title: "Pr\u00fcfung", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+      { id: "v84-order-completed", title: "Fertig", status: "COMPLETED" },
+    ]);
+    fetchCalls.length = 0;
+    await reload();
+    const detailIds = fetchCalls
+      .filter((entry) => /^\/api\/pilot-work-order\/orders\/.+/.test(entry.url))
+      .map((entry) => decodeURIComponent(entry.url.slice("/api/pilot-work-order/orders/".length)));
+    assert.deepStrictEqual(detailIds.slice().sort(), ["v84-order-returned", "v84-order-review"].sort());
+  });
+
+  await check("V8.4: h\u00f6chstens f\u00fcnf Overview-Abrufe f\u00fcr entscheidungsrelevante Auftr\u00e4ge", async () => {
+    setOrders(
+      Array.from({ length: 7 }, (unused, index) => ({
+        id: `v84-order-many-${index + 1}`,
+        title: `Wichtiger Vorgang ${index + 1}`,
+        status: "RETURNED",
+        updatedAt: new Date().toISOString(),
+      })),
+    );
+    fetchCalls.length = 0;
+    await reload();
+    const detailCalls = fetchCalls.filter((entry) => /^\/api\/pilot-work-order\/orders\/.+/.test(entry.url));
+    assert.strictEqual(ui.TODAY_OVERVIEW_FETCH_LIMIT, 5);
+    assert.strictEqual(detailCalls.length, ui.TODAY_OVERVIEW_FETCH_LIMIT);
+  });
+
+  await check("V8.4: mehr als f\u00fcnf wichtige Vorg\u00e4nge bleiben trotzdem vollst\u00e4ndig sichtbar", () => {
+    assert.strictEqual(rowTitles("today").length, 7);
+    const section = sectionHtml("today");
+    for (let index = 1; index <= 7; index += 1) {
+      assert.ok(section.includes(`Wichtiger Vorgang ${index}`), `Vorgang ${index} muss sichtbar bleiben`);
+    }
+    assert.ok(
+      section.includes("Weitere wichtige Vorg\u00e4nge vorhanden."),
+      "ein ruhiger Hinweis auf weitere Vorg\u00e4nge muss erscheinen",
+    );
+  });
+
+  await check(
+    "V8.4: echtes openDecision aus dem Overview erscheint im Warum-Satz, ein fehlgeschlagener Detailabruf zerst\u00f6rt die Karte nicht",
+    async () => {
+      setOrders([
+        { id: "v84-order-ok", title: "Normaler Vorgang", status: "BLOCKED", updatedAt: new Date().toISOString() },
+        { id: "v84-order-fails", title: "Vorgang mit Fehler", status: "BLOCKED", updatedAt: new Date().toISOString() },
+      ]);
+      setOpenDecision("v84-order-ok", "Jamal muss den Blocker aus dem echten Overview kl\u00e4ren.");
+      markDetailFetchFailing("v84-order-fails");
+      fetchCalls.length = 0;
+      await assert.doesNotReject(async () => reload());
+      assert.strictEqual(ui.getState().error, null, "ein fehlgeschlagener Detailabruf darf keinen Kartenfehler ausl\u00f6sen");
+      assert.deepStrictEqual(rowTitles("today"), ["Normaler Vorgang", "Vorgang mit Fehler"]);
+      const section = sectionHtml("today");
+      assert.ok(
+        section.includes("Jamal muss den Blocker aus dem echten Overview kl\u00e4ren."),
+        "das echte openDecision-Feld muss den Fallback-Satz verdr\u00e4ngen",
+      );
+      assert.ok(
+        section.includes("Der Auftrag ist blockiert und wartet auf deine Entscheidung."),
+        "der fehlgeschlagene Abruf f\u00e4llt auf den Fallback-Satz zur\u00fcck, statt die Karte zu zerst\u00f6ren",
+      );
+      clearOpenDecisionOverrides();
+      clearFailingDetailFetches();
+    },
+  );
+
+  await check("V8.4: keine technischen Statuscodes und keine ID/Revision im sichtbaren Text der angereicherten Zeilen", () => {
+    const visibleText = outputHtml().replace(/<[^>]*>/g, " ");
+    assert.doesNotMatch(visibleText, /READY_FOR|RETURNED|BLOCKED|IN_EXECUTION/);
+    assert.doesNotMatch(visibleText, /v84-order-|Rev\./);
+    assert.doesNotMatch(visibleText, /NEXT_STEP_BY_STATUS/, "nextStep wird bewusst nicht dargestellt");
+  });
+
+  await check(
+    "V8.4: die Schaltfl\u00e4che \u201e\u00d6ffnen\u201c bleibt Teil des bestehenden, einzigen Zeilen-Buttons (kein zweites Bedienelement)",
+    () => {
+      const section = sectionHtml("today");
+      const rowButtons = section.match(/<button type="button" class="chef-today-row"/g) || [];
+      const allButtons = section.match(/<button/g) || [];
+      assert.strictEqual(rowButtons.length, allButtons.length, "es entsteht kein zweites Bedienelement je Zeile");
+      assert.ok(section.includes('<span class="chef-today-row-open">\u00d6ffnen</span>'), "\u201e\u00d6ffnen\u201c muss sichtbar sein");
+      assert.doesNotMatch(section, /Freigeben|Ablehnen|Genehmigen|Zur\u00fcckweisen/);
+    },
+  );
+
+  await check("V8.4: \u00d6ffnen einer Zeile nutzt weiterhin ausschlie\u00dflich das bestehende openOrder()", () => {
+    pilotControls = backendOrders.map((order) => makePilotControl("select-order", order.id));
+    pilotClicks.length = 0;
+    fetchCalls.length = 0;
+    const opened = ui.openOrder("v84-order-ok");
+    assert.strictEqual(opened, true);
+    assert.deepStrictEqual(pilotClicks, [{ action: "select-order", orderId: "v84-order-ok" }]);
+    assert.deepStrictEqual(fetchCalls, [], "das \u00d6ffnen selbst l\u00f6st keinen weiteren Abruf aus");
+  });
+
+  await check("V8.4: weiterhin kein schreibender Request \u00fcber alle neuen Abl\u00e4ufe hinweg", () => {
+    assert.deepStrictEqual(postCalls(), []);
+  });
+
+  // -------------------------------------------------------------------
+  // V8.4-Korrekturlauf – Chefsprache in den sichtbaren Warum-S\u00e4tzen.
+  // Die Browserabnahme wies nach, dass zwei REALE openDecision-Texte aus
+  // buildOverview() (pilot-work-order-service.js) einen technischen
+  // Statuscode in Klammern enthalten. Die bisherigen V8.4-Tests oben nutzten
+  // dafür ausschlie\u00dflich frei erfundene Fake-Backend-Texte ohne diese
+  // Zus\u00e4tze (siehe z. B. "Jamal muss den Blocker aus dem echten Overview
+  // kl\u00e4ren.") und erkannten den Befund deshalb nicht. Die folgenden
+  // Pr\u00fcfungen verwenden deshalb bewusst wortgleiche Texte aus dem echten
+  // Dienst.
+  // -------------------------------------------------------------------
+
+  const REAL_OPEN_DECISION_COMPLETED =
+    "Jamal muss das Ergebnis abnehmen (COMPLETED) oder zur \u00dcberarbeitung zur\u00fcckgeben.";
+  const REAL_OPEN_DECISION_APPROVED =
+    "Jamal muss die Ausf\u00fchrung freigeben (APPROVED_FOR_EXECUTION) oder den Auftrag zur\u00fcckgeben.";
+
+  await check(
+    "V8.4-Korrektur: sanitizeChefDecisionText() entfernt bekannte technische Zus\u00e4tze, l\u00e4sst normale Klammertexte und unbekannte Texte unver\u00e4ndert (isolierte Funktionspr\u00fcfung)",
+    () => {
+      assert.strictEqual(
+        ui.sanitizeChefDecisionText(REAL_OPEN_DECISION_COMPLETED),
+        "Jamal muss das Ergebnis abnehmen oder zur \u00dcberarbeitung zur\u00fcckgeben.",
+      );
+      assert.strictEqual(
+        ui.sanitizeChefDecisionText(REAL_OPEN_DECISION_APPROVED),
+        "Jamal muss die Ausf\u00fchrung freigeben oder den Auftrag zur\u00fcckgeben.",
+      );
+      // normaler fachlicher Klammertext bleibt unangetastet (keine pauschale
+      // Klammerentfernung)
+      assert.strictEqual(
+        ui.sanitizeChefDecisionText("Freigabe durch Jamal (Vier-Augen-Prinzip) erforderlich."),
+        "Freigabe durch Jamal (Vier-Augen-Prinzip) erforderlich.",
+      );
+      // unbekannter, normaler Text bleibt unver\u00e4ndert
+      assert.strictEqual(
+        ui.sanitizeChefDecisionText("Der Kunde wartet noch auf eine R\u00fcckmeldung von Jamal."),
+        "Der Kunde wartet noch auf eine R\u00fcckmeldung von Jamal.",
+      );
+      // mehrfach vorkommende bekannte Zus\u00e4tze werden vollst\u00e4ndig entfernt,
+      // ohne doppelte Leerzeichen oder Leerzeichen vor Satzzeichen
+      assert.strictEqual(
+        ui.sanitizeChefDecisionText(
+          "Status (COMPLETED) und erneut (COMPLETED) sowie (APPROVED_FOR_EXECUTION) .",
+        ),
+        "Status und erneut sowie.",
+      );
+      // defensiv: null/undefined/leer/nur-technisch -> null (Fallback beim
+      // Aufrufer)
+      assert.strictEqual(ui.sanitizeChefDecisionText(null), null);
+      assert.strictEqual(ui.sanitizeChefDecisionText(undefined), null);
+      assert.strictEqual(ui.sanitizeChefDecisionText(""), null);
+      assert.strictEqual(ui.sanitizeChefDecisionText("   "), null);
+      assert.strictEqual(ui.sanitizeChefDecisionText(" (COMPLETED) (APPROVED_FOR_EXECUTION) "), null);
+      // das \u00fcbergebene Original wird nicht mutiert (Strings sind in
+      // JavaScript ohnehin unver\u00e4nderlich, hier zus\u00e4tzlich real gepr\u00fcft)
+      const original = REAL_OPEN_DECISION_COMPLETED;
+      ui.sanitizeChefDecisionText(original);
+      assert.strictEqual(original, REAL_OPEN_DECISION_COMPLETED);
+    },
+  );
+
+  await check(
+    "V8.4-Korrektur: whyTextFor() zeigt reale openDecision-Texte mit (COMPLETED)/(APPROVED_FOR_EXECUTION) bereinigt an (isolierte Funktionspr\u00fcfung)",
+    () => {
+      ui.getState().todayOverviewByOrderId["v84-fix-review-unit"] = {
+        openDecision: REAL_OPEN_DECISION_COMPLETED,
+        nextStep: null,
+      };
+      assert.strictEqual(
+        ui.whyTextFor({ id: "v84-fix-review-unit", status: "READY_FOR_REVIEW" }),
+        "Jamal muss das Ergebnis abnehmen oder zur \u00dcberarbeitung zur\u00fcckgeben.",
+      );
+      delete ui.getState().todayOverviewByOrderId["v84-fix-review-unit"];
+
+      ui.getState().todayOverviewByOrderId["v84-fix-approval-unit"] = {
+        openDecision: REAL_OPEN_DECISION_APPROVED,
+        nextStep: null,
+      };
+      assert.strictEqual(
+        ui.whyTextFor({ id: "v84-fix-approval-unit", status: "READY_FOR_JAMAL_APPROVAL" }),
+        "Jamal muss die Ausf\u00fchrung freigeben oder den Auftrag zur\u00fcckgeben.",
+      );
+      delete ui.getState().todayOverviewByOrderId["v84-fix-approval-unit"];
+    },
+  );
+
+  await check(
+    "V8.4-Korrektur: reale, wortgleiche openDecision-Texte aus dem Fake-Backend erscheinen in der Startkarte ohne technischen Statuscode, das technische Originalfeld bleibt unangetastet",
+    async () => {
+      setOrders([
+        { id: "v84-fix-review", title: "Ergebnis liegt wirklich vor", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+        { id: "v84-fix-approval", title: "Freigabe wartet wirklich", status: "READY_FOR_JAMAL_APPROVAL", updatedAt: new Date().toISOString() },
+      ]);
+      setOpenDecision("v84-fix-review", REAL_OPEN_DECISION_COMPLETED);
+      setOpenDecision("v84-fix-approval", REAL_OPEN_DECISION_APPROVED);
+      fetchCalls.length = 0;
+      await reload();
+
+      const section = sectionHtml("today");
+      assert.ok(
+        section.includes("Jamal muss das Ergebnis abnehmen oder zur \u00dcberarbeitung zur\u00fcckgeben."),
+        "der bereinigte READY_FOR_REVIEW-Satz muss sichtbar sein",
+      );
+      assert.ok(
+        section.includes("Jamal muss die Ausf\u00fchrung freigeben oder den Auftrag zur\u00fcckgeben."),
+        "der bereinigte READY_FOR_JAMAL_APPROVAL-Satz muss sichtbar sein",
+      );
+      const visibleText = section.replace(/<[^>]*>/g, " ");
+      assert.doesNotMatch(visibleText, /COMPLETED/, "kein technischer Statuscode COMPLETED sichtbar");
+      assert.doesNotMatch(visibleText, /APPROVED_FOR_EXECUTION/, "kein technischer Statuscode APPROVED_FOR_EXECUTION sichtbar");
+      // die beiden exakten Erwartungss\u00e4tze oben belegen bereits, dass kein
+      // doppeltes Leerzeichen und kein Leerzeichen vor dem Satzpunkt entsteht
+
+      // das zugrunde liegende, technische Originalfeld im Fake-Backend
+      // (Stellvertreter f\u00fcr das unver\u00e4nderte Feld openDecision aus
+      // buildOverview()) bleibt wortgleich erhalten
+      assert.strictEqual(backendOpenDecisionByOrderId["v84-fix-review"], REAL_OPEN_DECISION_COMPLETED);
+      assert.strictEqual(backendOpenDecisionByOrderId["v84-fix-approval"], REAL_OPEN_DECISION_APPROVED);
+      // und ebenso das nachgeladene Overview im Client-Zustand
+      assert.strictEqual(
+        ui.getState().todayOverviewByOrderId["v84-fix-review"].openDecision,
+        REAL_OPEN_DECISION_COMPLETED,
+      );
+      assert.strictEqual(
+        ui.getState().todayOverviewByOrderId["v84-fix-approval"].openDecision,
+        REAL_OPEN_DECISION_APPROVED,
+      );
+      assert.deepStrictEqual(postCalls(), [], "weiterhin kein schreibender Request");
+
+      clearOpenDecisionOverrides();
+    },
+  );
+
+  await check(
+    "V8.4-Korrektur: ein normaler fachlicher Klammertext aus dem Overview bleibt in der Startkarte vollst\u00e4ndig erhalten",
+    async () => {
+      setOrders([
+        { id: "v84-fix-normal-brackets", title: "Auftrag mit fachlichem Hinweis", status: "BLOCKED", updatedAt: new Date().toISOString() },
+      ]);
+      setOpenDecision("v84-fix-normal-brackets", "Freigabe durch Jamal (Vier-Augen-Prinzip) erforderlich.");
+      await reload();
+      const section = sectionHtml("today");
+      assert.ok(
+        section.includes("Freigabe durch Jamal (Vier-Augen-Prinzip) erforderlich."),
+        "ein normaler Klammertext darf nicht durch die Bereinigung besch\u00e4digt werden",
+      );
+      clearOpenDecisionOverrides();
+    },
+  );
+
+  await check(
+    "V8.4-Korrektur: null/undefined/leeres openDecision verwendet weiterhin den bestehenden Status-Fallback (keine Regression durch die Bereinigung)",
+    async () => {
+      setOrders([
+        { id: "v84-fix-null", title: "Ohne Overview-Text (null)", status: "BLOCKED", updatedAt: new Date().toISOString() },
+        { id: "v84-fix-empty", title: "Mit leerem Overview-Text", status: "RETURNED", updatedAt: new Date().toISOString() },
+      ]);
+      setOpenDecision("v84-fix-empty", "");
+      await reload();
+      const section = sectionHtml("today");
+      assert.ok(
+        section.includes("Der Auftrag ist blockiert und wartet auf deine Entscheidung."),
+        "null openDecision f\u00e4llt weiterhin auf den BLOCKED-Fallback zur\u00fcck",
+      );
+      assert.ok(
+        section.includes("Der Auftrag wurde zur\u00fcckgegeben und wartet auf deine n\u00e4chste Entscheidung."),
+        "leeres openDecision f\u00e4llt weiterhin auf den RETURNED-Fallback zur\u00fcck",
+      );
+      clearOpenDecisionOverrides();
+    },
+  );
+
+  await check(
+    "V8.4-Korrektur: die bestehende Detailnavigation \u00fcber openOrder() bleibt von der Textbereinigung unber\u00fchrt",
+    () => {
+      pilotControls = backendOrders.map((order) => makePilotControl("select-order", order.id));
+      pilotClicks.length = 0;
+      fetchCalls.length = 0;
+      const opened = ui.openOrder("v84-fix-null");
+      assert.strictEqual(opened, true);
+      assert.deepStrictEqual(pilotClicks, [{ action: "select-order", orderId: "v84-fix-null" }]);
+      assert.deepStrictEqual(fetchCalls, [], "das \u00d6ffnen selbst l\u00f6st weiterhin keinen weiteren Abruf aus");
+    },
+  );
+
+  await check("V8.4-Korrektur: weiterhin kein schreibender Request \u00fcber den gesamten Korrekturlauf hinweg", () => {
     assert.deepStrictEqual(postCalls(), []);
   });
 

@@ -10345,6 +10345,33 @@ details.local-agent-assignment-details > summary {
   color: var(--muted);
 }
 
+/* V8.4 – Chefmodus "Heute wichtig": Warum-Satz, Wartedauer und die
+   sichtbare Beschriftung "Öffnen" je entscheidungsrelevantem Auftrag.
+   Bewusst ruhig, keine Ampeln/Farben, gleiche Zurückhaltung wie
+   .chef-today-row-meta. */
+.chef-today-row-why {
+  font-size: var(--text-sm, 13px);
+  color: inherit;
+}
+
+.chef-today-row-wait {
+  font-size: var(--text-xs, 12px);
+  color: var(--muted);
+}
+
+.chef-today-row-open {
+  justify-self: start;
+  font-size: var(--text-xs, 12px);
+  font-weight: var(--font-medium);
+  color: var(--accent, inherit);
+}
+
+.chef-today-more-hint {
+  margin: 4px 0 0;
+  font-size: var(--text-xs, 12px);
+  color: var(--muted);
+}
+
 .chef-today-recommendation-title {
   margin: 0;
   font-size: 1.05rem;
