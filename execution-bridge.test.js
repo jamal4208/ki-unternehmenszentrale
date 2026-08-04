@@ -872,6 +872,95 @@ async function main() {
     }
   });
 
+  // ---------------------------------------------------------------------
+  // V8.6 – Fehlerklassifizierung: technisch nicht herstellbares Fixture-
+  // Repository ist ein Infrastrukturfehler, keine Vertragsverletzung.
+  // ---------------------------------------------------------------------
+
+  check("V8.6: nicht herstellbares Fixture-Repository wirft typisierten Infrastrukturfehler", () => {
+    const { paths } = bootstrap("eb-v86-infra-");
+    // Am erwarteten Repository-Pfad liegt eine Datei. Das Anlegen des
+    // Verzeichnisses ist damit technisch unmöglich – genau die Fehlerklasse,
+    // die in eingeschränkten Umgebungen auch git init trifft.
+    fs.writeFileSync(bridge.fixtureRepoPath(paths), "blockiert", { mode: 0o600 });
+    let caught = null;
+    try {
+      bridge.ensureFixtureProjectRepo({ paths });
+    } catch (error) {
+      caught = error;
+    }
+    assert.ok(caught, "ensureFixtureProjectRepo muss scheitern");
+    assert.ok(caught instanceof bridge.ExecutionInfrastructureError);
+    assert.strictEqual(caught.code, bridge.EXECUTION_INFRASTRUCTURE_ERROR_CODE);
+    assert.strictEqual(caught.httpStatus, 503);
+    assert.strictEqual(caught.message, bridge.EXECUTION_INFRASTRUCTURE_PUBLIC_MESSAGE);
+    assert.ok(bridge.isExecutionInfrastructureError(caught));
+  });
+
+  check("V8.6: öffentliche Infrastrukturmeldung ist pfadfrei, die Originalursache bleibt intern erhalten", () => {
+    const { paths, appSupportDir } = bootstrap("eb-v86-diag-");
+    fs.writeFileSync(bridge.fixtureRepoPath(paths), "blockiert", { mode: 0o600 });
+    let caught = null;
+    try {
+      bridge.ensureFixtureProjectRepo({ paths });
+    } catch (error) {
+      caught = error;
+    }
+    [caught.message, caught.internalDiagnosis].forEach((text) => {
+      assert.doesNotMatch(text, /\/Users|\/private|\/tmp|\/var\/folders/);
+      assert.doesNotMatch(text, /\.git\/hooks|git init|Operation not permitted/);
+      assert.ok(!text.includes(appSupportDir));
+    });
+    // Originalursache ausschließlich serverseitig, über cause.
+    assert.ok(caught.cause instanceof Error);
+    assert.ok(typeof caught.internalDiagnosis === "string" && caught.internalDiagnosis.length > 0);
+  });
+
+  check("V8.6: git-Fehlschlag im Fixture-Repository wird ebenfalls als Infrastrukturfehler klassifiziert", () => {
+    const { paths } = bootstrap("eb-v86-git-");
+    // .git existiert als Datei: die Initialisierung wird übersprungen, jedes
+    // nachfolgende git-Kommando scheitert kontrolliert.
+    const repoDir = bridge.fixtureRepoPath(paths);
+    fs.mkdirSync(repoDir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(path.join(repoDir, ".git"), "kein Repository", { mode: 0o600 });
+    assert.throws(
+      () => bridge.ensureFixtureProjectRepo({ paths }),
+      (error) => bridge.isExecutionInfrastructureError(error) && error.message === bridge.EXECUTION_INFRASTRUCTURE_PUBLIC_MESSAGE,
+    );
+  });
+
+  await checkAsync("V8.6: Infrastrukturfehler ist serverseitig im Audit nachvollziehbar", async () => {
+    const { paths } = bootstrap("eb-v86-audit-");
+    fs.writeFileSync(bridge.fixtureRepoPath(paths), "blockiert", { mode: 0o600 });
+    assert.throws(() => bridge.ensureFixtureProjectRepo({ paths }));
+    const auditRaw = fs.readFileSync(path.join(paths.auditDir, "execution-bridge-audit.log"), "utf8");
+    assert.match(auditRaw, /"action":"ENVIRONMENT_UNAVAILABLE"/);
+    assert.match(auditRaw, new RegExp(`"status":"${bridge.EXECUTION_INFRASTRUCTURE_ERROR_CODE}"`));
+    assert.doesNotMatch(auditRaw, /\/Users|\/private|\/var\/folders/);
+    assert.doesNotMatch(auditRaw, /apiKey|secret|password/i);
+  });
+
+  check("V8.6: fachliche Ablehnungen werden nicht als Infrastrukturfehler klassifiziert", () => {
+    assert.strictEqual(bridge.isExecutionInfrastructureError(new Error("runId ist erforderlich.")), false);
+    const stale = new Error("Working-Tree-Baseline ist veraltet (Drift). Status: STALE.");
+    stale.code = "BASELINE_STALE";
+    assert.strictEqual(bridge.isExecutionInfrastructureError(stale), false);
+    const systemError = Object.assign(new Error("EACCES"), { code: "EACCES", errno: -13, syscall: "mkdir" });
+    assert.strictEqual(bridge.isExecutionInfrastructureError(systemError), false);
+    assert.strictEqual(bridge.isExecutionInfrastructureError(null), false);
+  });
+
+  check("V8.6: Ursachenbeschreibung nimmt ausschließlich pfadfreie Kennwerte auf", () => {
+    const gitFailure = Object.assign(new Error("Command failed: git init -q\n/private/tmp/x: Operation not permitted"), {
+      status: 128,
+      syscall: "spawnSync",
+    });
+    const described = bridge.describeInfrastructureCause(gitFailure);
+    assert.match(described, /exit=128/);
+    assert.doesNotMatch(described, /git init|Operation not permitted|\/private/);
+    assert.strictEqual(bridge.describeInfrastructureCause(null), "UNKNOWN");
+  });
+
   check("Betrieb: Audit ist append-only und rotiert bei Größenüberschreitung", () => {
     const { paths } = bootstrap("eb-op-audit-");
     for (let index = 0; index < 5; index += 1) {

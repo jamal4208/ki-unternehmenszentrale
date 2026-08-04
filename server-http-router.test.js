@@ -6,9 +6,10 @@ const os = require("os");
 const http = require("http");
 const net = require("net");
 const path = require("path");
-const { spawn } = require("child_process");
+const { spawn, execFileSync } = require("child_process");
 const { createHttpRouter, buildRouteMap, getMimeType, normalizeRequestPathname } = require("./server-http-router");
-const { requestHandler } = require("./server");
+const { requestHandler, classifyExecutionHandlerFailure } = require("./server");
+const executionBridge = require("./execution-bridge");
 const { API_SECURITY_FLAGS } = require("./project-registry");
 const RouteInventory = require("./route-inventory");
 
@@ -24,6 +25,18 @@ function check(label, assertion) {
   assertion();
   passed += 1;
   console.log(`ok ${passed} - ${label}`);
+}
+
+// V8.6 – Assertion-Kontext für HTTP-Prüfpunkte. Gibt Status und Antwortkörper
+// aus, damit die Ursache eines Fehlschlags direkt erkennbar ist, ohne dass ein
+// absoluter Pfad in die Testausgabe gelangt.
+function safeResponseContext(response) {
+  const raw = typeof response?.body === "string" ? response.body : "";
+  const redacted = raw
+    .replace(/\/(?:Users|private|var|tmp|home|Volumes)\/[^\s"'`,)]*/g, "[Pfad entfernt]")
+    .replace(/\s+/g, " ")
+    .slice(0, 400);
+  return `HTTP ${response?.statusCode}: ${redacted}`;
 }
 
 function sendJson(res, statusCode, payload) {
@@ -701,9 +714,12 @@ async function runTests() {
       },
     });
     check("Integration: POST /api/execution/prepare liefert PREPARED", () => {
-      assert.strictEqual(prepared.statusCode, 200);
-      assert.strictEqual(prepared.json.status, "PREPARED");
-      assert.ok(typeof prepared.json.startToken === "string" && prepared.json.startToken.length > 0);
+      assert.strictEqual(prepared.statusCode, 200, safeResponseContext(prepared));
+      assert.strictEqual(prepared.json.status, "PREPARED", safeResponseContext(prepared));
+      assert.ok(
+        typeof prepared.json.startToken === "string" && prepared.json.startToken.length > 0,
+        safeResponseContext(prepared),
+      );
     });
 
     const started = await httpRequest(integrationPort, "POST", "/api/execution/attempts/start", {
@@ -774,9 +790,213 @@ async function runTests() {
     check("Integration: Apply-Token ist einmalig (Zweitnutzung liefert 400)", () =>
       assert.strictEqual(applyTokenReuse.statusCode, 400),
     );
+
+    // -------------------------------------------------------------------
+    // V8.6 – Fehlerklassifizierung am echten Serverprozess. Fachliche und
+    // sicherheitsbezogene Ablehnungen bleiben 400. Ausschließlich eine
+    // technisch nicht herstellbare Ausführungsumgebung wird 503.
+    // -------------------------------------------------------------------
+
+    const bridgePaths = executionBridge.resolveBridgePaths({});
+    const fixtureRepoDir = executionBridge.fixtureRepoPath(bridgePaths);
+    check("V8.6: Testprozess und Serverprozess sehen dasselbe isolierte Fixture-Repository", () => {
+      assert.ok(fixtureRepoDir.startsWith(`${FAKE_HOME_DIR}${path.sep}`), "Fixture-Repo muss unter dem isolierten HOME liegen");
+      assert.ok(fs.existsSync(path.join(fixtureRepoDir, ".git")));
+    });
+
+    function preparePayload(overrides = {}) {
+      return {
+        runId: overrides.runId || "run-v86",
+        executionPackage: {
+          executionPackageId: "ep-v86",
+          executionPackageFingerprint: "fp-v86",
+          projectId: "execution-bridge-fixture",
+          allowedFiles: ["FIXTURE_NOTE.md"],
+          forbiddenPaths: [],
+          ...(overrides.executionPackage || {}),
+        },
+      };
+    }
+
+    // Nach dem Apply ist der Working Tree des Fixture-Repositories bewusst
+    // verändert. Genau dieser Zustand ist der Vertragsfall "dirty Baseline".
+    const prepareDirtyBaseline = await httpRequest(integrationPort, "POST", "/api/execution/prepare", preparePayload({ runId: "run-v86-dirty" }));
+    check("V8.6: dirty Baseline bleibt Vertragsfehler (400) mit Fachtext", () => {
+      assert.strictEqual(prepareDirtyBaseline.statusCode, 400, safeResponseContext(prepareDirtyBaseline));
+      assert.match(prepareDirtyBaseline.json.message, /saubere Baseline/);
+      assert.strictEqual(prepareDirtyBaseline.json.code, undefined);
+    });
+
+    execFileSync("git", ["checkout", "--", "."], {
+      cwd: fixtureRepoDir,
+      encoding: "utf8",
+      shell: false,
+      env: { PATH: process.env.PATH || "", LANG: "C" },
+    });
+
+    const prepareMissingFields = await httpRequest(integrationPort, "POST", "/api/execution/prepare", { runId: "run-v86-missing" });
+    check("V8.6: fehlende Pflichtfelder bleiben Vertragsfehler (400)", () => {
+      assert.strictEqual(prepareMissingFields.statusCode, 400, safeResponseContext(prepareMissingFields));
+      assert.match(prepareMissingFields.json.message, /erforderlich/);
+    });
+
+    const prepareUnknownFieldIntegration = await httpRequest(integrationPort, "POST", "/api/execution/prepare", {
+      ...preparePayload({ runId: "run-v86-unknown" }),
+      freeShellCommand: "rm -rf /",
+    });
+    check("V8.6: unbekanntes Feld bleibt Vertragsfehler (400)", () => {
+      assert.strictEqual(prepareUnknownFieldIntegration.statusCode, 400, safeResponseContext(prepareUnknownFieldIntegration));
+      assert.strictEqual(prepareUnknownFieldIntegration.json.ok, false);
+    });
+
+    const prepareForbiddenFile = await httpRequest(
+      integrationPort,
+      "POST",
+      "/api/execution/prepare",
+      preparePayload({ runId: "run-v86-file", executionPackage: { allowedFiles: ["server.js"] } }),
+    );
+    check("V8.6: unzulässige Fixture-Datei bleibt Vertragsfehler (400)", () => {
+      assert.strictEqual(prepareForbiddenFile.statusCode, 400, safeResponseContext(prepareForbiddenFile));
+      assert.match(prepareForbiddenFile.json.message, /Fixture-Projekt erlaubt ausschließlich/);
+    });
+
+    const prepareStale = await httpRequest(
+      integrationPort,
+      "POST",
+      "/api/execution/prepare",
+      preparePayload({ runId: "run-v86-stale", executionPackage: { baseCommit: "0".repeat(40) } }),
+    );
+    check("V8.6: STALE-Paket bleibt Vertragsfehler (400)", () => {
+      assert.strictEqual(prepareStale.statusCode, 400, safeResponseContext(prepareStale));
+      assert.match(prepareStale.json.message, /STALE/);
+    });
+
+    const prepareUnknownProject = await httpRequest(
+      integrationPort,
+      "POST",
+      "/api/execution/prepare",
+      preparePayload({ runId: "run-v86-project", executionPackage: { projectId: "unbekanntes-projekt" } }),
+    );
+    check("V8.6: unbekanntes Projekt bleibt Vertragsfehler (400)", () => {
+      assert.strictEqual(prepareUnknownProject.statusCode, 400, safeResponseContext(prepareUnknownProject));
+      assert.strictEqual(prepareUnknownProject.json.code, undefined);
+    });
+
+    executionBridge.acquireProjectLock(bridgePaths, "execution-bridge-fixture", "att-v86-lock");
+    const prepareLocked = await httpRequest(integrationPort, "POST", "/api/execution/prepare", preparePayload({ runId: "run-v86-lock" }));
+    executionBridge.releaseProjectLock(bridgePaths, "execution-bridge-fixture", "att-v86-lock");
+    check("V8.6: aktiver Lock bleibt Vertragsfehler (400)", () => {
+      assert.strictEqual(prepareLocked.statusCode, 400, safeResponseContext(prepareLocked));
+      assert.match(prepareLocked.json.message, /aktiver Ausführungsversuch/);
+    });
+
+    const startInvalidToken = await httpRequest(integrationPort, "POST", "/api/execution/attempts/start", {
+      token: "kein-gueltiger-token",
+      runId: "run-v86-token",
+      executionPackageId: "ep-v86",
+      executionPackageFingerprint: "fp-v86",
+      attemptId: "att-v86-unbekannt",
+      scenario: "SUCCESS",
+      approved: true,
+    });
+    check("V8.6: ungültiger Start-Token bleibt Vertragsfehler (400)", () => {
+      assert.strictEqual(startInvalidToken.statusCode, 400, safeResponseContext(startInvalidToken));
+    });
+
+    // Erst jetzt wird das Fixture-Repository technisch unherstellbar gemacht:
+    // am erwarteten Verzeichnispfad liegt eine Datei. Dieselbe Fehlerklasse
+    // entsteht, wenn eine eingeschränkte Umgebung das Anlegen von
+    // .git-Strukturen verweigert.
+    fs.rmSync(fixtureRepoDir, { recursive: true, force: true });
+    fs.writeFileSync(fixtureRepoDir, "blockiert", { mode: 0o600 });
+
+    const prepareInfrastructure = await httpRequest(integrationPort, "POST", "/api/execution/prepare", preparePayload({ runId: "run-v86-infra" }));
+    check("V8.6: nicht herstellbares Fixture-Repository liefert kontrolliert 503", () => {
+      assert.strictEqual(prepareInfrastructure.statusCode, 503, safeResponseContext(prepareInfrastructure));
+      assert.strictEqual(prepareInfrastructure.json.ok, false);
+      assert.strictEqual(prepareInfrastructure.json.code, "EXECUTION_ENVIRONMENT_UNAVAILABLE");
+      assert.strictEqual(
+        prepareInfrastructure.json.message,
+        "Die Ausführungsumgebung konnte vorübergehend nicht vorbereitet werden.",
+      );
+      assert.strictEqual(prepareInfrastructure.json.writeOperationsBlocked, false);
+      assert.strictEqual(prepareInfrastructure.json.madeExternalRequest, false);
+    });
+
+    check("V8.6: Infrastruktur-Response enthält keine internen Pfade, Git-Ausgaben oder Stacktraces", () => {
+      [
+        /\/Users/,
+        /\/private/,
+        /\/tmp/,
+        /\/var\/folders/,
+        /\.git\/hooks/,
+        /git init/,
+        /Operation not permitted/,
+        /EEXIST|EACCES|EPERM|ENOENT|ENOTDIR/,
+        /\n\s+at /,
+        /execFileSync|spawnSync/,
+        /Library\/Application Support/,
+      ].forEach((pattern) => {
+        assert.doesNotMatch(prepareInfrastructure.body, pattern, `Verbotenes Muster ${pattern} in der Antwort`);
+      });
+    });
+
+    const startInvalidTokenWhileBroken = await httpRequest(integrationPort, "POST", "/api/execution/attempts/start", {
+      token: "kein-gueltiger-token",
+      runId: "run-v86-token-broken",
+      executionPackageId: "ep-v86",
+      executionPackageFingerprint: "fp-v86",
+      attemptId: "att-v86-unbekannt",
+      scenario: "SUCCESS",
+      approved: true,
+    });
+    check("V8.6: gestörte Umgebung macht Vertragsfehler nicht pauschal zu 503", () => {
+      assert.strictEqual(startInvalidTokenWhileBroken.statusCode, 400, safeResponseContext(startInvalidTokenWhileBroken));
+      assert.notStrictEqual(startInvalidTokenWhileBroken.json.code, "EXECUTION_ENVIRONMENT_UNAVAILABLE");
+    });
   } finally {
     serverProcess.kill("SIGTERM");
   }
+
+  // -------------------------------------------------------------------------
+  // V8.6 – Klassifizierung direkt an der Router-Funktion. Deckt Exceptionarten
+  // ab, die über HTTP nicht gefahrlos erzeugbar sind.
+  // -------------------------------------------------------------------------
+
+  check("V8.6: typisierter Infrastrukturfehler wird auf 503 mit festem Code abgebildet", () => {
+    const classified = classifyExecutionHandlerFailure(
+      new executionBridge.ExecutionInfrastructureError("fixtureRepo exit=128", new Error("intern")),
+    );
+    assert.strictEqual(classified.statusCode, 503);
+    assert.strictEqual(classified.payload.code, executionBridge.EXECUTION_INFRASTRUCTURE_ERROR_CODE);
+    assert.strictEqual(classified.payload.message, executionBridge.EXECUTION_INFRASTRUCTURE_PUBLIC_MESSAGE);
+  });
+
+  check("V8.6: bewusst formulierte Fachablehnung bleibt 400 mit unverändertem Text", () => {
+    const classified = classifyExecutionHandlerFailure(new Error("Branch weicht vom Live-Stand ab. Paket ist STALE."));
+    assert.strictEqual(classified.statusCode, 400);
+    assert.strictEqual(classified.payload.message, "Branch weicht vom Live-Stand ab. Paket ist STALE.");
+    assert.ok(!("code" in classified.payload));
+  });
+
+  check("V8.6: unbekannte Laufzeitexception wird nicht als normaler Vertragsfehler ausgegeben", () => {
+    const classified = classifyExecutionHandlerFailure(new TypeError("x is not a function"));
+    assert.strictEqual(classified.statusCode, 400);
+    assert.strictEqual(classified.payload.code, "EXECUTION_REQUEST_NOT_PROCESSED");
+    assert.doesNotMatch(classified.payload.message, /is not a function/);
+    assert.notStrictEqual(classified.payload.code, executionBridge.EXECUTION_INFRASTRUCTURE_ERROR_CODE);
+  });
+
+  check("V8.6: rohe Systemexception erreicht die Client-Antwort niemals im Original", () => {
+    const systemError = Object.assign(
+      new Error("EPERM: operation not permitted, mkdir '/Users/test/Library/Application Support/x/.git/hooks'"),
+      { code: "EPERM", errno: -1, syscall: "mkdir" },
+    );
+    const classified = classifyExecutionHandlerFailure(systemError);
+    assert.strictEqual(classified.statusCode, 400);
+    assert.strictEqual(classified.payload.code, "EXECUTION_REQUEST_NOT_PROCESSED");
+    assert.doesNotMatch(JSON.stringify(classified.payload), /\/Users|EPERM|\.git\/hooks/);
+  });
 
   check("normalizeRequestPathname blockiert Traversal", () => {
     assert.strictEqual(normalizeRequestPathname("/../secret"), null);
@@ -789,8 +1009,8 @@ async function runTests() {
     /* best effort cleanup */
   }
 
-  assert.strictEqual(passed, 73);
-  console.log("server-http-router.test.js: 73 Prüfpunkte erfolgreich");
+  assert.strictEqual(passed, 89);
+  console.log("server-http-router.test.js: 89 Prüfpunkte erfolgreich");
 }
 
 runTests().catch((error) => {

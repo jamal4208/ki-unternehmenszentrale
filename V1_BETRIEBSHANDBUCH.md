@@ -275,6 +275,23 @@ Je Abschlussbericht wird für jedes der folgenden Dokumente genau einer von drei
 
 Ablauf: Vor dem Formulieren des Abschlussberichts alle fünf Zeilen einmal durchgehen und je einen der drei Zustände eintragen. Kein Dokument wird dadurch automatisch geändert – jede tatsächliche Änderung bleibt ein bewusster, im Abschlussbericht ausdrücklich genannter Schritt; Commit und Push bleiben ausschließlich Jamals Freigabe.
 
+## 18b. Verbindliche Betriebsregel für Execution-Bridge-Tests (ab V8.6)
+
+Einige Tests erzeugen bewusst ein **echtes Git-Fixture-Repository** außerhalb beider Repositories (unter `~/Library/Application Support/.../fixtures/execution-bridge-demo`, in Tests unter einem isolierten `HOME`). Dafür wird `git init` in einem temporären Verzeichnis ausgeführt.
+
+**Regel:** Diese Tests müssen in einer Umgebung mit **vollständigen Schreibrechten auf `HOME` und `TMPDIR`** ausgeführt werden:
+
+- `server-http-router.test.js`
+- `execution-bridge.test.js`
+- `execution-bridge-codex.test.js`
+- jeder vollständige `npm test`-Lauf, weil diese Dateien darin enthalten sind
+
+**Grund (mechanisch bestätigt):** In einer eingeschränkten Agent-Sandbox darf `git init -q` unterhalb des temporären Fixture-Verzeichnisses das Verzeichnis `.git/hooks/` nicht anlegen (`Operation not permitted`). Damit scheitert `ensureFixtureProjectRepo()`, und ein Prüfpunkt wie „Integration: POST /api/execution/prepare liefert PREPARED" ist dort technisch nicht erfüllbar.
+
+**Konsequenz:** Ein Fehlschlag genau dieser Tests **innerhalb** der eingeschränkten Sandbox ist **kein belastbarer Produktnachweis**. Er belegt ausschließlich die fehlenden Schreibrechte der Ausführungsumgebung. Für eine verbindliche Abnahme zählt nur der Lauf außerhalb der Sandbox.
+
+**Erwartetes Sandbox-Verhalten ab V8.6:** Der Prepare-Aufruf antwortet in diesem Fall kontrolliert mit **HTTP 503**, `code: EXECUTION_ENVIRONMENT_UNAVAILABLE` und der festen, pfadfreien Meldung „Die Ausführungsumgebung konnte vorübergehend nicht vorbereitet werden." – nicht mehr mit einem irreführenden HTTP 400 samt absolutem Dateipfad. Der Sandbox-Lauf schlägt weiterhin fehl, aber sichtbar korrekt und diagnostizierbar; der Assertion-Kontext des Prüfpunkts gibt Status und sicheren Antwortkörper aus.
+
 ## 19. Update- und Versionsregel
 
 - V6.44.0 friert den lokalen V1-Betrieb ein; V6.44.1 synchronisiert nur die Health-Verifizierungsmomentaufnahme

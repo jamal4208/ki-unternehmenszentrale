@@ -254,6 +254,79 @@ const FIXTURE_CALC_JS_CONTENT =
 const FIXTURE_CALC_TEST_JS_CONTENT =
   "\"use strict\";\n\nconst assert = require(\"assert\");\nconst { addFixtureNumbers } = require(\"./FIXTURE_CALC.js\");\n\nassert.strictEqual(addFixtureNumbers(2, 3), 5);\nconsole.log(\"ok 1 - addFixtureNumbers addiert korrekt\");\n";
 
+// ---------------------------------------------------------------------------
+// V8.6 – Fehlerklassifizierung der Execution-Routen. Es gibt genau zwei
+// Klassen:
+//   A. fachliche oder sicherheitsbezogene Ablehnung -> gewöhnlicher Error,
+//      HTTP 400, bewusst formulierter Fachtext (unverändert),
+//   B. technisch nicht herstellbare Ausführungsumgebung (Ziel- oder
+//      Fixture-Repository lässt sich nicht anlegen bzw. initialisieren) ->
+//      ExecutionInfrastructureError, HTTP 503, feste pfadfreie Meldung.
+// Die Erkennung erfolgt ausschließlich über den stabilen Code, niemals über
+// das Durchsuchen von Fehlertexten. Die technische Originalursache bleibt
+// serverseitig über cause/internalDiagnosis erhalten und wird nie an den
+// Client gegeben.
+// ---------------------------------------------------------------------------
+
+const EXECUTION_INFRASTRUCTURE_ERROR_CODE = "EXECUTION_ENVIRONMENT_UNAVAILABLE";
+const EXECUTION_INFRASTRUCTURE_HTTP_STATUS = 503;
+const EXECUTION_INFRASTRUCTURE_PUBLIC_MESSAGE =
+  "Die Ausführungsumgebung konnte vorübergehend nicht vorbereitet werden.";
+
+class ExecutionInfrastructureError extends Error {
+  constructor(internalDiagnosis, cause) {
+    super(EXECUTION_INFRASTRUCTURE_PUBLIC_MESSAGE);
+    this.name = "ExecutionInfrastructureError";
+    this.code = EXECUTION_INFRASTRUCTURE_ERROR_CODE;
+    this.httpStatus = EXECUTION_INFRASTRUCTURE_HTTP_STATUS;
+    this.publicMessage = EXECUTION_INFRASTRUCTURE_PUBLIC_MESSAGE;
+    this.internalDiagnosis = String(internalDiagnosis || "UNKNOWN").slice(0, 200);
+    if (cause !== undefined) this.cause = cause;
+  }
+}
+
+function isExecutionInfrastructureError(error) {
+  if (!error || typeof error !== "object") return false;
+  if (error instanceof ExecutionInfrastructureError) return true;
+  return error.code === EXECUTION_INFRASTRUCTURE_ERROR_CODE;
+}
+
+// Reduziert eine beliebige Systemexception auf pfad- und ausgabefreie
+// Kennwerte. Bewusst ohne error.message, weil execFileSync dort das
+// vollständige Kommando samt absolutem Arbeitsverzeichnis und der rohen
+// Git-Ausgabe mitführt.
+function describeInfrastructureCause(error) {
+  if (!error || typeof error !== "object") return "UNKNOWN";
+  const parts = [];
+  if (typeof error.code === "string" && /^[A-Z0-9_]{1,40}$/.test(error.code)) parts.push(`code=${error.code}`);
+  if (typeof error.errno === "number") parts.push(`errno=${error.errno}`);
+  if (typeof error.status === "number") parts.push(`exit=${error.status}`);
+  if (typeof error.signal === "string" && /^[A-Z0-9]{1,20}$/.test(error.signal)) parts.push(`signal=${error.signal}`);
+  if (typeof error.syscall === "string" && /^[a-z0-9]{1,20}$/.test(error.syscall)) parts.push(`syscall=${error.syscall}`);
+  return parts.length > 0 ? parts.join(" ") : "UNKNOWN";
+}
+
+function infrastructureError(stage, cause) {
+  return new ExecutionInfrastructureError(`${stage} ${describeInfrastructureCause(cause)}`, cause);
+}
+
+// Serverseitige Diagnose über den bestehenden Audit-Weg. Bewusst best effort:
+// wenn schon das Anlegen der Ausführungsumgebung scheitert, kann auch das
+// Audit-Verzeichnis unbeschreibbar sein. Ein fehlgeschlagener Audit-Eintrag
+// darf die Klassifizierung nicht verändern.
+function auditInfrastructureFailure(paths, error) {
+  if (!paths || !paths.auditDir) return;
+  try {
+    appendAuditEntry(paths, {
+      action: "ENVIRONMENT_UNAVAILABLE",
+      status: EXECUTION_INFRASTRUCTURE_ERROR_CODE,
+      message: error.internalDiagnosis,
+    });
+  } catch (_auditError) {
+    /* best effort diagnosis only */
+  }
+}
+
 // In-memory, RAM-only, one-time execution tokens. Never written to disk, never
 // part of any run object, never returned via GET, never logged with full value.
 const TOKENS = new Map();
@@ -307,9 +380,15 @@ function ensureDirSecure(dirPath) {
 }
 
 function ensureBridgeDirs(paths) {
-  [paths.appSupportDir, paths.locksDir, paths.attemptsDir, paths.auditDir, paths.workspacesDir, paths.fixturesDir].forEach(
-    ensureDirSecure,
-  );
+  try {
+    [paths.appSupportDir, paths.locksDir, paths.attemptsDir, paths.auditDir, paths.workspacesDir, paths.fixturesDir].forEach(
+      ensureDirSecure,
+    );
+  } catch (error) {
+    const infrastructure = infrastructureError("bridgeDirs", error);
+    auditInfrastructureFailure(paths, infrastructure);
+    throw infrastructure;
+  }
 }
 
 function writeJsonAtomic(filePath, data) {
@@ -525,30 +604,46 @@ function runGitSync(repoDir, args) {
   });
 }
 
+// Der Erfolgsweg ist unverändert. Neu ist ausschließlich, dass ein technisch
+// nicht herstellbares Fixture-Repository (z. B. wenn die Umgebung das Anlegen
+// von .git-Strukturen verweigert) nicht mehr als rohe Child-Process-Exception
+// nach außen dringt, sondern als typisierter Infrastrukturfehler.
 function ensureFixtureProjectRepo(options = {}) {
   const paths = options.paths || resolveBridgePaths(options);
-  ensureDirSecure(paths.fixturesDir);
+  try {
+    ensureDirSecure(paths.fixturesDir);
+  } catch (error) {
+    const infrastructure = infrastructureError("fixturesDir", error);
+    auditInfrastructureFailure(paths, infrastructure);
+    throw infrastructure;
+  }
   const repoDir = fixtureRepoPath(paths);
   const gitDir = path.join(repoDir, ".git");
-  if (!fs.existsSync(gitDir)) {
-    fs.mkdirSync(repoDir, { recursive: true, mode: 0o700 });
-    runGitSync(repoDir, ["init", "-q"]);
-    runGitSync(repoDir, ["config", "user.email", "execution-bridge@local.invalid"]);
-    runGitSync(repoDir, ["config", "user.name", "Execution Bridge Fixture"]);
-    fs.writeFileSync(
-      path.join(repoDir, "FIXTURE_NOTE.md"),
-      "# Fixture-Notiz\n\nDiese Datei gehört zum Execution-Bridge-Fixture-Repository (Phase C).\n",
-      { mode: 0o600 },
-    );
-    fs.writeFileSync(
-      path.join(repoDir, "FIXTURE_DATA.json"),
-      JSON.stringify({ fixture: true, purpose: "execution-bridge-demo" }, null, 2),
-      { mode: 0o600 },
-    );
-    runGitSync(repoDir, ["add", "-A"]);
-    runGitSync(repoDir, ["commit", "-q", "-m", "Fixture-Repository für Execution Bridge (Phase C)"]);
+  try {
+    if (!fs.existsSync(gitDir)) {
+      fs.mkdirSync(repoDir, { recursive: true, mode: 0o700 });
+      runGitSync(repoDir, ["init", "-q"]);
+      runGitSync(repoDir, ["config", "user.email", "execution-bridge@local.invalid"]);
+      runGitSync(repoDir, ["config", "user.name", "Execution Bridge Fixture"]);
+      fs.writeFileSync(
+        path.join(repoDir, "FIXTURE_NOTE.md"),
+        "# Fixture-Notiz\n\nDiese Datei gehört zum Execution-Bridge-Fixture-Repository (Phase C).\n",
+        { mode: 0o600 },
+      );
+      fs.writeFileSync(
+        path.join(repoDir, "FIXTURE_DATA.json"),
+        JSON.stringify({ fixture: true, purpose: "execution-bridge-demo" }, null, 2),
+        { mode: 0o600 },
+      );
+      runGitSync(repoDir, ["add", "-A"]);
+      runGitSync(repoDir, ["commit", "-q", "-m", "Fixture-Repository für Execution Bridge (Phase C)"]);
+    }
+    ensureFixtureCodexPilotFiles(repoDir);
+  } catch (error) {
+    const infrastructure = infrastructureError("fixtureRepo", error);
+    auditInfrastructureFailure(paths, infrastructure);
+    throw infrastructure;
   }
-  ensureFixtureCodexPilotFiles(repoDir);
   return repoDir;
 }
 
@@ -1960,6 +2055,12 @@ module.exports = {
   TERMINAL_ATTEMPT_STATUSES,
   APPLY_STATUSES,
   KNOWN_WORKING_TREE_BASELINE_FIELDS,
+  EXECUTION_INFRASTRUCTURE_ERROR_CODE,
+  EXECUTION_INFRASTRUCTURE_HTTP_STATUS,
+  EXECUTION_INFRASTRUCTURE_PUBLIC_MESSAGE,
+  ExecutionInfrastructureError,
+  isExecutionInfrastructureError,
+  describeInfrastructureCause,
   DEFAULT_ATTEMPT_TIMEOUT_MS,
   DEFAULT_CODEX_ATTEMPT_TIMEOUT_MS,
   TOKEN_TTL_MS,

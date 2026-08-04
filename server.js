@@ -443,13 +443,74 @@ function readJsonRequestBody(req, maxBytes) {
   });
 }
 
-function executionErrorPayload(message) {
+function executionErrorPayload(message, code) {
   return {
     ok: false,
     message: String(message || "Anfrage konnte nicht sicher verarbeitet werden."),
+    ...(code ? { code: String(code) } : {}),
     writeOperationsBlocked: false,
     madeExternalRequest: false,
   };
+}
+
+// V8.6 – Ein Fehler der Execution-Routen ist entweder eine bewusst
+// formulierte fachliche/sicherheitsbezogene Ablehnung (HTTP 400, Fachtext
+// unverändert) oder ein typisierter Infrastrukturfehler (HTTP 503, feste
+// pfadfreie Meldung). Alles, was sich keiner der beiden Klassen zuordnen
+// lässt, wird nicht als Fachablehnung ausgegeben, sondern eigenständig
+// gekennzeichnet – ohne rohe Systemmeldung.
+const EXECUTION_UNCLASSIFIED_ERROR_CODE = "EXECUTION_REQUEST_NOT_PROCESSED";
+const EXECUTION_UNCLASSIFIED_PUBLIC_MESSAGE = "Die Anfrage konnte nicht sicher verarbeitet werden.";
+
+// Ein bewusst formulierter Fachtext enthält niemals einen absoluten Pfad,
+// einen Zeilenumbruch oder eine mehrzeilige Prozessausgabe. Trifft eines
+// davon zu, stammt der Text aus einer rohen Systemexception.
+function isPublicSafeExecutionMessage(message) {
+  if (typeof message !== "string") return false;
+  const trimmed = message.trim();
+  if (!trimmed || trimmed.length > 400) return false;
+  if (/[\n\r]/.test(trimmed)) return false;
+  if (/(^|[\s"'(=])\/[A-Za-z0-9._-]+\//.test(trimmed)) return false;
+  return true;
+}
+
+// Mechanische Unterscheidung über Fehlertyp bzw. errno/syscall, nicht über
+// eine Textsuche in der Fehlermeldung.
+function isUnexpectedRuntimeError(error) {
+  if (!error || typeof error !== "object") return true;
+  if (
+    error instanceof TypeError
+    || error instanceof RangeError
+    || error instanceof ReferenceError
+    || error instanceof SyntaxError
+    || error instanceof EvalError
+    || error instanceof URIError
+  ) {
+    return true;
+  }
+  if (typeof error.errno === "number") return true;
+  if (typeof error.syscall === "string" && error.syscall.length > 0) return true;
+  return false;
+}
+
+function classifyExecutionHandlerFailure(error) {
+  if (executionBridgeModule.isExecutionInfrastructureError(error)) {
+    return {
+      statusCode: executionBridgeModule.EXECUTION_INFRASTRUCTURE_HTTP_STATUS,
+      payload: executionErrorPayload(
+        executionBridgeModule.EXECUTION_INFRASTRUCTURE_PUBLIC_MESSAGE,
+        executionBridgeModule.EXECUTION_INFRASTRUCTURE_ERROR_CODE,
+      ),
+    };
+  }
+  const message = error && typeof error.message === "string" ? error.message : "";
+  if (isUnexpectedRuntimeError(error) || !isPublicSafeExecutionMessage(message)) {
+    return {
+      statusCode: 400,
+      payload: executionErrorPayload(EXECUTION_UNCLASSIFIED_PUBLIC_MESSAGE, EXECUTION_UNCLASSIFIED_ERROR_CODE),
+    };
+  }
+  return { statusCode: 400, payload: executionErrorPayload(message) };
 }
 
 const EXECUTION_PACKAGE_FIELDS = [
@@ -508,7 +569,8 @@ async function withExecutionApiGuards(req, res, allowedFields, label, handler) {
     const result = await handler(body);
     sendJson(res, 200, { ...result, ...API_SECURITY_FLAGS, madeExternalRequest: false });
   } catch (error) {
-    sendJson(res, 400, executionErrorPayload(error.message));
+    const classified = classifyExecutionHandlerFailure(error);
+    sendJson(res, classified.statusCode, classified.payload);
   }
 }
 
@@ -24369,4 +24431,9 @@ module.exports = {
   routePrefixHandlers,
   postRoutePrefixHandlers,
   staticAssets,
+  // V8.6 – rein lesend für server-http-router.test.js: erlaubt den direkten
+  // Nachweis der Fehlerklassifizierung (Vertragsfehler 400 gegen
+  // Infrastrukturfehler 503) auch für Exceptionarten, die über HTTP nicht
+  // gefahrlos erzeugbar sind. Keine Verhaltensänderung an requestHandler.
+  classifyExecutionHandlerFailure,
 };
