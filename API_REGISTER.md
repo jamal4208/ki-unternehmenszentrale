@@ -4,6 +4,33 @@
 
 `server.js` registriert über `server-http-router.js` **89 GET-Routen** und **52 additive POST-Routen** (Execution Bridge seit Phase C gesichert + V7.1 Phase A Dokumente/Backup gesichert `59f985f` + V7.1 Phase B HeyGen-Connector-Pilot gesichert `ff43089` + V7.1 Phase B.1 Mandantenbasis/Ergebnisrückführung gesichert `37e8a28` + V7.1 Phase C Canva-Connector-Pilot gesichert `52b2d02` + V7.1 Phase C.1 Pilot-Ergebnisakte/Kundenfeedback-Schleife und V7.1 Phase C.1.1 skalierbares Reviewmodell gemeinsam gesichert `6621d93` + V7.2 Phase A Schritt 2 Auth-Routen/Route-Gates + V7.2 Phase A Schritt 3 Owner-Verwaltung/Kundenportal-API + V7.2 Phase A Schritt 4 Betriebsabnahme + V7.2 Phase B Schritt 1 Arbeitsauftrags-API + V7.2 Phase C Schritt 1 Agentenlauf-/Ergebnis-Endpunkte + V7.2 Phase C Schritt 2 Änderungswunsch-/Freigabe-/Versions-Endpunkte innerhalb bestehender Präfixe + V7.3 Jamal-Arbeitsmodus-Zustand/-Aktionen + V7.4 Canva-Produktionskorridor-Zustand/-Aktionen gesichert `f2b0909` + V7.5 Agentenleitstand-/Unternehmensleitlinien-Routen gesichert `6ffa3f8` + V7.6.1 Office-/Finance-Routen gesichert `5b59b17` + V7.6.3 Health-Referenzlauf-Routen (lokal umgesetzt, ungesichert)). Andere HTTP-Methoden bleiben 405. GET-Routen bleiben read-only. Die POST-Routen schreiben ausschließlich lokal (App-Support-Metadaten bzw. die Auth-Datenbank bzw. – nach Jamal-Freigabe – ein Fixture-Testrepository); niemals in Health und niemals mit Commit/Push/Deployment.
 
+## V8.0 – Pilotauftrag aus einem Satz vorausfüllen (keine neue Route, ein neues statisches Asset, keine Änderung am Anlage-Vertrag)
+
+Routenzahlen bleiben unverändert (**89 GET, 52 POST** laut Übersichtszeile oben; laut `route-inventory.js` kanonisch geführt **91 GET, 53 POST**, siehe dortige Historie). Es gibt **keine neue API-Route**: der Vorschlag entsteht ausschließlich browserlokal und deterministisch, ohne jeden `fetch`/POST. Der bestehende Anlage-Vertrag (`POST /api/pilot-work-order/orders`, `gatherCreateFormInput()`, `validateCreateInput()`, `validatePilotOrderInput()`) ist unverändert.
+
+**Neues statisches Asset** (`route-access-policy.js`, additiv, statische Assets damit 34 statt 33): `/pilot-work-order-draft-profiles.js` (`STATIC_OWNER_ONLY`, identischer Schutz wie `/pilot-work-order-ui.js` – kein Kunden-/Supportzugriff, `Cache-Control: no-store`).
+
+**Neues, rein browserlokales Modul (kein HTTP-Endpunkt):** `pilot-work-order-draft-profiles.js#buildPilotWorkOrderDraft(input)` – UMD-Modul (Browser: globaler Namensraum; Node: `require()`), läuft ausschließlich im Client, ist deterministisch (keine Zufallsfunktion, kein Zeitstempel im Ergebnis) und führt keinen Netzwerk-, Datenbank- oder Modell-/Agenten-/Codex-Aufruf aus.
+
+| Eingabe | Typ | Bedeutung |
+|---|---|---|
+| `sentence` | string | Jamals einzelner Eingabesatz, unverändert |
+| `context.chainSelectableFiles` | string[] | unverändert aus `overview.chainSelectableFiles` |
+| `context.chainRecommendedFiles` | string[] | unverändert aus `overview.chainRecommendedFiles` |
+| `context.involvedAgents` | Array | unverändert aus `overview.involvedAgents` |
+
+| Ausgabe | Typ | Bedeutung |
+|---|---|---|
+| `outcome` | `"DRAFT"` \| `"UNSUPPORTED"` | ausschließlich das Profil `USER_PERSPECTIVE` wird erkannt (feste Stichwortprüfung, kein Sprachmodell) |
+| `fields` | Objekt mit den acht `validatePilotOrderInput()`-Feldern, oder `null` | wird durch die echte, unveränderte `pilot-work-order-service.js#validatePilotOrderInput()` akzeptiert |
+| `rationale` | Objekt oder `null` | Treffer der Stichwortprüfung, rein informativ |
+| `recommendedFiles` | string[] | identisch zu `context.chainRecommendedFiles` (zusätzlich defensiv gegen `context.chainSelectableFiles` geprüft) |
+| `team` | Array | identisch zu `context.involvedAgents`, als feste Bearbeitungskette dargestellt, keine eigene Auswahl |
+| `uncertainties` | string[] | sichtbare Rollenabweichungen (`isExactRoleMatch === false`, `mappingNote`), nicht geglättet |
+| `unsupportedReason` | string \| `null` | verständlicher Hinweistext bei `UNSUPPORTED` |
+
+Zusicherungen: keine eigene Geschäftsvalidierung, keine Datei außerhalb der Allowlist, keine Speicherung (kein LocalStorage, keine Datenbank), keine Business-Use-Policy-Anbindung im Vorschlagsweg, kein Rückfragemodell. Der Vorschlag füllt ausschließlich die acht bereits bestehenden, clientseitigen Formularfelder vor (`pilot-work-order-ui.js`); erst ein ausdrücklicher Klick auf den unveränderten Knopf „Pilotauftrag anlegen" sendet den bestehenden `POST /api/pilot-work-order/orders`.
+
 ## V7.9.9 – Auftragsbezogene Dateiauswahl auf die Nutzerperspektive erweitert (keine neue Route, ein additives read-only Overview-Feld)
 
 Routenzahlen bleiben unverändert (**89 GET, 52 POST**). Es gibt keine neue Route, keinen neuen Parameter der bestehenden Route `prepare-agent-chain` und keine neue Aktion. Geändert wurde ausschließlich der Inhalt der serverseitigen Allowlist sowie ein zusätzliches, rein lesendes Overview-Feld.

@@ -48,6 +48,20 @@
 (function () {
   var CANONICAL_PILOT_ORDER_ID = "pilot-three-agent-work-order-v1";
 
+  // V8.0 ("Pilotauftrag aus einem Satz vorausfüllen"): rein additive,
+  // optionale Abhängigkeit auf das deterministische, browserlokale
+  // Vorschlagsmodul (siehe pilot-work-order-draft-profiles.js). Im Browser
+  // lädt index.html dieses Skript VOR pilot-work-order-ui.js, wodurch der
+  // globale Namensraum bereits verfügbar ist; in Node-Tests wird es per
+  // require() geladen (gleiches Erkennungsmuster wie daily-work-run.js).
+  // Fehlt das Modul aus irgendeinem Grund, bleibt ausschließlich die neue
+  // Vorschlagsaktion inaktiv – das bestehende, manuelle Anlageformular ist
+  // davon vollständig unberührt.
+  var pilotWorkOrderDraftProfiles =
+    typeof module === "object" && module.exports
+      ? require("./pilot-work-order-draft-profiles")
+      : (typeof window !== "undefined" && window && window.PilotWorkOrderDraftProfiles) || null;
+
   // ---------------------------------------------------------------------
   // Zustand. Ein Wechsel des ausgewählten Auftrags (selectOrder) löscht
   // sofort `overview` (kein Weiteranzeigen der Daten des vorherigen
@@ -113,6 +127,23 @@
     // erfolgreichen Bestätigungsversuch wieder auf null gesetzt.
     // Form: { action, pilotOrderId, orderTitle, checked, submitting, error }.
     jamalConfirmation: null,
+    // V8.0 ("Pilotauftrag aus einem Satz vorausfüllen"): rein lokaler,
+    // nicht persistierter Zustand des zuletzt gebauten Arbeitsvorschlags.
+    // draftResult ist die unveränderte Rückgabe von
+    // pilotWorkOrderDraftProfiles.buildPilotWorkOrderDraft() (oder null,
+    // solange noch kein Vorschlag erzeugt wurde). draftFilledValues bildet
+    // Formularfeld-ID -> zuletzt eingesetzter Vorschlagswert ab (nur bei
+    // outcome === "DRAFT" gesetzt) und dient ausschließlich dem Vergleich
+    // "Von dir geändert" (aktueller DOM-Wert weicht vom zuletzt eingesetzten
+    // Vorschlagswert ab) – niemals einer automatischen Neuberechnung oder
+    // einem Überschreiben. draftSentenceAtBuild ist der Satz, zu dem der
+    // aktuell angezeigte Vorschlag gehört (für den Hinweis "Satz geändert").
+    // Wird bei jedem Schließen des Anlageformulars sowie nach jeder
+    // erfolgreichen Anlage vollständig geleert (siehe
+    // toggle-create-form/submitCreateOrder unten).
+    draftResult: null,
+    draftFilledValues: null,
+    draftSentenceAtBuild: null,
   };
 
   var STATUS_POLLING_INTERVAL_MS = 5000;
@@ -567,6 +598,14 @@
     // ohne jeden API-Aufruf (kein Status ändert sich dadurch) – dieselbe
     // Grundregel wie für codexApprovalToken/chainStepApprovalTokens oben.
     state.jamalConfirmation = null;
+    // Korrekturlauf F5 (V8.0): der flüchtige V8.0-Vorschlagszustand des
+    // Anlageformulars (draftResult/draftFilledValues/draftSentenceAtBuild)
+    // gehört ausschließlich zum zuvor geöffneten Auftrag – ohne diesen
+    // Reset blieb ein "Von dir geändert"-Vorschlag über den Auftragswechsel
+    // hinweg sichtbar. Dieselbe Funktion wie beim Schließen des
+    // Anlageformulars/nach erfolgreicher Anlage (siehe
+    // bindActionHandlersOnce/submitCreateOrder) – kein zweiter Reset-Pfad.
+    resetDraftState();
     render();
     return fetchJson("/api/pilot-work-order/orders/" + encodeURIComponent(orderId)).then(function (response) {
       if (state.selectedPilotOrderId !== orderId) return;
@@ -643,7 +682,14 @@
   // gewünschte Leeren des Formulars nach Erfolg bleibt dadurch unverändert.
   // -----------------------------------------------------------------------
 
+  // V8.0: das neue Satzfeld steht ZUERST, damit es beim selben
+  // Neuaufbau-/Erhaltungsmechanismus (siehe Kommentar oben) exakt wie die
+  // acht bestehenden Felder behandelt wird – erhalten bei render(), HTTP
+  // 400/409 und Netzwerkfehler.
+  var DRAFT_SENTENCE_FIELD_ID = "pilot-order-draft-sentence";
+
   var CREATE_FORM_FIELD_IDS = [
+    DRAFT_SENTENCE_FIELD_ID,
     "pilot-order-create-title",
     "pilot-order-create-desired-outcome",
     "pilot-order-create-requested-by",
@@ -652,6 +698,20 @@
     "pilot-order-create-forbidden-actions",
     "pilot-order-create-required-approvals",
     "pilot-order-create-timeframe",
+  ];
+
+  // Formularfeld-ID -> Schlüssel in draft.fields (buildPilotWorkOrderDraft-
+  // Rückgabe) sowie ob der Wert ein Array ist (eine Zeile je Eintrag, exakt
+  // wie gatherCreateFormInput()/lines() es beim Absenden wieder einliest).
+  var DRAFT_FIELD_TARGETS = [
+    { id: "pilot-order-create-title", key: "title", isArray: false },
+    { id: "pilot-order-create-desired-outcome", key: "desiredOutcome", isArray: false },
+    { id: "pilot-order-create-requested-by", key: "requestedBy", isArray: false },
+    { id: "pilot-order-create-quality-criteria", key: "qualityCriteria", isArray: true },
+    { id: "pilot-order-create-allowed-tools", key: "allowedTools", isArray: true },
+    { id: "pilot-order-create-forbidden-actions", key: "forbiddenActions", isArray: true },
+    { id: "pilot-order-create-required-approvals", key: "requiredApprovals", isArray: true },
+    { id: "pilot-order-create-timeframe", key: "timeframe", isArray: false },
   ];
 
   function captureCreateFormFieldValues() {
@@ -670,6 +730,80 @@
       var el = byId(id);
       if (el) el.value = values[id];
     });
+  }
+
+  // V8.0: rein lokaler Reset des Vorschlagszustands – niemals ein Auftrag,
+  // niemals ein Request. Aufgerufen beim Schließen des Anlageformulars und
+  // nach jeder erfolgreichen Anlage (siehe bindActionHandlersOnce/
+  // submitCreateOrder unten).
+  function resetDraftState() {
+    state.draftResult = null;
+    state.draftFilledValues = null;
+    state.draftSentenceAtBuild = null;
+  }
+
+  function fieldValueFromDraft(fieldEntry, fields) {
+    var raw = fields[fieldEntry.key];
+    if (fieldEntry.isArray) {
+      return Array.isArray(raw) ? raw.join("\n") : "";
+    }
+    return typeof raw === "string" ? raw : "";
+  }
+
+  // Einzige Stelle, die buildPilotWorkOrderDraft() aufruft. Rein
+  // browserlokal und deterministisch: kein fetch, kein POST, keine
+  // Speicherung, keine Kettenvorbereitung, keine Freigabe, kein
+  // Agentenlauf. Bei DRAFT werden ausschließlich die acht bestehenden
+  // DOM-Felder vorausgefüllt (keine neue Feld-ID, kein neues
+  // Anlageverfahren). Bei UNSUPPORTED bleiben alle acht Felder unangetastet.
+  function buildWorkDraft() {
+    if (!pilotWorkOrderDraftProfiles || typeof pilotWorkOrderDraftProfiles.buildPilotWorkOrderDraft !== "function") return;
+    var sentenceEl = byId(DRAFT_SENTENCE_FIELD_ID);
+    var sentence = sentenceEl ? String(sentenceEl.value || "") : "";
+    var overview = state.overview;
+    var context = {
+      chainSelectableFiles: chainSelectableFilesFromOverview(overview),
+      chainRecommendedFiles: chainRecommendedFilesFromOverview(overview),
+      involvedAgents: (overview && overview.involvedAgents) || [],
+    };
+    var result = pilotWorkOrderDraftProfiles.buildPilotWorkOrderDraft({ sentence: sentence, context: context });
+    // V8.0 Abschnitt 7.8: "kein Überschreiben manueller Änderungen beim
+    // erneuten Vorschlag". Ein Feld gilt bereits VOR diesem Aufbau als
+    // manuell geändert, wenn sein aktueller DOM-Wert vom zuletzt
+    // eingesetzten Vorschlagswert abweicht – genau dieses Feld bleibt beim
+    // Einsetzen des neuen Vorschlags unangetastet (die "Von dir
+    // geändert"-Markierung bleibt dadurch weiterhin sichtbar, da sie gegen
+    // den NEUEN Vorschlagswert verglichen wird).
+    //
+    // Korrekturlauf F1 (V8.0): existiert noch KEIN previousFilledValues
+    // (allererster Vorschlag in diesem Anlageformular), gab es bislang
+    // keinen Vergleichswert – ein bereits manuell ausgefülltes Feld wurde
+    // dadurch beim ersten Klick still überschrieben. Ohne einen früheren
+    // Vorschlagswert gilt ein Feld deshalb bereits dann als manuell
+    // eingegeben, wenn es nicht leer ist (siehe hasPreviousFilledValue
+    // unten) – es wird dann genauso unangetastet gelassen wie ein Feld, das
+    // vom zuletzt eingesetzten Vorschlagswert abweicht.
+    var previousFilledValues = state.draftFilledValues;
+    state.draftResult = result;
+    state.draftSentenceAtBuild = sentence;
+    if (result.outcome === "DRAFT" && result.fields) {
+      var filledValues = {};
+      DRAFT_FIELD_TARGETS.forEach(function (fieldEntry) {
+        var value = fieldValueFromDraft(fieldEntry, result.fields);
+        var el = byId(fieldEntry.id);
+        var hasPreviousFilledValue =
+          Boolean(previousFilledValues) && Object.prototype.hasOwnProperty.call(previousFilledValues, fieldEntry.id);
+        var wasManuallyChanged = hasPreviousFilledValue
+          ? Boolean(el) && el.value !== previousFilledValues[fieldEntry.id]
+          : Boolean(el) && isNonEmptyString(el.value);
+        if (el && !wasManuallyChanged) el.value = value;
+        filledValues[fieldEntry.id] = value;
+      });
+      state.draftFilledValues = filledValues;
+    }
+    // UNSUPPORTED: state.draftFilledValues bleibt absichtlich unverändert –
+    // ein vorheriger, erfolgreicher Vorschlag bleibt inhaltlich referenzierbar
+    // (Grundlage für "Von dir geändert"), aber es wird kein Feld angefasst.
   }
 
   function validateCreateInput(input) {
@@ -714,6 +848,11 @@
           state.actionError = null;
           state.conflict = null;
           state.jamalConfirmation = null;
+          // V8.0: nach erfolgreicher Anlage wird der lokale Vorschlagszustand
+          // vollständig geleert (kein Weiterbestehen für den nächsten,
+          // unabhängigen Anlagevorgang) – keine Doppelanlage, kein
+          // Wiederverwenden eines bereits verarbeiteten Vorschlags.
+          resetDraftState();
           render();
           return loadOrdersList();
         }
@@ -1182,24 +1321,172 @@
     );
   }
 
-  function createFormField(id, label, tag) {
+  function createFormField(id, label, tag, changed) {
+    // V8.0: optionales viertes Argument `changed` markiert ein Feld als
+    // "Von dir ge\u00e4ndert" (siehe isFieldChangedFromDraft unten) – rein
+    // visuell, \u00e4ndert weder Feld-ID noch Wert noch Validierung.
+    var badge = changed ? ' <span class="pilot-order-draft-changed-badge">Von dir ge\u00e4ndert</span>' : "";
     if (tag === "textarea") {
-      return '<label for="' + id + '">' + escapeHtml(label) + '</label><textarea id="' + id + '" rows="2"></textarea>';
+      return '<label for="' + id + '">' + escapeHtml(label) + badge + '</label><textarea id="' + id + '" rows="2"></textarea>';
     }
-    return '<label for="' + id + '">' + escapeHtml(label) + '</label><input id="' + id + '" type="text" />';
+    return '<label for="' + id + '">' + escapeHtml(label) + badge + '</label><input id="' + id + '" type="text" />';
   }
 
-  function renderCreateForm() {
+  // V8.0: ein Feld gilt als "Von dir ge\u00e4ndert", wenn ein Vorschlag
+  // jemals einen Wert eingesetzt hat (state.draftFilledValues kennt die
+  // Feld-ID) UND der aktuell im DOM stehende Wert (preservedValues, direkt
+  // vor dem Neuaufbau erfasst) davon abweicht. Reiner Vergleich, keine
+  // Neuberechnung, kein Zur\u00fccksetzen.
+  function isFieldChangedFromDraft(id, preservedValues) {
+    if (!state.draftFilledValues || !Object.prototype.hasOwnProperty.call(state.draftFilledValues, id)) return false;
+    var currentValue =
+      preservedValues && Object.prototype.hasOwnProperty.call(preservedValues, id) ? preservedValues[id] : "";
+    return currentValue !== state.draftFilledValues[id];
+  }
+
+  function renderDraftTeamItems(team) {
+    return team
+      .map(function (member) {
+        var mismatch = member && member.isExactRoleMatch === false ? " (Rollenabweichung \u2013 kein exakt benannter Agent)" : "";
+        var note = member && isNonEmptyString(member.mappingNote) ? "<br><em>" + escapeHtml(member.mappingNote) + "</em>" : "";
+        var label = (member && member.pilotRoleLabel) || "";
+        var canonical = (member && member.canonicalName) || "";
+        return "<li><strong>" + escapeHtml(label) + "</strong> = " + escapeHtml(canonical) + mismatch + note + "</li>";
+      })
+      .join("");
+  }
+
+  function renderDraftFileItems(files) {
+    return files
+      .map(function (relativePath) {
+        return "<li>" + escapeHtml(relativePath) + "</li>";
+      })
+      .join("");
+  }
+
+  // V8.0: rein darstellende Funktion, l\u00f6st selbst niemals eine Aktion
+  // aus. Offen sichtbar: Auftragstyp, Ergebnisziel, Prüfhinweis,
+  // Unsicherheiten. Eingeklappt (<details>): feste Bearbeitungskette,
+  // Dateiauswahl, Ergebnisform, Begr\u00fcndung.
+  function renderDraftResultBlock(currentSentenceValue) {
+    var draftResult = state.draftResult;
+    if (!draftResult) return "";
+    var sentenceChanged = state.draftSentenceAtBuild !== null && currentSentenceValue !== state.draftSentenceAtBuild;
+    var sentenceChangedHint = sentenceChanged
+      ? '<p class="pilot-order-draft-sentence-changed">Der Satz wurde ge\u00e4ndert. Der angezeigte Vorschlag geh\u00f6rt noch zum vorherigen Satz.</p>'
+      : "";
+    if (draftResult.outcome !== "DRAFT" || !draftResult.fields) {
+      return (
+        '<div class="pilot-order-draft-result pilot-order-draft-unsupported">' +
+        sentenceChangedHint +
+        "<p>" + escapeHtml(draftResult.unsupportedReason || "") + "</p>" +
+        "</div>"
+      );
+    }
+    var fields = draftResult.fields;
+    var uncertainties = Array.isArray(draftResult.uncertainties) ? draftResult.uncertainties : [];
+    var team = Array.isArray(draftResult.team) ? draftResult.team : [];
+    var recommendedFiles = Array.isArray(draftResult.recommendedFiles) ? draftResult.recommendedFiles : [];
+    var rationaleNote = draftResult.rationale && isNonEmptyString(draftResult.rationale.note) ? draftResult.rationale.note : "";
+    // Korrekturlauf F2 (V8.0, ausschließlich Anzeige): zeigt genau die vom
+    // Profilmodul tatsächlich gelieferten Treffer (rationale.matchedKeywords)
+    // in Alltagssprache an – keine zweite Stichworterkennung hier, keine
+    // technische Profil-ID im Haupttext, keine Sicherheits-/Gewissheits-
+    // formulierung. Bei fehlender oder leerer Trefferliste bleibt der
+    // Hinweis vollständig weg (keine leere Überschrift).
+    var matchedKeywords =
+      draftResult.rationale && Array.isArray(draftResult.rationale.matchedKeywords)
+        ? draftResult.rationale.matchedKeywords.filter(isNonEmptyString)
+        : [];
+    var matchedKeywordsHint =
+      matchedKeywords.length > 0
+        ? '<p class="pilot-order-draft-matched-keywords">Als Nutzerperspektive erkannt, weil in deinem Satz vorkommt: ' +
+          matchedKeywords.map(escapeHtml).join(", ") +
+          ".</p>"
+        : "";
+    return (
+      '<div class="pilot-order-draft-result">' +
+      sentenceChangedHint +
+      "<p><strong>Auftragstyp:</strong> Nutzerperspektive</p>" +
+      matchedKeywordsHint +
+      "<p><strong>Ergebnisziel:</strong> " + escapeHtml(fields.desiredOutcome) + "</p>" +
+      '<p class="pilot-order-draft-hint">Dieser Vorschlag ist keine Pr\u00fcfung. Die verbindliche Pr\u00fcfung erfolgt erst beim Anlegen des Pilotauftrags.</p>' +
+      (uncertainties.length > 0
+        ? '<ul class="pilot-order-draft-uncertainties">' +
+          uncertainties
+            .map(function (entry) {
+              return "<li>" + escapeHtml(entry) + "</li>";
+            })
+            .join("") +
+          "</ul>"
+        : "") +
+      '<details class="pilot-order-draft-details">' +
+      "<summary>Feste Bearbeitungskette, Dateiauswahl, Ergebnisform, Begr\u00fcndungen</summary>" +
+      "<p><strong>Feste Bearbeitungskette \u2013 nicht w\u00e4hlbar</strong></p>" +
+      "<ul>" + renderDraftTeamItems(team) + "</ul>" +
+      '<p class="pilot-order-draft-file-hint">Diese Auswahl kommt aus der bestehenden Serverempfehlung der Kette. Du kannst sie sp\u00e4ter beim Vorbereiten der Kette kontrollieren und \u00e4ndern.</p>' +
+      "<ul>" + renderDraftFileItems(recommendedFiles) + "</ul>" +
+      (rationaleNote ? "<p>" + escapeHtml(rationaleNote) + "</p>" : "") +
+      "</details>" +
+      "</div>"
+    );
+  }
+
+  function renderCreateForm(preservedValues) {
+    var currentSentenceValue =
+      preservedValues && Object.prototype.hasOwnProperty.call(preservedValues, DRAFT_SENTENCE_FIELD_ID)
+        ? preservedValues[DRAFT_SENTENCE_FIELD_ID]
+        : "";
     return (
       '<div class="pilot-order-create-form">' +
-      createFormField("pilot-order-create-title", "Titel", "input") +
-      createFormField("pilot-order-create-desired-outcome", "Gew\u00fcnschtes Ergebnis", "textarea") +
-      createFormField("pilot-order-create-requested-by", "Angefordert von", "input") +
-      createFormField("pilot-order-create-quality-criteria", "Qualit\u00e4tskriterien (eine Zeile je Kriterium)", "textarea") +
-      createFormField("pilot-order-create-allowed-tools", "Erlaubte Werkzeuge (eine Zeile je Werkzeug)", "textarea") +
-      createFormField("pilot-order-create-forbidden-actions", "Verbotene Aktionen (eine Zeile je Aktion)", "textarea") +
-      createFormField("pilot-order-create-required-approvals", "Erforderliche Freigaben (eine Zeile je Freigabe)", "textarea") +
-      createFormField("pilot-order-create-timeframe", "Zeitrahmen", "input") +
+      '<div class="pilot-order-draft-sentence-block">' +
+      createFormField(DRAFT_SENTENCE_FIELD_ID, "Was m\u00f6chtest du erreichen?", "textarea", false) +
+      '<button type="button" class="secondary-button" data-action="build-work-draft">Arbeitsvorschlag erstellen</button>' +
+      renderDraftResultBlock(currentSentenceValue) +
+      "</div>" +
+      createFormField("pilot-order-create-title", "Titel", "input", isFieldChangedFromDraft("pilot-order-create-title", preservedValues)) +
+      createFormField(
+        "pilot-order-create-desired-outcome",
+        "Gew\u00fcnschtes Ergebnis",
+        "textarea",
+        isFieldChangedFromDraft("pilot-order-create-desired-outcome", preservedValues),
+      ) +
+      createFormField(
+        "pilot-order-create-requested-by",
+        "Angefordert von",
+        "input",
+        isFieldChangedFromDraft("pilot-order-create-requested-by", preservedValues),
+      ) +
+      createFormField(
+        "pilot-order-create-quality-criteria",
+        "Qualit\u00e4tskriterien (eine Zeile je Kriterium)",
+        "textarea",
+        isFieldChangedFromDraft("pilot-order-create-quality-criteria", preservedValues),
+      ) +
+      createFormField(
+        "pilot-order-create-allowed-tools",
+        "Erlaubte Werkzeuge (eine Zeile je Werkzeug)",
+        "textarea",
+        isFieldChangedFromDraft("pilot-order-create-allowed-tools", preservedValues),
+      ) +
+      createFormField(
+        "pilot-order-create-forbidden-actions",
+        "Verbotene Aktionen (eine Zeile je Aktion)",
+        "textarea",
+        isFieldChangedFromDraft("pilot-order-create-forbidden-actions", preservedValues),
+      ) +
+      createFormField(
+        "pilot-order-create-required-approvals",
+        "Erforderliche Freigaben (eine Zeile je Freigabe)",
+        "textarea",
+        isFieldChangedFromDraft("pilot-order-create-required-approvals", preservedValues),
+      ) +
+      createFormField(
+        "pilot-order-create-timeframe",
+        "Zeitrahmen",
+        "input",
+        isFieldChangedFromDraft("pilot-order-create-timeframe", preservedValues),
+      ) +
       (state.createError ? '<p class="pilot-work-order-action-error">' + escapeHtml(state.createError) + "</p>" : "") +
       '<button type="button" class="primary-button" data-action="submit-create-order"' +
       (state.creating ? " disabled" : "") +
@@ -1230,7 +1517,7 @@
       '<button type="button" class="secondary-button" data-action="toggle-create-form">' +
       (state.createOpen ? "Anlage abbrechen" : "Neuen Pilotauftrag anlegen") +
       "</button>" +
-      (state.createOpen ? renderCreateForm() : "") +
+      (state.createOpen ? renderCreateForm(preservedCreateFormValues) : "") +
       "</div>";
     container.innerHTML = html;
     // Nach dem Neuaufbau die zuvor gesicherten Werte zurückschreiben, sofern
@@ -2839,9 +3126,18 @@
       } else if (action === "toggle-create-form") {
         state.createOpen = !state.createOpen;
         state.createError = null;
+        if (!state.createOpen) {
+          resetDraftState();
+        }
         render();
       } else if (action === "submit-create-order") {
         submitCreateOrder(gatherCreateFormInput());
+      } else if (action === "build-work-draft") {
+        // V8.0: ausschließlich lokal, deterministisch. Kein fetch, kein
+        // POST, keine Kettenvorbereitung, keine Freigabe, kein Agentenlauf
+        // (siehe buildWorkDraft oben).
+        buildWorkDraft();
+        render();
       } else if (action === "reload-after-conflict") {
         reloadSelectedOrder();
       } else if (action === "reload-chain-status") {
@@ -2939,6 +3235,13 @@
       render: render,
       escapeHtml: escapeHtml,
       CODEX_AGENT_EXECUTION_PRESET_ID: CODEX_AGENT_EXECUTION_PRESET_ID,
+      // V8.0 ("Pilotauftrag aus einem Satz vorausfüllen"): additiv
+      // exportiert, damit pilot-work-order-command-center-ui.test.js den
+      // rein lokalen, deterministischen Vorschlagsweg direkt prüfen kann
+      // (kein fetch, kein POST, siehe buildWorkDraft oben).
+      buildWorkDraft: buildWorkDraft,
+      DRAFT_SENTENCE_FIELD_ID: DRAFT_SENTENCE_FIELD_ID,
+      CREATE_FORM_FIELD_IDS: CREATE_FORM_FIELD_IDS,
     };
   }
 })();

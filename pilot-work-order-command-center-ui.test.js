@@ -36,6 +36,7 @@ function makeElement(overrides = {}) {
 }
 
 const CREATE_FORM_FIELD_IDS = [
+  "pilot-order-draft-sentence",
   "pilot-order-create-title",
   "pilot-order-create-desired-outcome",
   "pilot-order-create-requested-by",
@@ -84,6 +85,7 @@ const domElements = {
   "pilot-work-order-list-output": makeCreateFormAwareListOutputElement(),
   "pilot-work-order-output": makeElement(),
   "pilot-work-order-diagnostics-output": makeElement(),
+  "pilot-order-draft-sentence": makeElement(),
   "pilot-order-create-title": makeElement(),
   "pilot-order-create-desired-outcome": makeElement(),
   "pilot-order-create-requested-by": makeElement(),
@@ -99,6 +101,30 @@ function setCreateFormValues(values) {
     const el = domElements[`pilot-order-create-${key}`];
     if (el) el.value = values[key];
   });
+}
+
+// V8.0 ("Pilotauftrag aus einem Satz vorausfüllen"): das neue Satzfeld
+// steht außerhalb des `pilot-order-create-*`-Namensschemas (siehe
+// DRAFT_SENTENCE_FIELD_ID in pilot-work-order-ui.js).
+function setDraftSentenceValue(text) {
+  domElements["pilot-order-draft-sentence"].value = text;
+}
+
+function getCreateFormFieldValues() {
+  const values = {};
+  [
+    "title",
+    "desired-outcome",
+    "requested-by",
+    "quality-criteria",
+    "allowed-tools",
+    "forbidden-actions",
+    "required-approvals",
+    "timeframe",
+  ].forEach((suffix) => {
+    values[suffix] = domElements[`pilot-order-create-${suffix}`].value;
+  });
+  return values;
 }
 
 global.document = {
@@ -741,6 +767,371 @@ async function run() {
     assert.strictEqual(laterCreateCalls.length, 1, "eine spätere Anlage nach einem erfolgreichen Durchlauf muss wieder genau einen POST erzeugen");
     assert.strictEqual(ui.getState().creating, false);
     assert.strictEqual(ui.getState().createOpen, false);
+  });
+
+  // -------------------------------------------------------------------
+  // V8.0 ("Pilotauftrag aus einem Satz vorausfüllen"): rein lokaler,
+  // deterministischer Arbeitsvorschlag füllt die acht bestehenden
+  // Anlage-Formularfelder vor. Ergänzt (ersetzt nicht) die V7.9.6/
+  // V7.9.7-Prüfpunkte oben. Kein fetch, kein POST, keine Kettenvorbereitung,
+  // keine Freigabe, kein Agentenlauf für den Vorschlag selbst.
+  // -------------------------------------------------------------------
+
+  const V8_USER_PERSPECTIVE_SENTENCE =
+    "Pr\u00fcfe bitte, wie wir die Unternehmenszentrale f\u00fcr den t\u00e4glichen Gebrauch einfacher machen.";
+  const V8_UNSUPPORTED_SENTENCE = "Bereite bitte einen ProWin-Vertriebstermin f\u00fcr Marketingassets vor.";
+
+  function resetDraftTestState() {
+    const state = ui.getState();
+    state.createOpen = true;
+    state.createError = null;
+    state.draftResult = null;
+    state.draftFilledValues = null;
+    state.draftSentenceAtBuild = null;
+    CREATE_FORM_FIELD_IDS.forEach((id) => {
+      domElements[id].value = "";
+    });
+    ui.render();
+  }
+
+  function captureFullFormSnapshot() {
+    return Object.assign({ sentence: domElements["pilot-order-draft-sentence"].value }, getCreateFormFieldValues());
+  }
+
+  function assertFullFormSnapshotEqual(expected, message) {
+    assert.deepStrictEqual(captureFullFormSnapshot(), expected, message);
+  }
+
+  await check("V8.0-1./2. Arbeitsvorschlag erstellen erzeugt weder einen fetch noch einen POST /orders", async () => {
+    resetDraftTestState();
+    setDraftSentenceValue(V8_USER_PERSPECTIVE_SENTENCE);
+    fetchCalls.length = 0;
+    ui.buildWorkDraft();
+    assert.strictEqual(fetchCalls.length, 0, "buildWorkDraft darf niemals einen fetch auslösen");
+    assert.strictEqual(fetchCalls.filter((call) => call.url === "/api/pilot-work-order/orders").length, 0);
+  });
+
+  await check("V8.0-3. alle acht bestehenden Formularfelder werden gefüllt", async () => {
+    ui.render();
+    const values = getCreateFormFieldValues();
+    Object.keys(values).forEach((suffix) => {
+      assert.ok(values[suffix] && values[suffix].length > 0, `Feld pilot-order-create-${suffix} muss gefüllt sein`);
+    });
+    assert.strictEqual(values["requested-by"], "Jamal");
+    assert.strictEqual(fetchCalls.length, 0, "das Vorausfüllen darf keinen Request auslösen");
+  });
+
+  await check("V8.0-4. das Satzfeld bleibt nach render() erhalten", async () => {
+    ui.render();
+    assert.strictEqual(domElements["pilot-order-draft-sentence"].value, V8_USER_PERSPECTIVE_SENTENCE);
+  });
+
+  await check("V8.0-5. eine manuelle Änderung bleibt nach render() erhalten und wird als 'Von dir geändert' markiert", async () => {
+    domElements["pilot-order-create-title"].value = "Von Jamal manuell ge\u00e4nderter Titel";
+    ui.render();
+    assert.strictEqual(domElements["pilot-order-create-title"].value, "Von Jamal manuell ge\u00e4nderter Titel");
+    assert.match(domElements["pilot-work-order-list-output"].innerHTML, /Von dir ge\u00e4ndert/);
+  });
+
+  await check("V8.0-6. ein erneuter Vorschlag überschreibt die manuelle Änderung nicht", async () => {
+    fetchCalls.length = 0;
+    ui.buildWorkDraft();
+    ui.render();
+    assert.strictEqual(
+      domElements["pilot-order-create-title"].value,
+      "Von Jamal manuell ge\u00e4nderter Titel",
+      "ein erneuter Vorschlag darf eine manuelle Änderung niemals überschreiben",
+    );
+    assert.strictEqual(fetchCalls.length, 0);
+    assert.ok(domElements["pilot-order-create-desired-outcome"].value.length > 0, "nicht manuell geänderte Felder werden weiterhin gefüllt");
+  });
+
+  await check("V8.0-7. ein Doppelklick auf den Vorschlagsknopf erzeugt keinen doppelten Zustand und keinen Request", async () => {
+    resetDraftTestState();
+    setDraftSentenceValue(V8_USER_PERSPECTIVE_SENTENCE);
+    fetchCalls.length = 0;
+    ui.buildWorkDraft();
+    const afterFirst = getCreateFormFieldValues();
+    ui.buildWorkDraft();
+    const afterSecond = getCreateFormFieldValues();
+    assert.deepStrictEqual(afterSecond, afterFirst, "ein zweiter, unmittelbarer Vorschlagsklick darf keinen abweichenden Zustand erzeugen");
+    assert.strictEqual(fetchCalls.length, 0, "ein Doppelklick auf den Vorschlagsknopf darf niemals einen Request auslösen");
+  });
+
+  await check("V8.0-8. der bestehende Doppelklickschutz für 'Pilotauftrag anlegen' bleibt genau ein POST (Regression, siehe auch 9b./V7.9.7-E)", async () => {
+    fetchCalls.length = 0;
+    const input = {
+      title: "Auftrag A5: V8.0-Regressionstest Doppelklickschutz",
+      desiredOutcome: "Nachweis, dass V8.0 den bestehenden Doppelklickschutz nicht verändert.",
+      requestedBy: "Jamal",
+      qualityCriteria: ["Ergebnis passt"],
+      allowedTools: ["interne Dokumentenablage (read-only)"],
+      forbiddenActions: ["externe Schreibzugriffe"],
+      requiredApprovals: ["Freigabe vor Ausführungsstart"],
+      timeframe: "ohne festes Enddatum",
+    };
+    const first = ui.submitCreateOrder(input);
+    const second = ui.submitCreateOrder(input);
+    await Promise.all([first, second]);
+    const createCalls = fetchCalls.filter((call) => call.method === "POST" && call.url === "/api/pilot-work-order/orders");
+    assert.strictEqual(createCalls.length, 1);
+  });
+
+  await check("V8.0-9. ein nicht unterstützter Satz füllt kein Feld", async () => {
+    resetDraftTestState();
+    setDraftSentenceValue(V8_UNSUPPORTED_SENTENCE);
+    fetchCalls.length = 0;
+    ui.buildWorkDraft();
+    ui.render();
+    const values = getCreateFormFieldValues();
+    Object.keys(values).forEach((suffix) => {
+      assert.strictEqual(values[suffix], "", `Feld pilot-order-create-${suffix} darf bei UNSUPPORTED nicht gefüllt werden`);
+    });
+    assert.strictEqual(fetchCalls.length, 0);
+    assert.match(
+      domElements["pilot-work-order-list-output"].innerHTML,
+      /Daf\u00fcr kann ich noch keinen Kettenauftrag vorbereiten/,
+    );
+  });
+
+  await check("V8.0-10./11./12. der Vorschlagsweg löst niemals prepare-agent-chain, approve-for-execution oder start-chain-step aus", async () => {
+    assert.strictEqual(
+      fetchCalls.filter((call) => /prepare-agent-chain|approve-for-execution|start-chain-step/.test(call.url)).length,
+      0,
+    );
+  });
+
+  await check("V8.0-13. Satz und alle acht Felder bleiben nach HTTP 400 erhalten", async () => {
+    resetDraftTestState();
+    setDraftSentenceValue(V8_USER_PERSPECTIVE_SENTENCE);
+    ui.buildWorkDraft();
+    ui.render();
+    const snapshot = captureFullFormSnapshot();
+    fetchCalls.length = 0;
+    forceNextCreateOrderResponse = { status: 400, body: { ok: false, message: "Pilotauftrag ist unvollst\u00e4ndig (Testfixtur V8.0)." } };
+    await ui.submitCreateOrder(v797ValidInput);
+    assertFullFormSnapshotEqual(snapshot, "nach HTTP 400");
+    assert.strictEqual(ui.getState().creating, false, "state.creating muss nach HTTP 400 zurückgesetzt werden");
+  });
+
+  await check("V8.0-14. Satz und alle acht Felder bleiben nach HTTP 409 erhalten", async () => {
+    const snapshot = captureFullFormSnapshot();
+    fetchCalls.length = 0;
+    forceNextCreateOrderResponse = {
+      status: 409,
+      body: { ok: false, message: "Ein Pilotauftrag mit dieser ID existiert bereits (Testfixtur V8.0)." },
+    };
+    await ui.submitCreateOrder(v797ValidInput);
+    assertFullFormSnapshotEqual(snapshot, "nach HTTP 409");
+    assert.strictEqual(ui.getState().creating, false, "state.creating muss nach HTTP 409 zurückgesetzt werden");
+  });
+
+  await check("V8.0-15. Satz und alle acht Felder bleiben nach einem Netzwerkfehler erhalten", async () => {
+    const snapshot = captureFullFormSnapshot();
+    fetchCalls.length = 0;
+    forceNextFetchNetworkFailure = true;
+    await ui.submitCreateOrder(v797ValidInput);
+    assertFullFormSnapshotEqual(snapshot, "nach einem Netzwerkfehler");
+    assert.strictEqual(ui.getState().creating, false, "state.creating muss nach einem Netzwerkfehler zurückgesetzt werden");
+  });
+
+  await check("V8.0-16. state.creating wird nach jedem der drei vorstehenden Fehler zurückgesetzt (Zusammenfassung 13.–15.)", async () => {
+    assert.strictEqual(ui.getState().creating, false);
+    assert.strictEqual(ui.getState().createOpen, true, "der Dialog bleibt nach einem Fehler geöffnet");
+  });
+
+  await check("V8.0-17. nach erfolgreicher Anlage wird der Vorschlagszustand vollständig geleert", async () => {
+    fetchCalls.length = 0;
+    await ui.submitCreateOrder(v797ValidInput);
+    const state = ui.getState();
+    assert.strictEqual(state.createOpen, false, "eine erfolgreiche Anlage schließt den Dialog");
+    assert.strictEqual(state.draftResult, null, "draftResult muss nach erfolgreicher Anlage geleert werden");
+    assert.strictEqual(state.draftFilledValues, null, "draftFilledValues muss nach erfolgreicher Anlage geleert werden");
+    assert.strictEqual(state.draftSentenceAtBuild, null, "draftSentenceAtBuild muss nach erfolgreicher Anlage geleert werden");
+    assert.strictEqual(domElements["pilot-order-draft-sentence"].value, "", "das Satzfeld muss nach erfolgreicher Anlage geleert werden");
+  });
+
+  // -------------------------------------------------------------------
+  // Korrekturlauf V8.0 (F1): bereits manuell ausgefüllte Felder dürfen
+  // beim ERSTEN Klick auf "Arbeitsvorschlag erstellen" nicht still
+  // überschrieben werden (vorher fehlte ein Vergleichswert, solange
+  // state.draftFilledValues noch nie gesetzt wurde).
+  // -------------------------------------------------------------------
+
+  await check("F1. bereits manuell ausgefüllte Felder werden beim ERSTEN Arbeitsvorschlag nicht überschrieben", async () => {
+    resetDraftTestState();
+    const manualTitle = "Mein eigener Titel vor dem Vorschlag";
+    const manualTimeframe = "Diese Woche";
+    domElements["pilot-order-create-title"].value = manualTitle;
+    domElements["pilot-order-create-timeframe"].value = manualTimeframe;
+    setDraftSentenceValue(V8_USER_PERSPECTIVE_SENTENCE);
+
+    const ordersCountBefore = backend.orders.size;
+    fetchCalls.length = 0;
+    // state.draftFilledValues ist an dieser Stelle nachweislich noch nie
+    // gesetzt worden (erster Vorschlag in diesem frisch geöffneten
+    // Anlageformular) – genau der zuvor fehlerhafte Fall.
+    assert.strictEqual(ui.getState().draftFilledValues, null, "Vorbedingung: noch kein früherer Vorschlagswert vorhanden");
+
+    ui.buildWorkDraft();
+    ui.render();
+
+    assert.strictEqual(domElements["pilot-order-create-title"].value, manualTitle, "der bereits eingetragene Titel darf beim ersten Vorschlag nicht überschrieben werden");
+    assert.strictEqual(domElements["pilot-order-create-timeframe"].value, manualTimeframe, "der bereits eingetragene Zeitrahmen darf beim ersten Vorschlag nicht überschrieben werden");
+
+    ["desired-outcome", "requested-by", "quality-criteria", "allowed-tools", "forbidden-actions", "required-approvals"].forEach((suffix) => {
+      const value = domElements[`pilot-order-create-${suffix}`].value;
+      assert.ok(value && value.length > 0, `das zuvor leere Feld pilot-order-create-${suffix} muss regulär vorausgefüllt werden`);
+    });
+
+    const listOutputHtml = domElements["pilot-work-order-list-output"].innerHTML;
+    assert.match(
+      listOutputHtml,
+      /for="pilot-order-create-title">Titel <span class="pilot-order-draft-changed-badge">Von dir ge\u00e4ndert<\/span>/,
+      "der manuell eingetragene Titel muss als 'Von dir geändert' erkannt werden",
+    );
+    assert.match(
+      listOutputHtml,
+      /for="pilot-order-create-timeframe">Zeitrahmen <span class="pilot-order-draft-changed-badge">Von dir ge\u00e4ndert<\/span>/,
+      "der manuell eingetragene Zeitrahmen muss als 'Von dir geändert' erkannt werden",
+    );
+    assert.doesNotMatch(
+      listOutputHtml,
+      /for="pilot-order-create-desired-outcome">Gew\u00fcnschtes Ergebnis <span class="pilot-order-draft-changed-badge"/,
+      "ein regulär vorausgefülltes Feld darf nicht fälschlich als 'Von dir geändert' markiert werden",
+    );
+
+    assert.strictEqual(fetchCalls.length, 0, "der Arbeitsvorschlag darf beim ersten Klick keinen fetch-Aufruf auslösen");
+    assert.strictEqual(backend.orders.size, ordersCountBefore, "der Arbeitsvorschlag darf keinen Auftrag anlegen");
+    assert.strictEqual(ui.getState().creating, false, "der Arbeitsvorschlag darf keinen Anlage- oder Kettenlauf auslösen");
+  });
+
+  // -------------------------------------------------------------------
+  // Korrekturlauf V8.0 (F5): ein Auftragswechsel muss den offenen
+  // V8.0-Vorschlagszustand vollständig zurücksetzen (resetDraftState()),
+  // ohne einen zusätzlichen Request oder eine zweite Reset-Logik.
+  // -------------------------------------------------------------------
+
+  await check("F5. ein Auftragswechsel setzt den offenen V8.0-Vorschlagszustand vollständig zurück", async () => {
+    resetDraftTestState();
+    setDraftSentenceValue(V8_USER_PERSPECTIVE_SENTENCE);
+    fetchCalls.length = 0;
+    ui.buildWorkDraft();
+    ui.render();
+
+    assert.ok(ui.getState().draftResult, "vor dem Auftragswechsel muss ein Vorschlagszustand vorhanden sein");
+    assert.ok(ui.getState().draftFilledValues, "vor dem Auftragswechsel muss draftFilledValues vorhanden sein");
+    assert.strictEqual(ui.getState().draftSentenceAtBuild, V8_USER_PERSPECTIVE_SENTENCE);
+    assert.match(
+      domElements["pilot-work-order-list-output"].innerHTML,
+      /pilot-order-draft-result/,
+      "der Vorschlagsblock muss vor dem Auftragswechsel sichtbar sein",
+    );
+
+    const previouslySelectedOrderId = ui.getState().selectedPilotOrderId;
+    assert.notStrictEqual(previouslySelectedOrderId, orderAId, "Testvoraussetzung: aktuell ist ein anderer Auftrag als orderAId ausgewählt");
+
+    fetchCalls.length = 0;
+    const selectPromise = ui.selectOrder(orderAId);
+
+    // Unmittelbar nach dem Aufruf (vor dem Netzwerk-Roundtrip) muss der
+    // V8.0-Vorschlagszustand bereits vollständig verworfen sein.
+    const stateRightAfterCall = ui.getState();
+    assert.strictEqual(stateRightAfterCall.draftResult, null, "draftResult muss sofort beim Auftragswechsel zurückgesetzt werden");
+    assert.strictEqual(stateRightAfterCall.draftFilledValues, null, "draftFilledValues muss sofort beim Auftragswechsel zurückgesetzt werden");
+    assert.strictEqual(stateRightAfterCall.draftSentenceAtBuild, null, "draftSentenceAtBuild muss sofort beim Auftragswechsel zurückgesetzt werden");
+
+    await selectPromise;
+    const state = ui.getState();
+    assert.strictEqual(state.draftResult, null, "draftResult bleibt nach dem Laden des neuen Auftrags zurückgesetzt");
+    assert.strictEqual(state.draftFilledValues, null, "draftFilledValues bleibt nach dem Laden des neuen Auftrags zurückgesetzt");
+    assert.strictEqual(state.draftSentenceAtBuild, null, "draftSentenceAtBuild bleibt nach dem Laden des neuen Auftrags zurückgesetzt");
+    assert.strictEqual(state.overview.order.id, orderAId, "der ausgewählte Auftrag wird regulär geladen");
+
+    ui.render();
+    assert.doesNotMatch(
+      domElements["pilot-work-order-list-output"].innerHTML,
+      /pilot-order-draft-result/,
+      "der Vorschlagsblock muss nach dem Auftragswechsel verschwunden sein",
+    );
+
+    assert.strictEqual(
+      fetchCalls.filter((call) => call.method === "POST").length,
+      0,
+      "der Reset selbst darf keinen Request auslösen (kein POST durch den Auftragswechsel)",
+    );
+    assert.strictEqual(
+      fetchCalls.filter((call) => call.url === `/api/pilot-work-order/orders/${orderAId}`).length,
+      1,
+      "ausschließlich der reguläre Ladevorgang des neu ausgewählten Auftrags",
+    );
+  });
+
+  // -------------------------------------------------------------------
+  // Korrekturlauf V8.0 (F2, ausschließlich Anzeige): die vom
+  // Profilmodul tatsächlich gelieferten Treffer (rationale.matchedKeywords)
+  // werden im Vorschlagsblock in Alltagssprache angezeigt – keine zweite
+  // Stichworterkennung in pilot-work-order-ui.js, alle Werte über die
+  // bestehende escapeHtml()-Logik.
+  // -------------------------------------------------------------------
+
+  await check("F2. die tatsächlich erkannten Stichwörter werden im Vorschlagsblock sichtbar und escaped angezeigt", async () => {
+    await ui.selectOrder(ui.CANONICAL_PILOT_ORDER_ID);
+    resetDraftTestState();
+    setDraftSentenceValue(V8_USER_PERSPECTIVE_SENTENCE);
+    fetchCalls.length = 0;
+    ui.buildWorkDraft();
+
+    const draftResult = ui.getState().draftResult;
+    assert.strictEqual(draftResult.outcome, "DRAFT");
+    const realMatchedKeywords = draftResult.rationale && draftResult.rationale.matchedKeywords;
+    assert.ok(Array.isArray(realMatchedKeywords) && realMatchedKeywords.length > 0, "Testvoraussetzung: das Profilmodul liefert tatsächliche Treffer");
+
+    ui.render();
+    const htmlWithRealKeywords = domElements["pilot-work-order-list-output"].innerHTML;
+    assert.match(htmlWithRealKeywords, /Als Nutzerperspektive erkannt, weil in deinem Satz vorkommt:/, "der Hinweis muss in Alltagssprache erscheinen");
+    realMatchedKeywords.forEach((keyword) => {
+      assert.ok(htmlWithRealKeywords.includes(keyword), `das tatsächlich gelieferte Stichwort "${keyword}" muss sichtbar sein`);
+    });
+    assert.doesNotMatch(htmlWithRealKeywords, /USER_PERSPECTIVE/, "keine technische Profil-ID im Haupttext");
+
+    // Sonderzeichen-Nachweis sowie Nachweis "keine zweite Stichworterkennung
+    // in der UI": es wird ausschließlich rationale.matchedKeywords
+    // durchgereicht, unabhängig davon, ob das Wort tatsächlich im Satz
+    // vorkommt oder Sonderzeichen enthält (kein eigenes Nachprüfen/erneutes
+    // Suchen in pilot-work-order-ui.js).
+    const injectedKeywords = ['<b>t\u00e4glich</b>', 'einfacher"\'&'];
+    ui.getState().draftResult = Object.assign({}, draftResult, {
+      rationale: Object.assign({}, draftResult.rationale, { matchedKeywords: injectedKeywords }),
+    });
+    ui.render();
+    const htmlWithInjection = domElements["pilot-work-order-list-output"].innerHTML;
+    assert.doesNotMatch(htmlWithInjection, /<b>t\u00e4glich<\/b>/, "spitze Klammern in Stichwörtern dürfen nicht ungeschützt in das HTML gelangen");
+    assert.match(htmlWithInjection, /&lt;b&gt;t\u00e4glich&lt;\/b&gt;/, "spitze Klammern in Stichwörtern müssen escaped werden");
+    assert.match(htmlWithInjection, /einfacher&quot;&#39;&amp;/, "Anführungszeichen und Et-Zeichen in Stichwörtern müssen escaped werden");
+
+    // Keine leere Überschrift bei leerer Trefferliste.
+    ui.getState().draftResult = Object.assign({}, draftResult, {
+      rationale: Object.assign({}, draftResult.rationale, { matchedKeywords: [] }),
+    });
+    ui.render();
+    assert.doesNotMatch(
+      domElements["pilot-work-order-list-output"].innerHTML,
+      /Als Nutzerperspektive erkannt/,
+      "bei leerer Trefferliste darf kein Hinweis angezeigt werden",
+    );
+
+    // Kein Missbrauch als zweite Erkennung: fehlt rationale vollständig,
+    // bleibt der Hinweis ebenfalls vollständig weg.
+    ui.getState().draftResult = Object.assign({}, draftResult, { rationale: null });
+    ui.render();
+    assert.doesNotMatch(
+      domElements["pilot-work-order-list-output"].innerHTML,
+      /Als Nutzerperspektive erkannt/,
+      "bei fehlender rationale darf kein Hinweis angezeigt werden",
+    );
+
+    resetDraftTestState();
   });
 
   // -------------------------------------------------------------------

@@ -9993,6 +9993,75 @@ details.local-agent-assignment-details > summary {
   border-radius: var(--radius, 8px);
 }
 
+/* V8.0 ("Pilotauftrag aus einem Satz vorausfüllen"): minimale, additive
+   Styles für das neue Satzfeld, den Vorschlagsbereich, die
+   "Von dir geändert"-Markierung, Unsicherheiten und die eingeklappten
+   Vorschlagsdetails. Kein Redesign bestehender Klassen, keine Tabelle. */
+.pilot-order-draft-sentence-block {
+  display: grid;
+  gap: 6px;
+  padding-bottom: 10px;
+  margin-bottom: 4px;
+  border-bottom: 1px dashed var(--card-border-soft, var(--line));
+}
+
+.pilot-order-draft-changed-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: var(--text-xs, 11px);
+  font-weight: 600;
+  color: var(--accent-strong, #7a4b12);
+  background: var(--accent-soft, #f4e6cf);
+  border-radius: var(--radius-pill, 999px);
+}
+
+.pilot-order-draft-result {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--card-border-soft, var(--line));
+  border-radius: var(--radius, 8px);
+  background: var(--card-bg, #fff);
+}
+
+.pilot-order-draft-result p {
+  margin: 0;
+}
+
+.pilot-order-draft-hint,
+.pilot-order-draft-sentence-changed,
+.pilot-order-draft-file-hint {
+  font-size: var(--text-xs, 12px);
+  color: var(--muted);
+}
+
+.pilot-order-draft-sentence-changed {
+  color: var(--red, #b3441f);
+}
+
+.pilot-order-draft-uncertainties {
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--text-xs, 12px);
+  color: var(--muted);
+}
+
+.pilot-order-draft-unsupported {
+  color: var(--muted);
+}
+
+.pilot-order-draft-details summary {
+  cursor: pointer;
+  font-size: var(--text-xs, 12px);
+  color: var(--muted);
+}
+
+.pilot-order-draft-details ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
 .pilot-work-order-conflict {
   display: grid;
   gap: 8px;

@@ -141,6 +141,11 @@ const staticAssets = new Map([
   // kompakte Pilotauftrags-Karte (gleiches Muster wie
   // health-reference-work-run-ui.js).
   ["/pilot-work-order-ui.js", "pilot-work-order-ui.js"],
+  // V8.0 ("Pilotauftrag aus einem Satz vorausfüllen"): rein browserlokales,
+  // deterministisches Vorschlagsmodul (UMD, gleiches Muster wie
+  // agent-registry.js). Muss vor pilot-work-order-ui.js geladen werden
+  // (siehe index.html), damit der globale Namensraum bereits verfügbar ist.
+  ["/pilot-work-order-draft-profiles.js", "pilot-work-order-draft-profiles.js"],
   ["/app.js", "app.js"],
   ["/styles.css", "styles.css"],
   ["/v71-ui.js", "v71-ui.js"],

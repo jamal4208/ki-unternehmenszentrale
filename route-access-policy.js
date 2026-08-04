@@ -604,6 +604,11 @@ const STATIC_POLICIES = [
   // kompakte Pilotauftrags-Karte im Cockpit (gleiches Muster wie
   // health-reference-work-run-ui.js).
   staticOwnerOnly("/pilot-work-order-ui.js", "Chef-UI-Skript Pilotauftrags-Karte"),
+  // V8.0 ("Pilotauftrag aus einem Satz vorausfüllen"): identischer Schutz
+  // wie das bestehende UI-Skript – rein browserlokal, keine eigene Route,
+  // aber dennoch nur mit Owner-Session erreichbar (kein Kunden-/Support-
+  // Zugriff auf interne Implementierungsdetails).
+  staticOwnerOnly("/pilot-work-order-draft-profiles.js", "Deterministisches Vorschlagsmodul Pilotauftrags-Karte"),
 ];
 
 const ALL_POLICIES = Object.freeze([

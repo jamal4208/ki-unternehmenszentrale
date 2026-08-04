@@ -53,6 +53,10 @@
 //   GET-Prefix (Pilotauftrag-Einzelabruf, /api/pilot-work-order/orders/),
 //   +1 neuer POST-Prefix (adressierte Aktion je Auftrag,
 //   /api/pilot-work-order/orders/), kein neues statisches Asset.
+// V8.0 – Pilotauftrag aus einem Satz vorausfüllen: keine neue Route (rein
+//   browserlokal und deterministisch), +1 neues statisches Asset
+//   (pilot-work-order-draft-profiles.js, STATIC_OWNER_ONLY, gleicher Schutz
+//   wie pilot-work-order-ui.js).
 //
 // Alle Einzelabruf-/Feedback-GET-Routen laufen wie bei bestehenden
 // Einzelressourcen über routePrefixHandlers und werden hier konventionsgemäß
@@ -62,7 +66,7 @@ const EXPECTED_ROUTE_INVENTORY = Object.freeze({
   postRoutes: 53,
   getRoutePrefixes: 9,
   postRoutePrefixes: 10,
-  staticAssets: 33,
+  staticAssets: 34,
 });
 
 function countBracketEntries(blockSource) {

@@ -148,6 +148,27 @@ async function run() {
     assert.strictEqual(result.statusCode, 404);
   });
 
+  // V8.0 ("Pilotauftrag aus einem Satz vorausfüllen"): identischer Schutz
+  // wie das bestehende UI-Skript (staticOwnerOnly). Die 404-Antwort für
+  // CUSTOMER_ADMIN darf keinerlei Information über den geschützten
+  // Assetpfad preisgeben (identische, generische 404-Antwort wie bei jedem
+  // anderen unbekannten/verbotenen Pfad).
+  await check("CUSTOMER_ADMIN erreicht das statische pilot-work-order-draft-profiles.js nicht (404)", async () => {
+    const result = await invoke({
+      method: "GET",
+      url: "/pilot-work-order-draft-profiles.js",
+      headers: { cookie: customerAdminSession.cookieHeader },
+    });
+    assert.strictEqual(result.statusCode, 404);
+    assert.doesNotMatch(result.body, /pilot-work-order-draft-profiles/);
+  });
+
+  await check("OWNER erreicht das statische pilot-work-order-draft-profiles.js (200, no-store)", async () => {
+    const result = await invoke({ method: "GET", url: "/pilot-work-order-draft-profiles.js", headers: { cookie: ownerSession.cookieHeader } });
+    assert.strictEqual(result.statusCode, 200);
+    assert.strictEqual(result.headers["Cache-Control"], "no-store");
+  });
+
   await check("Kundenrolle kann keine Pilotauftrags-Aktion über den POST-Prefix auslösen (404)", async () => {
     const result = await invoke({
       method: "POST",
