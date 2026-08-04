@@ -105,6 +105,25 @@
 
         <section class="view is-active" id="cockpit-view" data-title="Cockpit">
           <!--
+            Chefmodus P1 – Startseite "Heute": der führende erste Bereich des
+            Cockpits. Der Chef sieht morgens zuerst "Was ist heute wichtig?"
+            statt Projekte, Agenten, Technik, Audit, Aufträge oder Ketten.
+            Die Karte ersetzt keine bestehende Funktionalität; alle bisherigen
+            Bereiche bleiben darunter unverändert erhalten und erreichbar.
+            Vollständig von chef-today-ui.js gerendert (gleiches Grundmuster
+            wie #pilot-work-order-card), ausschließlich lesend, ohne eigene
+            Auftragserfassung: jede Hauptaktion führt in die bestehende
+            Pilotauftrags-Karte.
+          -->
+          <section class="chef-today-card" id="chef-today-card" aria-labelledby="chef-today-title">
+            <div class="chef-today-head">
+              <p class="eyebrow">Chefmodus</p>
+              <h2 id="chef-today-title">Heute</h2>
+            </div>
+            <div id="chef-today-output" aria-live="polite">Lade deinen Tag…</div>
+          </section>
+
+          <!--
             V7.3 – Jamal-Arbeitsmodus (Auftrag Abschnitt C/J): die einzige
             zentrale Arbeitskarte ganz oben im Cockpit ("Oben arbeiten. Unten
             nachschauen."). Der gesamte zustandsabhängige Inhalt wird von
@@ -1596,5 +1615,9 @@
     <script src="health-reference-work-run-ui.js"></script>
     <script src="pilot-work-order-draft-profiles.js"></script>
     <script src="pilot-work-order-ui.js"></script>
+    <!-- Chefmodus P1 – Startseite "Heute". Wird nach pilot-work-order-ui.js
+         geladen, damit die Auswahlzeilen der Pilotauftrags-Karte bereits
+         gerendert werden, wenn eine Hauptaktion dorthin führt. -->
+    <script src="chef-today-ui.js"></script>
   </body>
 </html>

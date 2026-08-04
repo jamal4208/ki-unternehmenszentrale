@@ -609,6 +609,9 @@ const STATIC_POLICIES = [
   // aber dennoch nur mit Owner-Session erreichbar (kein Kunden-/Support-
   // Zugriff auf interne Implementierungsdetails).
   staticOwnerOnly("/pilot-work-order-draft-profiles.js", "Deterministisches Vorschlagsmodul Pilotauftrags-Karte"),
+  // Chefmodus P1 – Startseite "Heute": identischer Schutz wie die
+  // Pilotauftrags-Karte, deren vorhandene Leserouten die Startkarte nutzt.
+  staticOwnerOnly("/chef-today-ui.js", "Chef-UI-Skript Startseite Heute"),
 ];
 
 const ALL_POLICIES = Object.freeze([

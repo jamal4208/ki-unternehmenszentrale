@@ -57,6 +57,10 @@
 //   browserlokal und deterministisch), +1 neues statisches Asset
 //   (pilot-work-order-draft-profiles.js, STATIC_OWNER_ONLY, gleicher Schutz
 //   wie pilot-work-order-ui.js).
+// Chefmodus P1 – Startseite "Heute": keine neue Route (die Startkarte liest
+//   ausschließlich die bereits vorhandenen Pilotauftrags-Leserouten), +1 neues
+//   statisches Asset (chef-today-ui.js, STATIC_OWNER_ONLY, gleicher Schutz wie
+//   pilot-work-order-ui.js).
 //
 // Alle Einzelabruf-/Feedback-GET-Routen laufen wie bei bestehenden
 // Einzelressourcen über routePrefixHandlers und werden hier konventionsgemäß
@@ -66,7 +70,7 @@ const EXPECTED_ROUTE_INVENTORY = Object.freeze({
   postRoutes: 53,
   getRoutePrefixes: 9,
   postRoutePrefixes: 10,
-  staticAssets: 34,
+  staticAssets: 35,
 });
 
 function countBracketEntries(blockSource) {

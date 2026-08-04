@@ -146,6 +146,10 @@ const staticAssets = new Map([
   // agent-registry.js). Muss vor pilot-work-order-ui.js geladen werden
   // (siehe index.html), damit der globale Namensraum bereits verfügbar ist.
   ["/pilot-work-order-draft-profiles.js", "pilot-work-order-draft-profiles.js"],
+  // Chefmodus P1 – Startseite "Heute": eigenständiges, additives Chef-UI-
+  // Skript für die führende Startkarte im Cockpit (gleiches Muster wie
+  // pilot-work-order-ui.js). Rein lesend, keine eigene Route.
+  ["/chef-today-ui.js", "chef-today-ui.js"],
   ["/app.js", "app.js"],
   ["/styles.css", "styles.css"],
   ["/v71-ui.js", "v71-ui.js"],
