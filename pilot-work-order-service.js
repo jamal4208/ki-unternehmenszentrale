@@ -111,6 +111,14 @@ const migrations = require("./auth-db-migrations");
 // hier importiert – ein Import in die andere Richtung wäre ein
 // Zirkelbezug).
 const codexAdapter = require("./execution-codex-adapter");
+// V8.1 ("Ergebnis verstehen ohne Technik"): ausschließlich additive,
+// rein lesende Wiederverwendung der bereits produktiv genutzten
+// Abschnittslogik (Quelle der Wahrheit für die verbindliche
+// Fünf-Abschnittsstruktur). Es wird hier NICHTS aus diesem Modul
+// verändert und keine zweite Parserimplementierung angelegt – siehe
+// buildResultPresentation() unten, die ausschließlich bereits exportierte
+// Funktionen (getStageContract/parseStageSections/splitIntoItems) aufruft.
+const documentationResult = require("./pilot-agent-documentation-result");
 
 const PILOT_WORK_ORDER_STATUS_VALUES = migrations.PILOT_WORK_ORDER_STATUS_VALUES;
 const PILOT_ROLE_VALUES = migrations.PILOT_ROLE_VALUES;
@@ -597,6 +605,120 @@ function listPilotOrders(db) {
   return authDb.listPilotWorkOrders(db).map(rowToOrderView);
 }
 
+// ---------------------------------------------------------------------------
+// V8.1 ("Ergebnis verstehen ohne Technik") – additive, rein lesende
+// Aufbereitung eines bereits gespeicherten Kettenergebnisses für die
+// fachliche Darstellung im Cockpit. Verändert weder den Schreibpfad noch die
+// Validierung; nutzt ausschließlich die bereits produktiv genutzte
+// Abschnittslogik aus pilot-agent-documentation-result.js
+// (getStageContract/parseStageSections/splitIntoItems). Der gespeicherte
+// resultRawText wird dabei an keiner Stelle verändert – es wird lediglich ein
+// zusätzliches, rein lesendes Feld (resultPresentation) berechnet.
+//
+// Die Zuordnung Pilotrolle -> Stufenvertrag ist dieselbe, die bereits an
+// anderer Stelle produktiv verwendet wird (siehe CHAIN_STEP_TO_PILOT_ROLE
+// unten bzw. pilot-agent-execution-chain-service.js#STEP_NUMBER_TO_PILOT_ROLE
+// und pilot-agent-execution-service.js#resultContractStageForPreset): Schritt
+// 1 (RECHERCHE_ANALYSE) nutzt den Rechercheervertrag, Schritt 2
+// (DOKUMENTATION) den Dokumentationsvertrag, Schritt 3 (PROJEKTMANAGER) den
+// Projektmanagervertrag. Für jede andere/unbekannte Pilotrolle ist keine
+// Stufe bekannt – es wird dann ehrlich "keine bekannte Struktur" gemeldet,
+// niemals eine Struktur erfunden.
+const PILOT_ROLE_TO_RESULT_CONTRACT_STAGE = Object.freeze({
+  RECHERCHE_ANALYSE: documentationResult.RESULT_CONTRACT_STAGES.RESEARCH,
+  DOKUMENTATION: documentationResult.RESULT_CONTRACT_STAGES.DOCUMENTATION,
+  PROJEKTMANAGER: documentationResult.RESULT_CONTRACT_STAGES.PROJECT_MANAGER,
+});
+
+// Formt die bereits vom Produktivparser (parseStageSections) gelieferten
+// Rohabschnitte in eine für die Darstellung bequeme Form. `splitIntoItems`
+// ist exakt dieselbe, bereits produktiv genutzte Funktion, die auch beim
+// Speichern eines Ergebnisses die Punkte eines Item-Abschnitts trennt – hier
+// ausschließlich lesend auf den bereits gespeicherten resultRawText
+// angewendet, niemals umgekehrt.
+function buildResultPresentationSections(contract, parsedSections) {
+  return parsedSections.map((section) => {
+    const rule = contract.sectionRules[section.sectionNumber];
+    if (rule.kind === "ITEMS") {
+      const split = documentationResult.splitIntoItems(section.bodyLines);
+      return {
+        number: section.sectionNumber,
+        title: rule.title,
+        kind: "ITEMS",
+        prose: null,
+        items: split.items,
+      };
+    }
+    return {
+      number: section.sectionNumber,
+      title: rule.title,
+      kind: "PROSE",
+      prose: section.bodyText,
+      items: [],
+    };
+  });
+}
+
+const UNSTRUCTURED_RESULT_HONEST_NOTICE =
+  "Das Ergebnis hält die vereinbarte Gliederung nicht ein. Es wird unverändert angezeigt; " +
+  "eine verlässliche Kurzfassung steht nicht zur Verfügung.";
+
+const NO_KNOWN_CONTRACT_HONEST_NOTICE =
+  "Für dieses Ergebnis ist keine vereinbarte Fünf-Abschnittsstruktur bekannt. Es wird unverändert " +
+  "angezeigt; eine verlässliche Kurzfassung steht nicht zur Verfügung.";
+
+// Rückgabe: { structureStatus, sections, rawTextAvailable, contractStage,
+// resultLabel, honestNotice }. structureStatus ist genau einer von
+// "STRUCTURED" | "UNSTRUCTURED_ACCEPTED" | "UNAVAILABLE" (siehe Auftrag
+// Abschnitt 6). Erfindet niemals eine Struktur: ist die tatsächliche,
+// bereits gespeicherte Stufenzuordnung unbekannt oder erfüllt der Rohtext den
+// Abschnittsvertrag nicht, wird ausschließlich der ehrliche Hinweistext
+// zurückgegeben, niemals eine Kurzfassung.
+function buildResultPresentation(run) {
+  const rawTextAvailable = isNonEmptyString(run.resultRawText);
+  if (!rawTextAvailable) {
+    return {
+      structureStatus: "UNAVAILABLE",
+      sections: [],
+      rawTextAvailable: false,
+      contractStage: null,
+      resultLabel: null,
+      honestNotice: null,
+    };
+  }
+  const stage = PILOT_ROLE_TO_RESULT_CONTRACT_STAGE[run.pilotRole] || null;
+  if (!stage) {
+    return {
+      structureStatus: "UNSTRUCTURED_ACCEPTED",
+      sections: [],
+      rawTextAvailable: true,
+      contractStage: null,
+      resultLabel: null,
+      honestNotice: NO_KNOWN_CONTRACT_HONEST_NOTICE,
+    };
+  }
+  const contract = documentationResult.getStageContract(stage);
+  const parsed = documentationResult.parseStageSections(contract, run.resultRawText);
+  if (!parsed.structureValid) {
+    return {
+      structureStatus: "UNSTRUCTURED_ACCEPTED",
+      sections: [],
+      rawTextAvailable: true,
+      contractStage: stage,
+      resultLabel: contract.resultLabel,
+      honestNotice: UNSTRUCTURED_RESULT_HONEST_NOTICE,
+    };
+  }
+  return {
+    structureStatus: "STRUCTURED",
+    sections: buildResultPresentationSections(contract, parsed.sections),
+    rawTextAvailable: true,
+    contractStage: stage,
+    resultLabel: contract.resultLabel,
+    honestNotice: null,
+  };
+}
+
 // Phase 6 ("technische Agentenlauf-Infrastruktur mit lokalem deterministischem Read-Only-Runner"): kompakte,
 // auftragsbezogene Sicht auf jeden bisherigen technischen Agentenlauf.
 // Bewusst hier (nicht in pilot-agent-execution-service.js) implementiert,
@@ -624,6 +746,15 @@ function rowToAgentExecutionRunSummary(row) {
     status: row.status,
     resultSummary,
     resultRawText: row.resultRawText,
+    // V8.1 ("Ergebnis verstehen ohne Technik"): additives, rein lesendes
+    // Feld – siehe buildResultPresentation() oben. Nutzt ausschließlich
+    // row.status/row.resultRawText/row.pilotRole, die bereits alle Teil
+    // dieses unveränderten Datensatzes sind.
+    resultPresentation: buildResultPresentation({
+      status: row.status,
+      resultRawText: row.resultRawText,
+      pilotRole: row.pilotRole,
+    }),
     errorMessage: row.errorMessage,
     promptDigest: row.promptDigest || null,
     promptCharCount: row.promptCharCount === null || row.promptCharCount === undefined ? null : row.promptCharCount,

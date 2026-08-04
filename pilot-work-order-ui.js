@@ -2606,6 +2606,272 @@
     return '<br><span class="pilot-work-order-action-error">' + escapeHtml(documentationCompactionNoticeText(normalization)) + "</span>";
   }
 
+  // -------------------------------------------------------------------
+  // V8.1 ("Ergebnis verstehen ohne Technik") – rein lesende Darstellung
+  // eines bereits gespeicherten Kettenergebnisses. Diese Funktionen parsen
+  // NICHTS selbst: sie zeigen ausschließlich die bereits vom Server additiv
+  // mitgelieferten Abschnitte (run.resultPresentation, siehe
+  // pilot-work-order-service.js#buildResultPresentation). Fehlt dieses Feld
+  // (älterer Overview-Stand), wird ehrlich auf den weiterhin vollständig
+  // erreichbaren Rohtext unter "Technische Details" verwiesen – niemals eine
+  // Struktur erfunden.
+  // -------------------------------------------------------------------
+  function renderResultPresentationSectionHtml(section) {
+    var html = '<div class="pilot-work-order-result-section"><p class="pilot-work-order-result-section__title">' + escapeHtml(section.title) + "</p>";
+    if (section.kind === "ITEMS" && Array.isArray(section.items) && section.items.length > 0) {
+      html += "<ul>" + section.items.map(function (item) { return "<li>" + escapeHtml(item) + "</li>"; }).join("") + "</ul>";
+    } else if (isNonEmptyString(section.prose)) {
+      html += "<p>" + escapeHtml(section.prose) + "</p>";
+    }
+    html += "</div>";
+    return html;
+  }
+
+  // Nur die PM-Stufe liefert das abschließende Gesamturteil der Kette;
+  // Recherche- und Dokumentationsergebnisse sind fachlich immer
+  // Zwischenergebnisse (siehe Auftrag Abschnitt 7, "Teilergebnis").
+  function isChainIntermediateStage(contractStage) {
+    return contractStage === "RESEARCH" || contractStage === "DOCUMENTATION";
+  }
+
+  // V8.1 Korrektur ("echte Kettenansicht auf verständliche
+  // Ergebnisdarstellung umstellen"): dieselben drei festen presetId-Werte,
+  // die pilot-agent-execution-service.js#PILOT_AGENT_TASK_PRESETS
+  // ausschließlich für chainManaged-Presets vergibt (dort read-only, hier
+  // nur zum Wiedererkennen verwendet – keine zweite Preset-Definition,
+  // keine Kettenlogik). Dient ausschließlich dazu, denselben Lauf nicht in
+  // zwei verschiedenen Bereichen der Diagnoseansicht doppelt anzuzeigen.
+  var CHAIN_MANAGED_PRESET_IDS = ["codex-chain-research-analysis", "codex-document-chain-result", "codex-pm-evaluate-chain"];
+
+  function isChainManagedRun(run) {
+    return Boolean(run) && CHAIN_MANAGED_PRESET_IDS.indexOf(run.presetId) !== -1;
+  }
+
+  // -------------------------------------------------------------------
+  // V8.2 ("Entscheidungsansicht statt Textmenge") – dieselben, bereits vom
+  // Server gelieferten Abschnitte (run.resultPresentation) werden jetzt so
+  // ANGEORDNET, dass offen nur eine kompakte Entscheidungsansicht steht:
+  // Fazit/Gesamturteil, höchstens drei wichtigste Erkenntnisse, bei der
+  // PM-Stufe zusätzlich Empfehlung und – falls tatsächlich vorhanden –
+  // Entscheidung, sowie ein kompakter Risiko-/Grenzen-Hinweis, falls
+  // vorhanden. Es wird an keiner Stelle etwas NEU zusammengefasst, gekürzt
+  // (außer durch das reine Weglassen ganzer, bereits vorhandener Items ab
+  // dem vierten) oder umformuliert – jeder angezeigte Text ist unverändert
+  // eines der bereits vom Server gelieferten `section.prose`/`section.items`-
+  // Felder. Die vollständigen, unveränderten Abschnitte (alle fünf, in
+  // ursprünglicher Reihenfolge) bleiben zusätzlich vollständig unter
+  // "Fachliche Details" erreichbar (Auftrag Abschnitt 6/11).
+  //
+  // Welcher Abschnitt (per fester Abschnittsnummer, NICHT per Markertext)
+  // welchen Platz in der Entscheidungsansicht füllt, ist stufenabhängig, weil
+  // die drei Stufenverträge (pilot-agent-documentation-result.js) denselben
+  // Abschnitten unterschiedliche fachliche Bedeutung geben (siehe Auftrag
+  // Abschnitt 3, Analysefrage 1):
+  //  - Abschnitt 1 ist bei allen drei Stufen das Fazit/Gesamturteil (PROSE).
+  //  - Abschnitt 2 ist bei allen drei Stufen der wichtigste Kernbefund-/
+  //    Stärkenabschnitt (ITEMS) – Quelle der "wichtigsten Erkenntnisse".
+  //  - Der Risiko-/Grenzen-Abschnitt ist derjenige Abschnitt, dessen fester
+  //    Titel bereits "GRENZEN" nennt (RESEARCH: Abschnitt 5 "GRENZEN UND
+  //    UNSICHERHEITEN"; DOKUMENTATION: Abschnitt 3 "OFFENE PUNKTE UND
+  //    GRENZEN") bzw. bei der PM-Stufe die belegten Schwächen (Abschnitt 3).
+  //  - Nur die PM-Stufe hat einen eigenen Empfehlungsabschnitt ("EMPFEHLUNG
+  //    AN JAMAL", Abschnitt 5) und einen eigenen Entscheidungsabschnitt
+  //    ("PRIORISIERTE ENTSCHEIDUNGEN", Abschnitt 4) – Stufe 1/2 zeigen
+  //    deshalb offen bewusst weder Empfehlung noch Entscheidung (Auftrag
+  //    Abschnitt 4, "Verbindliches Zielbild").
+  // Diese Zuordnung ist eine reine Auswahl unter bereits vorhandenen,
+  // serverseitig festgelegten Abschnitten – keine neue Zusammenfassung, kein
+  // zweiter Parser (Auftrag Abschnitt 10).
+  var PRESENTATION_STAGE_SLOTS = {
+    RESEARCH: { riskSectionNumber: 5, recommendationSectionNumber: null, decisionSectionNumber: null },
+    DOCUMENTATION: { riskSectionNumber: 3, recommendationSectionNumber: null, decisionSectionNumber: null },
+    PROJECT_MANAGER: { riskSectionNumber: 3, recommendationSectionNumber: 5, decisionSectionNumber: 4 },
+  };
+  var PRESENTATION_KEY_FINDINGS_SECTION_NUMBER = 1 + 1; // Abschnitt 2, siehe Kommentar oben.
+  var PRESENTATION_KEY_FINDINGS_MAX_ITEMS = 3;
+
+  function findPresentationSectionByNumber(sections, sectionNumber) {
+    if (!Array.isArray(sections) || !sectionNumber) return null;
+    return (
+      sections.find(function (section) {
+        return section && section.number === sectionNumber;
+      }) || null
+    );
+  }
+
+  function presentationSectionHasContent(section) {
+    if (!section) return false;
+    if (section.kind === "ITEMS") return Array.isArray(section.items) && section.items.length > 0;
+    return isNonEmptyString(section.prose);
+  }
+
+  function renderPresentationItemListHtml(items) {
+    return "<ul>" + items.map(function (item) { return "<li>" + escapeHtml(item) + "</li>"; }).join("") + "</ul>";
+  }
+
+  // Höchstens drei wichtigste Erkenntnisse offen – die vollständige Liste
+  // bleibt unverändert unter "Fachliche Details" erhalten (Auftrag Abschnitt
+  // 11, Prüfpunkt 12). Reine Auswahl der ersten drei bereits vorhandenen
+  // Items, keine Kürzung innerhalb eines Items.
+  function renderKeyFindingsHtml(section) {
+    if (!presentationSectionHasContent(section) || section.kind !== "ITEMS") return "";
+    var limited = section.items.slice(0, PRESENTATION_KEY_FINDINGS_MAX_ITEMS);
+    if (limited.length === 0) return "";
+    return (
+      '<div class="pilot-work-order-key-points"><p class="pilot-work-order-key-points__title">Wichtigste Erkenntnisse</p>' +
+      renderPresentationItemListHtml(limited) +
+      "</div>"
+    );
+  }
+
+  // Kompakter Hinweis – nur sichtbar, wenn der zugeordnete Abschnitt
+  // tatsächlich Inhalt hat (Auftrag Abschnitt 4: "nur wenn vorhanden").
+  // Zeigt den vorhandenen Abschnitt unverändert, weder ergänzt noch
+  // umformuliert noch dramatisiert (Auftrag Abschnitt 5).
+  function renderRiskNoteHtml(section) {
+    if (!presentationSectionHasContent(section)) return "";
+    var body = section.kind === "ITEMS" ? renderPresentationItemListHtml(section.items) : "<p>" + escapeHtml(section.prose) + "</p>";
+    return '<div class="pilot-work-order-risk-note"><p class="pilot-work-order-risk-note__title">Risiken und Grenzen</p>' + body + "</div>";
+  }
+
+  // Ausschließlich bei der PM-Stufe vorhanden (Auftrag Abschnitt 4/5).
+  function renderRecommendationHtml(section) {
+    if (!presentationSectionHasContent(section) || section.kind !== "PROSE") return "";
+    return '<div class="pilot-work-order-recommendation"><p class="pilot-work-order-recommendation__title">Empfehlung</p><p>' + escapeHtml(section.prose) + "</p></div>";
+  }
+
+  // Nur anzeigen, wenn im vorhandenen Ergebnis tatsächlich ein
+  // Entscheidungsabschnitt mit Inhalt vorliegt – niemals ein erfundener
+  // Entscheidungsblock (Auftrag Abschnitt 5/11, Prüfpunkt 4/5).
+  function renderDecisionRequiredHtml(section) {
+    if (!presentationSectionHasContent(section) || section.kind !== "ITEMS") return "";
+    return (
+      '<div class="pilot-work-order-decision-required"><p class="pilot-work-order-decision-required__title">Entscheidung erforderlich</p>' +
+      renderPresentationItemListHtml(section.items) +
+      "</div>"
+    );
+  }
+
+  // Kennzeichnung (Auftrag Abschnitt 4): "Zwischenergebnis" für Stufe 1/2,
+  // "Gesamtbewertung" für die PM-Stufe. Der Wortlaut für Stufe 1/2 bleibt
+  // bewusst identisch mit V8.1 (keine funktionale Änderung, ausschließlich
+  // Anordnung).
+  function renderStageStatusHtml(contractStage) {
+    if (contractStage === "PROJECT_MANAGER") {
+      return '<p class="pilot-work-order-result-status"><strong>Gesamtbewertung</strong></p>';
+    }
+    if (isChainIntermediateStage(contractStage)) {
+      return '<p class="pilot-work-order-result-quality">Zwischenergebnis \u2013 noch nicht das abschlie\u00dfende Gesamtergebnis.</p>';
+    }
+    return "";
+  }
+
+  // Ebene 2 (Auftrag Abschnitt 6): genau EIN eingeklappter Bereich
+  // "Fachliche Details" pro Kettenschritt, standardmäßig geschlossen (kein
+  // "open"-Attribut). Enthält vollständig und in bestehender Reihenfolge
+  // dieselben fünf Abschnitte, die V8.1 bereits offen zeigte – hier
+  // ausschließlich in ihrer Vollständigkeit bewahrt, nicht neu erzeugt.
+  function renderFachlicheDetailsHtml(presentation) {
+    var body;
+    if (presentation && presentation.structureStatus === "STRUCTURED" && Array.isArray(presentation.sections) && presentation.sections.length > 0) {
+      body =
+        '<p class="pilot-work-order-result-quality"><strong>Qualit\u00e4tsstatus:</strong> Vereinbarte Ergebnisstruktur eingehalten.</p>' +
+        presentation.sections.map(renderResultPresentationSectionHtml).join("");
+    } else if (presentation && presentation.structureStatus === "UNSTRUCTURED_ACCEPTED") {
+      body =
+        '<p class="pilot-work-order-result-quality"><strong>Qualit\u00e4tsstatus:</strong> Struktur nicht vollst\u00e4ndig eingehalten \u2013 Rohtext wird unver\u00e4ndert gezeigt.</p>' +
+        "<p>" + escapeHtml(presentation.honestNotice || "") + "</p>";
+    } else {
+      body =
+        '<p class="pilot-work-order-result-quality">Keine strukturierten Fachabschnitte verf\u00fcgbar \u2013 der vollst\u00e4ndige Rohtext ist unter \u201eTechnische Details\u201c einsehbar.</p>';
+    }
+    return '<details class="pilot-work-order-details pilot-work-order-result-fachlich"><summary>Fachliche Details</summary>' + body + "</details>";
+  }
+
+  function renderRunResultPresentationHtml(run) {
+    var presentation = run && run.resultPresentation;
+    var stage = presentation ? presentation.contractStage : null;
+    var openHtml = renderStageStatusHtml(stage);
+
+    if (presentation && presentation.structureStatus === "STRUCTURED" && Array.isArray(presentation.sections) && presentation.sections.length > 0) {
+      var slots = PRESENTATION_STAGE_SLOTS[stage] || { riskSectionNumber: null, recommendationSectionNumber: null, decisionSectionNumber: null };
+      var fazitSection = findPresentationSectionByNumber(presentation.sections, 1);
+      var keyFindingsSection = findPresentationSectionByNumber(presentation.sections, PRESENTATION_KEY_FINDINGS_SECTION_NUMBER);
+      var riskSection = findPresentationSectionByNumber(presentation.sections, slots.riskSectionNumber);
+      var recommendationSection = findPresentationSectionByNumber(presentation.sections, slots.recommendationSectionNumber);
+      var decisionSection = findPresentationSectionByNumber(presentation.sections, slots.decisionSectionNumber);
+
+      if (presentationSectionHasContent(fazitSection)) {
+        openHtml += '<p class="pilot-work-order-decision-verdict">' + escapeHtml(fazitSection.prose) + "</p>";
+      }
+      openHtml += renderKeyFindingsHtml(keyFindingsSection);
+      openHtml += renderRecommendationHtml(recommendationSection);
+      openHtml += renderDecisionRequiredHtml(decisionSection);
+      openHtml += renderRiskNoteHtml(riskSection);
+    } else if (presentation && presentation.structureStatus === "UNSTRUCTURED_ACCEPTED") {
+      openHtml += "<p>" + escapeHtml(presentation.honestNotice || "") + "</p>";
+    } else if (run && isNonEmptyString(run.resultRawText)) {
+      // Kein serverseitig aufbereitetes Ergebnis vorhanden (\u00e4lterer
+      // Overview-Stand ohne dieses additive Feld, oder
+      // structureStatus === "UNAVAILABLE"): ehrlicher Hinweis statt
+      // erfundener Struktur. Der Rohtext bleibt unver\u00e4ndert unter
+      // "Technische Details" erreichbar (siehe renderRunTechnicalDetailsHtml).
+      openHtml += '<p class="pilot-work-order-result-quality">F\u00fcr dieses Ergebnis liegt keine aufbereitete fachliche Zusammenfassung vor. Der vollst\u00e4ndige Rohtext ist unter \u201eTechnische Details\u201c einsehbar.</p>';
+    }
+    // Ebene 2 (Auftrag Abschnitt 6/11, Pr\u00fcfpunkt 6): genau EIN
+    // "Fachliche Details"-Bereich, unabh\u00e4ngig vom Strukturstatus.
+    openHtml += renderFachlicheDetailsHtml(presentation);
+    return openHtml;
+  }
+
+  // Genau EIN <details>-Element pro Ergebnis (Auftrag Abschnitt 8): bündelt
+  // Lauf-/Digest-/Runner-Angaben, die Verdichtungsinformationen und den
+  // unveränderten Rohtext. Der gespeicherte run.resultRawText wird hier
+  // ausschließlich gelesen, niemals verändert.
+  //
+  // V8.1 Korrektur ("echte Kettenansicht auf verständliche
+  // Ergebnisdarstellung umstellen"): zusätzlich Lauf-ID, Runner-Art
+  // (angefordert/tatsächlich), Runner, Modell und Start-/Endzeit ergänzt –
+  // dieselben Felder, die vorher ausschließlich im alten, offenen Block
+  // (renderAgentExecutionRun) sichtbar waren (Auftrag Abschnitt 4: diese
+  // Angaben müssen im "Technische Details"-Bereich stehen, nicht offen).
+  // Alle Werte stammen unverändert aus dem bereits vorhandenen
+  // run-Objekt, keine neue Datenquelle.
+  function renderRunTechnicalDetailsHtml(run) {
+    if (!run) return "";
+    var rows = [];
+    if (run.id) rows.push("Lauf-ID: " + escapeHtml(run.id));
+    if (isNonEmptyString(run.requestedRunnerKind) || isNonEmptyString(run.actualRunnerKind)) {
+      rows.push(
+        "Runner-Art \u2013 angefordert: " + escapeHtml(run.requestedRunnerKind || "unbekannt") +
+          " \u00b7 tats\u00e4chlich: " + escapeHtml(run.actualRunnerKind || "unbekannt") +
+          " \u00b7 KI ausgef\u00fchrt: " + (run.aiExecuted ? "ja" : "nein"),
+      );
+    }
+    if (isNonEmptyString(run.runnerLabel || run.runnerId)) {
+      rows.push("Runner: " + escapeHtml(run.runnerLabel || run.runnerId));
+    }
+    if (isNonEmptyString(run.modelLabel)) {
+      rows.push("Modell: " + escapeHtml(run.modelLabel) + (run.runnerVersion ? " (" + escapeHtml(run.runnerVersion) + ")" : ""));
+    }
+    if (run.startedAt || run.finishedAt) {
+      rows.push("Gestartet: " + escapeHtml(formatTimestamp(run.startedAt)) + " \u00b7 Beendet: " + escapeHtml(formatTimestamp(run.finishedAt)));
+    }
+    if (run.promptDigest) rows.push("Prompt-Digest: " + escapeHtml(run.promptDigest));
+    if (run.mandateDigest) rows.push("Kernauftrag-Digest: " + escapeHtml(run.mandateDigest));
+    var html = '<details class="pilot-work-order-details pilot-work-order-result-technical"><summary>Technische Details</summary>';
+    html += rows.map(function (row) { return "<p>" + row + "</p>"; }).join("");
+    if (run.resultTruncated) {
+      html += '<p class="pilot-work-order-action-error">Hinweis: Das persistierte Ergebnis wurde beim Speichern gek\u00fcrzt.</p>';
+    }
+    html += documentationCompactionNoticeHtml(run);
+    if (isNonEmptyString(run.resultRawText)) {
+      html += "<p>Rohtext (unver\u00e4ndert gespeichert):</p><pre class=\"pilot-agent-execution-result\">" + escapeHtml(run.resultRawText) + "</pre>";
+    }
+    html += "</details>";
+    return html;
+  }
+
   function normalizedFileListFrom(entries) {
     var source = Array.isArray(entries) ? entries : [];
     var result = [];
@@ -2978,34 +3244,50 @@
     var qualityPreview = qualityCriteria.length > 0 ? qualityCriteria.join(" | ") : "nicht angegeben";
     var stageTaskLabel = run && run.taskTitle ? run.taskTitle : CHAIN_STEP_TITLES[step.stepNumber] || "Schritt " + step.stepNumber;
 
-    var html = '<li class="pilot-agent-chain-step">';
-    html += "<strong>" + escapeHtml(CHAIN_STEP_TITLES[step.stepNumber] || "Schritt " + step.stepNumber) + "</strong>";
-    html += "<br>Agent: " + escapeHtml(CHAIN_AGENT_LABELS[step.agentKey] || step.agentKey) + " (" + escapeHtml(step.agentKey) + ")";
-    html += "<br>Status: " + (CHAIN_STEP_STATUS_LABELS[step.stepStatus] || escapeHtml(step.stepStatus)) + " \u00b7 Freigabe: " + (CHAIN_APPROVAL_STATUS_LABELS[step.approvalStatus] || escapeHtml(step.approvalStatus));
+    // V8.2.1 ("Technischen Kopf einklappen"): dieselben Angaben, die vorher
+    // unveränderlich zwischen der Schritt-Überschrift und dem eigentlichen
+    // Kettenergebnis offen standen (Agent, Status/Freigabe, Kernauftrag/
+    // Ergebniswunsch/Qualitätskriterien, Stufenauftrag, executionRunId,
+    // Vorgänger-executionRunId, Vorgänger-Übernahme, Rollenverbuchung),
+    // werden jetzt unverändert (kein Text gekürzt, umformuliert oder
+    // entfernt) in `orderAndRunDetailsHtml` gesammelt. Für einen bereits
+    // erfolgreich abgeschlossenen Schritt (Ergebnis vorhanden) erscheinen
+    // sie erst NACH dem Ergebnis in einem neuen, standardmäßig
+    // geschlossenen Bereich "Auftrags- und Laufdetails" (siehe unten) statt
+    // wie bisher offen VOR dem Ergebnis. Ohne Ergebnis (Schritt noch
+    // PENDING/RUNNING oder ohne zugehörigen Lauf FAILED) bleibt die
+    // Darstellung exakt wie vor diesem Auftrag – dort sind Status,
+    // Freigabe und die Schaltflächen weiterhin sofort ohne Aufklappen
+    // sichtbar, weil dort noch keine Ergebnisdarstellung existiert, vor der
+    // sie stünden.
+    var orderAndRunDetailsHtml = "";
+    orderAndRunDetailsHtml += "<br>Agent: " + escapeHtml(CHAIN_AGENT_LABELS[step.agentKey] || step.agentKey) + " (" + escapeHtml(step.agentKey) + ")";
+    orderAndRunDetailsHtml +=
+      "<br>Status: " + (CHAIN_STEP_STATUS_LABELS[step.stepStatus] || escapeHtml(step.stepStatus)) + " \u00b7 Freigabe: " + (CHAIN_APPROVAL_STATUS_LABELS[step.approvalStatus] || escapeHtml(step.approvalStatus));
     if (chainMandate) {
-      html += "<br>Kernauftrag: " + escapeHtml(chainMandate.title || "nicht angegeben");
-      html += "<br>Ergebniswunsch: " + escapeHtml(chainMandate.desiredOutcome || "nicht angegeben");
-      html += "<br>Qualitätskriterien (Kernauftrag): " + escapeHtml(qualityPreview);
+      orderAndRunDetailsHtml += "<br>Kernauftrag: " + escapeHtml(chainMandate.title || "nicht angegeben");
+      orderAndRunDetailsHtml += "<br>Ergebniswunsch: " + escapeHtml(chainMandate.desiredOutcome || "nicht angegeben");
+      orderAndRunDetailsHtml += "<br>Qualitätskriterien (Kernauftrag): " + escapeHtml(qualityPreview);
     } else {
-      html += "<br>Kernauftrag f\u00fcr diese Altkette nicht mitgef\u00fchrt";
+      orderAndRunDetailsHtml += "<br>Kernauftrag f\u00fcr diese Altkette nicht mitgef\u00fchrt";
     }
-    html += "<br>Stufenauftrag: " + escapeHtml(stageTaskLabel);
+    orderAndRunDetailsHtml += "<br>Stufenauftrag: " + escapeHtml(stageTaskLabel);
     if (step.executionRunId) {
-      html += "<br>executionRunId: " + escapeHtml(step.executionRunId);
+      orderAndRunDetailsHtml += "<br>executionRunId: " + escapeHtml(step.executionRunId);
     }
     if (step.chainedFromExecutionRunId) {
-      html += "<br>Vorg\u00e4nger-executionRunId: " + escapeHtml(step.chainedFromExecutionRunId);
+      orderAndRunDetailsHtml += "<br>Vorg\u00e4nger-executionRunId: " + escapeHtml(step.chainedFromExecutionRunId);
     }
     if (step.stepNumber === 1) {
-      html += "<br>Vorgänger vollständig übernommen: nicht erforderlich (Schritt 1).";
+      orderAndRunDetailsHtml += "<br>Vorgänger vollständig übernommen: nicht erforderlich (Schritt 1).";
     } else if (step.predecessorFullyIncluded === true) {
-      html +=
+      orderAndRunDetailsHtml +=
         "<br>Vorgänger vollständig übernommen: ja" +
         (step.predecessorIncludedCharCount !== null && step.predecessorIncludedCharCount !== undefined
           ? " (" + escapeHtml(String(step.predecessorIncludedCharCount)) + " Zeichen)."
           : ".");
     } else if (step.predecessorFullyIncluded === false) {
-      html +=
+      orderAndRunDetailsHtml +=
         '<br><span class="pilot-work-order-action-error">Vorgänger vollständig übernommen: nein' +
         (step.predecessorCharCount !== null && step.predecessorCharCount !== undefined
           ? " (" + escapeHtml(String(step.predecessorCharCount)) + " Zeichen vorhanden)."
@@ -3013,21 +3295,32 @@
         "</span>";
     }
     if (step.roleHandoffBooked) {
-      html += "<br>Rollenverbuchung: erfolgt" + (step.roleHandoffBookedAt ? " (" + escapeHtml(formatTimestamp(step.roleHandoffBookedAt)) + ")" : "");
+      orderAndRunDetailsHtml += "<br>Rollenverbuchung: erfolgt" + (step.roleHandoffBookedAt ? " (" + escapeHtml(formatTimestamp(step.roleHandoffBookedAt)) + ")" : "");
     }
+
+    // Dieselben Steuerungselemente (Warnhinweis bei zu langer
+    // Vorgängerübergabe, die beiden Schaltflächen, der Freigabehinweis)
+    // unverändert wie bisher – für einen bereits erfolgreich
+    // abgeschlossenen Schritt sind "Freigabe anfordern"/"Stufe starten"
+    // ohnehin immer dauerhaft deaktiviert (siehe canRequestApproval/
+    // canStart, beide verlangen step.stepStatus === "PENDING"); sie stehen
+    // dann zusammen mit den übrigen Auftrags-/Laufangaben im neuen
+    // eingeklappten Bereich, statt zwischen Schritt-Überschrift und
+    // Ergebnis zu stehen.
+    var controlsHtml = "";
     if (pendingPredecessorTooLarge) {
       var pendingCharCountText =
         step.pendingPredecessorCharCount !== null && step.pendingPredecessorCharCount !== undefined
           ? String(step.pendingPredecessorCharCount)
           : "unbekannt";
-      html +=
+      controlsHtml +=
         '<br><span class="pilot-work-order-action-error">Vorg\u00e4nger\u00fcbergabe zu lang (' +
         escapeHtml(pendingCharCountText) +
         " von maximal " +
         escapeHtml(String(CHAIN_PREDECESSOR_MAX_CHARS)) +
         " Zeichen). Dieser Schritt kann so nicht gestartet werden.</span>";
     }
-    html +=
+    controlsHtml +=
       ' <button type="button" data-action="request-chain-step-approval" data-chain-id="' +
       escapeHtml(chain.id) +
       '" data-chain-step="' +
@@ -3035,7 +3328,7 @@
       '"' +
       (canRequestApproval ? "" : " disabled") +
       ">Freigabe f\u00fcr diese Stufe anfordern</button>";
-    html +=
+    controlsHtml +=
       ' <button type="button" data-action="start-chain-step" data-chain-id="' +
       escapeHtml(chain.id) +
       '" data-chain-step="' +
@@ -3044,24 +3337,28 @@
       (canStart ? "" : " disabled") +
       ">Genau diese Stufe starten</button>";
     if (hasToken) {
-      html += "<p>Freigabe liegt vor \u2013 gilt ausschlie\u00dflich f\u00fcr genau diese eine Stufe.</p>";
+      controlsHtml += "<p>Freigabe liegt vor \u2013 gilt ausschlie\u00dflich f\u00fcr genau diese eine Stufe.</p>";
     }
-    if (step.stepStatus === "SUCCEEDED" && run) {
-      html +=
-        "<br>Tats\u00e4chlicher Runner: " +
-        escapeHtml(run.actualRunnerKind || "") +
-        " \u00b7 KI ausgef\u00fchrt: " +
-        (run.aiExecuted ? "ja" : "nein");
-      if (run.promptDigest) {
-        html += "<br>Prompt-Digest: " + escapeHtml(run.promptDigest);
-      }
-      if (run.mandateDigest) {
-        html += "<br>Kernauftrag-Digest: " + escapeHtml(run.mandateDigest);
-      }
-      if (run.resultTruncated) {
-        html += '<br><span class="pilot-work-order-action-error">Hinweis: Das persistierte Ergebnis wurde beim Speichern gekürzt.</span>';
-      }
-      html += documentationCompactionNoticeHtml(run);
+
+    var html = '<li class="pilot-agent-chain-step">';
+    html += "<strong>" + escapeHtml(CHAIN_STEP_TITLES[step.stepNumber] || "Schritt " + step.stepNumber) + "</strong>";
+
+    var showResult = step.stepStatus === "SUCCEEDED" && Boolean(run);
+
+    if (!showResult) {
+      // Kein Kettenergebnis vorhanden, vor dem geblättert werden müsste –
+      // unveränderte V8.2-Darstellung: Auftrags-/Laufangaben und
+      // Steuerungselemente stehen wie bisher offen direkt unter der
+      // Schritt-Überschrift.
+      html += orderAndRunDetailsHtml;
+      html += controlsHtml;
+    }
+    if (showResult) {
+      // V8.1 ("Ergebnis verstehen ohne Technik"): fachlicher Inhalt zuerst
+      // (resultPresentation, rein lesend vom Server aufbereitet), Runner-,
+      // Digest- und Rohtext-Angaben wandern in genau EIN <details>-Element
+      // weiter unten. run.resultRawText bleibt dabei unangetastet.
+      html += renderRunResultPresentationHtml(run);
       var analyzedFiles = [];
       if (run.resultSummary && Array.isArray(run.resultSummary.analyzedFiles)) {
         analyzedFiles = run.resultSummary.analyzedFiles
@@ -3072,12 +3369,25 @@
           })
           .filter(Boolean);
       }
+      var analyzedFilesHtml = "";
       if (analyzedFiles.length > 0) {
-        html += "<br>Tats\u00e4chlich verwendete Dateien: " + escapeHtml(analyzedFiles.join(", "));
+        analyzedFilesHtml = "<p>Tats\u00e4chlich verwendete Dateien: " + escapeHtml(analyzedFiles.join(", ")) + "</p>";
       }
-      if (run.resultRawText) {
-        html += "<br>Ergebnis:<br><pre class=\"pilot-agent-execution-result\">" + escapeHtml(run.resultRawText) + "</pre>";
-      }
+      html += renderRunTechnicalDetailsHtml(run);
+      // V8.2.1 ("Technischen Kopf einklappen"): Ebene 3, standardmäßig
+      // geschlossen. Enthält vollständig und unverändert dieselben
+      // Angaben (inklusive Steuerungselemente), die vorher offen vor dem
+      // Ergebnis standen, ergänzt um die ebenfalls rein technische Angabe
+      // der tatsächlich verwendeten Dateien (vorher offen zwischen
+      // Ergebnis und "Technische Details"). Kein Informationsverlust: jede
+      // Angabe bleibt vollständig vorhanden, ausschließlich die
+      // Standard-Sichtbarkeit ändert sich.
+      html +=
+        '<details class="pilot-work-order-details pilot-work-order-order-run-details"><summary>Auftrags- und Laufdetails</summary>' +
+        orderAndRunDetailsHtml +
+        analyzedFilesHtml +
+        controlsHtml +
+        "</details>";
     }
     if (step.stepStatus === "FAILED") {
       html +=
@@ -3114,7 +3424,41 @@
       var pmStep = chain.steps[2];
       var pmRun = pmStep ? findAgentExecutionRunById(overview, pmStep.executionRunId) : null;
       if (pmRun && pmRun.resultRawText) {
-        html += "<h5>PM-Gesamturteil</h5><pre class=\"pilot-agent-execution-result\">" + escapeHtml(pmRun.resultRawText) + "</pre>";
+        // V8.1 Korrektur ("echte Kettenansicht auf verständliche
+        // Ergebnisdarstellung umstellen"): dasselbe PM-Ergebnis ist bereits
+        // oben in der Stufe-3-Karte inklusive Rohtext und "Technischen
+        // Details" vollständig sichtbar. Hier deshalb ausschließlich die
+        // fachliche Kurzdarstellung – KEIN zweites offenes <pre> mit dem
+        // vollständigen Rohtext (Auftrag Abschnitt 4/7: Rohtext darf nicht
+        // doppelt bzw. zusätzlich offen erscheinen). Auch im
+        // UNSTRUCTURED_ACCEPTED- bzw. Fallback-Fall bleibt der ehrliche
+        // Hinweis stehen, ohne den Rohtext hier erneut auszugeben.
+        var pmPresentation = pmRun.resultPresentation;
+        // V8.2 ("Entscheidungsansicht statt Textmenge", Auftrag Abschnitt 7,
+        // "PM-Gesamturteil außerhalb des dritten Kettenschritts"): dasselbe
+        // PM-Ergebnis steht bereits vollständig (Gesamtbewertung, wichtigste
+        // Erkenntnisse, Empfehlung, ggf. Entscheidung, Risiken/Grenzen sowie
+        // die vollständigen Fachlichen/Technischen Details) oben in Stufe 3.
+        // Hier deshalb nur noch ein kompakter Verweis, der vollständige
+        // Wortlaut bleibt zusätzlich – aber standardmäßig eingeklappt –
+        // erreichbar (nicht gelöscht, siehe Auftrag Abschnitt 7, letzter
+        // Absatz).
+        html += "<h5>PM-Gesamturteil</h5>";
+        html +=
+          '<p class="pilot-work-order-result-quality">Gesamtbewertung, wichtigste Erkenntnisse, Empfehlung und ggf. Entscheidung stehen oben in Stufe 3.</p>';
+        if (pmPresentation && pmPresentation.structureStatus === "STRUCTURED" && Array.isArray(pmPresentation.sections) && pmPresentation.sections.length > 0) {
+          html +=
+            '<details class="pilot-work-order-details"><summary>Vollst\u00e4ndiger PM-Bericht (Wiederholung aus Stufe 3)</summary>' +
+            pmPresentation.sections.map(renderResultPresentationSectionHtml).join("") +
+            "</details>";
+        } else if (pmPresentation && pmPresentation.structureStatus === "UNSTRUCTURED_ACCEPTED") {
+          html += "<p>" + escapeHtml(pmPresentation.honestNotice || "") + "</p>";
+          html += '<p class="pilot-work-order-result-quality">Der vollst\u00e4ndige Rohtext steht oben in Stufe 3 unter \u201eTechnische Details\u201c.</p>';
+        } else {
+          html +=
+            '<p class="pilot-work-order-result-quality">F\u00fcr dieses Ergebnis liegt keine aufbereitete fachliche Zusammenfassung vor. ' +
+            "Der vollst\u00e4ndige Rohtext steht oben in Stufe 3 unter \u201eTechnische Details\u201c.</p>";
+        }
       }
     }
     html += "</div>";
@@ -3130,47 +3474,57 @@
       "<p>Jede Stufe verwendet einen echten, isolierten Codex-Agentenlauf mit eigener executionRunId und ben\u00f6tigt eine eigene, " +
       "kurzlebige Einzelfreigabe. Ein erfolgreicher Schritt startet den n\u00e4chsten niemals automatisch.</p>";
     html += "<p>Der Kernauftrag bleibt f\u00fcr alle drei Stufen unver\u00e4ndert. Jamal legt die Dateiauswahl hier einmal f\u00fcr alle drei Stufen fest.</p>";
+    // V8.1 Korrektur ("echte Kettenansicht auf verständliche
+    // Ergebnisdarstellung umstellen"): NUR die Anlage einer NEUEN Kette
+    // bleibt unverändert an "In Ausführung" gebunden. Vorher endete diese
+    // Funktion hier per return und zeigte dadurch für jeden Pilotauftrag,
+    // der nicht mehr IN_EXECUTION ist (z. B. status COMPLETED), überhaupt
+    // keine Kettenkarte an – nicht einmal für eine bereits erfolgreich
+    // abgeschlossene Kette. Genau das war die Ursache der fehlgeschlagenen
+    // Browserabnahme (siehe Analyse zu Auftrag Abschnitt 3): der bereits
+    // korrekt umgestellte renderChainStepCard/renderRunResultPresentationHtml
+    // wurde dadurch im Browser für abgeschlossene Aufträge nie erreicht.
     if (overview.status !== "IN_EXECUTION") {
-      html += "<p>Eine Agentenkette kann nur w\u00e4hrend \u201eIn Ausf\u00fchrung\u201c vorbereitet werden.</p>";
-      return html;
-    }
-    if (selection.selectableFiles.length > 0) {
-      html += '<div class="pilot-chain-file-selection"><p><strong>Dateiauswahl f\u00fcr alle drei Stufen:</strong></p>';
-      if (selection.recommendedFiles.length > 0) {
-        html +=
-          "<p>Vorausgew\u00e4hlt sind die f\u00fcr die Nutzerperspektive empfohlenen Dateien (" +
-          escapeHtml(selection.recommendedFiles.join(", ")) +
-          "). Die Auswahl ist frei \u00e4nderbar; die Liste selbst ist serverseitig geschlossen. " +
-          "Eine Auswahl allein bereitet keine Kette vor, gibt nichts frei und startet nichts.</p>";
+      html += "<p>Eine neue Agentenkette kann nur w\u00e4hrend \u201eIn Ausf\u00fchrung\u201c vorbereitet werden.</p>";
+    } else {
+      if (selection.selectableFiles.length > 0) {
+        html += '<div class="pilot-chain-file-selection"><p><strong>Dateiauswahl f\u00fcr alle drei Stufen:</strong></p>';
+        if (selection.recommendedFiles.length > 0) {
+          html +=
+            "<p>Vorausgew\u00e4hlt sind die f\u00fcr die Nutzerperspektive empfohlenen Dateien (" +
+            escapeHtml(selection.recommendedFiles.join(", ")) +
+            "). Die Auswahl ist frei \u00e4nderbar; die Liste selbst ist serverseitig geschlossen. " +
+            "Eine Auswahl allein bereitet keine Kette vor, gibt nichts frei und startet nichts.</p>";
+        }
+        html += "<ul>";
+        selection.selectableFiles.forEach(function (filePath) {
+          var checked = selection.selectedFiles.indexOf(filePath) !== -1;
+          var recommended = selection.recommendedFiles.indexOf(filePath) !== -1;
+          html +=
+            "<li><label>" +
+            '<input type="checkbox" data-action="toggle-chain-selected-file" data-file-path="' +
+            escapeHtml(filePath) +
+            '"' +
+            (checked ? " checked" : "") +
+            (state.chainActionInFlight || orderChainLocked ? " disabled" : "") +
+            " /> " +
+            escapeHtml(filePath) +
+            (recommended ? " \u2013 empfohlen f\u00fcr die Nutzerperspektive" : "") +
+            "</label></li>";
+        });
+        html += "</ul></div>";
       }
-      html += "<ul>";
-      selection.selectableFiles.forEach(function (filePath) {
-        var checked = selection.selectedFiles.indexOf(filePath) !== -1;
-        var recommended = selection.recommendedFiles.indexOf(filePath) !== -1;
-        html +=
-          "<li><label>" +
-          '<input type="checkbox" data-action="toggle-chain-selected-file" data-file-path="' +
-          escapeHtml(filePath) +
-          '"' +
-          (checked ? " checked" : "") +
-          (state.chainActionInFlight || orderChainLocked ? " disabled" : "") +
-          " /> " +
-          escapeHtml(filePath) +
-          (recommended ? " \u2013 empfohlen f\u00fcr die Nutzerperspektive" : "") +
-          "</label></li>";
-      });
-      html += "</ul></div>";
-    }
-    var canPrepare = !state.chainActionInFlight && !orderChainLocked && selection.selectedFiles.length > 0;
-    html +=
-      '<button type="button" data-action="prepare-agent-chain"' +
-      (canPrepare ? "" : " disabled") +
-      ">Neue Agentenkette vorbereiten (Recherche/Dokumentation/PM)</button>";
-    if (selection.selectedFiles.length === 0) {
-      html += '<p class="pilot-work-order-action-error">Mindestens eine Datei muss ausgew\u00e4hlt sein, bevor die Kette vorbereitet werden kann.</p>';
-    }
-    if (state.chainActionError) {
-      html += '<p class="pilot-work-order-action-error">' + escapeHtml(state.chainActionError) + "</p>";
+      var canPrepare = !state.chainActionInFlight && !orderChainLocked && selection.selectedFiles.length > 0;
+      html +=
+        '<button type="button" data-action="prepare-agent-chain"' +
+        (canPrepare ? "" : " disabled") +
+        ">Neue Agentenkette vorbereiten (Recherche/Dokumentation/PM)</button>";
+      if (selection.selectedFiles.length === 0) {
+        html += '<p class="pilot-work-order-action-error">Mindestens eine Datei muss ausgew\u00e4hlt sein, bevor die Kette vorbereitet werden kann.</p>';
+      }
+      if (state.chainActionError) {
+        html += '<p class="pilot-work-order-action-error">' + escapeHtml(state.chainActionError) + "</p>";
+      }
     }
     html += renderChainStatusCard(overview);
     if (chains.length === 0) {
@@ -3349,12 +3703,60 @@
       html += "<p>Ein Agentenlauf ist nur w\u00e4hrend \u201eIn Ausf\u00fchrung\u201c m\u00f6glich.</p>";
     }
     html += renderCodexAgentExecutionSection(overview);
-    if (runs.length === 0) {
-      html += "<p>Noch kein Agentenlauf gestartet.</p>";
+    // V8.1 Korrektur ("echte Kettenansicht auf verständliche
+    // Ergebnisdarstellung umstellen"): Läufe eines Drei-Agenten-Kettenschritts
+    // (chainManaged, erkennbar an ihrer festen, serverseitig vergebenen
+    // presetId, siehe pilot-agent-execution-service.js#PILOT_AGENT_TASK_PRESETS)
+    // erscheinen ebenfalls in overview.agentExecutionRuns und wurden hier
+    // bisher IMMER zusätzlich mit dem alten, offenen Rohtextblock gezeigt –
+    // unabhängig vom Auftragsstatus. Sie haben weiter unten in der
+    // Drei-Agenten-Kette (renderAgentChainSection/renderChainStepCard)
+    // bereits genau eine vollständige Darstellung inklusive Rohtext unter
+    // "Technische Details". Ohne diesen Filter gäbe es pro Kettenschritt
+    // zwei technische Detailbereiche und einen doppelt offenen Rohtext
+    // (Auftrag Abschnitt 4: "genau einen technischen Detailbereich je
+    // Kettenschritt"). Kein Datenverlust: derselbe Lauf bleibt vollständig
+    // sichtbar, ausschließlich an der einen dafür vorgesehenen Stelle.
+    var nonChainRuns = runs.filter(function (run) {
+      return !isChainManagedRun(run);
+    });
+    if (nonChainRuns.length === 0) {
+      html +=
+        runs.length === 0
+          ? "<p>Noch kein Agentenlauf gestartet.</p>"
+          : "<p>Alle bisherigen L\u00e4ufe geh\u00f6ren zu einer Drei-Agenten-Kette und werden ausschlie\u00dflich weiter unten unter \u201eDrei-Agenten-Kette\u201c gezeigt.</p>";
     } else {
-      html += "<ol>" + runs.map(renderAgentExecutionRun).join("") + "</ol>";
+      html += "<ol>" + nonChainRuns.map(renderAgentExecutionRun).join("") + "</ol>";
     }
     return html;
+  }
+
+  // V8.2 ("Entscheidungsansicht statt Textmenge", Auftrag Abschnitt 7):
+  // offen stehen ausschließlich von Rolle, an Rolle, Filterstatus, ein
+  // kurzer Übergabebefund und – bei einer Ablehnung durch den
+  // Projektmanager-Filter – der Ablehnungsgrund. Der vollständige Wortlaut
+  // (Ergebnis/Empfehlung, Grundlage, Risiko/Grenze, nächster Schritt,
+  // benötigte Entscheidung, Filterhinweis) bleibt vollständig, aber
+  // standardmäßig eingeklappt unter "Übergabedetails" erhalten – nichts
+  // wird gelöscht.
+  function renderHandoffDetailsHtml(handoff) {
+    var rows = [
+      "<p>Ergebnis/Empfehlung: " + escapeHtml(handoff.resultOrRecommendation) + "</p>",
+      "<p>Grundlage: " + escapeHtml(handoff.basisUsed) + "</p>",
+      "<p>Risiko/Grenze: " + escapeHtml(handoff.riskOrLimit) + "</p>",
+      "<p>N\u00e4chster Schritt: " + escapeHtml(handoff.nextStep) + "</p>",
+    ];
+    if (handoff.decisionNeeded) {
+      rows.push("<p>Ben\u00f6tigte Entscheidung: " + escapeHtml(handoff.decisionNeeded) + "</p>");
+    }
+    if (handoff.pmFilterReasons && handoff.pmFilterReasons.length > 0) {
+      rows.push("<p>Filterhinweis: " + escapeHtml(handoff.pmFilterReasons.join("; ")) + "</p>");
+    }
+    return (
+      '<details class="pilot-work-order-details pilot-work-order-handoff-details"><summary>\u00dcbergabedetails</summary>' +
+      rows.join("") +
+      "</details>"
+    );
   }
 
   function renderHandoffs(overview) {
@@ -3363,18 +3765,16 @@
     }
     var items = overview.handoffs
       .map(function (handoff) {
+        var rejectionHint =
+          handoff.pmFilterStatus === "REJECTED" && handoff.pmFilterReasons && handoff.pmFilterReasons.length > 0
+            ? "<br>Ablehnungsgrund: " + escapeHtml(handoff.pmFilterReasons.join("; "))
+            : "";
         return (
-          "<li><strong>" + handoff.sequence + ". an " + escapeHtml(handoff.toPilotRoleLabel) + "</strong> \u2013 Filter: " +
-          escapeHtml(handoff.pmFilterStatus) +
+          "<li><strong>" + handoff.sequence + ". von " + escapeHtml(handoff.fromPilotRole) + " an " + escapeHtml(handoff.toPilotRoleLabel) + "</strong>" +
+          "<br>Filterstatus: " + escapeHtml(handoff.pmFilterStatus) +
           "<br>Kurzbefund: " + escapeHtml(handoff.shortFinding) +
-          "<br>Ergebnis/Empfehlung: " + escapeHtml(handoff.resultOrRecommendation) +
-          "<br>Grundlage: " + escapeHtml(handoff.basisUsed) +
-          "<br>Risiko/Grenze: " + escapeHtml(handoff.riskOrLimit) +
-          "<br>N\u00e4chster Schritt: " + escapeHtml(handoff.nextStep) +
-          (handoff.decisionNeeded ? "<br>Ben\u00f6tigte Entscheidung: " + escapeHtml(handoff.decisionNeeded) : "") +
-          (handoff.pmFilterReasons && handoff.pmFilterReasons.length > 0
-            ? "<br>Filterhinweis: " + escapeHtml(handoff.pmFilterReasons.join("; "))
-            : "") +
+          rejectionHint +
+          renderHandoffDetailsHtml(handoff) +
           "</li>"
         );
       })

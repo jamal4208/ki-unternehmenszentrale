@@ -582,6 +582,26 @@ function makeFakeBackend() {
       }
       chain.revision += 1;
     },
+    // V8.1 ("Ergebnis verstehen ohne Technik"): setzt bzw. entfernt das
+    // additive, rein lesende resultPresentation-Feld an dem Lauf, der zu
+    // einer bereits erfolgreichen Stufe gehört. Simuliert, was
+    // pilot-work-order-service.js#buildResultPresentation im echten Betrieb
+    // liefert – ohne hier eine zweite Parserlogik nachzubauen.
+    setResultPresentation: (chainId, stepNumber, presentation) => {
+      const order = orders.get(CANONICAL_ID);
+      const chain = findChain(order, chainId);
+      if (!chain) return;
+      const step = findStep(chain, stepNumber);
+      if (!step || !step.executionRunId) return;
+      const run = (order.agentExecutionRuns || []).find((entry) => entry.id === step.executionRunId);
+      if (!run) return;
+      if (presentation === null) {
+        delete run.resultPresentation;
+      } else {
+        run.resultPresentation = presentation;
+      }
+      chain.revision += 1;
+    },
     markChainAsLegacy: (chainId) => {
       const order = orders.get(CANONICAL_ID);
       const chain = findChain(order, chainId);
@@ -862,7 +882,10 @@ async function run() {
     assert.ok(call);
     assert.strictEqual(call.body.chainStep, 1);
     const html = diagnosticsHtml();
-    assert.match(html, /Tats\u00e4chlicher Runner: CODEX_READ_ONLY/);
+    // V8.1 Korrektur ("echte Kettenansicht auf verständliche
+    // Ergebnisdarstellung umstellen"): derselbe Runner-Wert steht jetzt im
+    // "Technische Details"-Bereich statt im alten offenen Block.
+    assert.match(html, /tats\u00e4chlich: CODEX_READ_ONLY/);
     assert.match(html, /executionRunId: pilot-agent-run-chain-test-1/);
     assert.match(html, /Testbefund Schritt 1/);
     assert.match(html, /Dateiauswahl dieser Kette \(f\u00fcr alle drei Stufen fixiert\)/);
@@ -875,6 +898,75 @@ async function run() {
     const step2StartMatch = html.match(new RegExp(`data-action="start-chain-step" data-chain-id="${chainId}" data-chain-step="2"[^>]*`));
     assert.ok(step2StartMatch && step2StartMatch[0].includes("disabled"), "Schritt 2 darf ohne eigene Freigabe nicht gestartet sein");
     assert.doesNotMatch(html, /Testdokumentation Schritt 2/, "Schritt 2 darf nicht automatisch gelaufen sein");
+  });
+
+  // -------------------------------------------------------------------
+  // V8.1 ("Ergebnis verstehen ohne Technik"): additive, rein lesende
+  // Darstellung von resultPresentation. Die Testfixtur simuliert hier exakt
+  // die Form, die pilot-work-order-service.js#buildResultPresentation im
+  // echten Betrieb liefert (siehe pilot-agent-execution-chain.test.js für
+  // den Nachweis, dass der Server tatsächlich diese Form erzeugt).
+  // -------------------------------------------------------------------
+  await check("V8.1-14./15./16./17./18.: ein strukturiertes Ergebnis zeigt Kurzfazit/Kernbefunde vor genau einem eingeklappten „Technische Details“-Bereich, der weiterhin den vollständigen Rohtext enthält", async () => {
+    backend.setResultPresentation(chainId, 1, {
+      structureStatus: "STRUCTURED",
+      sections: [
+        { number: 1, title: "KURZFAZIT", kind: "PROSE", prose: "Kurzfazit-Text für Schritt 1.", items: [] },
+        { number: 2, title: "BELEGTE KERNBEFUNDE", kind: "ITEMS", prose: null, items: ["Erster belegter Befund.", "Zweiter belegter Befund."] },
+        { number: 3, title: "REIBUNGSVERLUSTE", kind: "ITEMS", prose: null, items: ["Ein Reibungsverlust."] },
+        { number: 4, title: "PRIORISIERTE VERBESSERUNGEN", kind: "ITEMS", prose: null, items: ["Erste Verbesserung.", "Zweite Verbesserung."] },
+        { number: 5, title: "GRENZEN UND UNSICHERHEITEN", kind: "PROSE", prose: "Grenzen-Text für Schritt 1.", items: [] },
+      ],
+      rawTextAvailable: true,
+      contractStage: "RESEARCH",
+      resultLabel: "Rechercheergebnis",
+      honestNotice: null,
+    });
+    await ui.reloadSelectedOrder();
+    const html = diagnosticsHtml();
+    // 14./15.: Kernbefunde/Prioritäten stehen offen im Haupttext.
+    assert.match(html, /Kurzfazit-Text f\u00fcr Schritt 1\./);
+    assert.match(html, /Erster belegter Befund\./);
+    assert.match(html, /Erste Verbesserung\./);
+    assert.match(html, /Grenzen-Text f\u00fcr Schritt 1\./);
+    // 14.: das Kurzfazit steht textlich VOR den technischen Angaben
+    // (Prompt-Digest/Rohtext), die jetzt ausschließlich im „Technische
+    // Details“-Bereich liegen.
+    const summaryIndex = html.indexOf("Kurzfazit-Text f\u00fcr Schritt 1.");
+    const technicalIndex = html.indexOf("Technische Details");
+    assert.ok(summaryIndex >= 0 && technicalIndex >= 0 && summaryIndex < technicalIndex, "das Kurzfazit muss vor den Technischen Details stehen");
+    // 16./17.: Prompt-Digest & Co. stehen ausschließlich im Technische-
+    // Details-Bereich; für Schritt 1 existiert genau ein solcher Bereich.
+    const technicalDetailsCount = html.split('class="pilot-work-order-details pilot-work-order-result-technical"').length - 1;
+    assert.strictEqual(technicalDetailsCount, 1, "genau ein Technische-Details-Bereich für den einzigen bisher gelaufenen Schritt");
+    assert.match(html, /Vereinbarte Ergebnisstruktur eingehalten/);
+    // Abschnitt 7 ("Teilergebnis"): Recherche-/Dokumentationsergebnisse sind
+    // niemals das abschließende Gesamtergebnis der Kette – nur die
+    // PM-Stufe liefert das Gesamturteil.
+    assert.match(html, /Zwischenergebnis \u2013 noch nicht das abschlie\u00dfende Gesamtergebnis\./);
+    // 18.: der Rohtext bleibt vollständig und unverändert im Technische-
+    // Details-Bereich erreichbar.
+    assert.match(html, /Testbefund Schritt 1/);
+  });
+
+  await check("V8.1-8./9./10.: ein strukturell ungültiges, aber angenommenes Ergebnis erfindet keine Kurzfassung, zeigt einen ehrlichen Hinweis und lässt den Rohtext erreichbar", async () => {
+    backend.setResultPresentation(chainId, 1, {
+      structureStatus: "UNSTRUCTURED_ACCEPTED",
+      sections: [],
+      rawTextAvailable: true,
+      contractStage: "RESEARCH",
+      resultLabel: "Rechercheergebnis",
+      honestNotice:
+        "Das Ergebnis hält die vereinbarte Gliederung nicht ein. Es wird unverändert angezeigt; " +
+        "eine verlässliche Kurzfassung steht nicht zur Verfügung.",
+    });
+    await ui.reloadSelectedOrder();
+    const html = diagnosticsHtml();
+    assert.match(html, /h\u00e4lt die vereinbarte Gliederung nicht ein/);
+    assert.match(html, /Struktur nicht vollst\u00e4ndig eingehalten/);
+    assert.match(html, /Testbefund Schritt 1/, "der Rohtext bleibt trotz ungültiger Struktur vollständig erreichbar");
+    backend.setResultPresentation(chainId, 1, null);
+    await ui.reloadSelectedOrder();
   });
 
   await check("Codex nicht verfügbar deaktiviert die Freigabeanforderung für die nächste Stufe", async () => {
@@ -1673,6 +1765,692 @@ async function run() {
 
   await check("V7.9.4-14: die bestehenden 28 Prüfpunkte wurden erweitert, nicht reduziert", async () => {
     assert.ok(passed >= 28, "alle vorher bestehenden Prüfpunkte müssen weiterhin erfolgreich durchlaufen sein");
+  });
+
+  // -------------------------------------------------------------------
+  // V8.1 Korrektur ("echte Kettenansicht auf verständliche
+  // Ergebnisdarstellung umstellen"): der erste Browserversuch schlug fehl,
+  // weil overview.status bei der real von Jamal geprüften Pilotauftrag
+  // ("Pilotauftrag: Nutzerperspektive und täglicher Gebrauch der
+  // KI-Unternehmenszentrale") bereits COMPLETED war – renderAgentChainSection
+  // endete für jeden nicht-IN_EXECUTION-Status vorher per return, BEVOR
+  // renderChainStepCard/renderRunResultPresentationHtml überhaupt erreicht
+  // wurde. Alle bisherigen V8.1-Tests oben liefen ausschließlich gegen einen
+  // IN_EXECUTION-Auftrag und haben diese exakte, real aufgetretene
+  // Kombination (abgeschlossener Auftrag + abgeschlossene Kette mit
+  // resultRawText UND resultPresentation an jedem Lauf) nie geprüft. Dieser
+  // Block baut deshalb bewusst einen eigenen, realistisch strukturierten
+  // Auftrag direkt über backend.createOrder (status COMPLETED, dieselbe
+  // Form wie overviewFor() sie im echten Betrieb liefert) und rendert ihn
+  // über denselben echten Weg (ui.selectOrder -> render() ->
+  // renderSelectedOrderOutput -> renderAgentChainSection ->
+  // renderChainStepCard), den auch der Browser verwendet.
+  // -------------------------------------------------------------------
+  let v81CompletedOrderId;
+  let v81CompletedChainId;
+  const v81RunIds = { 1: "pilot-agent-run-v81-completed-1", 2: "pilot-agent-run-v81-completed-2", 3: "pilot-agent-run-v81-completed-3" };
+
+  function v81ChainManagedRun(stepNumber, presetId, contractStage, sections, extra) {
+    return Object.assign(
+      {
+        id: v81RunIds[stepNumber],
+        presetId,
+        pilotRole: contractStage === "RESEARCH" ? "RECHERCHE_ANALYSE" : contractStage === "DOCUMENTATION" ? "DOKUMENTATION" : "PROJEKTMANAGER",
+        pilotRoleLabel: "Testrolle",
+        taskTitle: `Kettenschritt ${stepNumber}`,
+        runnerId: "codex-read-only-analysis",
+        runnerLabel: "Codex \u2013 echter, isolierter Read-Only-KI-Agentenlauf",
+        requestedRunnerKind: "CODEX_READ_ONLY",
+        actualRunnerKind: "CODEX_READ_ONLY",
+        aiExecuted: true,
+        fallbackUsed: false,
+        modelLabel: "Codex (ChatGPT)",
+        runnerVersion: "codex-cli 0.999.0-test",
+        status: "SUCCEEDED",
+        promptDigest: "b".repeat(64),
+        mandateDigest: "a".repeat(64),
+        resultTruncated: false,
+        resultRawText: `Rohtext Kettenschritt ${stepNumber} \u2013 vollst\u00e4ndig unver\u00e4ndert gespeichert (V8.1-Regressionsauftrag).`,
+        resultSummary: { secretRedactionApplied: false, secretRedactionNotice: null, analyzedFiles: ["V1_BETRIEBSHANDBUCH.md"] },
+        errorMessage: null,
+        handoffStatus: "SUCCEEDED",
+        handoffErrorMessage: null,
+        startedAt: "2026-08-01T09:00:00.000Z",
+        finishedAt: "2026-08-01T09:01:00.000Z",
+        resultPresentation: {
+          structureStatus: "STRUCTURED",
+          sections,
+          rawTextAvailable: true,
+          contractStage,
+          resultLabel: contractStage === "RESEARCH" ? "Rechercheergebnis" : contractStage === "DOCUMENTATION" ? "Dokumentationsergebnis" : "Projektmanager-Ergebnis",
+          honestNotice: null,
+        },
+      },
+      extra || {},
+    );
+  }
+
+  await check(
+    "V8.1 Korrektur-Setup: ein bereits COMPLETED-Pilotauftrag mit einer COMPLETED-Kette (drei erfolgreiche Schritte, jeweils resultRawText UND resultPresentation) wird direkt angelegt",
+    async () => {
+      v81CompletedOrderId = "pilot-order-v81-completed-real-view";
+      v81CompletedChainId = "pilot-agent-chain-v81-completed-1";
+      const run1 = v81ChainManagedRun(1, "codex-chain-research-analysis", "RESEARCH", [
+        { number: 1, title: "KURZFAZIT", kind: "PROSE", prose: "Kurzfazit Rechercheschritt.", items: [] },
+        { number: 2, title: "BELEGTE KERNBEFUNDE", kind: "ITEMS", prose: null, items: ["Kernbefund A."] },
+        { number: 3, title: "REIBUNGSVERLUSTE", kind: "ITEMS", prose: null, items: ["Reibungsverlust A."] },
+        { number: 4, title: "PRIORISIERTE VERBESSERUNGEN", kind: "ITEMS", prose: null, items: ["Verbesserung A."] },
+        { number: 5, title: "GRENZEN UND UNSICHERHEITEN", kind: "PROSE", prose: "Grenzen Rechercheschritt.", items: [] },
+      ]);
+      const run2 = v81ChainManagedRun(2, "codex-document-chain-result", "DOCUMENTATION", [
+        { number: 1, title: "KURZERGEBNIS", kind: "PROSE", prose: "Kurzergebnis Dokumentationsschritt.", items: [] },
+        { number: 2, title: "BEST\u00c4TIGTE KERNBEFUNDE", kind: "ITEMS", prose: null, items: ["Best\u00e4tigter Kernbefund B."] },
+        { number: 3, title: "OFFENE PUNKTE UND GRENZEN", kind: "ITEMS", prose: null, items: ["Offener Punkt B."] },
+        { number: 4, title: "PRIORISIERTE EMPFEHLUNGEN", kind: "ITEMS", prose: null, items: ["Empfehlung B."] },
+        { number: 5, title: "HERKUNFTSHINWEIS", kind: "PROSE", prose: "Herkunftshinweis B.", items: [] },
+      ]);
+      const run3 = v81ChainManagedRun(3, "codex-pm-evaluate-chain", "PROJECT_MANAGER", [
+        { number: 1, title: "GESAMTURTEIL", kind: "PROSE", prose: "Gesamturteil des Projektmanager-Agenten: konsistent und entscheidungsreif.", items: [] },
+        { number: 2, title: "ENTSCHEIDUNGSRELEVANTE ABWEICHUNGEN", kind: "ITEMS", prose: null, items: ["Keine wesentliche Abweichung."] },
+        { number: 3, title: "OFFENE RISIKEN", kind: "ITEMS", prose: null, items: ["Kein offenes Risiko."] },
+        { number: 4, title: "EMPFEHLUNG AN JAMAL", kind: "PROSE", prose: "Empfehlung an Jamal: Ergebnis zur Abnahme vorlegen.", items: [] },
+        { number: 5, title: "ENTSCHEIDUNGSREIFE", kind: "PROSE", prose: "Entscheidungsreif.", items: [] },
+      ]);
+      backend.createOrder(v81CompletedOrderId, {
+        title: "Pilotauftrag: Nutzerperspektive und t\u00e4glicher Gebrauch der KI-Unternehmenszentrale (Testfixtur)",
+        status: "COMPLETED",
+        statusLabel: "Abgeschlossen",
+        revision: 9,
+        handoffs: [],
+        agentExecutionRuns: [run1, run2, run3],
+        agentChains: [
+          {
+            id: v81CompletedChainId,
+            chainStatus: "COMPLETED",
+            currentStep: 3,
+            revision: 4,
+            selectedFilesFixed: true,
+            selectedFiles: ["V1_BETRIEBSHANDBUCH.md"],
+            mandateDigest: "a".repeat(64),
+            completedAt: "2026-08-01T09:03:00.000Z",
+            steps: [
+              { stepNumber: 1, agentKey: "review-agent", presetId: "codex-chain-research-analysis", stepStatus: "SUCCEEDED", approvalStatus: "GRANTED", executionRunId: v81RunIds[1], roleHandoffBooked: true },
+              { stepNumber: 2, agentKey: "documentation-agent", presetId: "codex-document-chain-result", stepStatus: "SUCCEEDED", approvalStatus: "GRANTED", executionRunId: v81RunIds[2], chainedFromExecutionRunId: v81RunIds[1], predecessorFullyIncluded: true, predecessorIncludedCharCount: 10, roleHandoffBooked: true },
+              { stepNumber: 3, agentKey: "orchestrator-agent", presetId: "codex-pm-evaluate-chain", stepStatus: "SUCCEEDED", approvalStatus: "GRANTED", executionRunId: v81RunIds[3], chainedFromExecutionRunId: v81RunIds[2], predecessorFullyIncluded: true, predecessorIncludedCharCount: 10, roleHandoffBooked: true },
+            ],
+          },
+        ],
+      });
+      fetchCalls.length = 0;
+      await ui.selectOrder(v81CompletedOrderId);
+      assert.strictEqual(fetchCalls.filter((entry) => entry.method === "POST").length, 0, "reines Auswählen/Laden eines abgeschlossenen Auftrags darf keinen POST auslösen");
+      assert.strictEqual(ui.getState().overview.status, "COMPLETED", "Testfixtur: der Auftrag muss tatsächlich COMPLETED sein, wie beim echten, von Jamal geprüften Pilotauftrag");
+    },
+  );
+
+  await check(
+    "V8.1 Korrektur-1./2./3.: für einen bereits COMPLETED-Auftrag rendert der ECHTE Kettenrenderer trotzdem alle drei erfolgreichen Kettenschritte (vorher: renderAgentChainSection endete hier per return, bevor renderChainStepCard je erreicht wurde)",
+    async () => {
+      const html = diagnosticsHtml();
+      assert.match(html, /Schritt 1 \u2013 Recherche\/Analyse/);
+      assert.match(html, /Schritt 2 \u2013 Dokumentation/);
+      assert.match(html, /Schritt 3 \u2013 Projektmanager-Bewertung/);
+      assert.match(html, new RegExp(v81RunIds[1]));
+      assert.match(html, new RegExp(v81RunIds[2]));
+      assert.match(html, new RegExp(v81RunIds[3]));
+    },
+  );
+
+  await check("V8.1 Korrektur-4.: „Gesamturteil“ (PM-Stufe, Abschnitt GESAMTURTEIL) ist offen sichtbar", async () => {
+    const html = diagnosticsHtml();
+    assert.match(html, /GESAMTURTEIL/);
+    assert.match(html, /Gesamturteil des Projektmanager-Agenten: konsistent und entscheidungsreif\./);
+    assert.match(html, /Empfehlung an Jamal: Ergebnis zur Abnahme vorlegen\./);
+  });
+
+  await check("V8.1 Korrektur-5.: Stufe 1 und Stufe 2 sind als „Zwischenergebnis“ gekennzeichnet, Stufe 3 (PM) nicht", async () => {
+    const html = diagnosticsHtml();
+    const zwischenergebnisCount = html.split("Zwischenergebnis \u2013 noch nicht das abschlie\u00dfende Gesamtergebnis.").length - 1;
+    assert.strictEqual(zwischenergebnisCount, 2, "genau Stufe 1 und Stufe 2 sind Zwischenergebnisse, die PM-Stufe (Stufe 3) liefert das Gesamturteil und ist keines");
+  });
+
+  await check(
+    "V8.1 Korrektur-6./7.: „Technische Details“ erscheint genau dreimal (einmal je Kettenschritt); Runner, Digests und Rohtext liegen ausschließlich darin",
+    async () => {
+      const html = diagnosticsHtml();
+      const technicalDetailsCount = html.split('class="pilot-work-order-details pilot-work-order-result-technical"').length - 1;
+      assert.strictEqual(technicalDetailsCount, 3, "genau ein Technische-Details-Bereich je der drei erfolgreichen Kettenschritte");
+      // Jeder Rohtext-/Digest-/Runner-Beleg muss innerhalb eines <details>-Blocks liegen.
+      const detailsBlocks = html.match(/<details class="pilot-work-order-details pilot-work-order-result-technical">[\s\S]*?<\/details>/g) || [];
+      assert.strictEqual(detailsBlocks.length, 3);
+      [1, 2, 3].forEach((stepNumber) => {
+        const rawTextNeedle = `Rohtext Kettenschritt ${stepNumber} \u2013 vollst\u00e4ndig unver\u00e4ndert gespeichert (V8.1-Regressionsauftrag).`;
+        const containingBlock = detailsBlocks.find((block) => block.includes(rawTextNeedle));
+        assert.ok(containingBlock, `der Rohtext von Schritt ${stepNumber} muss innerhalb eines Technische-Details-Blocks liegen`);
+        assert.match(containingBlock, /Runner-Art \u2013 angefordert: CODEX_READ_ONLY/);
+        assert.match(containingBlock, /Modell: Codex \(ChatGPT\)/);
+        assert.match(containingBlock, /Prompt-Digest: b{64}/);
+        assert.match(containingBlock, /Kernauftrag-Digest: a{64}/);
+        assert.match(containingBlock, new RegExp(`Lauf-ID: ${v81RunIds[stepNumber]}`));
+      });
+    },
+  );
+
+  await check(
+    "V8.1 Korrektur-8.: der alte, offene Rohtextblock erscheint für diese drei Kettenschritt-Läufe NICHT zusätzlich außerhalb von „Technische Details“ (kein doppelter Rohtext, keine zweite Stelle mit Runner/Modell)",
+    async () => {
+      const html = diagnosticsHtml();
+      [1, 2, 3].forEach((stepNumber) => {
+        const rawTextNeedle = `Rohtext Kettenschritt ${stepNumber} \u2013 vollst\u00e4ndig unver\u00e4ndert gespeichert (V8.1-Regressionsauftrag).`;
+        const occurrences = html.split(rawTextNeedle).length - 1;
+        assert.strictEqual(occurrences, 1, `der Rohtext von Schritt ${stepNumber} darf nur genau einmal (innerhalb der Technischen Details) erscheinen`);
+      });
+      // Die alte, unstrukturierte Liste "Agentenlauf (lokaler deterministischer
+      // Runner)" darf für diese drei chainManaged-Läufe keinen eigenen <li>
+      // mehr zeigen – sie sind ausschließlich in der Drei-Agenten-Kette sichtbar.
+      assert.match(
+        html,
+        /Alle bisherigen L\u00e4ufe geh\u00f6ren zu einer Drei-Agenten-Kette und werden ausschlie\u00dflich weiter unten unter „Drei-Agenten-Kette“ gezeigt\./,
+      );
+    },
+  );
+
+  await check("V8.1 Korrektur-9.: der vollständige Rohtext bleibt (innerhalb der Technischen Details) vollständig erreichbar", async () => {
+    const html = diagnosticsHtml();
+    [1, 2, 3].forEach((stepNumber) => {
+      assert.match(html, new RegExp(`Rohtext Kettenschritt ${stepNumber} \u2013 vollst\u00e4ndig unver\u00e4ndert gespeichert \\(V8\\.1-Regressionsauftrag\\)\\.`));
+    });
+  });
+
+  await check("V8.1 Korrektur-10.: das reine Rendern des abgeschlossenen Kettenauftrags erzeugt keinen fetch/POST, keine Freigabe, keinen Kettenstart und keinen Statuswechsel", async () => {
+    fetchCalls.length = 0;
+    ui.render();
+    ui.render();
+    assert.strictEqual(fetchCalls.length, 0, "reines Rendern darf keinen fetch auslösen");
+    assert.strictEqual(ui.getState().overview.status, "COMPLETED", "kein Statuswechsel durch reines Rendern");
+    const html = diagnosticsHtml();
+    assert.doesNotMatch(html, /data-action="prepare-agent-chain"(?! disabled)/, "für einen abgeschlossenen Auftrag darf keine aktive Schaltfläche zum Anlegen einer neuen Kette erscheinen");
+    assert.match(html, /Eine neue Agentenkette kann nur w\u00e4hrend „In Ausf\u00fchrung“ vorbereitet werden\./);
+  });
+
+  // -------------------------------------------------------------------
+  // Regressionstest (Auftrag Abschnitt 7, letzter Absatz): ein
+  // unstrukturiertes, aber angenommenes Ergebnis im selben, echten
+  // COMPLETED-Kettenrenderer – ehrlicher Hinweis sichtbar, keine erfundene
+  // Kurzfassung, Rohtext ausschließlich unter „Technische Details“.
+  // -------------------------------------------------------------------
+  await check(
+    "V8.1 Regressionstest: ein unstrukturiertes, aber angenommenes Ergebnis (UNSTRUCTURED_ACCEPTED) im echten COMPLETED-Kettenrenderer zeigt einen ehrlichen Hinweis, erfindet keine Kurzfassung und zeigt den Rohtext ausschließlich unter „Technische Details“",
+    async () => {
+      const order = backend.orders.get(v81CompletedOrderId);
+      const run1 = order.agentExecutionRuns.find((entry) => entry.id === v81RunIds[1]);
+      run1.resultPresentation = {
+        structureStatus: "UNSTRUCTURED_ACCEPTED",
+        sections: [],
+        rawTextAvailable: true,
+        contractStage: "RESEARCH",
+        resultLabel: "Rechercheergebnis",
+        honestNotice:
+          "Das Ergebnis h\u00e4lt die vereinbarte Gliederung nicht ein. Es wird unver\u00e4ndert angezeigt; eine verl\u00e4ssliche Kurzfassung steht nicht zur Verf\u00fcgung.",
+      };
+      await ui.reloadSelectedOrder();
+      const html = diagnosticsHtml();
+      assert.match(html, /h\u00e4lt die vereinbarte Gliederung nicht ein/, "der ehrliche Hinweis muss sichtbar sein");
+      assert.doesNotMatch(html, /KURZFAZIT/, "für dieses Ergebnis darf keine erfundene Struktur/Kurzfassung mehr erscheinen");
+      const technicalDetailsCount = html.split('class="pilot-work-order-details pilot-work-order-result-technical"').length - 1;
+      assert.strictEqual(technicalDetailsCount, 3, "weiterhin genau ein Technische-Details-Bereich je Kettenschritt");
+      const detailsBlocks = html.match(/<details class="pilot-work-order-details pilot-work-order-result-technical">[\s\S]*?<\/details>/g) || [];
+      const step1RawTextNeedle = "Rohtext Kettenschritt 1 \u2013 vollst\u00e4ndig unver\u00e4ndert gespeichert (V8.1-Regressionsauftrag).";
+      const step1Block = detailsBlocks.find((block) => block.includes(step1RawTextNeedle));
+      assert.ok(step1Block, "der Rohtext von Schritt 1 muss weiterhin unter „Technische Details“ vollständig erreichbar sein");
+      const occurrencesOutsideCheck = html.split(step1RawTextNeedle).length - 1;
+      assert.strictEqual(occurrencesOutsideCheck, 1, "der Rohtext darf trotz UNSTRUCTURED_ACCEPTED nicht zusätzlich außerhalb der Technischen Details erscheinen");
+    },
+  );
+
+  // -------------------------------------------------------------------
+  // V8.2 ("Entscheidungsansicht statt Textmenge") – dieselben, bereits vom
+  // Server gelieferten Abschnitte werden jetzt ANDERS ANGEORDNET: offen nur
+  // eine kompakte Entscheidungsansicht, der vollständige Fachinhalt bleibt
+  // unverändert unter „Fachliche Details“ (zusätzlich zu den bereits
+  // geprüften „Technische Details“) erreichbar. Eigener, in sich
+  // geschlossener Auftrag mit denselben, produktiv verwendeten
+  // Abschnittstiteln/-nummern wie pilot-agent-documentation-result.js
+  // (siehe pilot-agent-execution-chain.test.js, das denselben Wortlaut
+  // serverseitig nachweist), damit dieser Test keine Fiktion prüft.
+  // -------------------------------------------------------------------
+  let v82OrderId;
+  let v82ChainId;
+  const v82RunIds = { 1: "pilot-agent-run-v82-1", 2: "pilot-agent-run-v82-2", 3: "pilot-agent-run-v82-3" };
+
+  function v82ChainManagedRun(stepNumber, presetId, contractStage, sections, resultRawText) {
+    return {
+      id: v82RunIds[stepNumber],
+      presetId,
+      pilotRole: contractStage === "RESEARCH" ? "RECHERCHE_ANALYSE" : contractStage === "DOCUMENTATION" ? "DOKUMENTATION" : "PROJEKTMANAGER",
+      pilotRoleLabel: "Testrolle",
+      taskTitle: `Kettenschritt ${stepNumber}`,
+      runnerId: "codex-read-only-analysis",
+      runnerLabel: "Codex \u2013 echter, isolierter Read-Only-KI-Agentenlauf",
+      requestedRunnerKind: "CODEX_READ_ONLY",
+      actualRunnerKind: "CODEX_READ_ONLY",
+      aiExecuted: true,
+      fallbackUsed: false,
+      modelLabel: "Codex (ChatGPT)",
+      runnerVersion: "codex-cli 0.999.0-test",
+      status: "SUCCEEDED",
+      promptDigest: "d".repeat(64),
+      mandateDigest: "c".repeat(64),
+      resultTruncated: false,
+      resultRawText,
+      resultSummary: { secretRedactionApplied: false, secretRedactionNotice: null, analyzedFiles: ["V1_BETRIEBSHANDBUCH.md"] },
+      errorMessage: null,
+      handoffStatus: "SUCCEEDED",
+      handoffErrorMessage: null,
+      startedAt: "2026-08-04T09:00:00.000Z",
+      finishedAt: "2026-08-04T09:01:00.000Z",
+      resultPresentation: {
+        structureStatus: "STRUCTURED",
+        sections,
+        rawTextAvailable: true,
+        contractStage,
+        resultLabel: contractStage === "RESEARCH" ? "Rechercheergebnis" : contractStage === "DOCUMENTATION" ? "Dokumentationsergebnis" : "Projektmanager-Ergebnis",
+        honestNotice: null,
+      },
+    };
+  }
+
+  await check(
+    "V8.2-Setup: ein COMPLETED-Pilotauftrag mit einer COMPLETED-Kette (echte Abschnittstitel/-nummern, mehr als drei Kernbefunde in Schritt 1, echte Entscheidung in Schritt 3) wird direkt angelegt",
+    async () => {
+      v82OrderId = "pilot-order-v82-decision-view";
+      v82ChainId = "pilot-agent-chain-v82-decision-view-1";
+      const run1 = v82ChainManagedRun(
+        1,
+        "codex-chain-research-analysis",
+        "RESEARCH",
+        [
+          { number: 1, title: "KURZFAZIT", kind: "PROSE", prose: "V82-Fazit Rechercheschritt.", items: [] },
+          {
+            number: 2,
+            title: "BELEGTE KERNBEFUNDE",
+            kind: "ITEMS",
+            prose: null,
+            items: ["V82-Kernbefund eins.", "V82-Kernbefund zwei.", "V82-Kernbefund drei.", "V82-Kernbefund vier."],
+          },
+          { number: 3, title: "REIBUNGSVERLUSTE", kind: "ITEMS", prose: null, items: ["V82-Reibungsverlust eins."] },
+          { number: 4, title: "PRIORISIERTE VERBESSERUNGEN", kind: "ITEMS", prose: null, items: ["V82-Verbesserung eins."] },
+          { number: 5, title: "GRENZEN UND UNSICHERHEITEN", kind: "PROSE", prose: "V82-Grenzen Rechercheschritt.", items: [] },
+        ],
+        "Rohtext Kettenschritt 1 (V8.2-Auftrag) \u2013 vollst\u00e4ndig unver\u00e4ndert gespeichert.",
+      );
+      const run2 = v82ChainManagedRun(
+        2,
+        "codex-document-chain-result",
+        "DOCUMENTATION",
+        [
+          { number: 1, title: "KURZERGEBNIS", kind: "PROSE", prose: "V82-Kurzergebnis Dokumentationsschritt.", items: [] },
+          { number: 2, title: "BEST\u00c4TIGTE KERNBEFUNDE", kind: "ITEMS", prose: null, items: ["V82-Best\u00e4tigter Kernbefund eins."] },
+          { number: 3, title: "OFFENE PUNKTE UND GRENZEN", kind: "ITEMS", prose: null, items: ["V82-Offener Punkt eins."] },
+          { number: 4, title: "PRIORISIERTE EMPFEHLUNGEN", kind: "ITEMS", prose: null, items: ["V82-Empfehlung eins."] },
+          { number: 5, title: "HERKUNFTSHINWEIS", kind: "PROSE", prose: "V82-Herkunftshinweis.", items: [] },
+        ],
+        "Rohtext Kettenschritt 2 (V8.2-Auftrag) \u2013 vollst\u00e4ndig unver\u00e4ndert gespeichert.",
+      );
+      const run3 = v82ChainManagedRun(
+        3,
+        "codex-pm-evaluate-chain",
+        "PROJECT_MANAGER",
+        [
+          { number: 1, title: "GESAMTURTEIL", kind: "PROSE", prose: "V82-Gesamturteil: konsistent und entscheidungsreif.", items: [] },
+          { number: 2, title: "WICHTIGSTE BELEGTE STAERKEN", kind: "ITEMS", prose: null, items: ["V82-St\u00e4rke eins.", "V82-St\u00e4rke zwei."] },
+          { number: 3, title: "WICHTIGSTE BELEGTE SCHWAECHEN", kind: "ITEMS", prose: null, items: ["V82-Schw\u00e4che eins."] },
+          {
+            number: 4,
+            title: "PRIORISIERTE ENTSCHEIDUNGEN",
+            kind: "ITEMS",
+            prose: null,
+            items: ["V82-Entscheidung eins: bitte freigeben.", "V82-Entscheidung zwei."],
+          },
+          { number: 5, title: "EMPFEHLUNG AN JAMAL", kind: "PROSE", prose: "V82-Empfehlung: zur Abnahme vorlegen.", items: [] },
+        ],
+        "Rohtext Kettenschritt 3 (V8.2-Auftrag) \u2013 vollst\u00e4ndig unver\u00e4ndert gespeichert.",
+      );
+      backend.createOrder(v82OrderId, {
+        title: "Pilotauftrag: V8.2-Entscheidungsansicht (Testfixtur)",
+        status: "COMPLETED",
+        statusLabel: "Abgeschlossen",
+        revision: 4,
+        handoffs: [
+          {
+            id: "pilot-handoff-v82-1",
+            sequence: 1,
+            fromPilotRole: "RECHERCHE_ANALYSE",
+            toPilotRole: "DOKUMENTATION",
+            toPilotRoleLabel: "Dokumentations-Agent",
+            shortFinding: "V82-Kurzbefund f\u00fcr Handoff.",
+            resultOrRecommendation: "V82-Ergebnis/Empfehlung Volltext.",
+            basisUsed: "V82-Grundlage Volltext.",
+            riskOrLimit: "V82-Risiko Volltext.",
+            nextStep: "V82-N\u00e4chster Schritt Volltext.",
+            decisionNeeded: null,
+            pmFilterStatus: "PASSED",
+            pmFilterReasons: [],
+            createdAt: "2026-08-04T09:02:00.000Z",
+          },
+        ],
+        agentExecutionRuns: [run1, run2, run3],
+        agentChains: [
+          {
+            id: v82ChainId,
+            chainStatus: "COMPLETED",
+            currentStep: 3,
+            revision: 4,
+            selectedFilesFixed: true,
+            selectedFiles: ["V1_BETRIEBSHANDBUCH.md"],
+            mandateDigest: "c".repeat(64),
+            completedAt: "2026-08-04T09:03:00.000Z",
+            steps: [
+              { stepNumber: 1, agentKey: "review-agent", presetId: "codex-chain-research-analysis", stepStatus: "SUCCEEDED", approvalStatus: "GRANTED", executionRunId: v82RunIds[1], roleHandoffBooked: true },
+              { stepNumber: 2, agentKey: "documentation-agent", presetId: "codex-document-chain-result", stepStatus: "SUCCEEDED", approvalStatus: "GRANTED", executionRunId: v82RunIds[2], chainedFromExecutionRunId: v82RunIds[1], predecessorFullyIncluded: true, predecessorIncludedCharCount: 10, roleHandoffBooked: true },
+              { stepNumber: 3, agentKey: "orchestrator-agent", presetId: "codex-pm-evaluate-chain", stepStatus: "SUCCEEDED", approvalStatus: "GRANTED", executionRunId: v82RunIds[3], chainedFromExecutionRunId: v82RunIds[2], predecessorFullyIncluded: true, predecessorIncludedCharCount: 10, roleHandoffBooked: true },
+            ],
+          },
+        ],
+      });
+      fetchCalls.length = 0;
+      await ui.selectOrder(v82OrderId);
+      assert.strictEqual(fetchCalls.filter((entry) => entry.method === "POST").length, 0, "reines Auswählen/Laden darf keinen POST auslösen");
+      assert.strictEqual(ui.getState().overview.status, "COMPLETED");
+    },
+  );
+
+  await check("V8.2-1./2.: Stufe 1 und Stufe 2 zeigen offen „Zwischenergebnis“, das jeweilige Fazit und höchstens drei Kernpunkte", async () => {
+    const html = diagnosticsHtml();
+    const zwischenergebnisCount = html.split("Zwischenergebnis \u2013 noch nicht das abschlie\u00dfende Gesamtergebnis.").length - 1;
+    assert.strictEqual(zwischenergebnisCount, 2, "genau Stufe 1 und Stufe 2 sind als Zwischenergebnis gekennzeichnet");
+    assert.match(html, /V82-Fazit Rechercheschritt\./);
+    assert.match(html, /V82-Kurzergebnis Dokumentationsschritt\./);
+    // Stufe 1 hat vier Kernbefunde, offen dürfen höchstens drei erscheinen.
+    const keyPointsBlocks = html.match(/<div class="pilot-work-order-key-points">[\s\S]*?<\/div>/g) || [];
+    const step1KeyPoints = keyPointsBlocks.find((block) => block.includes("V82-Kernbefund eins."));
+    assert.ok(step1KeyPoints, "die wichtigsten Erkenntnisse von Schritt 1 müssen offen erscheinen");
+    const step1KeyPointsItemCount = (step1KeyPoints.match(/<li>/g) || []).length;
+    assert.strictEqual(step1KeyPointsItemCount, 3, "offen dürfen höchstens drei Kernpunkte erscheinen");
+    assert.match(step1KeyPoints, /V82-Kernbefund eins\./);
+    assert.match(step1KeyPoints, /V82-Kernbefund zwei\./);
+    assert.match(step1KeyPoints, /V82-Kernbefund drei\./);
+    assert.doesNotMatch(step1KeyPoints, /V82-Kernbefund vier\./, "der vierte Kernbefund darf offen nicht erscheinen");
+    // 12.: der vierte, offen weggelassene Kernbefund bleibt vollständig unter „Fachliche Details“ erhalten.
+    assert.match(html, /V82-Kernbefund vier\./, "der vierte Kernbefund muss vollständig unter „Fachliche Details“ erhalten bleiben");
+  });
+
+  await check("V8.2-3./4.: Stufe 3 (PM) zeigt offen „Gesamtbewertung“, das Gesamturteil, höchstens drei Kernpunkte, eine Empfehlung und die vorhandene Entscheidung", async () => {
+    const html = diagnosticsHtml();
+    assert.match(html, /<strong>Gesamtbewertung<\/strong>/);
+    assert.match(html, /V82-Gesamturteil: konsistent und entscheidungsreif\./);
+    assert.match(html, /V82-St\u00e4rke eins\./);
+    assert.match(html, /V82-St\u00e4rke zwei\./);
+    // Empfehlung stammt ausschließlich aus dem vorhandenen Empfehlungsabschnitt (Abschnitt 5, "EMPFEHLUNG AN JAMAL").
+    const recommendationBlock = html.match(/<div class="pilot-work-order-recommendation">[\s\S]*?<\/div>/);
+    assert.ok(recommendationBlock, "eine Empfehlung muss für die PM-Stufe offen erscheinen");
+    assert.match(recommendationBlock[0], /V82-Empfehlung: zur Abnahme vorlegen\./);
+    // 4.: eine tatsächlich vorhandene Entscheidung erscheint mit fester Kennzeichnung und dem vorhandenen Entscheidungstext.
+    const decisionBlock = html.match(/<div class="pilot-work-order-decision-required">[\s\S]*?<\/div>/);
+    assert.ok(decisionBlock, "„Entscheidung erforderlich“ muss erscheinen, wenn eine echte Entscheidung vorliegt");
+    assert.match(decisionBlock[0], /Entscheidung erforderlich/);
+    assert.match(decisionBlock[0], /V82-Entscheidung eins: bitte freigeben\./);
+    assert.match(decisionBlock[0], /V82-Entscheidung zwei\./);
+    assert.strictEqual((html.match(/Entscheidung erforderlich/g) || []).length, 1, "„Entscheidung erforderlich“ darf nur für die PM-Stufe erscheinen");
+  });
+
+  await check("V8.2-5.: Risiken/Grenzen erscheinen offen und kompakt, ausschließlich aus dem jeweils vorhandenen Abschnitt, nie ergänzt oder umformuliert", async () => {
+    const html = diagnosticsHtml();
+    const riskBlocks = html.match(/<div class="pilot-work-order-risk-note">[\s\S]*?<\/div>/g) || [];
+    assert.strictEqual(riskBlocks.length, 3, "je Kettenschritt genau ein kompakter Risiko-/Grenzen-Hinweis");
+    assert.ok(riskBlocks.some((block) => block.includes("V82-Grenzen Rechercheschritt.")), "Schritt 1: Risiko/Grenzen aus Abschnitt „GRENZEN UND UNSICHERHEITEN“");
+    assert.ok(riskBlocks.some((block) => block.includes("V82-Offener Punkt eins.")), "Schritt 2: Risiko/Grenzen aus Abschnitt „OFFENE PUNKTE UND GRENZEN“");
+    assert.ok(riskBlocks.some((block) => block.includes("V82-Schw\u00e4che eins.")), "Schritt 3: Risiko/Grenzen aus Abschnitt „WICHTIGSTE BELEGTE SCHWAECHEN“");
+    riskBlocks.forEach((block) => assert.match(block, /Risiken und Grenzen/));
+  });
+
+  await check("V8.2-6./7.: pro Kettenschritt existiert genau ein „Fachliche Details“ und ein „Technische Details“, beide standardmäßig geschlossen", async () => {
+    const html = diagnosticsHtml();
+    const fachlicheDetailsCount = html.split('class="pilot-work-order-details pilot-work-order-result-fachlich"').length - 1;
+    assert.strictEqual(fachlicheDetailsCount, 3, "genau ein „Fachliche Details“-Bereich je Kettenschritt");
+    const technicalDetailsCount = html.split('class="pilot-work-order-details pilot-work-order-result-technical"').length - 1;
+    assert.strictEqual(technicalDetailsCount, 3, "genau ein „Technische Details“-Bereich je Kettenschritt");
+    const detailsTags = html.match(/<details\b[^>]*>/g) || [];
+    assert.ok(detailsTags.length > 0, "es müssen <details>-Bereiche vorhanden sein");
+    detailsTags.forEach((tag) => assert.doesNotMatch(tag, /\bopen\b/, `${tag} darf standardmäßig nicht geöffnet sein`));
+  });
+
+  await check("V8.2-8./9./10./11.: der vollständige Fachinhalt und der byteidentische Rohtext bleiben vollständig erhalten; Runner/Digests/IDs stehen ausschließlich unter „Technische Details“", async () => {
+    const html = diagnosticsHtml();
+    // 8./9.: vollständiger Fachinhalt (auch die offen weggelassenen Items) und
+    // vollständiger, unveränderter Rohtext bleiben je genau einmal erhalten.
+    ["V82-Kernbefund eins.", "V82-Kernbefund zwei.", "V82-Kernbefund drei.", "V82-Kernbefund vier.", "V82-Reibungsverlust eins.", "V82-Verbesserung eins."].forEach((needle) => {
+      assert.match(html, new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    });
+    [1, 2, 3].forEach((stepNumber) => {
+      const needle = `Rohtext Kettenschritt ${stepNumber} (V8.2-Auftrag) \u2013 vollst\u00e4ndig unver\u00e4ndert gespeichert.`;
+      assert.strictEqual(html.split(needle).length - 1, 1, `der Rohtext von Schritt ${stepNumber} muss genau einmal, byteidentisch erhalten bleiben`);
+    });
+    // 10./11.: Runner/Digests/IDs stehen ausschließlich innerhalb von „Technische Details“.
+    const technicalBlocks = html.match(/<details class="pilot-work-order-details pilot-work-order-result-technical">[\s\S]*?<\/details>/g) || [];
+    assert.strictEqual(technicalBlocks.length, 3);
+    technicalBlocks.forEach((block) => {
+      assert.match(block, /Prompt-Digest: d{64}/);
+      assert.match(block, /Kernauftrag-Digest: c{64}/);
+    });
+    // 11.: der neu eingeführte, offene Entscheidungskopf selbst (Fazit,
+    // Kernpunkte, Empfehlung, Entscheidung, Risiko-/Grenzen-Hinweis) darf
+    // keine Runner-/Digest-/ID-Angaben nennen. Die bereits vor V8.2
+    // bestehende, technische Stufenkopfzeile (Stufenauftrag/executionRunId
+    // je Kettenschritt) ist NICHT Teil von resultPresentation und bleibt
+    // durch diesen Auftrag unverändert (Auftrag Abschnitt 9/10).
+    var decisionBlockPattern = /<p class="pilot-work-order-decision-verdict">[\s\S]*?<\/p>|<div class="pilot-work-order-key-points">[\s\S]*?<\/div>|<div class="pilot-work-order-recommendation">[\s\S]*?<\/div>|<div class="pilot-work-order-decision-required">[\s\S]*?<\/div>|<div class="pilot-work-order-risk-note">[\s\S]*?<\/div>|<p class="pilot-work-order-result-status">[\s\S]*?<\/p>/g;
+    var decisionBlocks = html.match(decisionBlockPattern) || [];
+    assert.ok(decisionBlocks.length > 0, "es müssen offene Entscheidungsblöcke vorhanden sein");
+    decisionBlocks.forEach((block) => {
+      assert.doesNotMatch(block, /Prompt-Digest|Kernauftrag-Digest|executionRunId|Runner|presetId/, `${block} darf keine technischen Angaben enthalten`);
+    });
+  });
+
+  await check("V8.2-Setup (kein Entscheidungsabschnitt vorhanden): ein zweiter, eigenständiger PM-Lauf ohne Abschnitt 4 wird angelegt", async () => {
+    const noDecisionOrderId = "pilot-order-v82-no-decision";
+    const noDecisionChainId = "pilot-agent-chain-v82-no-decision-1";
+    const noDecisionRunId = "pilot-agent-run-v82-no-decision-3";
+    const run3NoDecision = {
+      id: noDecisionRunId,
+      presetId: "codex-pm-evaluate-chain",
+      pilotRole: "PROJEKTMANAGER",
+      pilotRoleLabel: "Testrolle",
+      taskTitle: "Kettenschritt 3",
+      runnerId: "codex-read-only-analysis",
+      runnerLabel: "Codex \u2013 echter, isolierter Read-Only-KI-Agentenlauf",
+      requestedRunnerKind: "CODEX_READ_ONLY",
+      actualRunnerKind: "CODEX_READ_ONLY",
+      aiExecuted: true,
+      fallbackUsed: false,
+      modelLabel: "Codex (ChatGPT)",
+      runnerVersion: "codex-cli 0.999.0-test",
+      status: "SUCCEEDED",
+      promptDigest: "e".repeat(64),
+      mandateDigest: "f".repeat(64),
+      resultTruncated: false,
+      resultRawText: "Rohtext ohne Entscheidungsabschnitt (V8.2-Auftrag) \u2013 vollst\u00e4ndig unver\u00e4ndert gespeichert.",
+      resultSummary: { secretRedactionApplied: false, secretRedactionNotice: null, analyzedFiles: ["V1_BETRIEBSHANDBUCH.md"] },
+      errorMessage: null,
+      handoffStatus: "SUCCEEDED",
+      handoffErrorMessage: null,
+      startedAt: "2026-08-04T09:00:00.000Z",
+      finishedAt: "2026-08-04T09:01:00.000Z",
+      resultPresentation: {
+        structureStatus: "STRUCTURED",
+        // Bewusst nur vier Abschnitte (kein Abschnitt 4, "PRIORISIERTE
+        // ENTSCHEIDUNGEN") – testet, dass ohne echte Entscheidung kein
+        // erfundener Entscheidungsblock erscheint (Auftrag Abschnitt 11,
+        // Prüfpunkt 5).
+        sections: [
+          { number: 1, title: "GESAMTURTEIL", kind: "PROSE", prose: "V82b-Gesamturteil ohne Entscheidungsabschnitt.", items: [] },
+          { number: 2, title: "WICHTIGSTE BELEGTE STAERKEN", kind: "ITEMS", prose: null, items: ["V82b-St\u00e4rke eins."] },
+          { number: 3, title: "WICHTIGSTE BELEGTE SCHWAECHEN", kind: "ITEMS", prose: null, items: ["V82b-Schw\u00e4che eins."] },
+          { number: 5, title: "EMPFEHLUNG AN JAMAL", kind: "PROSE", prose: "V82b-Empfehlung ohne Entscheidungsabschnitt.", items: [] },
+        ],
+        rawTextAvailable: true,
+        contractStage: "PROJECT_MANAGER",
+        resultLabel: "Projektmanager-Ergebnis",
+        honestNotice: null,
+      },
+    };
+    backend.createOrder(noDecisionOrderId, {
+      title: "Pilotauftrag: V8.2 ohne Entscheidungsabschnitt (Testfixtur)",
+      status: "COMPLETED",
+      statusLabel: "Abgeschlossen",
+      revision: 1,
+      handoffs: [],
+      agentExecutionRuns: [run3NoDecision],
+      agentChains: [
+        {
+          id: noDecisionChainId,
+          chainStatus: "COMPLETED",
+          currentStep: 3,
+          revision: 1,
+          selectedFilesFixed: true,
+          selectedFiles: ["V1_BETRIEBSHANDBUCH.md"],
+          mandateDigest: "f".repeat(64),
+          completedAt: "2026-08-04T09:03:00.000Z",
+          steps: [
+            { stepNumber: 1, agentKey: "review-agent", presetId: "codex-chain-research-analysis", stepStatus: "PENDING", approvalStatus: "NOT_REQUESTED", executionRunId: null },
+            { stepNumber: 2, agentKey: "documentation-agent", presetId: "codex-document-chain-result", stepStatus: "PENDING", approvalStatus: "NOT_REQUESTED", executionRunId: null },
+            { stepNumber: 3, agentKey: "orchestrator-agent", presetId: "codex-pm-evaluate-chain", stepStatus: "SUCCEEDED", approvalStatus: "GRANTED", executionRunId: noDecisionRunId, roleHandoffBooked: true },
+          ],
+        },
+      ],
+    });
+    fetchCalls.length = 0;
+    await ui.selectOrder(noDecisionOrderId);
+    assert.strictEqual(fetchCalls.filter((entry) => entry.method === "POST").length, 0);
+    const html = diagnosticsHtml();
+    assert.match(html, /V82b-Gesamturteil ohne Entscheidungsabschnitt\./);
+    assert.doesNotMatch(html, /Entscheidung erforderlich/, "ohne echten Entscheidungsabschnitt darf kein erfundener Entscheidungsblock erscheinen");
+  });
+
+  await check("V8.2-14.: Rollenübergaben zeigen offen nur von Rolle, an Rolle, Filterstatus und Kurzbefund; der vollständige Wortlaut steht unter „Übergabedetails“", async () => {
+    await ui.selectOrder(v82OrderId);
+    const html = diagnosticsHtml();
+    assert.match(html, /von RECHERCHE_ANALYSE an Dokumentations-Agent/);
+    assert.match(html, /Filterstatus: PASSED/);
+    assert.match(html, /Kurzbefund: V82-Kurzbefund f\u00fcr Handoff\./);
+    const handoffDetailsBlocks = html.match(/<details class="pilot-work-order-details pilot-work-order-handoff-details">[\s\S]*?<\/details>/g) || [];
+    assert.strictEqual(handoffDetailsBlocks.length, 1, "genau ein „Übergabedetails“-Bereich für diese eine Rollenübergabe");
+    assert.match(handoffDetailsBlocks[0], /V82-Ergebnis\/Empfehlung Volltext\./);
+    assert.match(handoffDetailsBlocks[0], /V82-Grundlage Volltext\./);
+    assert.match(handoffDetailsBlocks[0], /V82-Risiko Volltext\./);
+    assert.match(handoffDetailsBlocks[0], /V82-N\u00e4chster Schritt Volltext\./);
+    // Der vollständige Wortlaut steht NICHT zusätzlich offen außerhalb von „Übergabedetails“.
+    const outsideHandoffDetails = html.split(/<details class="pilot-work-order-details pilot-work-order-handoff-details">[\s\S]*?<\/details>/g).join("");
+    assert.doesNotMatch(outsideHandoffDetails, /V82-Ergebnis\/Empfehlung Volltext\./);
+  });
+
+  // -------------------------------------------------------------------
+  // V8.2.1 ("Technischen Kopf einklappen") – dieselbe, bereits durch V8.2
+  // offen sichtbare Entscheidungsansicht (Zwischenergebnis/Gesamtbewertung,
+  // Fazit, höchstens drei Kernpunkte, Empfehlung, Entscheidung, Risiken/
+  // Grenzen, „Fachliche Details“, „Technische Details“) bleibt vollständig
+  // unverändert. Zusätzlich geprüft: der vormals offen VOR dem Ergebnis
+  // stehende technische Kopf (Agent, Status/Freigabe, Kernauftrag,
+  // Stufenauftrag, executionRunId, Vorgängerlauf, Rollenverbuchung,
+  // tatsächlich verwendete Dateien) steht jetzt ausschließlich innerhalb
+  // eines neuen, standardmäßig geschlossenen Bereichs „Auftrags- und
+  // Laufdetails“ NACH „Technische Details“ – nichts davon wurde entfernt,
+  // gekürzt oder umformuliert.
+  // -------------------------------------------------------------------
+  await check("V8.2.1-1.: pro erfolgreichem Kettenschritt existiert genau ein neuer, standardmäßig geschlossener Bereich „Auftrags- und Laufdetails“ zusätzlich zu „Fachliche Details“/„Technische Details“", async () => {
+    const html = diagnosticsHtml();
+    const orderRunDetailsCount = html.split('class="pilot-work-order-details pilot-work-order-order-run-details"').length - 1;
+    assert.strictEqual(orderRunDetailsCount, 3, "genau ein „Auftrags- und Laufdetails“-Bereich je erfolgreichem Kettenschritt");
+    const orderRunDetailsBlocks = html.match(/<details class="pilot-work-order-details pilot-work-order-order-run-details">[\s\S]*?<\/details>/g) || [];
+    assert.strictEqual(orderRunDetailsBlocks.length, 3);
+    orderRunDetailsBlocks.forEach((block) => assert.doesNotMatch(block, /\bopen\b/, "„Auftrags- und Laufdetails“ darf standardmäßig nicht geöffnet sein"));
+    const fachlicheDetailsCount = html.split('class="pilot-work-order-details pilot-work-order-result-fachlich"').length - 1;
+    const technicalDetailsCount = html.split('class="pilot-work-order-details pilot-work-order-result-technical"').length - 1;
+    assert.strictEqual(fachlicheDetailsCount, 3, "„Fachliche Details“ bleibt unverändert dreimal vorhanden");
+    assert.strictEqual(technicalDetailsCount, 3, "„Technische Details“ bleibt unverändert dreimal vorhanden");
+    const allDetailsTags = html.match(/<details\b[^>]*>/g) || [];
+    assert.ok(allDetailsTags.length >= 9, "es müssen mindestens neun <details>-Bereiche vorhanden sein (3x je Ebene)");
+    allDetailsTags.forEach((tag) => assert.doesNotMatch(tag, /\bopen\b/, `${tag} darf standardmäßig nicht geöffnet sein`));
+  });
+
+  await check("V8.2.1-2.: der vormals offene technische Kopf (Agent, Status/Freigabe, Kernauftrag, Stufenauftrag, executionRunId, Rollenverbuchung, tatsächlich verwendete Dateien) bleibt vollständig erhalten, ausschließlich innerhalb von „Auftrags- und Laufdetails“", async () => {
+    const html = diagnosticsHtml();
+    const orderRunDetailsBlocks = html.match(/<details class="pilot-work-order-details pilot-work-order-order-run-details">[\s\S]*?<\/details>/g) || [];
+    assert.strictEqual(orderRunDetailsBlocks.length, 3);
+    orderRunDetailsBlocks.forEach((block, index) => {
+      const stepNumber = index + 1;
+      assert.match(block, /Agent: /, `Schritt ${stepNumber}: „Agent“ muss vollständig erhalten bleiben`);
+      assert.match(block, /Status: .*Freigabe: /, `Schritt ${stepNumber}: „Status“/„Freigabe“ müssen vollständig erhalten bleiben`);
+      assert.match(block, /Stufenauftrag: /, `Schritt ${stepNumber}: „Stufenauftrag“ muss vollständig erhalten bleiben`);
+      assert.match(block, /Kernauftrag f\u00fcr diese Altkette nicht mitgef\u00fchrt/, `Schritt ${stepNumber}: der Kernauftrag-Hinweis muss vollständig erhalten bleiben`);
+      assert.match(block, new RegExp(v82RunIds[stepNumber]), `Schritt ${stepNumber}: executionRunId muss vollständig erhalten bleiben`);
+      assert.match(block, /Rollenverbuchung: erfolgt/, `Schritt ${stepNumber}: „Rollenverbuchung“ muss vollständig erhalten bleiben`);
+      assert.match(block, /Tats\u00e4chlich verwendete Dateien: /, `Schritt ${stepNumber}: die tatsächlich verwendeten Dateien müssen vollständig erhalten bleiben`);
+    });
+    assert.match(orderRunDetailsBlocks[1], new RegExp("Vorg\u00e4nger-executionRunId: " + v82RunIds[1]), "Schritt 2: der Vorgängerlauf muss vollständig erhalten bleiben");
+    assert.match(orderRunDetailsBlocks[2], new RegExp("Vorg\u00e4nger-executionRunId: " + v82RunIds[2]), "Schritt 3: der Vorgängerlauf muss vollständig erhalten bleiben");
+    // Dieselben Angaben stehen nicht mehr zusätzlich offen außerhalb von „Auftrags- und Laufdetails“ (kein Duplikat, aber auch kein Verlust).
+    const outsideOrderRunDetails = html.split(/<details class="pilot-work-order-details pilot-work-order-order-run-details">[\s\S]*?<\/details>/g).join("");
+    [1, 2, 3].forEach((stepNumber) => {
+      assert.doesNotMatch(outsideOrderRunDetails, new RegExp("executionRunId: " + v82RunIds[stepNumber]), `Schritt ${stepNumber}: executionRunId darf offen nicht mehr erscheinen`);
+    });
+    assert.doesNotMatch(outsideOrderRunDetails, /Tats\u00e4chlich verwendete Dateien: /, "die verwendeten Dateien dürfen offen nicht mehr erscheinen");
+    assert.doesNotMatch(outsideOrderRunDetails, /Stufenauftrag: /, "„Stufenauftrag“ darf offen nicht mehr erscheinen");
+  });
+
+  await check("V8.2.1-3.: nach dem Öffnen eines abgeschlossenen Kettenschritts stehen Rollenname und Ergebnis (Gesamtbewertung, Fazit, Kernpunkte, Empfehlung, Entscheidung, Risiken) unmittelbar sichtbar VOR „Fachliche Details“, „Technische Details“ und „Auftrags- und Laufdetails“ – ohne technischen Kopf und ohne Schaltflächen dazwischen", async () => {
+    const html = diagnosticsHtml();
+    const gesamtbewertungIndex = html.indexOf("<strong>Gesamtbewertung</strong>");
+    assert.ok(gesamtbewertungIndex >= 0, "die Gesamtbewertung der PM-Stufe muss offen sichtbar sein");
+    const fachlicheDetailsIndex = html.indexOf('class="pilot-work-order-details pilot-work-order-result-fachlich"', gesamtbewertungIndex);
+    const technischeDetailsIndex = html.indexOf('class="pilot-work-order-details pilot-work-order-result-technical"', gesamtbewertungIndex);
+    const auftragsDetailsIndex = html.indexOf('class="pilot-work-order-details pilot-work-order-order-run-details"', gesamtbewertungIndex);
+    assert.ok(fachlicheDetailsIndex >= 0 && technischeDetailsIndex >= 0 && auftragsDetailsIndex >= 0, "alle drei eingeklappten Bereiche müssen für Schritt 3 vorhanden sein");
+    assert.ok(
+      gesamtbewertungIndex < fachlicheDetailsIndex && fachlicheDetailsIndex < technischeDetailsIndex && technischeDetailsIndex < auftragsDetailsIndex,
+      "Reihenfolge muss sein: Ergebnis -> „Fachliche Details“ -> „Technische Details“ -> „Auftrags- und Laufdetails“",
+    );
+    const step3TitleIndex = html.lastIndexOf("<strong>Schritt 3", gesamtbewertungIndex);
+    assert.ok(step3TitleIndex >= 0 && step3TitleIndex < gesamtbewertungIndex);
+    const headSlice = html.slice(step3TitleIndex, gesamtbewertungIndex);
+    assert.doesNotMatch(
+      headSlice,
+      /executionRunId|Stufenauftrag|Kernauftrag f\u00fcr diese Altkette|Rollenverbuchung|Status: |<button/,
+      "zwischen Rollenname und Ergebnis dürfen für einen bereits abgeschlossenen Schritt keine technischen Kopfangaben oder Schaltflächen mehr offen stehen",
+    );
+  });
+
+  await check("V8.2.1-4.: reines Rendern/Auswählen des bereits abgeschlossenen V8.2-Auftrags löst weiterhin keinen POST, keinen Statuswechsel und keine Kettenaktion aus", async () => {
+    fetchCalls.length = 0;
+    await ui.selectOrder(v82OrderId);
+    ui.render();
+    ui.render();
+    assert.strictEqual(fetchCalls.filter((entry) => entry.method === "POST").length, 0, "reines Auswählen/Rendern darf keinen POST auslösen");
+    assert.strictEqual(ui.getState().overview.status, "COMPLETED", "kein Statuswechsel durch reines Rendern");
+    assert.strictEqual(ui.getState().overview.agentChains[0].chainStatus, "COMPLETED", "keine Kettenaktion durch reines Rendern");
+  });
+
+  await check("V8.2-15./16.: reines Rendern des V8.2-Auftrags löst keinen POST/Kettenstart/Rollenübergabe/Statuswechsel aus; der abgeschlossene Auftrag bleibt vollständig dargestellt", async () => {
+    fetchCalls.length = 0;
+    ui.render();
+    ui.render();
+    assert.strictEqual(fetchCalls.length, 0, "reines Rendern darf keinen fetch auslösen");
+    assert.strictEqual(ui.getState().overview.status, "COMPLETED", "kein Statuswechsel durch reines Rendern");
+    const html = diagnosticsHtml();
+    assert.match(html, /Schritt 1 \u2013 Recherche\/Analyse/);
+    assert.match(html, /Schritt 2 \u2013 Dokumentation/);
+    assert.match(html, /Schritt 3 \u2013 Projektmanager-Bewertung/);
+    [1, 2, 3].forEach((stepNumber) => assert.match(html, new RegExp(v82RunIds[stepNumber])));
   });
 
   console.log(`pilot-agent-execution-chain-ui.test.js: ${passed} Prüfpunkte erfolgreich`);

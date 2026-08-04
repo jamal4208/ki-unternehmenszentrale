@@ -4,6 +4,27 @@
 
 `server.js` registriert über `server-http-router.js` **89 GET-Routen** und **52 additive POST-Routen** (Execution Bridge seit Phase C gesichert + V7.1 Phase A Dokumente/Backup gesichert `59f985f` + V7.1 Phase B HeyGen-Connector-Pilot gesichert `ff43089` + V7.1 Phase B.1 Mandantenbasis/Ergebnisrückführung gesichert `37e8a28` + V7.1 Phase C Canva-Connector-Pilot gesichert `52b2d02` + V7.1 Phase C.1 Pilot-Ergebnisakte/Kundenfeedback-Schleife und V7.1 Phase C.1.1 skalierbares Reviewmodell gemeinsam gesichert `6621d93` + V7.2 Phase A Schritt 2 Auth-Routen/Route-Gates + V7.2 Phase A Schritt 3 Owner-Verwaltung/Kundenportal-API + V7.2 Phase A Schritt 4 Betriebsabnahme + V7.2 Phase B Schritt 1 Arbeitsauftrags-API + V7.2 Phase C Schritt 1 Agentenlauf-/Ergebnis-Endpunkte + V7.2 Phase C Schritt 2 Änderungswunsch-/Freigabe-/Versions-Endpunkte innerhalb bestehender Präfixe + V7.3 Jamal-Arbeitsmodus-Zustand/-Aktionen + V7.4 Canva-Produktionskorridor-Zustand/-Aktionen gesichert `f2b0909` + V7.5 Agentenleitstand-/Unternehmensleitlinien-Routen gesichert `6ffa3f8` + V7.6.1 Office-/Finance-Routen gesichert `5b59b17` + V7.6.3 Health-Referenzlauf-Routen (lokal umgesetzt, ungesichert)). Andere HTTP-Methoden bleiben 405. GET-Routen bleiben read-only. Die POST-Routen schreiben ausschließlich lokal (App-Support-Metadaten bzw. die Auth-Datenbank bzw. – nach Jamal-Freigabe – ein Fixture-Testrepository); niemals in Health und niemals mit Commit/Push/Deployment.
 
+## V8.1 – Ergebnis verstehen ohne Technik (keine neue Route, kein neuer Parameter, keine neue Aktion)
+
+Routenzahlen bleiben unverändert (**89 GET, 52 POST** laut Übersichtszeile oben; laut `route-inventory.js` kanonisch geführt **91 GET, 53 POST**). Es gibt **keine neue API-Route, keinen neuen Parameter und keine neue Aktion**. Ausschließlich die bereits bestehende Antwortstruktur eines Agentenlaufs (`agentExecutionRuns[]` in der Overview sowie die Einzellauf-/Kettenansichten, `pilot-work-order-service.js#rowToAgentExecutionRunSummary`) trägt zusätzlich ein rein lesendes, additives Feld:
+
+`resultPresentation`:
+
+| Feld | Typ | Bedeutung |
+|---|---|---|
+| `structureStatus` | `"STRUCTURED"` \| `"UNSTRUCTURED_ACCEPTED"` \| `"UNAVAILABLE"` | `STRUCTURED`, wenn der gespeicherte Rohtext die verbindliche Fünf-Abschnittsstruktur seiner Stufe einhält; `UNSTRUCTURED_ACCEPTED`, wenn ein Rohtext ohne diese Struktur dennoch angenommen wurde (`contractFallbackAccepted`) oder keine bekannte Stufe zugeordnet werden kann; `UNAVAILABLE`, wenn kein Rohtext vorliegt (z. B. fehlgeschlagener Lauf) |
+| `sections` | Array | nur bei `STRUCTURED` befüllt: genau die fünf Abschnitte (`number`, `title`, `kind` (`PROSE`/`ITEMS`), `prose`, `items`) in vertraglicher Reihenfolge und mit den verbindlichen Titeln aus `pilot-agent-documentation-result.js`; sonst `[]` |
+| `rawTextAvailable` | boolean | `true`, wenn `resultRawText` vorhanden ist |
+| `contractStage` | `"RESEARCH"` \| `"DOCUMENTATION"` \| `"PROJECT_MANAGER"` \| `null` | aus `pilotRole` abgeleiteter Stufenvertrag, `null` ohne bekannte Zuordnung |
+| `resultLabel` | string \| `null` | menschenlesbare Stufenbezeichnung aus dem Vertrag (z. B. „Rechercheergebnis“), `null` ohne bekannten Vertrag |
+| `honestNotice` | string \| `null` | fester, ehrlicher Hinweistext bei `UNSTRUCTURED_ACCEPTED` (keine erfundene Kurzfassung); sonst `null` |
+
+Erzeugt in `pilot-work-order-service.js#buildResultPresentation()` ausschließlich durch additiven, lesenden Aufruf der bereits produktiv genutzten Abschnittslogik aus `pilot-agent-documentation-result.js` (`getStageContract`, `parseStageSections`, `splitIntoItems` – dieselbe Logik, die auch den Schreib-/Validierungspfad in `pilot-agent-codex-runner.js` speist). Es entsteht **keine zweite Parserimplementierung** und der gespeicherte `resultRawText` bleibt davon unangetastet.
+
+**Rein darstellende Nutzung** in `pilot-work-order-ui.js`: Kettenschritt-Karten und das PM-Gesamturteil zeigen bei `STRUCTURED` die fünf Abschnitte offen im Hauptbereich (Kurzfazit/Gesamturteil zuerst), bei `UNSTRUCTURED_ACCEPTED` den ehrlichen Hinweistext statt einer erfundenen Zusammenfassung, und verschieben Runner-/Digest-/Rohtext-Angaben in genau ein `<details>`-Element „Technische Details“ je Ergebnis. Ältere Overview-Antworten ohne `resultPresentation` (z. B. bestehende Testfixturen) bleiben unverändert lesbar: die UI erkennt das fehlende Feld und zeigt weiterhin den vollständigen Rohtext, ohne eine Struktur zu erfinden.
+
+Zusicherungen: keine Migration, keine neue Spalte, kein neues Ergebnisobjekt in der Datenbank, keine Änderung an Freigaben, Rollenübergabe, Abschlussprüfung, Ergebnisbudget oder Verdichtungsregeln. Das reine Anzeigen eines Ergebnisses löst keinen POST, keine Freigabe und keinen Kettenstart aus.
+
 ## V8.0.1 – Rollenübergabe nach abgeschlossener Drei-Agenten-Kette bedienbar gemacht (keine neue Route, kein neuer Parameter, keine neue Aktion)
 
 Routenzahlen bleiben unverändert (**89 GET, 52 POST** laut Übersichtszeile oben; laut `route-inventory.js` kanonisch geführt **91 GET, 53 POST**). Es gibt **keine neue API-Route, keinen neuen Parameter und keine neue Aktion**: die bereits bestehende, bereits getestete Route `POST /api/pilot-work-order/orders/:pilotOrderId/submit-handoff` (`pilot-work-order-routes.js`/`pilot-work-order-service.js#submitHandoff`, unverändert) erhält lediglich erstmals einen bedienbaren Aufrufer im Cockpit (`pilot-work-order-ui.js`).

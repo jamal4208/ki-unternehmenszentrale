@@ -576,6 +576,23 @@ async function run() {
     assert.strictEqual(step1Run.agentKey, "review-agent");
     assert.strictEqual(step1Run.actualRunnerKind, "CODEX_READ_ONLY");
     assert.strictEqual(step1Run.resultRawText, RESEARCH_RESULT_TEXT);
+    // V8.1 ("Ergebnis verstehen ohne Technik"): RESEARCH_RESULT_TEXT hat
+    // keine ABSCHNITT-Markerzeilen, ist aber klein genug, um als
+    // contractFallbackAccepted durchgelassen zu werden (sonst wäre Schritt 1
+    // gar nicht SUCCEEDED). resultPresentation muss das ehrlich als
+    // UNSTRUCTURED_ACCEPTED kennzeichnen, ohne eine Struktur zu erfinden,
+    // und den Rohtext weiterhin vollständig erreichbar halten.
+    const step1Overview = pilotService.getPilotOrderOverview(db, orderAId);
+    const step1RunSummary = step1Overview.agentExecutionRuns.find((run) => run.id === step1.executionRunId);
+    assert.ok(step1RunSummary, "Schritt-1-Lauf muss im Overview auffindbar sein");
+    assert.strictEqual(step1RunSummary.resultPresentation.structureStatus, "UNSTRUCTURED_ACCEPTED");
+    assert.deepStrictEqual(step1RunSummary.resultPresentation.sections, []);
+    assert.strictEqual(step1RunSummary.resultPresentation.rawTextAvailable, true);
+    assert.ok(
+      step1RunSummary.resultPresentation.honestNotice.includes("hält die vereinbarte Gliederung nicht ein"),
+      "es darf keine erfundene Kurzfassung entstehen, sondern ein ehrlicher Hinweis",
+    );
+    assert.strictEqual(step1RunSummary.resultRawText, RESEARCH_RESULT_TEXT, "der Rohtext bleibt über resultPresentation hinaus unverändert erreichbar");
     step1PromptCall = adapter.calls[0];
     assert.ok(step1PromptCall.prompt.includes("review-agent"));
     assert.ok(step1PromptCall.prompt.includes("Verbindlicher Kernauftrag"));
@@ -824,6 +841,15 @@ async function run() {
     assert.strictEqual(step3.stepStatus, "SUCCEEDED");
     const step3Run = authDb.getPilotAgentExecutionRunById(db, step3.executionRunId);
     assert.strictEqual(step3Run.agentKey, "orchestrator-agent");
+    // V8.1: das PM-Testergebnis oben ("Gesamturteil: konsistent...") hat
+    // ebenfalls keine ABSCHNITT-Struktur, ist aber klein genug für
+    // contractFallbackAccepted. Auch das PM-Gesamturteil darf keine
+    // erfundene Kurzfassung zeigen.
+    const step3Overview = pilotService.getPilotOrderOverview(db, orderAId);
+    const step3RunSummary = step3Overview.agentExecutionRuns.find((run) => run.id === step3.executionRunId);
+    assert.strictEqual(step3RunSummary.resultPresentation.structureStatus, "UNSTRUCTURED_ACCEPTED");
+    assert.strictEqual(step3RunSummary.resultPresentation.rawTextAvailable, true);
+    assert.ok(step3RunSummary.resultPresentation.honestNotice.includes("hält die vereinbarte Gliederung nicht ein"));
     const promptSentToStep3 = adapter.calls[0].prompt;
     assert.ok(promptSentToStep3.includes("===BEGIN NICHT VERTRAUENSWÜRDIGES VORGÄNGERERGEBNIS==="));
     assert.ok(promptSentToStep3.includes(orderA.order.title), "der unveränderte Kernauftrag muss auch in Schritt 3 enthalten sein");
@@ -1212,6 +1238,27 @@ async function run() {
     assert.ok(researchNormalization.droppedItemCount >= 1);
     assert.strictEqual(step1Run.resultSummary.documentationNormalization, undefined, "Schritt 1 erhält keine Dokumentationsmetadaten");
 
+    // V8.1 ("Ergebnis verstehen ohne Technik"): dieses Recherche-Ergebnis
+    // erfüllt die verbindliche Fünf-Abschnittsstruktur vollständig (auch
+    // nach Verdichtung) – resultPresentation muss es als STRUCTURED mit
+    // genau den fünf vertraglichen Abschnitten in Titel und Reihenfolge
+    // zeigen, und zwar unter Wiederverwendung derselben Abschnittslogik, die
+    // auch den Schreibpfad (researchNormalization oben) validiert hat.
+    const step1StagesOverview = pilotService.getPilotOrderOverview(db, orderStages.order.id);
+    const step1StagesRunSummary = step1StagesOverview.agentExecutionRuns.find((run) => run.id === step1.executionRunId);
+    assert.strictEqual(step1StagesRunSummary.resultPresentation.structureStatus, "STRUCTURED");
+    assert.strictEqual(step1StagesRunSummary.resultPresentation.contractStage, "RESEARCH");
+    assert.strictEqual(step1StagesRunSummary.resultPresentation.honestNotice, null);
+    assert.deepStrictEqual(
+      step1StagesRunSummary.resultPresentation.sections.map((section) => section.title),
+      ["KURZFAZIT", "BELEGTE KERNBEFUNDE", "REIBUNGSVERLUSTE", "PRIORISIERTE VERBESSERUNGEN", "GRENZEN UND UNSICHERHEITEN"],
+    );
+    assert.deepStrictEqual(step1StagesRunSummary.resultPresentation.sections.map((section) => section.number), [1, 2, 3, 4, 5]);
+    assert.ok(
+      step1StagesRunSummary.resultPresentation.sections[1].items.length > 0,
+      "Listenpunkte des Abschnitts BELEGTE KERNBEFUNDE müssen übernommen sein",
+    );
+
     // Der Digest der Kette gehört zum gespeicherten, nicht zum Rohtext.
     assert.strictEqual(
       step1.resultDigest,
@@ -1259,6 +1306,16 @@ async function run() {
     assert.strictEqual(pmNormalization.storedCharCount, step3Run.resultRawText.length);
     assert.strictEqual(step3Run.resultSummary.documentationNormalization, undefined, "Schritt 3 erhält keine Dokumentationsmetadaten");
 
+    // V8.1: dasselbe für das strukturell gültige PM-Gesamturteil.
+    const step3StagesOverview = pilotService.getPilotOrderOverview(db, orderStages.order.id);
+    const step3StagesRunSummary = step3StagesOverview.agentExecutionRuns.find((run) => run.id === step3.executionRunId);
+    assert.strictEqual(step3StagesRunSummary.resultPresentation.structureStatus, "STRUCTURED");
+    assert.strictEqual(step3StagesRunSummary.resultPresentation.contractStage, "PROJECT_MANAGER");
+    assert.deepStrictEqual(
+      step3StagesRunSummary.resultPresentation.sections.map((section) => section.title),
+      ["GESAMTURTEIL", "WICHTIGSTE BELEGTE STAERKEN", "WICHTIGSTE BELEGTE SCHWAECHEN", "PRIORISIERTE ENTSCHEIDUNGEN", "EMPFEHLUNG AN JAMAL"],
+    );
+
     // COMPLETED erst nach dem regulären, einzeln freigegebenen Schritt 3.
     assert.strictEqual(afterStep3.chainStatus, "COMPLETED");
     assert.strictEqual(afterStep3.steps.filter((entry) => entry.stepStatus === "SUCCEEDED").length, 3);
@@ -1295,6 +1352,20 @@ async function run() {
     assert.ok(failedRun.errorMessage.includes("Fünf-Abschnittsstruktur"));
     assert.strictEqual(failedRun.resultSummary.diagnostics.reasonCode, "RESEARCH_RESULT_STRUCTURE_INVALID");
     assert.strictEqual(failedRun.resultSummary.diagnostics.runnerPhase, "RESULT_VALIDATION");
+
+    // V8.1: ein fehlgeschlagener Lauf ohne gespeicherten Rohtext darf keine
+    // erfundene Zusammenfassung erzeugen. resultPresentation muss
+    // UNAVAILABLE melden, ohne Abschnitte oder Hinweistext.
+    const failedOverview = pilotService.getPilotOrderOverview(db, orderBadResearch.order.id);
+    const failedRunSummary = failedOverview.agentExecutionRuns.find((run) => run.id === failedStep1.executionRunId);
+    assert.strictEqual(failedRunSummary.resultPresentation.structureStatus, "UNAVAILABLE");
+    assert.deepStrictEqual(failedRunSummary.resultPresentation.sections, []);
+    assert.strictEqual(failedRunSummary.resultPresentation.rawTextAvailable, false);
+    assert.strictEqual(failedRunSummary.resultPresentation.honestNotice, null);
+    // Der technische Grund-Code darf in resultPresentation (fachlicher
+    // Bereich) nicht auftauchen; er bleibt ausschließlich in
+    // resultSummary.diagnostics (Technische Details) verfügbar.
+    assert.strictEqual(JSON.stringify(failedRunSummary.resultPresentation).includes("RESEARCH_RESULT_STRUCTURE_INVALID"), false);
 
     const finalView = chainService.getChainView(db, badResearchChain.id);
     finalView.steps.forEach((entry) => assert.notStrictEqual(entry.stepStatus, "RUNNING", `Schritt ${entry.stepNumber} darf nicht RUNNING bleiben`));

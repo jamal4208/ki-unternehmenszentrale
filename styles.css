@@ -9870,6 +9870,97 @@ details.local-agent-assignment-details > summary {
   word-break: break-word;
 }
 
+/* V8.1 ("Ergebnis verstehen ohne Technik") – fachliche Aufbereitung eines
+   bereits gespeicherten Kettenergebnisses. Rein darstellend, keine neue
+   Logik: die Inhalte stammen unverändert aus resultPresentation. */
+.pilot-work-order-result-section {
+  margin: 6px 0;
+}
+
+.pilot-work-order-result-section__title {
+  margin: 0 0 2px;
+  font-weight: var(--font-medium);
+  color: var(--ink);
+}
+
+.pilot-work-order-result-quality {
+  margin: 6px 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.pilot-work-order-result-technical {
+  margin-top: 8px;
+}
+
+/* V8.2 ("Entscheidungsansicht statt Textmenge") – kompakte, offen sichtbare
+   Entscheidungsansicht je Kettenschritt. Rein darstellend, keine neue
+   Logik: die Inhalte stammen unverändert aus resultPresentation (siehe
+   pilot-work-order-ui.js#renderRunResultPresentationHtml). */
+.pilot-work-order-result-status {
+  margin: 4px 0 6px;
+  font-size: var(--text-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+
+.pilot-work-order-decision-verdict {
+  margin: 4px 0 8px;
+  font-weight: var(--font-medium);
+  color: var(--ink);
+}
+
+.pilot-work-order-key-points,
+.pilot-work-order-recommendation,
+.pilot-work-order-decision-required,
+.pilot-work-order-risk-note {
+  margin: 8px 0;
+}
+
+.pilot-work-order-key-points__title,
+.pilot-work-order-recommendation__title,
+.pilot-work-order-decision-required__title,
+.pilot-work-order-risk-note__title {
+  margin: 0 0 2px;
+  font-weight: var(--font-medium);
+  color: var(--ink);
+}
+
+.pilot-work-order-decision-required {
+  padding: 6px 10px;
+  border-left: 3px solid var(--accent, var(--ink));
+  background: var(--card-bg-muted);
+  border-radius: var(--radius-sm, 4px);
+}
+
+.pilot-work-order-risk-note {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.pilot-work-order-risk-note__title {
+  color: var(--muted);
+}
+
+.pilot-work-order-result-fachlich {
+  margin-top: 6px;
+}
+
+.pilot-work-order-handoff-details {
+  margin-top: 4px;
+}
+
+/* V8.2.1 ("Technischen Kopf einklappen") – derselbe bisher offene
+   Stufenkopf (Agent, Status/Freigabe, Kernauftrag, Stufenauftrag,
+   executionRunId, Vorgängerlauf, Rollenverbuchung, verwendete Dateien,
+   Steuerungselemente) steht bei bereits vorhandenem Ergebnis jetzt
+   zusätzlich standardmäßig eingeklappt ganz unten. Rein darstellend,
+   keine neue Logik. */
+.pilot-work-order-order-run-details {
+  margin-top: 6px;
+}
+
 .pilot-work-order-details summary {
   cursor: pointer;
   font-weight: var(--font-medium);
