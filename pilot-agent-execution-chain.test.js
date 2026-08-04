@@ -364,7 +364,12 @@ async function run() {
     // Migration 23 anwenden.
     // -----------------------------------------------------------------
     const migrationResult = migrations.runMigrations(v22Db);
-    assert.deepStrictEqual(migrationResult.appliedNow, [23, 24]);
+    // Diese Liste ist bewusst vollständig und exakt (kein "enthält"): sie
+    // belegt, dass ab Version 22 ALLE noch fehlenden Migrationen genau einmal
+    // und in aufsteigender Reihenfolge nachgezogen werden. Sie muss deshalb
+    // beim Hinzufügen jeder neuen Migration mitgeführt werden (V7.8.0: 24
+    // ergänzt, V8.7 Stufe A: 25 ergänzt).
+    assert.deepStrictEqual(migrationResult.appliedNow, [23, 24, 25]);
     assert.ok(migrations.getAppliedVersions(v22Db).includes(23));
     assert.ok(migrations.getAppliedVersions(v22Db).includes(24));
 

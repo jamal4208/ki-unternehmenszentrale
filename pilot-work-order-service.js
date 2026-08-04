@@ -167,6 +167,99 @@ function isNonEmptyStringArray(value) {
 }
 
 // ---------------------------------------------------------------------------
+// V8.7 Stufe A ("Blockierungs- und Rückgabegründe dauerhaft sichern") –
+// EINE gemeinsame, reine Validierungsfunktion für beide manuellen
+// Entscheidungsgründe: blockOrder(reason) und returnOrder(note). Beide Texte
+// werden ab jetzt dauerhaft gespeichert (pilot_work_order_decision_reasons,
+// Migration 25) und müssen deshalb dieselbe Prüfung durchlaufen – zwei
+// getrennte Prüfungen wären zwei Sicherheitsniveaus.
+//
+// Bewusste Grundsätze:
+// - KEINE stille Bereinigung außer trim und CRLF→LF. Alles andere wird
+//   abgewiesen, nicht heimlich repariert: der gespeicherte Grund muss exakt
+//   das sein, was Jamal eingegeben hat.
+// - KEIN stilles Kürzen. Ein zu langer Text ist ein Eingabefehler (400) und
+//   wird nicht auf 500 Zeichen abgeschnitten – sonst stünde später ein
+//   halber Satz als verbindliche Begründung in der Historie.
+// - Die Fehlermeldungen geben den eingegebenen Text NIEMALS wieder. Gerade
+//   bei einem abgewiesenen, möglicherweise sensiblen Inhalt darf dieser
+//   nicht über die Fehlerantwort wieder nach außen gelangen.
+// - Technische Statuscodes (BLOCKED, RETURNED, HTTP 409 …) sind ausdrücklich
+//   erlaubter Fließtext: sie sind für eine Begründung fachlich sinnvoll.
+// ---------------------------------------------------------------------------
+const DECISION_REASON_MIN_LENGTH = 5;
+const DECISION_REASON_MAX_LENGTH = 500;
+
+// C0-Steuerzeichen (U+0000–U+001F) und DEL (U+007F). Einzige bewusste
+// Ausnahme ist der Zeilenumbruch U+000A: eine mehrzeilige Begründung ist
+// fachlich sinnvoll. U+000D ist NICHT ausgenommen – ein echtes CRLF wurde
+// zuvor bereits zu LF normalisiert, ein danach noch verbliebenes
+// alleinstehendes CR ist ein Steuerzeichen und wird abgewiesen.
+const DECISION_REASON_CONTROL_CHARACTER_PATTERN = /[\u0000-\u0009\u000B-\u001F\u007F]/;
+
+// Bewusst eng: nur "<" unmittelbar gefolgt von einem Buchstaben oder "/" gilt
+// als HTML-artig. Ein fachlich völlig legitimer Vergleich ("Aufwand < 5 Tage")
+// bleibt dadurch erlaubt.
+const DECISION_REASON_HTML_LIKE_PATTERN = /<[A-Za-z/]/;
+
+// Gleiches Sicherheitsmuster wie an den bestehenden Grenzen des Projekts
+// (local-data-backup.js#SECRET_PATTERNS, execution-codex-adapter.js#
+// SECRET_PATTERNS): mögliche Zugangsdaten und maschinenspezifische Pfade
+// werden abgewiesen statt gespeichert. Anders als dort wird hier NICHT
+// redigiert – ein dauerhaft gespeicherter Entscheidungsgrund soll gar nicht
+// erst ein Geheimnis enthalten.
+const DECISION_REASON_FORBIDDEN_CONTENT_PATTERNS = Object.freeze([
+  /\/Users\//i,
+  /[A-Za-z]:\\/,
+  /\btoken\b/i,
+  /\bpassword\b/i,
+  /\bpasswort\b/i,
+  /\bcookie\b/i,
+  /\bsession[-_\s]?id\b/i,
+]);
+
+function validateDecisionReasonText(value, options = {}) {
+  const fieldName = options.fieldName || "reason";
+  // Die Meldung für den vollständig fehlenden Wert bleibt exakt der
+  // bisherige, von bestehenden Tests geprüfte Wortlaut.
+  const missingMessage = options.missingMessage || `${fieldName} ist erforderlich.`;
+  if (!isNonEmptyString(value)) throw badRequest(missingMessage);
+
+  const normalized = value.replace(/\r\n/g, "\n").trim();
+
+  if (normalized.length < DECISION_REASON_MIN_LENGTH) {
+    throw badRequest(
+      `${fieldName} ist zu kurz: mindestens ${DECISION_REASON_MIN_LENGTH} Zeichen sind erforderlich, ` +
+        "damit die Begründung später nachvollziehbar bleibt.",
+    );
+  }
+  if (normalized.length > DECISION_REASON_MAX_LENGTH) {
+    throw badRequest(
+      `${fieldName} ist zu lang: höchstens ${DECISION_REASON_MAX_LENGTH} Zeichen sind erlaubt ` +
+        `(eingegeben: ${normalized.length}). Der Text wird bewusst nicht automatisch gekürzt – ` +
+        "bitte die Begründung selbst kürzen.",
+    );
+  }
+  if (DECISION_REASON_CONTROL_CHARACTER_PATTERN.test(normalized)) {
+    throw badRequest(
+      `${fieldName} enthält unzulässige Steuerzeichen. Erlaubt ist normaler Text, ` +
+        "ein Zeilenumbruch ist zulässig.",
+    );
+  }
+  if (DECISION_REASON_HTML_LIKE_PATTERN.test(normalized)) {
+    throw badRequest(`${fieldName} darf keine HTML-artigen Eingaben enthalten. Bitte reinen Text eingeben.`);
+  }
+  if (DECISION_REASON_FORBIDDEN_CONTENT_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    throw badRequest(
+      `${fieldName} enthält möglicherweise vertrauliche oder maschinenspezifische Angaben ` +
+        "(zum Beispiel Zugangsdaten oder lokale Dateipfade) und wird aus Sicherheitsgründen nicht gespeichert. " +
+        "Bitte die Begründung ohne solche Angaben formulieren.",
+    );
+  }
+  return normalized;
+}
+
+// ---------------------------------------------------------------------------
 // Agentenzuteilung – ausschließlich bereits vorhandene, kanonische Agenten.
 // ---------------------------------------------------------------------------
 function resolveCanonicalAgent(canonicalName) {
@@ -867,10 +960,58 @@ function loadChainRoleProgress(db, pilotOrderId) {
   return Array.from(bookedRoles);
 }
 
+// V8.7 Stufe A – Aufbereitung einer gespeicherten Gründe-Zeile für das
+// Overview. Rein lesend, keine UI-Texte (die Oberfläche entscheidet selbst
+// über Darstellung und Beschriftung), keine serverseitige Kürzung: der Text
+// wird exakt so ausgeliefert, wie er eingegeben und gespeichert wurde.
+// Gleiches, bereits etabliertes Muster wie loadChainRoleProgress oben: alte
+// Datenbankstände (gezielte Migrationstests auf Version 22, siehe
+// pilot-agent-execution-chain.test.js) kennen die Gründe-Tabelle noch nicht.
+// Dort gibt es definitionsgemäß keine gespeicherten Gründe. Ausschließlich
+// dieser eine, klar benannte Fall wird abgefangen – jeder andere
+// Datenbankfehler wird unverändert weitergereicht und niemals verschluckt.
+function loadDecisionReasonRows(db, pilotOrderId) {
+  try {
+    return authDb.listPilotWorkOrderDecisionReasons(db, pilotOrderId);
+  } catch (error) {
+    if (!String((error && error.message) || "").includes("no such table")) {
+      throw error;
+    }
+    return [];
+  }
+}
+
+function rowToDecisionReasonView(row) {
+  return {
+    kind: row.reasonKind,
+    text: row.reasonText,
+    setAt: row.createdAt,
+    setByUserId: row.actorUserId ?? null,
+    fromStatus: row.fromStatus,
+    toStatus: row.toStatus,
+    orderRevision: row.orderRevisionAfter,
+  };
+}
+
 function buildOverview(db, orderRow) {
   if (!orderRow) return null;
   const order = rowToOrderView(orderRow);
   const handoffs = authDb.listPilotHandoffs(db, orderRow.id).map(rowToHandoffView);
+
+  // V8.7 Stufe A – Blockierungs-/Rückgabegründe. Einzige Quelle ist die
+  // append-only Fachtabelle (Migration 25); es wird NICHTS aus Status,
+  // Rollenübergaben, Audittexten oder pmFilterReasonsJson abgeleitet.
+  //
+  // Aktualität ist rein rechnerisch: aktuell gültig ist genau die Zeile mit
+  // orderRevisionAfter === order.revision. Jede spätere Statusänderung
+  // erhöht die Auftragsrevision, wodurch ein früherer Grund automatisch nur
+  // noch historisch ist – ohne Aufräumlogik und ohne dass eine gespeicherte
+  // Zeile jemals verändert wird. Ein Bestandsauftrag ohne gespeicherte
+  // Gründe liefert deshalb null und eine leere Historie (kein Backfill).
+  const decisionReasonRows = loadDecisionReasonRows(db, orderRow.id);
+  const decisionReasonHistory = decisionReasonRows.map(rowToDecisionReasonView);
+  const currentDecisionReason =
+    decisionReasonHistory.find((entry) => entry.orderRevision === order.revision) || null;
   const agentExecutionRuns = authDb
     .listPilotAgentExecutionRunsForOrder(db, orderRow.id)
     .map(rowToAgentExecutionRunSummary);
@@ -921,6 +1062,8 @@ function buildOverview(db, orderRow) {
     chainRecommendedFiles: getChainRecommendedFilesSnapshot(),
     openDecision,
     risksAndLimits,
+    currentDecisionReason,
+    decisionReasonHistory,
     nextStep: NEXT_STEP_BY_STATUS[order.status] || NEXT_STEP_BY_STATUS.DRAFT,
     progress: {
       rolesPassed: handoffPassedRoles.size,
@@ -1303,8 +1446,51 @@ function approveCompletion(db, options = {}) {
   return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
 }
 
+// V8.7 Stufe A – gemeinsamer Schreibpfad für Statuswechsel UND Grundeintrag.
+// Beides läuft in EINER withAuthTransaction-Klammer: entweder werden
+// Statuswechsel und Gründe-Zeile beide dauerhaft, oder keiner von beiden.
+// Ein CAS-/Revisionskonflikt in applyStatusTransition wirft, bevor die
+// Gründe-Zeile überhaupt geschrieben wird, und rollt zusätzlich die gesamte
+// Klammer zurück – es kann daher weder ein blockierter Auftrag ohne den
+// gerade eingegebenen Grund noch ein Grund ohne erfolgten Statuswechsel
+// entstehen.
+//
+// Die Gründe-Zeile wird ausschließlich bei einem TATSÄCHLICHEN Statuswechsel
+// geschrieben: bleibt applyStatusTransition ein wirkungsloses No-op (der
+// Auftrag hat den Zielstatus bereits, die Revision bleibt unverändert),
+// entsteht bewusst kein Eintrag – sonst gäbe es zwei Gründe-Zeilen zur
+// selben Auftragsrevision und die Aktualitätsregel wäre nicht mehr eindeutig.
+//
+// buildOverview() läuft bewusst NACH der Transaktion (unverändert zum
+// bisherigen Aufbau): es ist rein lesend und führt unter anderem eine
+// gecachte Codex-Verfügbarkeitsprüfung aus, die nichts in einer offenen
+// Schreibtransaktion zu suchen hat.
+function applyManualDecisionWithReason(db, options, { orderRow, nextStatus, reasonKind, reasonText }) {
+  authDb.withAuthTransaction(db, () => {
+    const fromStatus = orderRow.status;
+    const orderRevisionBefore = orderRow.revision;
+    const orderRevisionAfter = applyStatusTransition(db, orderRow, nextStatus, options);
+    if (orderRevisionAfter <= orderRevisionBefore) return;
+    authDb.insertPilotWorkOrderDecisionReason(db, {
+      id: crypto.randomUUID(),
+      pilotOrderId: orderRow.id,
+      reasonKind,
+      reasonText,
+      fromStatus,
+      toStatus: nextStatus,
+      orderRevisionBefore,
+      orderRevisionAfter,
+      actorUserId: options.actorUserId ?? null,
+      createdAt: nowIso(options.now),
+    });
+  });
+}
+
 function returnOrder(db, options = {}) {
-  if (!isNonEmptyString(options.note)) throw badRequest("note ist erforderlich (Grund der Rückgabe).");
+  const reasonText = validateDecisionReasonText(options.note, {
+    fieldName: "note",
+    missingMessage: "note ist erforderlich (Grund der Rückgabe).",
+  });
   const orderId = resolveOrderId(options);
   const orderRow = loadMutableOrder(db, orderId, options);
   if (!["READY_FOR_JAMAL_APPROVAL", "READY_FOR_REVIEW", "IN_EXECUTION"].includes(orderRow.status)) {
@@ -1313,7 +1499,12 @@ function returnOrder(db, options = {}) {
       currentStatus: orderRow.status,
     });
   }
-  applyStatusTransition(db, orderRow, "RETURNED", options);
+  applyManualDecisionWithReason(db, options, {
+    orderRow,
+    nextStatus: "RETURNED",
+    reasonKind: "RETURN",
+    reasonText,
+  });
   return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
 }
 
@@ -1331,10 +1522,18 @@ function reopenFromReturned(db, options = {}) {
 }
 
 function blockOrder(db, options = {}) {
-  if (!isNonEmptyString(options.reason)) throw badRequest("reason ist erforderlich.");
+  const reasonText = validateDecisionReasonText(options.reason, {
+    fieldName: "reason",
+    missingMessage: "reason ist erforderlich.",
+  });
   const orderId = resolveOrderId(options);
   const orderRow = loadMutableOrder(db, orderId, options);
-  applyStatusTransition(db, orderRow, "BLOCKED", options);
+  applyManualDecisionWithReason(db, options, {
+    orderRow,
+    nextStatus: "BLOCKED",
+    reasonKind: "BLOCK",
+    reasonText,
+  });
   return buildOverview(db, authDb.getPilotWorkOrderById(db, orderId));
 }
 

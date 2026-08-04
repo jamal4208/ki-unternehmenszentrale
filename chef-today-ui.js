@@ -88,19 +88,26 @@
  * vorhandene Overview-Felder (`handoffs`, `risksAndLimits`, `status`),
  * niemals eine neue Route, niemals eine zweite Statusquelle. Für BLOCKED und
  * RETURNED bleiben Empfehlung und Risiko/Grenze bewusst immer `null` (siehe
- * recommendationTextFor()/riskTextFor()): die konkrete blockOrder(reason)-
- * bzw. returnOrder(note)-Information wird von der bestehenden Serviceschicht
- * heute nicht persistiert, ältere Handoff-Daten könnten veraltet oder
- * unpassend sein. Lieber keine Information als eine möglicherweise falsche.
- * Die sichtbare Beschriftung "Öffnen" heißt jetzt "Entscheidung öffnen" –
- * unverändert derselbe Button, derselbe Navigationspfad (openOrder()).
+ * recommendationTextFor()/riskTextFor()): ältere Handoff-Daten könnten
+ * veraltet oder unpassend sein. Lieber keine Information als eine
+ * möglicherweise falsche. Die sichtbare Beschriftung "Öffnen" heißt jetzt
+ * "Entscheidung öffnen" – unverändert derselbe Button, derselbe
+ * Navigationspfad (openOrder()).
  *
- * Bekannte, bewusst nicht in V8.5 behobene Lücken (unverändert zu V8.4 bzw.
- * gesondert dokumentiert in CURRENT_STATUS.md): der Freitext aus
- * blockOrder(reason)/returnOrder(note) bleibt weiterhin nicht persistiert;
- * READY_FOR_REVIEW und READY_FOR_JAMAL_APPROVAL besitzen im UI weiterhin nur
- * je eine Primäraktion, keine Rückgabe-Schaltfläche (serverseitige
- * Rückgaberouten existieren, sind aber nicht verdrahtet).
+ * Stand seit V8.7 Stufe A ("Blockierungs- und Rückgabegründe dauerhaft
+ * sichern"): der bei blockOrder(reason)/returnOrder(note) eingegebene
+ * Freitext WIRD inzwischen dauerhaft gespeichert (append-only Fachtabelle
+ * pilot_work_order_decision_reasons, Migration 25) und steht im Overview
+ * additiv als `currentDecisionReason`/`decisionReasonHistory` bereit. Diese
+ * Datei liest diese Felder in V8.7 Stufe A bewusst noch NICHT – die
+ * sichtbare Darstellung des Grundes ist ausdrücklich nicht Teil von Stufe A.
+ * Die obige Entscheidung, für BLOCKED/RETURNED keine Empfehlung und keinen
+ * Risikotext aus Handoff-Daten abzuleiten, bleibt davon unberührt.
+ *
+ * Bekannte, bewusst weiterhin offene Lücken (gesondert dokumentiert in
+ * CURRENT_STATUS.md): READY_FOR_REVIEW und READY_FOR_JAMAL_APPROVAL besitzen
+ * im UI weiterhin nur je eine Primäraktion, keine Rückgabe-Schaltfläche
+ * (serverseitige Rückgaberouten existieren, sind aber nicht verdrahtet).
  */
 
 (function () {

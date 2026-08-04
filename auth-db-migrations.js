@@ -3113,6 +3113,65 @@ const MIGRATIONS = Object.freeze([
         ADD COLUMN roleHandoffBookedAt TEXT;
     `,
   }),
+  // V8.7 Stufe A ("Blockierungs- und Rückgabegründe dauerhaft sichern") –
+  // schließt eine echte Verluststelle: der bei blockOrder(reason) bzw.
+  // returnOrder(note) eingegebene Freitext wurde bisher ausschließlich auf
+  // Vorhandensein geprüft und danach verworfen (pilot-work-order-service.js).
+  // Das System konnte deshalb dauerhaft nicht beantworten, WARUM ein Auftrag
+  // blockiert oder zurückgegeben wurde.
+  //
+  // Diese Tabelle ist die ALLEINIGE Speicherwahrheit dieser Gründe:
+  // - keine Snapshot-Spalten auf pilot_work_orders (kein zweiter,
+  //   möglicherweise abweichender Stand),
+  // - kein neuer Auditereignistyp (die Auditgrenze bleibt exakt unverändert;
+  //   der Freitext wird NIEMALS in auth_audit_events geschrieben),
+  // - keine Ableitung aus pilot_handoffs, Audittexten oder Statuscodes,
+  // - kein Backfill (Altaufträge besitzen definitionsgemäß keinen Grund).
+  //
+  // Append-only wie auth_audit_events/work_order_results: ein einmal
+  // gesetzter Grund wird niemals überschrieben. Bewusst NUR ein
+  // UPDATE-Schutztrigger und KEIN DELETE-Schutztrigger – die Zeilen hängen
+  // per ON DELETE CASCADE am Auftrag; ein DELETE-Trigger würde das Löschen
+  // eines Auftrags unmöglich machen.
+  //
+  // Aktualität wird NICHT über eine current-Flag-Spalte geführt (die müsste
+  // beim Statuswechsel nachgeführt werden, wäre also eine zweite, driftende
+  // Wahrheit), sondern rein rechnerisch abgeleitet: aktuell gültig ist genau
+  // die Zeile mit orderRevisionAfter === pilot_work_orders.revision. Jede
+  // spätere Statusänderung erhöht die Auftragsrevision und macht einen
+  // früheren Grund damit automatisch historisch – ohne Aufräumlogik, ohne
+  // Nullsetzen, ohne Überschreiben.
+  //
+  // orderRevisionAfter > orderRevisionBefore ist als CHECK verbindlich:
+  // eine Gründe-Zeile kann es nur zu einem TATSÄCHLICH stattgefundenen
+  // Statuswechsel geben, niemals zu einem wirkungslosen No-op.
+  Object.freeze({
+    version: 25,
+    name: "add_pilot_work_order_decision_reasons_v18",
+    sql: `
+      CREATE TABLE pilot_work_order_decision_reasons (
+        id TEXT PRIMARY KEY,
+        pilotOrderId TEXT NOT NULL REFERENCES pilot_work_orders(id) ON DELETE CASCADE,
+        reasonKind TEXT NOT NULL CHECK (reasonKind IN ('BLOCK', 'RETURN')),
+        reasonText TEXT NOT NULL CHECK (length(reasonText) BETWEEN 5 AND 500),
+        fromStatus TEXT NOT NULL CHECK (fromStatus IN (${sqlEnum(PILOT_WORK_ORDER_STATUS_VALUES)})),
+        toStatus TEXT NOT NULL CHECK (toStatus IN ('BLOCKED', 'RETURNED')),
+        orderRevisionBefore INTEGER NOT NULL CHECK (orderRevisionBefore >= 0),
+        orderRevisionAfter INTEGER NOT NULL CHECK (orderRevisionAfter > orderRevisionBefore),
+        actorUserId TEXT CHECK (actorUserId IS NULL OR length(actorUserId) <= 100),
+        createdAt TEXT NOT NULL
+      );
+
+      CREATE INDEX idx_pilot_work_order_decision_reasons_order_revision
+        ON pilot_work_order_decision_reasons(pilotOrderId, orderRevisionAfter DESC);
+
+      CREATE TRIGGER trg_pilot_work_order_decision_reasons_no_update
+      BEFORE UPDATE ON pilot_work_order_decision_reasons
+      BEGIN
+        SELECT RAISE(ABORT, 'pilot_work_order_decision_reasons ist append-only: UPDATE ist nicht erlaubt.');
+      END;
+    `,
+  }),
 ]);
 
 function ensureMigrationsTable(db) {

@@ -2092,6 +2092,61 @@ function listPilotHandoffs(db, pilotOrderId) {
 }
 
 // ---------------------------------------------------------------------------
+// V8.7 Stufe A – pilot_work_order_decision_reasons (Migration 25): alleinige
+// Speicherwahrheit für den manuell eingegebenen Blockierungs-/Rückgabegrund.
+// Append-only: es gibt hier bewusst KEINE Aktualisierungsfunktion und keinen
+// UPDATE-Pfad; ein Änderungsversuch würde zusätzlich vom
+// trg_pilot_work_order_decision_reasons_no_update-Trigger abgewiesen.
+//
+// Die Aufrufer (pilot-work-order-service.js#blockOrder/#returnOrder) rufen
+// insertPilotWorkOrderDecisionReason ausschließlich INNERHALB derselben
+// withAuthTransaction-Klammer auf, in der auch der Statuswechsel stattfindet:
+// entweder werden Statuswechsel UND Grund dauerhaft, oder keins von beiden.
+// Ein CAS-/Revisionskonflikt rollt die Grundzeile damit zwingend mit zurück.
+//
+// Der übergebene Text wird hier NICHT verändert, gekürzt oder bereinigt – er
+// ist zum Aufrufzeitpunkt bereits vollständig validiert und normalisiert
+// (pilot-work-order-service.js#validateDecisionReasonText). Diese Schicht
+// schreibt ausschließlich parametrisiert und mutiert das Eingabeobjekt nie.
+// ---------------------------------------------------------------------------
+function insertPilotWorkOrderDecisionReason(db, input = {}) {
+  db.prepare(
+    `INSERT INTO pilot_work_order_decision_reasons
+      (id, pilotOrderId, reasonKind, reasonText, fromStatus, toStatus,
+       orderRevisionBefore, orderRevisionAfter, actorUserId, createdAt)
+     VALUES
+      (@id, @pilotOrderId, @reasonKind, @reasonText, @fromStatus, @toStatus,
+       @orderRevisionBefore, @orderRevisionAfter, @actorUserId, @createdAt)`,
+  ).run({
+    id: input.id,
+    pilotOrderId: input.pilotOrderId,
+    reasonKind: input.reasonKind,
+    reasonText: input.reasonText,
+    fromStatus: input.fromStatus,
+    toStatus: input.toStatus,
+    orderRevisionBefore: input.orderRevisionBefore,
+    orderRevisionAfter: input.orderRevisionAfter,
+    actorUserId: input.actorUserId ?? null,
+    createdAt: input.createdAt,
+  });
+  return db.prepare("SELECT * FROM pilot_work_order_decision_reasons WHERE id = ?").get(input.id) || null;
+}
+
+// Deterministisch aufsteigend historisch sortiert (älteste Entscheidung
+// zuerst). orderRevisionAfter ist der fachlich führende Ordnungsschlüssel,
+// createdAt/id sind ausschließlich stabilisierende Zweitschlüssel, damit die
+// Reihenfolge auch bei identischem Zeitstempel nie zufällig ist.
+function listPilotWorkOrderDecisionReasons(db, pilotOrderId) {
+  return db
+    .prepare(
+      `SELECT * FROM pilot_work_order_decision_reasons
+       WHERE pilotOrderId = ?
+       ORDER BY orderRevisionAfter ASC, createdAt ASC, id ASC`,
+    )
+    .all(pilotOrderId);
+}
+
+// ---------------------------------------------------------------------------
 // Phase 6 ("technische Agentenlauf-Infrastruktur mit lokalem deterministischem Read-Only-Runner") – pilot_agent_execution_runs
 // (Migration 20). Ein Agentenlauf ist eine rein technische Ausführungseinheit
 // (siehe PILOT_AGENT_EXECUTION_RUN_STATUS_VALUES), getrennt von der
@@ -2672,6 +2727,10 @@ module.exports = {
   updatePilotWorkOrderStatusConditional,
   insertPilotHandoff,
   listPilotHandoffs,
+  // V8.7 Stufe A – dauerhaft gesicherte Blockierungs-/Rückgabegründe
+  // (append-only, bewusst ohne Aktualisierungsfunktion)
+  insertPilotWorkOrderDecisionReason,
+  listPilotWorkOrderDecisionReasons,
   // Phase 6 – technische Agentenlauf-Infrastruktur mit lokalem deterministischem Read-Only-Runner
   insertPilotAgentExecutionRunAsRunning,
   getPilotAgentExecutionRunById,

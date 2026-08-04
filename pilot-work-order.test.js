@@ -450,6 +450,61 @@ async function run() {
     assert.ok(typeof overview.nextStep === "string" && overview.nextStep.length > 0);
     assert.ok(overview.autonomyBoundaries);
     assert.strictEqual(overview.autonomyBoundaries.autoApprovalByAgentAllowed, false);
+    // V8.7 Stufe A – rein additiv: beide Felder sind IMMER vorhanden. Dieser
+    // Auftrag wurde nie manuell blockiert oder zurückgegeben, deshalb sind
+    // sie leer (kein Backfill, keine Ableitung aus Status oder Handoffs).
+    assert.ok("currentDecisionReason" in overview);
+    assert.ok("decisionReasonHistory" in overview);
+    assert.strictEqual(overview.currentDecisionReason, null);
+    assert.deepStrictEqual(overview.decisionReasonHistory, []);
+  });
+
+  // V8.7 Stufe A ("Blockierungs- und Rückgabegründe dauerhaft sichern") – der
+  // bei blockOrder(reason)/returnOrder(note) eingegebene Freitext wurde bis
+  // V8.6 nur geprüft und danach verworfen. Hier wird ausschließlich die
+  // Sichtbarkeit im Overview mitgeprüft; die vollständigen Prüfungen
+  // (Persistierung, Aktualitätsregel, Historie, Validierung, Atomarität,
+  // Append-only, Migration 25) stehen in
+  // pilot-work-order-decision-reason.test.js.
+  await check("8b. V8.7: ein manuell blockierter Auftrag liefert den gespeicherten Grund als currentDecisionReason und behält ihn danach historisch", () => {
+    const { db: reasonDb } = makeIsolatedDb("pilot-work-order-test-decision-reason-");
+    const created = service.createPilotOrder(reasonDb, validCreateOrderInput({ title: "Auftrag mit Entscheidungsgrund" }));
+    const pilotOrderId = created.order.id;
+    service.markReadyForApproval(reasonDb, { pilotOrderId });
+
+    const reason = "Blockiert: die erforderliche Rechtsfreigabe liegt noch nicht vor.";
+    const blocked = service.blockOrder(reasonDb, { pilotOrderId, reason, actorUserId: "owner-1" });
+    assert.strictEqual(blocked.status, "BLOCKED");
+    assert.ok(blocked.currentDecisionReason, "der eingegebene Grund muss jetzt dauerhaft vorliegen");
+    assert.strictEqual(blocked.currentDecisionReason.kind, "BLOCK");
+    assert.strictEqual(blocked.currentDecisionReason.text, reason);
+    assert.strictEqual(blocked.currentDecisionReason.setByUserId, "owner-1");
+    assert.strictEqual(blocked.currentDecisionReason.fromStatus, "READY_FOR_JAMAL_APPROVAL");
+    assert.strictEqual(blocked.currentDecisionReason.toStatus, "BLOCKED");
+    assert.strictEqual(blocked.currentDecisionReason.orderRevision, blocked.order.revision);
+    assert.strictEqual(blocked.decisionReasonHistory.length, 1);
+
+    // Nach dem Weiterführen gilt der Grund nur noch historisch – die
+    // Aktualität hängt ausschließlich an der Auftragsrevision.
+    const unblocked = service.unblockOrder(reasonDb, { pilotOrderId });
+    assert.strictEqual(unblocked.status, "RETURNED");
+    assert.strictEqual(unblocked.currentDecisionReason, null);
+    assert.strictEqual(unblocked.decisionReasonHistory.length, 1);
+    assert.strictEqual(unblocked.decisionReasonHistory[0].text, reason);
+  });
+
+  await check("8c. V8.7: ein zu kurzer oder sicherheitskritischer Grund wird mit 400 abgewiesen und verändert den Auftrag nicht", () => {
+    const { db: rejectDb } = makeIsolatedDb("pilot-work-order-test-decision-reason-reject-");
+    const created = service.createPilotOrder(rejectDb, validCreateOrderInput({ title: "Auftrag mit abgewiesenem Grund" }));
+    const pilotOrderId = created.order.id;
+    service.markReadyForApproval(rejectDb, { pilotOrderId });
+
+    assert.throws(() => service.blockOrder(rejectDb, { pilotOrderId, reason: "abc" }), /zu kurz/);
+    assert.throws(() => service.blockOrder(rejectDb, { pilotOrderId, reason: "Der token ist abgelaufen." }), /Sicherheitsgründen/);
+    const overview = service.getPilotOrderOverview(rejectDb, pilotOrderId);
+    assert.strictEqual(overview.status, "READY_FOR_JAMAL_APPROVAL", "ein abgewiesener Grund darf den Status nie verändern");
+    assert.strictEqual(overview.currentDecisionReason, null);
+    assert.deepStrictEqual(overview.decisionReasonHistory, []);
   });
 
   await check("die Autonomiegrenzen dieses Pilotlaufs schließen jede externe Aktion aus", () => {

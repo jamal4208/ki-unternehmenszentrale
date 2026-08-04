@@ -4,6 +4,41 @@
 
 `server.js` registriert über `server-http-router.js` **89 GET-Routen** und **52 additive POST-Routen** (Execution Bridge seit Phase C gesichert + V7.1 Phase A Dokumente/Backup gesichert `59f985f` + V7.1 Phase B HeyGen-Connector-Pilot gesichert `ff43089` + V7.1 Phase B.1 Mandantenbasis/Ergebnisrückführung gesichert `37e8a28` + V7.1 Phase C Canva-Connector-Pilot gesichert `52b2d02` + V7.1 Phase C.1 Pilot-Ergebnisakte/Kundenfeedback-Schleife und V7.1 Phase C.1.1 skalierbares Reviewmodell gemeinsam gesichert `6621d93` + V7.2 Phase A Schritt 2 Auth-Routen/Route-Gates + V7.2 Phase A Schritt 3 Owner-Verwaltung/Kundenportal-API + V7.2 Phase A Schritt 4 Betriebsabnahme + V7.2 Phase B Schritt 1 Arbeitsauftrags-API + V7.2 Phase C Schritt 1 Agentenlauf-/Ergebnis-Endpunkte + V7.2 Phase C Schritt 2 Änderungswunsch-/Freigabe-/Versions-Endpunkte innerhalb bestehender Präfixe + V7.3 Jamal-Arbeitsmodus-Zustand/-Aktionen + V7.4 Canva-Produktionskorridor-Zustand/-Aktionen gesichert `f2b0909` + V7.5 Agentenleitstand-/Unternehmensleitlinien-Routen gesichert `6ffa3f8` + V7.6.1 Office-/Finance-Routen gesichert `5b59b17` + V7.6.3 Health-Referenzlauf-Routen (lokal umgesetzt, ungesichert)). Andere HTTP-Methoden bleiben 405. GET-Routen bleiben read-only. Die POST-Routen schreiben ausschließlich lokal (App-Support-Metadaten bzw. die Auth-Datenbank bzw. – nach Jamal-Freigabe – ein Fixture-Testrepository); niemals in Health und niemals mit Commit/Push/Deployment.
 
+## V8.7 Stufe A – Blockierungs- und Rückgabegründe dauerhaft sichern (keine neue Route, kein neuer Parameter, keine neue Aktion)
+
+Routenzahlen bleiben unverändert (**89 GET, 52 POST** laut Übersichtszeile oben; laut `route-inventory.js` kanonisch geführt **91 GET, 53 POST**). Es gibt **keine neue API-Route, keinen neuen Parameter und keine neue Aktion**. `route-access-policy.js` bleibt unverändert. Die bestehenden Aktionen `POST /api/pilot-work-order/orders/:pilotOrderId/block-order` (Feld `reason`) und `POST /api/pilot-work-order/orders/:pilotOrderId/return-order` (Feld `note`) behalten ihre unveränderte Feldliste und ihre unveränderten Servicesignaturen.
+
+**Geschlossene Verluststelle:** der über `reason`/`note` eingegebene Freitext wurde bis einschließlich V8.6 nur auf Vorhandensein geprüft und danach verworfen. Ab V8.7 Stufe A wird er dauerhaft in der neuen, append-only Fachtabelle `pilot_work_order_decision_reasons` (Migration 25) gespeichert – der **alleinigen** Speicherwahrheit dieser Gründe. Keine Snapshot-Spalte auf `pilot_work_orders`, kein neuer Auditereignistyp, kein Backfill, keine Ableitung aus Handoffs, Audittexten oder Statuscodes.
+
+**Verändertes Antwortverhalten der bestehenden Aktionen (rein additiv):** jede Overview-Antwort (`GET /api/pilot-work-order/status`, `GET /api/pilot-work-order/orders/:pilotOrderId` sowie das `overview`-Objekt aller Pilotaktionen) trägt zusätzlich zwei rein lesende Felder:
+
+| Feld | Typ | Bedeutung |
+|---|---|---|
+| `currentDecisionReason` | Objekt \| `null` | der aktuell gültige manuelle Blockierungs-/Rückgabegrund; `null`, wenn keine gespeicherte Gründe-Zeile zur aktuellen Auftragsrevision passt (auch bei jedem Bestandsauftrag ohne Gründe) |
+| `decisionReasonHistory` | Array | alle jemals gespeicherten Gründe dieses Auftrags, **aufsteigend** nach Auftragsrevision; leer, wenn nie ein Grund gesetzt wurde |
+
+Objektstruktur beider Felder (identisch):
+
+| Feld | Typ | Bedeutung |
+|---|---|---|
+| `kind` | `"BLOCK"` \| `"RETURN"` | `BLOCK` bei `blockOrder`, `RETURN` bei `returnOrder` |
+| `text` | string | der validierte, normalisierte Grundtext, ungekürzt (5 bis 500 Zeichen) |
+| `setAt` | ISO-8601-String | Zeitpunkt der Entscheidung |
+| `setByUserId` | string \| `null` | handelnder Nutzer, `null` wenn nicht ermittelbar |
+| `fromStatus` | string | Auftragsstatus **vor** dem Übergang |
+| `toStatus` | `"BLOCKED"` \| `"RETURNED"` | Auftragsstatus **nach** dem Übergang |
+| `orderRevision` | Zahl | Auftragsrevision **nach** dem Übergang |
+
+**Verbindliche Aktualitätsregel:** aktuell gültig ist genau die Gründe-Zeile mit `orderRevisionAfter === order.revision`; erfüllt keine Zeile diese Bedingung, ist `currentDecisionReason` gleich `null`. Es gibt bewusst **keine** `current`-Flag-Spalte, keine Aufräumlogik, kein Nullsetzen und kein Überschreiben früherer Gründe. Ein Grund wird durch jede spätere Statusänderung automatisch historisch.
+
+**Atomarität:** Statuswechsel und Grundeintrag laufen in einer gemeinsamen Transaktion. Ein CAS-/Revisionskonflikt (HTTP 409) hinterlässt nachweislich keine Grundzeile; ein fehlgeschlagener Grundeintrag rollt den Statuswechsel und das zugehörige Status-Audit vollständig zurück.
+
+**Neue 400-Antworten der bestehenden Aktionen:** der Grundtext wird jetzt inhaltlich validiert (Mindestlänge 5, Maximallänge 500, kein stilles Kürzen, CRLF→LF, keine C0-Steuerzeichen außer Zeilenumbruch, keine HTML-artigen Eingaben, keine sensiblen oder maschinenspezifischen Inhalte wie `/Users/`, `C:\`, `token`, `password`, `cookie`, `session-id`). Ein abgewiesener Text verändert den Auftrag nicht und wird in der Fehlermeldung **niemals** gespiegelt. Technische Statuscodes, Umlaute und Klammern bleiben ausdrücklich erlaubter Text.
+
+**Auditgrenze unverändert:** `PILOT_WORK_ORDER_STATUS_CHANGED` wird weiterhin genau einmal mit unveränderten Metadaten geschrieben; der Freitext gelangt in **kein** Auditereignis. Systemseitige Übergänge (`forbiddenActionOccurred → BLOCKED`, PM-Filter-Ablehnung → `RETURNED`) erzeugen unverändert **keinen** Grundeintrag.
+
+Zusicherungen: keine neue Route, keine geänderte Feldliste, keine Änderung der Statusmaschine, keine sichtbare Oberflächenänderung (Detailansicht und Chefmodus bleiben in Stufe A unverändert), keine Änderung an den Migrationen 1 bis 24 und keine Änderung an `auth_audit_events`.
+
 ## V8.1 – Ergebnis verstehen ohne Technik (keine neue Route, kein neuer Parameter, keine neue Aktion)
 
 Routenzahlen bleiben unverändert (**89 GET, 52 POST** laut Übersichtszeile oben; laut `route-inventory.js` kanonisch geführt **91 GET, 53 POST**). Es gibt **keine neue API-Route, keinen neuen Parameter und keine neue Aktion**. Ausschließlich die bereits bestehende Antwortstruktur eines Agentenlaufs (`agentExecutionRuns[]` in der Overview sowie die Einzellauf-/Kettenansichten, `pilot-work-order-service.js#rowToAgentExecutionRunSummary`) trägt zusätzlich ein rein lesendes, additives Feld:
