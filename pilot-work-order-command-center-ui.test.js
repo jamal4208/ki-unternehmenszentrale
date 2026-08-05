@@ -187,7 +187,7 @@ global.document = {
 const CANONICAL_ID = "pilot-three-agent-work-order-v1";
 const STATUS_LABELS = {
   DRAFT: "Entwurf",
-  READY_FOR_JAMAL_APPROVAL: "Wartet auf Jamal-Freigabe",
+  READY_FOR_JAMAL_APPROVAL: "Wartet auf deine Freigabe",
   APPROVED_FOR_EXECUTION: "Für Ausführung freigegeben",
   IN_EXECUTION: "In Ausführung",
   READY_FOR_REVIEW: "Wartet auf Abschlussprüfung",

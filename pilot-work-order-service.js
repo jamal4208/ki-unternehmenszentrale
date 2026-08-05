@@ -304,7 +304,7 @@ const PILOT_TEAM_BY_ROLE = new Map(PILOT_TEAM.map((agent) => [agent.pilotRole, a
 
 const PILOT_STATUS_LABELS_DE = Object.freeze({
   DRAFT: "Entwurf",
-  READY_FOR_JAMAL_APPROVAL: "Wartet auf Jamal-Freigabe",
+  READY_FOR_JAMAL_APPROVAL: "Wartet auf deine Freigabe",
   APPROVED_FOR_EXECUTION: "Für Ausführung freigegeben",
   IN_EXECUTION: "In Ausführung",
   READY_FOR_REVIEW: "Wartet auf Abschlussprüfung",

@@ -2012,7 +2012,7 @@
     var button = "";
     var disabledAttr = state.actionInFlight ? " disabled" : "";
     if (status === "DRAFT") {
-      button = '<button type="button" data-action="mark-ready-for-approval"' + disabledAttr + ">Zur Jamal-Freigabe vorlegen</button>";
+      button = '<button type="button" data-action="mark-ready-for-approval"' + disabledAttr + ">Zur Freigabe vorlegen</button>";
     } else if (status === "READY_FOR_JAMAL_APPROVAL") {
       button = '<button type="button" data-action="approve-for-execution"' + disabledAttr + ">Ausf\u00fchrung freigeben</button>";
     } else if (status === "APPROVED_FOR_EXECUTION") {
