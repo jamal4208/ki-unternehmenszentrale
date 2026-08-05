@@ -131,6 +131,21 @@
  * der Abrufgrenze, oder ein anderer Status), bleibt die bestehende Zeile
  * "Zu entscheiden" unverändert die einzige Aussage dazu – kein Ersatztext,
  * keine erfundene Begründung.
+ *
+ * V8.8.1 ("Reihenfolge und Ruhe im Chefmodus", rein darstellend – weder
+ * Funktionsinhalte noch Auswahl, Sortierung, Statusmodell, Navigation oder
+ * API-Aufrufe ändern sich): zwei ausschließlich strukturelle Änderungen an
+ * render() unten. Erstens die Zusammenstellung der fünf Bereiche: Handlung
+ * zuerst (Heute wichtig, Empfohlene nächste Arbeit, Neuen Auftrag anlegen),
+ * Beobachtung und Vergangenheit danach (Läuft, Fertig) – vorher standen
+ * "Fertig" und "Läuft" vor der Empfehlung und der Auftragsanlage. Zweitens
+ * zeigen renderRunningSection() und renderDoneSection() bei leerer Auswahl
+ * (selectRunning()/selectDone(), unverändert) jetzt einen leeren String
+ * statt einer Section mit Verneinungstext ("Gerade läuft keine Arbeit."/
+ * "Noch nichts abgeschlossen.") – ein leerer Tag zeigt beide Bereiche
+ * dadurch gar nicht mehr. Sobald mindestens ein Eintrag vorhanden ist,
+ * bleibt die Darstellung (Überschrift, Zeilen, Fortschritt/Statuslabel)
+ * byte- bzw. inhaltsgleich zum Stand vor V8.8.1.
  */
 
 (function () {
@@ -717,10 +732,16 @@
     );
   }
 
+  // V8.8.1 ("Reihenfolge und Ruhe im Chefmodus") – ein leerer Tag zeigt
+  // "Fertig" gar nicht mehr (weder Überschrift noch Verneinungstext): eine
+  // leere Beobachtungssektion lenkt von der nächsten Handlung ab, ohne
+  // selbst eine Information zu tragen. Sobald mindestens ein Auftrag
+  // COMPLETED ist, bleibt die Darstellung darunter unverändert (dieselbe
+  // Auswahl selectDone(), derselbe HTML-Aufbau wie vor V8.8.1).
   function renderDoneSection(orders) {
     var items = selectDone(orders);
     if (items.length === 0) {
-      return renderSection("done", "Fertig", renderEmpty("Noch nichts abgeschlossen."));
+      return "";
     }
     return renderSection(
       "done",
@@ -735,10 +756,15 @@
     );
   }
 
+  // V8.8.1 ("Reihenfolge und Ruhe im Chefmodus") – dieselbe Begründung wie
+  // bei renderDoneSection() oben: ein leerer Tag zeigt "Läuft" gar nicht
+  // mehr. Sobald mindestens ein Auftrag IN_EXECUTION ist, bleibt die
+  // Darstellung darunter unverändert (dieselbe Auswahl selectRunning(),
+  // derselbe HTML-Aufbau wie vor V8.8.1).
   function renderRunningSection(orders) {
     var items = selectRunning(orders);
     if (items.length === 0) {
-      return renderSection("running", "L\u00e4uft", renderEmpty("Gerade l\u00e4uft keine Arbeit."));
+      return "";
     }
     return renderSection(
       "running",
@@ -799,10 +825,10 @@
     var orders = state.orders;
     output.innerHTML =
       renderTodaySection(orders) +
-      renderDoneSection(orders) +
-      renderRunningSection(orders) +
       renderRecommendationSection(orders) +
-      renderNewOrderSection();
+      renderNewOrderSection() +
+      renderRunningSection(orders) +
+      renderDoneSection(orders);
   }
 
   // -----------------------------------------------------------------------

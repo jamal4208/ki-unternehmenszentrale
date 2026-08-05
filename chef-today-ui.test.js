@@ -365,6 +365,25 @@ function sectionHtml(key) {
   return match[0];
 }
 
+// V8.8.1 ("Reihenfolge und Ruhe im Chefmodus") – im Unterschied zu
+// sectionHtml() (löst aus, wenn der Bereich fehlt) prüft dies bewusst
+// zerstörungsfrei, OB ein Bereich überhaupt gerendert wurde: "Läuft" und
+// "Fertig" sollen im Leerzustand vollständig entfallen (siehe TESTANFOR-
+// DERUNGEN 4/6).
+function sectionExists(key) {
+  return new RegExp(`data-chef-today-section="${key}"`).test(outputHtml());
+}
+
+// V8.8.1 – die tatsächliche Reihenfolge der gerenderten Bereiche, in der
+// Reihenfolge, in der ihre data-chef-today-section-Marker im HTML
+// erscheinen. Ausschließlich lesend, keine Annahme über die Anzahl der
+// Bereiche (leere Bereiche fehlen bewusst, siehe renderRunningSection()/
+// renderDoneSection()).
+function sectionOrder() {
+  const matches = outputHtml().match(/data-chef-today-section="([a-z-]+)"/g) || [];
+  return matches.map((entry) => entry.match(/data-chef-today-section="([a-z-]+)"/)[1]);
+}
+
 function rowTitles(key) {
   const matches = sectionHtml(key).match(/<span class="chef-today-row-title">([^<]*)<\/span>/g) || [];
   return matches.map((entry) => entry.replace(/<[^>]+>/g, ""));
@@ -790,22 +809,120 @@ async function run() {
     assert.strictEqual(ui.selectRecommendedNextWork(ui.getState().orders).title, "Laufende Arbeit 1");
   });
 
-  await check("ein leerer Tag bleibt ruhig: kein Fehler, keine Aktion au\u00dfer dem neuen Auftrag", async () => {
-    setOrders([]);
-    await reload();
-    assert.ok(sectionHtml("today").includes("Heute wartet nichts auf deine Entscheidung."));
-    assert.ok(sectionHtml("done").includes("Noch nichts abgeschlossen."));
-    assert.ok(sectionHtml("running").includes("Gerade l\u00e4uft keine Arbeit."));
-    assert.ok(sectionHtml("recommendation").includes("Es gibt heute keine Arbeit, die auf dich wartet."));
-    assert.strictEqual(ui.selectRecommendedNextWork(ui.getState().orders), null);
-    const buttons = outputHtml().match(/class="primary-button"/g) || [];
-    assert.strictEqual(buttons.length, 1, "\u00fcbrig bleibt genau die Anlage eines neuen Auftrags");
-    assert.ok(sectionHtml("new-order").includes("Neuen Auftrag anlegen"));
-    assert.deepStrictEqual(postCalls(), []);
-  });
+  await check(
+    "V8.8.1 (1/2/3/4/5/6/7/8/9): ein leerer Tag bleibt ruhig, zeigt weiterhin Heute wichtig/Empfehlung/Neuer Auftrag, aber keine leeren Sektionen \u201eL\u00e4uft\u201c/\u201eFertig\u201c mehr, kein Fehler, keine Aktion au\u00dfer dem neuen Auftrag",
+    async () => {
+      setOrders([]);
+      await reload();
+      // 1/2/3 – die drei handlungsorientierten Bereiche bleiben vollständig.
+      assert.ok(sectionHtml("today").includes("Heute wartet nichts auf deine Entscheidung."));
+      assert.ok(sectionHtml("recommendation").includes("Es gibt heute keine Arbeit, die auf dich wartet."));
+      assert.ok(sectionHtml("new-order").includes("Neuen Auftrag anlegen"));
+      // 4/6 – "Läuft" und "Fertig" werden im Leerzustand gar nicht gerendert.
+      assert.strictEqual(sectionExists("running"), false, 'V8.8.1: die leere Sektion "L\u00e4uft" darf im Leerzustand nicht gerendert werden');
+      assert.strictEqual(sectionExists("done"), false, 'V8.8.1: die leere Sektion "Fertig" darf im Leerzustand nicht gerendert werden');
+      // 5/7 – die bisherigen Verneinungstexte erscheinen nirgends mehr.
+      assert.ok(
+        !outputHtml().includes("Gerade l\u00e4uft keine Arbeit."),
+        "V8.8.1: der bisherige Verneinungstext zu \u201eL\u00e4uft\u201c darf im Leerzustand nicht mehr erscheinen",
+      );
+      assert.ok(
+        !outputHtml().includes("Noch nichts abgeschlossen."),
+        "V8.8.1: der bisherige Verneinungstext zu \u201eFertig\u201c darf im Leerzustand nicht mehr erscheinen",
+      );
+      assert.strictEqual(ui.selectRecommendedNextWork(ui.getState().orders), null);
+      // 8 – genau ein primärer Startknopf bleibt im Leerzustand übrig.
+      const buttons = outputHtml().match(/class="primary-button"/g) || [];
+      assert.strictEqual(buttons.length, 1, "\u00fcbrig bleibt genau die Anlage eines neuen Auftrags");
+      // 9 – kein schreibender Request im Leerzustand.
+      assert.deepStrictEqual(postCalls(), []);
+    },
+  );
 
   await check("\u00fcber den gesamten Ablauf wurde kein einziger schreibender Aufruf gesendet", () => {
     assert.deepStrictEqual(postCalls(), []);
+  });
+
+  // -------------------------------------------------------------------
+  // V8.8.1 ("Reihenfolge und Ruhe im Chefmodus") – neue Reihenfolge bei
+  // vorhandenem Inhalt, unveränderter Inhalt/Navigation von "Läuft" und
+  // "Fertig", sowie die beiden reinen Leerzustands-Kombinationen. Nummerierung
+  // der Prüfpunkte folgt dem Arbeitspaket (TESTANFORDERUNGEN).
+  // -------------------------------------------------------------------
+
+  await check(
+    "V8.8.1 (10): bei vorhandenem Inhalt steht Heute wichtig vor Empfohlener n\u00e4chster Arbeit vor Neuen Auftrag anlegen vor L\u00e4uft vor Fertig",
+    async () => {
+      setOrders([
+        { id: "v881-today", title: "Wichtiger Auftrag", status: "BLOCKED", updatedAt: new Date().toISOString() },
+        { id: "v881-running", title: "Laufender Auftrag", status: "IN_EXECUTION" },
+        { id: "v881-done", title: "Fertiger Auftrag", status: "COMPLETED" },
+      ]);
+      await reload();
+      assert.deepStrictEqual(sectionOrder(), ["today", "recommendation", "new-order", "running", "done"]);
+    },
+  );
+
+  await check(
+    "V8.8.1 (11/12): \u201eL\u00e4uft\u201c erscheint vollst\u00e4ndig, wenn mindestens ein laufender Auftrag vorhanden ist; Inhalt und Navigation bleiben unver\u00e4ndert",
+    () => {
+      assert.deepStrictEqual(rowTitles("running"), ["Laufender Auftrag"]);
+      assert.ok(sectionHtml("running").includes("1 von 3 Rollen abgeschlossen"));
+      pilotControls = ui.getState().orders.map((order) => makePilotControl("select-order", order.id));
+      pilotClicks.length = 0;
+      fetchCalls.length = 0;
+      const opened = ui.openOrder("v881-running");
+      assert.strictEqual(opened, true);
+      assert.deepStrictEqual(pilotClicks, [{ action: "select-order", orderId: "v881-running" }]);
+      assert.deepStrictEqual(fetchCalls, [], "das \u00d6ffnen einer laufenden Zeile l\u00f6st keinen weiteren Abruf aus");
+    },
+  );
+
+  await check(
+    "V8.8.1 (13/14): \u201eFertig\u201c erscheint vollst\u00e4ndig, wenn mindestens ein abgeschlossener Auftrag vorhanden ist; Inhalt und Navigation bleiben unver\u00e4ndert",
+    () => {
+      assert.deepStrictEqual(rowTitles("done"), ["Fertiger Auftrag"]);
+      assert.ok(sectionHtml("done").includes(STATUS_LABELS.COMPLETED));
+      pilotClicks.length = 0;
+      fetchCalls.length = 0;
+      const opened = ui.openOrder("v881-done");
+      assert.strictEqual(opened, true);
+      assert.deepStrictEqual(pilotClicks, [{ action: "select-order", orderId: "v881-done" }]);
+      assert.deepStrictEqual(fetchCalls, [], "das \u00d6ffnen einer fertigen Zeile l\u00f6st keinen weiteren Abruf aus");
+    },
+  );
+
+  await check("V8.8.1 (17): mehrfaches Rendern liefert eine konsistente Reihenfolge", () => {
+    const first = outputHtml();
+    ui.render();
+    ui.render();
+    const second = outputHtml();
+    assert.strictEqual(first, second);
+    assert.deepStrictEqual(sectionOrder(), ["today", "recommendation", "new-order", "running", "done"]);
+  });
+
+  await check('V8.8.1 (15): nur laufender Inhalt zeigt "L\u00e4uft", aber nicht "Fertig"', async () => {
+    setOrders([{ id: "v881-only-running", title: "Nur laufend", status: "IN_EXECUTION" }]);
+    await reload();
+    assert.strictEqual(sectionExists("running"), true);
+    assert.strictEqual(sectionExists("done"), false);
+  });
+
+  await check('V8.8.1 (16): nur abgeschlossener Inhalt zeigt "Fertig", aber nicht "L\u00e4uft"', async () => {
+    setOrders([{ id: "v881-only-done", title: "Nur fertig", status: "COMPLETED" }]);
+    await reload();
+    assert.strictEqual(sectionExists("done"), true);
+    assert.strictEqual(sectionExists("running"), false);
+  });
+
+  await check("V8.8.1 (24): die neue Darstellung mutiert keine Auftragsdaten", () => {
+    const before = ui.getState().orders.map((order) => `${order.id}:${order.status}`);
+    ui.render();
+    ui.render();
+    assert.deepStrictEqual(
+      ui.getState().orders.map((order) => `${order.id}:${order.status}`),
+      before,
+    );
   });
 
   // -------------------------------------------------------------------
