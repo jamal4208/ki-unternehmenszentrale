@@ -162,6 +162,29 @@
  * Pilotauftrags-Karte (pilot-work-order-ui.js#renderPrimaryAction),
  * erreichbar wie zuvor über openOrder(). Keine neue Funktion, keine neue
  * Route, kein neuer Bedienzustand, keine Statusänderung.
+ *
+ * V8.8.5 ("Volltext bei 'Wichtig zu beachten' auf Ebene 1 durch 'Hinweis
+ * vorhanden' ersetzen", rein darstellend, Alternative D des geprüften
+ * Architektur-, UX- und Sicherheitsberichts V8.8.5): riskTextFor() bleibt
+ * unverändert dieselbe reine Ableitungsfunktion wie seit V8.5 – sie stellt
+ * ausschließlich fest, OB ein gültiger, sanitisierter Risiko-/Grenztext aus
+ * overview.risksAndLimits vorliegt, und liefert diesen weiterhin
+ * vollständig zurück (z. B. für zukünftige, hier nicht betroffene
+ * Verwendungen). Einzig renderTodayRow() zeigt bei einem vorhandenen
+ * Rückgabewert von riskTextFor(order) jetzt nicht mehr diesen Volltext,
+ * sondern ausschließlich den festen, verbindlichen Kurztext
+ * CHEF_TODAY_RISK_HINT_TEXT ("Hinweis vorhanden") – fehlt der Rückgabewert
+ * (null), entfällt die Zeile weiterhin vollständig, exakt wie zuvor. Die
+ * Sichtbarkeitsregel selbst (nur READY_FOR_REVIEW/READY_FOR_JAMAL_APPROVAL,
+ * niemals BLOCKED/RETURNED) ändert sich dadurch nicht – sie steht bereits
+ * vollständig in riskTextFor() und wird hier nicht berührt. Die
+ * vollständigen, unveränderten Risiken und Grenzen bleiben ausschließlich
+ * in der bestehenden Pilotauftrags-Detailansicht
+ * (pilot-work-order-ui.js#renderRisks(), vor renderPrimaryAction()
+ * aufgerufen) sichtbar – diese Datei liest overview.risksAndLimits dort
+ * unverändert, unangetastet weiter. Kein neuer Zustand, keine
+ * Aufklapplogik, keine Kritikalitätsklassifizierung, keine automatische
+ * Zusammenfassung, kein Zugriff auf andere Daten, keine Mutation.
  */
 
 (function () {
@@ -426,6 +449,12 @@
     return null;
   }
 
+  // V8.8.5 – der einzige, verbindliche sichtbare Kurztext auf Ebene 1, wenn
+  // riskTextFor(order) einen gültigen Risiko-/Grenztext liefert (siehe
+  // Modulkopf). Ausschließlich hier verwendet (renderTodayRow() unten) –
+  // keine zweite, abweichende Formulierung an anderer Stelle.
+  var CHEF_TODAY_RISK_HINT_TEXT = "Hinweis vorhanden";
+
   // -----------------------------------------------------------------------
   // V8.7 Stufe C ("aktuellen Entscheidungsgrund im Chefmodus sichtbar
   // machen") – der bei blockOrder(reason)/returnOrder(note) eingegebene,
@@ -675,8 +704,10 @@
   // Entscheidungsgrund ("Warum blockiert?"/"Warum zurückgegeben?", siehe
   // decisionReasonTextFor()/decisionReasonLineLabel() – ergänzt die Zeile
   // darüber, ersetzt sie nie), optional "Empfehlung"
-  // (recommendationTextFor()), optional "Wichtig zu beachten"
-  // (riskTextFor()), Wartedauer und die sichtbare Beschriftung "Entscheidung
+  // (recommendationTextFor()), optional "Wichtig zu beachten" (V8.8.5: nur
+  // noch der feste Kurztext CHEF_TODAY_RISK_HINT_TEXT, wenn riskTextFor()
+  // einen gültigen Risiko-/Grenztext liefert – nicht mehr dessen Volltext,
+  // siehe Modulkopf), Wartedauer und die sichtbare Beschriftung "Entscheidung
   // öffnen". V8.8.4: die zuvor hier zusätzlich gerenderte, aus der Kategorie
   // bereits ableitbare Zeile "Verfügbare Aktion" entfällt (siehe Modulkopf).
   // Die ganze Zeile bleibt EIN bestehender Button
@@ -701,7 +732,11 @@
         decisionReasonTextFor(order),
       ) +
       renderTodayRowLine("chef-today-row-recommendation", "Empfehlung", recommendationTextFor(order)) +
-      renderTodayRowLine("chef-today-row-risk", "Wichtig zu beachten", riskTextFor(order)) +
+      renderTodayRowLine(
+        "chef-today-row-risk",
+        "Wichtig zu beachten",
+        riskTextFor(order) ? CHEF_TODAY_RISK_HINT_TEXT : null,
+      ) +
       (wait ? '<span class="chef-today-row-wait">' + escapeHtml(wait) + "</span>" : "") +
       '<span class="chef-today-row-open">Entscheidung \u00f6ffnen</span>' +
       "</button>"
@@ -1002,6 +1037,7 @@
       waitLabelFor: waitLabelFor,
       recommendationTextFor: recommendationTextFor,
       riskTextFor: riskTextFor,
+      CHEF_TODAY_RISK_HINT_TEXT: CHEF_TODAY_RISK_HINT_TEXT,
       decisionReasonLineLabel: decisionReasonLineLabel,
       decisionReasonTextFor: decisionReasonTextFor,
       CHEF_TODAY_ROW_TEXT_DISPLAY_LIMIT: CHEF_TODAY_ROW_TEXT_DISPLAY_LIMIT,

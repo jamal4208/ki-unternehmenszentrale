@@ -1366,7 +1366,7 @@ async function run() {
     clearHandoffAndRiskOverrides();
   });
 
-  await check("V8.5 (7): READY_FOR_REVIEW zeigt maximal einen Risiko-/Grenztext", async () => {
+  await check("V8.5 (7): READY_FOR_REVIEW zeigt maximal einen Risiko-/Grenztext (V8.8.5: als fester Kurztext, kein Volltext auf Ebene 1)", async () => {
     setOrders([
       { id: "v85-risk-max-one", title: "Ergebnis mit mehreren Hinweisen", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
     ]);
@@ -1375,18 +1375,22 @@ async function run() {
     const section = sectionHtml("today");
     const riskLines = section.match(/Wichtig zu beachten:/g) || [];
     assert.strictEqual(riskLines.length, 1, "es darf h\u00f6chstens ein Risiko-/Grenztext erscheinen");
-    assert.ok(section.includes("Dritter Hinweis."), "der letzte Eintrag muss verwendet werden");
+    assert.ok(section.includes(ui.CHEF_TODAY_RISK_HINT_TEXT), "der feste Kurztext muss erscheinen");
+    assert.ok(!section.includes("Dritter Hinweis."), "der Volltext des letzten Eintrags darf auf Ebene 1 nicht mehr erscheinen");
+    assert.strictEqual(ui.riskTextFor(ui.getState().orders[0]), "Dritter Hinweis.", "die reine Ableitungsfunktion liefert weiterhin den letzten Eintrag vollst\u00e4ndig");
     clearHandoffAndRiskOverrides();
   });
 
-  await check("V8.5 (8): READY_FOR_JAMAL_APPROVAL zeigt belastbaren Risiko-/Grenztext, sofern vorhanden", async () => {
+  await check("V8.5 (8): READY_FOR_JAMAL_APPROVAL zeigt belastbaren Risiko-/Grenztext, sofern vorhanden (V8.8.5: als fester Kurztext)", async () => {
     setOrders([
       { id: "v85-risk-approval", title: "Freigabe mit Risikohinweis", status: "READY_FOR_JAMAL_APPROVAL", updatedAt: new Date().toISOString() },
     ]);
     setRisksAndLimits("v85-risk-approval", ["Die Datenbasis ist noch unvollst\u00e4ndig."]);
     await reload();
     const section = sectionHtml("today");
-    assert.ok(section.includes("Die Datenbasis ist noch unvollst\u00e4ndig."));
+    assert.ok(section.includes(ui.CHEF_TODAY_RISK_HINT_TEXT));
+    assert.ok(!section.includes("Die Datenbasis ist noch unvollst\u00e4ndig."), "der Volltext darf auf Ebene 1 nicht mehr erscheinen");
+    assert.strictEqual(ui.riskTextFor(ui.getState().orders[0]), "Die Datenbasis ist noch unvollst\u00e4ndig.");
     clearHandoffAndRiskOverrides();
   });
 
@@ -1414,14 +1418,16 @@ async function run() {
     clearHandoffAndRiskOverrides();
   });
 
-  await check("V8.5 (11): der letzte nicht leere risksAndLimits-Eintrag wird verwendet", async () => {
+  await check("V8.5 (11): der letzte nicht leere risksAndLimits-Eintrag wird verwendet (V8.8.5: die reine Ableitungsfunktion liefert ihn vollständig, Ebene 1 zeigt nur den Kurztext)", async () => {
     setOrders([
       { id: "v85-risk-last", title: "Ergebnis mit leerem letzten Eintrag", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
     ]);
     setRisksAndLimits("v85-risk-last", ["Erster Hinweis.", "Letzter belastbarer Hinweis.", "   "]);
     await reload();
+    assert.strictEqual(ui.riskTextFor(ui.getState().orders[0]), "Letzter belastbarer Hinweis.");
     const section = sectionHtml("today");
-    assert.ok(section.includes("Letzter belastbarer Hinweis."));
+    assert.ok(section.includes(ui.CHEF_TODAY_RISK_HINT_TEXT));
+    assert.doesNotMatch(section, /Letzter belastbarer Hinweis\./);
     assert.doesNotMatch(section, /Erster Hinweis\./);
     clearHandoffAndRiskOverrides();
   });
@@ -1506,18 +1512,23 @@ async function run() {
     clearHandoffAndRiskOverrides();
   });
 
-  await check("V8.5 (23): normale Klammertexte in Empfehlung und Risiko bleiben erhalten", async () => {
-    setOrders([
-      { id: "v85-brackets", title: "Ergebnis mit fachlichem Klammertext", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
-    ]);
-    setHandoffs("v85-brackets", [makeDocumentationHandoff({ resultOrRecommendation: "Freigabe empfohlen (Vier-Augen-Prinzip beachtet)." })]);
-    setRisksAndLimits("v85-brackets", ["Datenbasis unvollst\u00e4ndig (siehe Anhang)."]);
-    await reload();
-    const section = sectionHtml("today");
-    assert.ok(section.includes("Freigabe empfohlen (Vier-Augen-Prinzip beachtet)."));
-    assert.ok(section.includes("Datenbasis unvollst\u00e4ndig (siehe Anhang)."));
-    clearHandoffAndRiskOverrides();
-  });
+  await check(
+    "V8.5 (23): normale Klammertexte in Empfehlung bleiben auf Ebene 1 erhalten; im Risikotext bleiben sie in der reinen Ableitungsfunktion erhalten (V8.8.5: Ebene 1 zeigt nur den Kurztext)",
+    async () => {
+      setOrders([
+        { id: "v85-brackets", title: "Ergebnis mit fachlichem Klammertext", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+      ]);
+      setHandoffs("v85-brackets", [makeDocumentationHandoff({ resultOrRecommendation: "Freigabe empfohlen (Vier-Augen-Prinzip beachtet)." })]);
+      setRisksAndLimits("v85-brackets", ["Datenbasis unvollst\u00e4ndig (siehe Anhang)."]);
+      await reload();
+      const section = sectionHtml("today");
+      assert.ok(section.includes("Freigabe empfohlen (Vier-Augen-Prinzip beachtet)."));
+      assert.strictEqual(ui.riskTextFor(ui.getState().orders[0]), "Datenbasis unvollst\u00e4ndig (siehe Anhang).");
+      assert.ok(!section.includes("Datenbasis unvollst\u00e4ndig (siehe Anhang)."), "der Risiko-Volltext darf auf Ebene 1 nicht mehr erscheinen");
+      assert.ok(section.includes(ui.CHEF_TODAY_RISK_HINT_TEXT));
+      clearHandoffAndRiskOverrides();
+    },
+  );
 
   await check(
     "V8.5 (24): ein fehlgeschlagener Overview-Abruf zerst\u00f6rt die Karte nicht (Empfehlung/Risiko entfallen ersatzlos)",
@@ -1790,9 +1801,10 @@ async function run() {
       assert.ok(!section.includes("Ein Grund, der bei diesem Status nie erscheinen darf."));
       assert.strictEqual(ui.decisionReasonTextFor(order), null, "der Status-Schutz gilt auch isoliert (nur BLOCKED/RETURNED)");
       assert.strictEqual(ui.recommendationTextFor(order), "Die Dokumentation empfiehlt die Freigabe.", "Empfehlung bleibt unabhängig sichtbar");
-      assert.strictEqual(ui.riskTextFor(order), "Ein Restrisiko bleibt bestehen.", "Risiko/Grenze bleibt unabhängig sichtbar");
+      assert.strictEqual(ui.riskTextFor(order), "Ein Restrisiko bleibt bestehen.", "Risiko/Grenze bleibt unabhängig als reine Ableitungsfunktion sichtbar");
       assert.ok(section.includes("Die Dokumentation empfiehlt die Freigabe."));
-      assert.ok(section.includes("Ein Restrisiko bleibt bestehen."));
+      assert.ok(!section.includes("Ein Restrisiko bleibt bestehen."), "V8.8.5: der Risiko-Volltext darf auf Ebene 1 nicht mehr erscheinen");
+      assert.ok(section.includes(ui.CHEF_TODAY_RISK_HINT_TEXT));
       clearHandoffAndRiskOverrides();
       clearDecisionReasonOverrides();
     },
@@ -2238,10 +2250,11 @@ async function run() {
     assert.ok(section.includes("Die Dokumentation empfiehlt die Freigabe."));
   });
 
-  await check("V8.8.4 (8): „Wichtig zu beachten“ bleibt vollständig erhalten", () => {
+  await check("V8.8.4 (8): „Wichtig zu beachten“ bleibt als Zeile vollständig erhalten (V8.8.5: seither als fester Kurztext statt Volltext)", () => {
     const section = sectionHtml("today");
     assert.ok(section.includes("Wichtig zu beachten:"));
-    assert.ok(section.includes("Die Datenbasis ist noch unvollst\u00e4ndig."));
+    assert.ok(section.includes(ui.CHEF_TODAY_RISK_HINT_TEXT));
+    assert.ok(!section.includes("Die Datenbasis ist noch unvollst\u00e4ndig."), "V8.8.5: der Volltext darf auf Ebene 1 nicht mehr erscheinen");
   });
 
   await check("V8.8.4 (9): Wartedauer bleibt für jeden Eintrag vollständig erhalten", () => {
@@ -2339,6 +2352,203 @@ async function run() {
   );
 
   await check("V8.8.4: weiterhin kein schreibender Request über den gesamten V8.8.4-Testlauf hinweg", () => {
+    assert.deepStrictEqual(postCalls(), []);
+  });
+
+  // -------------------------------------------------------------------
+  // V8.8.5 ("Volltext bei 'Wichtig zu beachten' auf Ebene 1 durch
+  // 'Hinweis vorhanden' ersetzen", rein darstellend, Alternative D) –
+  // Nummerierung folgt den TESTANFORDERUNGEN aus dem freigegebenen
+  // Architektur-, UX- und Sicherheitsbericht V8.8.5. (1)/(2) – BLOCKED/
+  // RETURNED zeigen weiterhin keine Zeile – bereits vollständig durch
+  // V8.5 (9)/(10) oben nachgewiesen (unverändert, riskTextFor() liefert
+  // für diese beiden Status weiterhin immer null). (10)–(16) – Kategorie,
+  // Titel, „Zu entscheiden“, „Warum blockiert?“/„Warum zurückgegeben?“,
+  // Empfehlung, Wartedauer und „Entscheidung öffnen“ – bereits vollständig
+  // durch V8.8.4 (3)–(10) oben nachgewiesen (unverändert, keine dieser
+  // Zeilen wird durch V8.8.5 berührt) und zusätzlich unten erneut
+  // stichprobenhaft geprüft.
+  // -------------------------------------------------------------------
+
+  await check(
+    "V8.8.5 (3): READY_FOR_REVIEW mit gültigem Risiko-/Grenztext zeigt exakt „Wichtig zu beachten: Hinweis vorhanden“",
+    async () => {
+      setOrders([
+        { id: "v885-review-hint", title: "Ergebnis mit Risikohinweis", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+      ]);
+      setRisksAndLimits("v885-review-hint", ["Die Datenbasis ist noch unvollst\u00e4ndig."]);
+      await reload();
+      const section = sectionHtml("today");
+      assert.ok(
+        section.includes(
+          '<span class="chef-today-row-line-label">Wichtig zu beachten:</span> <span class="chef-today-row-line-text">Hinweis vorhanden</span>',
+        ),
+        "exakt „Wichtig zu beachten: Hinweis vorhanden“ muss sichtbar sein",
+      );
+      assert.strictEqual(ui.CHEF_TODAY_RISK_HINT_TEXT, "Hinweis vorhanden");
+      clearHandoffAndRiskOverrides();
+    },
+  );
+
+  await check(
+    "V8.8.5 (4): READY_FOR_JAMAL_APPROVAL mit gültigem Risiko-/Grenztext zeigt exakt „Wichtig zu beachten: Hinweis vorhanden“",
+    async () => {
+      setOrders([
+        { id: "v885-approval-hint", title: "Freigabe mit Risikohinweis", status: "READY_FOR_JAMAL_APPROVAL", updatedAt: new Date().toISOString() },
+      ]);
+      setRisksAndLimits("v885-approval-hint", ["Ein Restrisiko bleibt bestehen."]);
+      await reload();
+      const section = sectionHtml("today");
+      assert.ok(
+        section.includes(
+          '<span class="chef-today-row-line-label">Wichtig zu beachten:</span> <span class="chef-today-row-line-text">Hinweis vorhanden</span>',
+        ),
+      );
+      clearHandoffAndRiskOverrides();
+    },
+  );
+
+  await check(
+    "V8.8.5 (5): READY_FOR_JAMAL_APPROVAL ohne Risiko-/Grenztext zeigt weiterhin keine Zeile „Wichtig zu beachten“",
+    async () => {
+      setOrders([
+        { id: "v885-approval-no-hint", title: "Freigabe ohne Risikohinweis", status: "READY_FOR_JAMAL_APPROVAL", updatedAt: new Date().toISOString() },
+      ]);
+      await reload();
+      const section = sectionHtml("today");
+      assert.doesNotMatch(section, /Wichtig zu beachten:/);
+    },
+  );
+
+  await check(
+    "V8.8.5 (6): der ursprüngliche Volltext erscheint auf Ebene 1 nicht mehr, obwohl riskTextFor() ihn als reine Ableitungsfunktion weiterhin vollständig liefert",
+    async () => {
+      setOrders([
+        { id: "v885-no-fulltext", title: "Ergebnis mit langem Risikotext", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+      ]);
+      setRisksAndLimits("v885-no-fulltext", ["Ein sehr spezifischer, nur f\u00fcr diesen Test einmaliger Risikotext."]);
+      await reload();
+      const order = ui.getState().orders[0];
+      assert.strictEqual(
+        ui.riskTextFor(order),
+        "Ein sehr spezifischer, nur f\u00fcr diesen Test einmaliger Risikotext.",
+        "riskTextFor() bleibt unverändert die reine Ableitungsfunktion mit dem vollen Text",
+      );
+      const section = sectionHtml("today");
+      assert.ok(
+        !section.includes("Ein sehr spezifischer, nur f\u00fcr diesen Test einmaliger Risikotext."),
+        "der Volltext darf auf Ebene 1 nicht mehr erscheinen",
+      );
+      assert.ok(section.includes(ui.CHEF_TODAY_RISK_HINT_TEXT));
+      clearHandoffAndRiskOverrides();
+    },
+  );
+
+  await check(
+    "V8.8.5 (7/8): mehrere Risiken führen weiterhin zu höchstens einer Zeile, kein Volltext aus irgendeinem Eintrag erscheint auf Ebene 1",
+    async () => {
+      setOrders([
+        { id: "v885-multi-risk", title: "Ergebnis mit mehreren Hinweisen", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+      ]);
+      setRisksAndLimits("v885-multi-risk", ["Erster Einzelhinweis.", "Zweiter Einzelhinweis.", "Dritter Einzelhinweis."]);
+      await reload();
+      const section = sectionHtml("today");
+      const riskLines = section.match(/Wichtig zu beachten:/g) || [];
+      assert.strictEqual(riskLines.length, 1, "es darf höchstens eine Zeile „Wichtig zu beachten“ erscheinen");
+      assert.ok(!section.includes("Erster Einzelhinweis."));
+      assert.ok(!section.includes("Zweiter Einzelhinweis."));
+      assert.ok(!section.includes("Dritter Einzelhinweis."));
+      assert.ok(section.includes(ui.CHEF_TODAY_RISK_HINT_TEXT));
+      clearHandoffAndRiskOverrides();
+    },
+  );
+
+  await check(
+    "V8.8.5 (9): unerwartete, leere oder ungültige risksAndLimits-Werte bleiben defensiv behandelt (riskTextFor() liefert weiterhin ausschließlich den einzig gültigen Eintrag)",
+    () => {
+      ui.getState().todayOverviewByOrderId["v885-invalid"] = {
+        openDecision: null,
+        nextStep: null,
+        handoffs: [],
+        risksAndLimits: [null, 42, {}, "   ", "Echter Hinweis."],
+      };
+      assert.strictEqual(ui.riskTextFor({ id: "v885-invalid", status: "READY_FOR_REVIEW" }), "Echter Hinweis.");
+      delete ui.getState().todayOverviewByOrderId["v885-invalid"];
+    },
+  );
+
+  await check(
+    "V8.8.5: Kategorie, Titel, „Zu entscheiden“, Empfehlung, Wartedauer und „Entscheidung öffnen“ bleiben durch die Kurztext-Umstellung unverändert vollständig erhalten (Fall F: gemischte Liste)",
+    async () => {
+      setOrders([
+        { id: "v885-mixed-blocked", title: "Blockierter Auftrag", status: "BLOCKED", updatedAt: isoAtLocalDaysAgo(2) },
+        { id: "v885-mixed-review", title: "Pr\u00fcfung wartet", status: "READY_FOR_REVIEW", updatedAt: isoAtLocalDaysAgo(0) },
+        { id: "v885-mixed-approval", title: "Freigabe wartet", status: "READY_FOR_JAMAL_APPROVAL", updatedAt: isoAtLocalDaysAgo(1) },
+      ]);
+      setHandoffs("v885-mixed-review", [makeDocumentationHandoff({ resultOrRecommendation: "Die Dokumentation empfiehlt die Freigabe." })]);
+      setRisksAndLimits("v885-mixed-approval", ["Ein Restrisiko bleibt bestehen."]);
+      await reload();
+      const section = sectionHtml("today");
+      assert.ok(section.includes("Auftrag blockiert"));
+      assert.ok(section.includes("Ergebnis wartet auf Pr\u00fcfung"));
+      assert.ok(section.includes("Freigabe erforderlich"));
+      assert.deepStrictEqual(rowTitles("today"), ["Pr\u00fcfung wartet", "Blockierter Auftrag", "Freigabe wartet"]);
+      assert.ok(section.includes("Zu entscheiden:"));
+      assert.ok(section.includes("Empfehlung:"));
+      assert.ok(section.includes("Die Dokumentation empfiehlt die Freigabe."));
+      const waitLabels = (section.match(/<span class="chef-today-row-wait">([^<]*)<\/span>/g) || []).map((entry) =>
+        entry.replace(/<[^>]+>/g, ""),
+      );
+      assert.deepStrictEqual(waitLabels.slice().sort(), ["Gestern", "Heute", "Seit 2 Tagen"].sort());
+      const openLabels = section.match(/<span class="chef-today-row-open">Entscheidung \u00f6ffnen<\/span>/g) || [];
+      assert.strictEqual(openLabels.length, 3);
+      assert.ok(section.includes(ui.CHEF_TODAY_RISK_HINT_TEXT));
+      const riskLines = section.match(/Wichtig zu beachten:/g) || [];
+      assert.strictEqual(riskLines.length, 1, "keine doppelten Hinweise in der gemischten Liste");
+      clearHandoffAndRiskOverrides();
+    },
+  );
+
+  await check(
+    "V8.8.5 (17/18): die Pilotauftrags-Detailansicht zeigt weiterhin alle Risiken/Grenzen vollständig über renderRisks(), vor dem echten Aktionsknopf",
+    () => {
+      assert.match(pilotUiJs, /function renderRisks/, "renderRisks() bleibt vollständig in der Pilotauftrags-Karte erhalten");
+      const risksCallIndex = pilotUiJs.indexOf("renderRisks(overview)");
+      const primaryActionCallIndex = pilotUiJs.indexOf("renderPrimaryAction(overview)");
+      assert.ok(risksCallIndex > -1 && primaryActionCallIndex > -1, "beide Aufrufe müssen im Rendering der Detailansicht vorkommen");
+      assert.ok(risksCallIndex < primaryActionCallIndex, "renderRisks() muss im Rendering vor renderPrimaryAction() aufgerufen werden");
+      assert.doesNotMatch(pilotUiJs, /V8\.8\.5/, "die Pilotauftrags-Detailansicht wird durch V8.8.5 nicht verändert");
+      assert.doesNotMatch(pilotServiceJs, /V8\.8\.5/, "der Service wird durch V8.8.5 nicht verändert");
+    },
+  );
+
+  await check("V8.8.5 (19/20): keine POST-/PATCH-/DELETE-Aufrufe, keine Mutation der Overview-Daten durch das Rendern", () => {
+    assert.deepStrictEqual(postCalls(), []);
+    assert.doesNotMatch(js, /"POST"|'POST'|"PATCH"|'PATCH'|"DELETE"|'DELETE'/);
+    const before = JSON.stringify(ui.getState().todayOverviewByOrderId);
+    ui.render();
+    const after = JSON.stringify(ui.getState().todayOverviewByOrderId);
+    assert.strictEqual(before, after, "das erneute Rendern darf die übernommenen Overview-Daten nicht verändern");
+  });
+
+  await check(
+    "V8.8.5 (21/22/23/24/25): Navigation, Routen und Bedienzustand bleiben durch die Kurztext-Umstellung unverändert; keine Datenbank-/Statuslogik im Skript",
+    () => {
+      const routeMatches = js.match(/\/api\/[a-zA-Z0-9\-\/]+/g) || [];
+      assert.ok(routeMatches.length > 0, "die bestehende Leseroute muss weiterhin verwendet werden");
+      routeMatches.forEach((route) => {
+        assert.ok(route.startsWith("/api/pilot-work-order/orders"), `keine neue Route erwartet, gefunden: ${route}`);
+      });
+      const actions = Array.from(new Set(js.match(/data-chef-today-action="([a-z-]+)"/g) || []));
+      assert.deepStrictEqual(
+        actions.slice().sort(),
+        ['data-chef-today-action="open-order"', 'data-chef-today-action="open-recommended"', 'data-chef-today-action="open-new-order"'].sort(),
+      );
+      assert.doesNotMatch(js, /INSERT INTO|UPDATE .* SET|DELETE FROM/i, "keine Datenbankzugriffe in chef-today-ui.js");
+    },
+  );
+
+  await check("V8.8.5: weiterhin kein schreibender Request über den gesamten V8.8.5-Testlauf hinweg", () => {
     assert.deepStrictEqual(postCalls(), []);
   });
 
