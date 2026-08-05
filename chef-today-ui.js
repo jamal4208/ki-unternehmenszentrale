@@ -108,6 +108,29 @@
  * CURRENT_STATUS.md): READY_FOR_REVIEW und READY_FOR_JAMAL_APPROVAL besitzen
  * im UI weiterhin nur je eine Primäraktion, keine Rückgabe-Schaltfläche
  * (serverseitige Rückgaberouten existieren, sind aber nicht verdrahtet).
+ *
+ * V8.7 Stufe C ("aktuellen Entscheidungsgrund im Chefmodus sichtbar
+ * machen", additiv zu V8.4/V8.5): schließt genau die oben (V8.4) und in
+ * V8.7 Stufe A benannte Lücke – der bei blockOrder(reason)/returnOrder(note)
+ * eingegebene Freitext wird seit V8.7 Stufe A dauerhaft gespeichert und
+ * steht im Overview additiv als `currentDecisionReason` bereit
+ * (`{ kind, text, ... }` oder `null`, siehe pilot-work-order-service.js#
+ * buildOverview). loadTodayOverviews() übernimmt dieses eine Feld jetzt
+ * zusätzlich unverändert (niemals `decisionReasonHistory` – die Historie
+ * wird bewusst nicht in den Chefmodus-State übernommen und nie gerendert).
+ * decisionReasonTextFor() liefert daraus – ausschließlich für BLOCKED und
+ * RETURNED, ausschließlich bei vorhandenem, nicht leerem Text – den
+ * konkreten Grundtext, decisionReasonLineLabel() die dazu passende
+ * Beschriftung ("Warum blockiert?"/"Warum zurückgegeben?", unbekannte
+ * Grundart defensiv "Grund"). renderTodayRow() zeigt diesen Text als
+ * zusätzliche, optionale Zeile direkt unter "Zu entscheiden" – über
+ * dieselbe bestehende renderTodayRowLine()-Konvention (escapeHtml,
+ * truncateForRowDisplay/CHEF_TODAY_ROW_TEXT_DISPLAY_LIMIT), also mit
+ * derselben Sicherheits- und Kürzungsgarantie wie die übrigen Zeilen.
+ * Fehlt `currentDecisionReason` (kein Grund gespeichert, Auftrag außerhalb
+ * der Abrufgrenze, oder ein anderer Status), bleibt die bestehende Zeile
+ * "Zu entscheiden" unverändert die einzige Aussage dazu – kein Ersatztext,
+ * keine erfundene Begründung.
  */
 
 (function () {
@@ -365,6 +388,47 @@
     return null;
   }
 
+  // -----------------------------------------------------------------------
+  // V8.7 Stufe C ("aktuellen Entscheidungsgrund im Chefmodus sichtbar
+  // machen") – der bei blockOrder(reason)/returnOrder(note) eingegebene,
+  // seit V8.7 Stufe A dauerhaft gespeicherte Freitext. Ausschließlich aus
+  // dem bereits übernommenen state.todayOverviewByOrderId[...].
+  // currentDecisionReason (siehe loadTodayOverviews() oben) – niemals aus
+  // decisionReasonHistory, niemals aus Handoffs, Risiken, openDecision oder
+  // Statuscodes abgeleitet.
+  // -----------------------------------------------------------------------
+
+  // Dasselbe bereits übernommene Feld, einmal zentral gelesen – sowohl für
+  // den Grundtext (decisionReasonTextFor) als auch für die dazu passende
+  // Beschriftung (decisionReasonLineLabel) in renderTodayRow().
+  function currentDecisionReasonFor(order) {
+    var overview = order ? state.todayOverviewByOrderId[order.id] : null;
+    return overview ? overview.currentDecisionReason || null : null;
+  }
+
+  // Verbindliche Beschriftung je Grundart (Auftrag: BLOCK → "Warum
+  // blockiert?", RETURN → "Warum zurückgegeben?"). Eine unbekannte
+  // Grundart bleibt defensiv "Grund" statt eines rohen, technischen Werts.
+  function decisionReasonLineLabel(kind) {
+    if (kind === "BLOCK") return "Warum blockiert?";
+    if (kind === "RETURN") return "Warum zur\u00fcckgegeben?";
+    return "Grund";
+  }
+
+  // Der konkrete Grundtext (Auftrag Abschnitt "B. Reine Ableitungsfunktionen"):
+  // nur für BLOCKED oder RETURNED, nur bei vorhandenem currentDecisionReason
+  // mit einem nicht leeren Text. Sonst überall `null` – kein Ersatztext, kein
+  // Rückgriff auf decisionReasonHistory, keine Ableitung aus einer anderen
+  // Quelle.
+  function decisionReasonTextFor(order) {
+    if (!order) return null;
+    if (order.status !== "BLOCKED" && order.status !== "RETURNED") return null;
+    var reason = currentDecisionReasonFor(order);
+    if (!reason || typeof reason.text !== "string") return null;
+    if (reason.text.trim().length === 0) return null;
+    return reason.text;
+  }
+
   // Verfügbare Aktion (Auftrag Abschnitt "D. Verfügbare Aktion"): eine reine,
   // statische Status-zu-Klartext-Ableitung. Die Werte spiegeln wortgleich
   // die vier tatsächlichen Primäraktionen aus
@@ -485,6 +549,13 @@
                 // Bedeutung dieser Felder.
                 handoffs: Array.isArray(overview.handoffs) ? overview.handoffs : [],
                 risksAndLimits: Array.isArray(overview.risksAndLimits) ? overview.risksAndLimits : [],
+                // V8.7 Stufe C – ausschließlich das bereits bestehende,
+                // aktuelle Feld (siehe decisionReasonTextFor() unten).
+                // Bewusst KEINE Übernahme des historischen Overview-Feldes
+                // (Feldname siehe Modulkopf, hier absichtlich nicht als
+                // Objektzugriff notiert): die Historie gehört nicht in den
+                // Chefmodus-State und wird hier nie gerendert.
+                currentDecisionReason: overview.currentDecisionReason || null,
               };
             }
           })
@@ -556,23 +627,35 @@
   // innerhalb einer Auftragszeile (siehe renderTodayRow()). Fehlt der Text
   // (null/leer), wird nichts gerendert – keine leere Überschrift, kein
   // erfundener Platzhaltertext wie "Keine Empfehlung vorhanden".
+  //
+  // V8.7 Stufe C (Browserabnahme-Korrektur): ein Label bekommt nur dann
+  // zusätzlich einen Doppelpunkt angehängt, wenn es nicht bereits mit einem
+  // Fragezeichen endet ("Zu entscheiden" → "Zu entscheiden:", aber "Warum
+  // blockiert?" bleibt "Warum blockiert?" statt "Warum blockiert?:"). Die
+  // bestehenden, bereits freigegebenen Labels ohne Fragezeichen sind davon
+  // nicht betroffen – ausschließlich decisionReasonLineLabel() liefert
+  // aktuell ein mit "?" endendes Label.
   function renderTodayRowLine(className, label, text) {
     if (!text) return "";
+    var labelText = /\?$/.test(label) ? label : label + ":";
     return (
       '<span class="chef-today-row-line ' +
       className +
       '"><span class="chef-today-row-line-label">' +
-      escapeHtml(label + ":") +
+      escapeHtml(labelText) +
       '</span> <span class="chef-today-row-line-text">' +
       escapeHtml(truncateForRowDisplay(text)) +
       "</span></span>"
     );
   }
 
-  // V8.4/V8.5 – eine Zeile in "Heute wichtig". Sichtbare Reihenfolge (Auftrag
-  // Abschnitt "E. Rendering"): Kategorie, Auftragstitel, "Zu entscheiden"
-  // (bestehender whyTextFor()-Text, jetzt beschriftet), optional
-  // "Empfehlung" (recommendationTextFor()), optional "Wichtig zu beachten"
+  // V8.4/V8.5/V8.7 Stufe C – eine Zeile in "Heute wichtig". Sichtbare
+  // Reihenfolge: Kategorie, Auftragstitel, "Zu entscheiden" (bestehender
+  // whyTextFor()-Text, jetzt beschriftet), optional der konkrete
+  // Entscheidungsgrund ("Warum blockiert?"/"Warum zurückgegeben?", siehe
+  // decisionReasonTextFor()/decisionReasonLineLabel() – ergänzt die Zeile
+  // darüber, ersetzt sie nie), optional "Empfehlung"
+  // (recommendationTextFor()), optional "Wichtig zu beachten"
   // (riskTextFor()), Wartedauer, "Verfügbare Aktion"
   // (primaryActionLabelFor()) und die sichtbare Beschriftung "Entscheidung
   // öffnen". Die ganze Zeile bleibt EIN bestehender Button
@@ -581,6 +664,7 @@
   // eigenständiges Bedienelement, keine Aktion, kein neuer Navigationspfad.
   function renderTodayRow(order) {
     var wait = waitLabelFor(order);
+    var reason = currentDecisionReasonFor(order);
     return (
       '<button type="button" class="chef-today-row" data-chef-today-action="open-order" data-order-id="' +
       escapeHtml(order.id) +
@@ -590,6 +674,11 @@
       escapeHtml(order.title) +
       "</span>" +
       renderTodayRowLine("chef-today-row-decision", "Zu entscheiden", whyTextFor(order)) +
+      renderTodayRowLine(
+        "chef-today-row-reason",
+        reason ? decisionReasonLineLabel(reason.kind) : null,
+        decisionReasonTextFor(order),
+      ) +
       renderTodayRowLine("chef-today-row-recommendation", "Empfehlung", recommendationTextFor(order)) +
       renderTodayRowLine("chef-today-row-risk", "Wichtig zu beachten", riskTextFor(order)) +
       (wait ? '<span class="chef-today-row-wait">' + escapeHtml(wait) + "</span>" : "") +
@@ -862,6 +951,7 @@
       DONE_STATUS: DONE_STATUS,
       RUNNING_LIMIT: RUNNING_LIMIT,
       TODAY_OVERVIEW_FETCH_LIMIT: TODAY_OVERVIEW_FETCH_LIMIT,
+      escapeHtml: escapeHtml,
       getState: function () {
         return state;
       },
@@ -881,6 +971,8 @@
       waitLabelFor: waitLabelFor,
       recommendationTextFor: recommendationTextFor,
       riskTextFor: riskTextFor,
+      decisionReasonLineLabel: decisionReasonLineLabel,
+      decisionReasonTextFor: decisionReasonTextFor,
       primaryActionLabelFor: primaryActionLabelFor,
       PRIMARY_ACTION_LABEL_BY_STATUS: PRIMARY_ACTION_LABEL_BY_STATUS,
       CHEF_TODAY_ROW_TEXT_DISPLAY_LIMIT: CHEF_TODAY_ROW_TEXT_DISPLAY_LIMIT,

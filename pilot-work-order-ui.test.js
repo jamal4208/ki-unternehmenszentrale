@@ -239,17 +239,24 @@ check("57. die neuen deutschen Literale folgen der bestehenden \\uXXXX-Konventio
   assert.match(js, /G\\u00fcltig seit: /);
 });
 
-check("58. keine Änderung am Chefmodus (chef-today-ui.js/.test.js werden von V8.7 Stufe B nicht berührt, kein aktiver Feldzugriff)", () => {
+check("58. keine Änderung an dieser Detailansicht durch den Chefmodus (pilot-work-order-ui.js bleibt von chef-today-ui.js unberührt)", () => {
+  // Diese Datei (pilot-work-order-ui.js) selbst darf durch den Chefmodus
+  // nie berührt werden – das gilt unverändert seit V8.7 Stufe B und bleibt
+  // die einzige hier tatsächlich geprüfte Richtung.
   assert.doesNotMatch(js, /chef-today/);
   const chefJs = readFile("chef-today-ui.js");
   assert.doesNotMatch(chefJs, /pilot-decision-reason/);
-  // Der bestehende, unveränderte Kopfkommentar aus V8.7 Stufe A ERWÄHNT die
-  // beiden Feldnamen bewusst (siehe dort: "liest diese Felder... bewusst
-  // noch NICHT") – das ist unverändert korrekt und keine Berührung durch
-  // Stufe B. Geprüft wird deshalb ausschließlich, dass kein tatsächlicher
-  // Feldzugriff (".currentDecisionReason"/".decisionReasonHistory") und
-  // keine neue Rückgabe-/Blockier-Schaltfläche hinzugekommen ist.
-  assert.doesNotMatch(chefJs, /\.currentDecisionReason/);
+  // Mechanisch erzwungene Folgeanpassung durch V8.7 Stufe C ("aktuellen
+  // Entscheidungsgrund im Chefmodus 'Heute wichtig' sichtbar machen",
+  // analog zur bereits in V8.7 Stufe A dokumentierten Anpassung der
+  // Migrationsliste): bis einschließlich Stufe B war ein Feldzugriff auf
+  // `currentDecisionReason` in chef-today-ui.js noch nicht vorgesehen –
+  // genau das ist inzwischen der gesamte, explizit beauftragte Zweck von
+  // Stufe C. Die Prüfung bleibt für `decisionReasonHistory` unverändert
+  // scharf (Chefmodus liest ausschließlich das aktuelle Feld, niemals die
+  // Historie) und für eine neue Rückgabe-/Blockier-Schaltfläche
+  // unverändert scharf (`.decisionReasonHistory` bzw. eine CSS-Berührung
+  // des Klassenraums `pilot-decision-reason` wären weiterhin ein Befund).
   assert.doesNotMatch(chefJs, /\.decisionReasonHistory/);
 });
 

@@ -38,6 +38,11 @@ const css = readFile("styles.css");
 const serverJs = readFile("server.js");
 const policyJs = readFile("route-access-policy.js");
 const packageJson = readFile("package.json");
+// V8.7 Stufe C – ausschließlich lesend für die statischen Abgrenzungsprüfungen
+// 49/50 unten (keine Änderung an der Pilotauftrags-Detailansicht oder am
+// Service durch dieses Arbeitspaket).
+const pilotUiJs = readFile("pilot-work-order-ui.js");
+const pilotServiceJs = readFile("pilot-work-order-service.js");
 
 // Die Fixture-Statuswerte müssen echte Statuswerte des bestehenden Dienstes
 // sein – sonst prüfte dieser Test eine erfundene Welt.
@@ -190,6 +195,57 @@ function clearHandoffAndRiskOverrides() {
   backendRisksAndLimitsByOrderId = {};
 }
 
+// V8.7 Stufe C ("aktuellen Entscheidungsgrund im Chefmodus 'Heute wichtig'
+// sichtbar machen") – zusätzliche, rein additive Fake-Backend-Steuerung für
+// das bereits bestehende Overview-Feld `currentDecisionReason` (siehe
+// pilot-work-order-service.js#buildOverview, Stufe A). Standard: kein
+// Eintrag, also `null`, wie im echten Dienst ohne gespeicherten Grund.
+// `decisionReasonHistory` wird – wortgleich zum echten HTTP-Vertrag –
+// IMMER mitgeliefert (auch ohne currentDecisionReason-Override), damit die
+// Prüfpunkte unten real nachweisen können, dass chef-today-ui.js dieses
+// Feld niemals liest, niemals in den State kopiert und niemals rendert.
+let backendDecisionReasonByOrderId = {};
+
+// Fixe, von jedem currentDecisionReason-Override unabhängige Historie –
+// absichtlich mit eindeutig erkennbarem, nie erwartetem Text/Zeitpunkt/
+// Akteur, damit ein versehentliches Rendern oder Kopieren sofort auffällt.
+const DECISION_REASON_HISTORY_FIXTURE = [
+  {
+    kind: "RETURN",
+    text: "Historischer Testgrund einer fr\u00fcheren Revision (darf niemals im Chefmodus erscheinen).",
+    setAt: "2020-01-01T00:00:00.000Z",
+    setByUserId: "user-secret-history-actor",
+    fromStatus: "READY_FOR_REVIEW",
+    toStatus: "RETURNED",
+    orderRevision: 1,
+  },
+];
+
+// Fixture-Erzeugung eines Entscheidungsgrundes, wortgleich zur echten
+// Feldstruktur aus pilot-work-order-service.js#rowToDecisionReasonView.
+function makeDecisionReason(overrides) {
+  return Object.assign(
+    {
+      kind: "BLOCK",
+      text: "Der Blocker muss zuerst mit dem Kunden gekl\u00e4rt werden.",
+      setAt: "2026-05-01T09:00:00.000Z",
+      setByUserId: "user-secret-reason-actor",
+      fromStatus: "IN_EXECUTION",
+      toStatus: "BLOCKED",
+      orderRevision: 4,
+    },
+    overrides || {},
+  );
+}
+
+function setCurrentDecisionReason(orderId, reason) {
+  backendDecisionReasonByOrderId[orderId] = reason;
+}
+
+function clearDecisionReasonOverrides() {
+  backendDecisionReasonByOrderId = {};
+}
+
 // Fixture-Erzeugung eines Dokumentations-Handoffs, wortgleich zur echten
 // Feldstruktur aus pilot-work-order-service.js#rowToHandoffView – nur die
 // für V8.5 tatsächlich gelesenen Felder (toPilotRole, pmFilterStatus,
@@ -267,6 +323,13 @@ global.fetch = function fetchStub(url, options) {
             risksAndLimits: Object.prototype.hasOwnProperty.call(backendRisksAndLimitsByOrderId, orderId)
               ? backendRisksAndLimitsByOrderId[orderId]
               : [],
+            currentDecisionReason: Object.prototype.hasOwnProperty.call(backendDecisionReasonByOrderId, orderId)
+              ? backendDecisionReasonByOrderId[orderId]
+              : null,
+            // V8.7 Stufe C: wortgleich zum echten HTTP-Vertrag immer als
+            // Array vorhanden, unabhängig vom currentDecisionReason-
+            // Override oben (siehe DECISION_REASON_HISTORY_FIXTURE).
+            decisionReasonHistory: DECISION_REASON_HISTORY_FIXTURE,
           },
         }
       : { ok: false };
@@ -309,6 +372,15 @@ function rowTitles(key) {
 
 function postCalls() {
   return fetchCalls.filter((entry) => entry.method !== "GET");
+}
+
+// V8.7 Stufe C – extrahiert ausschließlich die neue Grundzeile (falls
+// gerendert) aus einem Abschnitts-HTML, damit data-Attribut-/Aktionsprüfungen
+// nicht versehentlich den umschließenden Zeilen-Button (mit seinem
+// bestehenden data-chef-today-action="open-order") treffen.
+function reasonLineHtml(sectionHtmlText) {
+  const match = sectionHtmlText.match(/<span class="chef-today-row-line chef-today-row-reason">[\s\S]*?<\/span><\/span>/);
+  return match ? match[0] : null;
 }
 
 async function reload() {
@@ -1460,6 +1532,517 @@ async function run() {
       assert.ok(section.includes(reason), `Kategorie \u201e${reason}\u201c muss weiterhin sichtbar sein`);
     });
   });
+
+  // -------------------------------------------------------------------
+  // V8.7 Stufe C ("aktuellen Entscheidungsgrund im Chefmodus 'Heute
+  // wichtig' sichtbar machen") – die neue, optionale Grundzeile direkt
+  // unter "Zu entscheiden". Nummerierung der Prüfpunkte folgt dem
+  // Arbeitspaket (TESTANFORDERUNGEN 1–50).
+  // -------------------------------------------------------------------
+
+  await check(
+    "V8.7 Stufe C (1/2/5): BLOCKED mit aktuellem Grund zeigt „Warum blockiert?“, den konkreten Grundtext, „Zu entscheiden“ bleibt zusätzlich sichtbar",
+    async () => {
+      setOrders([
+        { id: "v87c-blocked", title: "Auftrag mit gespeichertem Blockiergrund", status: "BLOCKED", updatedAt: new Date().toISOString() },
+      ]);
+      setCurrentDecisionReason(
+        "v87c-blocked",
+        makeDecisionReason({ kind: "BLOCK", text: "Der Kunde muss zuerst die fehlenden Unterlagen liefern." }),
+      );
+      await reload();
+      const section = sectionHtml("today");
+      assert.ok(section.includes('<span class="chef-today-row-line-label">Warum blockiert?</span>'));
+      assert.ok(section.includes("Der Kunde muss zuerst die fehlenden Unterlagen liefern."));
+      assert.ok(
+        section.includes('<span class="chef-today-row-line-label">Zu entscheiden:</span>'),
+        "„Zu entscheiden“ bleibt zusätzlich sichtbar, wird nicht ersetzt",
+      );
+      clearDecisionReasonOverrides();
+    },
+  );
+
+  await check(
+    "V8.7 Stufe C (3/4/5): RETURNED mit aktuellem Grund zeigt „Warum zurückgegeben?“, den konkreten Grundtext, „Zu entscheiden“ bleibt zusätzlich sichtbar",
+    async () => {
+      setOrders([
+        { id: "v87c-returned", title: "Auftrag mit gespeichertem Rückgabegrund", status: "RETURNED", updatedAt: new Date().toISOString() },
+      ]);
+      setCurrentDecisionReason(
+        "v87c-returned",
+        makeDecisionReason({ kind: "RETURN", toStatus: "RETURNED", text: "Das Ergebnis erfüllt noch nicht die vereinbarten Kriterien." }),
+      );
+      await reload();
+      const section = sectionHtml("today");
+      assert.ok(section.includes('<span class="chef-today-row-line-label">Warum zurückgegeben?</span>'));
+      assert.ok(section.includes("Das Ergebnis erfüllt noch nicht die vereinbarten Kriterien."));
+      assert.ok(section.includes('<span class="chef-today-row-line-label">Zu entscheiden:</span>'));
+      clearDecisionReasonOverrides();
+    },
+  );
+
+  // ---------------------------------------------------------------------
+  // V8.7 Stufe C – Browserabnahme-Korrektur ("Warum blockiert?:"/"Warum
+  // zurückgegeben?:" statt "Warum blockiert?"/"Warum zurückgegeben?"):
+  // renderTodayRowLine() hängt an ein bereits mit "?" endendes Label keinen
+  // zusätzlichen Doppelpunkt mehr an. Bestehende Labels ohne "?" ("Zu
+  // entscheiden", "Empfehlung", "Wichtig zu beachten") behalten ihren
+  // Doppelpunkt unverändert.
+  // ---------------------------------------------------------------------
+
+  await check('sichtbar exakt „Warum blockiert?“ – kein zusätzlicher Doppelpunkt nach dem Fragezeichen', async () => {
+    setOrders([{ id: "v87c-label-blocked", title: "Auftrag", status: "BLOCKED", updatedAt: new Date().toISOString() }]);
+    setCurrentDecisionReason("v87c-label-blocked", makeDecisionReason({ kind: "BLOCK", text: "Kurzer Grund." }));
+    await reload();
+    const section = sectionHtml("today");
+    assert.ok(section.includes('<span class="chef-today-row-line-label">Warum blockiert?</span>'));
+    assert.doesNotMatch(section, /Warum blockiert\?:/);
+    clearDecisionReasonOverrides();
+  });
+
+  await check('sichtbar exakt „Warum zurückgegeben?“ – kein zusätzlicher Doppelpunkt nach dem Fragezeichen', async () => {
+    setOrders([{ id: "v87c-label-returned", title: "Auftrag", status: "RETURNED", updatedAt: new Date().toISOString() }]);
+    setCurrentDecisionReason("v87c-label-returned", makeDecisionReason({ kind: "RETURN", toStatus: "RETURNED", text: "Kurzer Grund." }));
+    await reload();
+    const section = sectionHtml("today");
+    assert.ok(section.includes('<span class="chef-today-row-line-label">Warum zurückgegeben?</span>'));
+    assert.doesNotMatch(section, /Warum zurückgegeben\?:/);
+    clearDecisionReasonOverrides();
+  });
+
+  await check('„Warum blockiert?:“ kommt im gesamten „Heute wichtig“-Abschnitt nicht vor', async () => {
+    setOrders([
+      { id: "v87c-label-blocked-scan", title: "Auftrag", status: "BLOCKED", updatedAt: new Date().toISOString() },
+      { id: "v87c-label-returned-scan", title: "Auftrag", status: "RETURNED", updatedAt: new Date().toISOString() },
+    ]);
+    setCurrentDecisionReason("v87c-label-blocked-scan", makeDecisionReason({ kind: "BLOCK", text: "Grund A." }));
+    setCurrentDecisionReason("v87c-label-returned-scan", makeDecisionReason({ kind: "RETURN", toStatus: "RETURNED", text: "Grund B." }));
+    await reload();
+    const section = sectionHtml("today");
+    assert.doesNotMatch(section, /Warum blockiert\?:/);
+    clearDecisionReasonOverrides();
+  });
+
+  await check('„Warum zurückgegeben?:“ kommt im gesamten „Heute wichtig“-Abschnitt nicht vor', async () => {
+    setOrders([
+      { id: "v87c-label-blocked-scan-2", title: "Auftrag", status: "BLOCKED", updatedAt: new Date().toISOString() },
+      { id: "v87c-label-returned-scan-2", title: "Auftrag", status: "RETURNED", updatedAt: new Date().toISOString() },
+    ]);
+    setCurrentDecisionReason("v87c-label-blocked-scan-2", makeDecisionReason({ kind: "BLOCK", text: "Grund A." }));
+    setCurrentDecisionReason("v87c-label-returned-scan-2", makeDecisionReason({ kind: "RETURN", toStatus: "RETURNED", text: "Grund B." }));
+    await reload();
+    const section = sectionHtml("today");
+    assert.doesNotMatch(section, /Warum zurückgegeben\?:/);
+    clearDecisionReasonOverrides();
+  });
+
+  await check('„Zu entscheiden:“ bleibt durch die Label-Korrektur unverändert (weiterhin mit Doppelpunkt)', async () => {
+    setOrders([{ id: "v87c-label-decision-unchanged", title: "Auftrag", status: "BLOCKED", updatedAt: new Date().toISOString() }]);
+    setCurrentDecisionReason("v87c-label-decision-unchanged", makeDecisionReason({ kind: "BLOCK", text: "Grund." }));
+    await reload();
+    const section = sectionHtml("today");
+    assert.ok(section.includes('<span class="chef-today-row-line-label">Zu entscheiden:</span>'));
+    clearDecisionReasonOverrides();
+  });
+
+  await check('„Empfehlung:“ bleibt durch die Label-Korrektur unverändert (weiterhin mit Doppelpunkt)', async () => {
+    setOrders([{ id: "v87c-label-recommendation-unchanged", title: "Auftrag", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() }]);
+    setHandoffs("v87c-label-recommendation-unchanged", [makeDocumentationHandoff({ resultOrRecommendation: "Empfehlungstext." })]);
+    await reload();
+    const section = sectionHtml("today");
+    assert.ok(section.includes('<span class="chef-today-row-line-label">Empfehlung:</span>'));
+    clearHandoffAndRiskOverrides();
+  });
+
+  await check('„Wichtig zu beachten:“ bleibt durch die Label-Korrektur unverändert (weiterhin mit Doppelpunkt)', async () => {
+    setOrders([{ id: "v87c-label-risk-unchanged", title: "Auftrag", status: "READY_FOR_JAMAL_APPROVAL", updatedAt: new Date().toISOString() }]);
+    setRisksAndLimits("v87c-label-risk-unchanged", ["Ein Restrisiko."]);
+    await reload();
+    const section = sectionHtml("today");
+    assert.ok(section.includes('<span class="chef-today-row-line-label">Wichtig zu beachten:</span>'));
+    clearHandoffAndRiskOverrides();
+  });
+
+  await check(
+    "V8.7 Stufe C (6/7/8/9/14): ein anderer Status (READY_FOR_REVIEW) zeigt keine Grundzeile; Empfehlung und Risiko bleiben unabhängig vom Grundtext",
+    async () => {
+      setOrders([
+        { id: "v87c-review-inconsistent", title: "Ergebnis mit inkonsistentem Grund", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+      ]);
+      setHandoffs("v87c-review-inconsistent", [makeDocumentationHandoff({ resultOrRecommendation: "Die Dokumentation empfiehlt die Freigabe." })]);
+      setRisksAndLimits("v87c-review-inconsistent", ["Ein Restrisiko bleibt bestehen."]);
+      setCurrentDecisionReason(
+        "v87c-review-inconsistent",
+        makeDecisionReason({ text: "Ein Grund, der bei diesem Status nie erscheinen darf." }),
+      );
+      await reload();
+      const order = ui.getState().orders[0];
+      const section = sectionHtml("today");
+      assert.doesNotMatch(section, /Warum blockiert\?|Warum zurückgegeben\?/);
+      assert.ok(!section.includes("Ein Grund, der bei diesem Status nie erscheinen darf."));
+      assert.strictEqual(ui.decisionReasonTextFor(order), null, "der Status-Schutz gilt auch isoliert (nur BLOCKED/RETURNED)");
+      assert.strictEqual(ui.recommendationTextFor(order), "Die Dokumentation empfiehlt die Freigabe.", "Empfehlung bleibt unabhängig sichtbar");
+      assert.strictEqual(ui.riskTextFor(order), "Ein Restrisiko bleibt bestehen.", "Risiko/Grenze bleibt unabhängig sichtbar");
+      assert.ok(section.includes("Die Dokumentation empfiehlt die Freigabe."));
+      assert.ok(section.includes("Ein Restrisiko bleibt bestehen."));
+      clearHandoffAndRiskOverrides();
+      clearDecisionReasonOverrides();
+    },
+  );
+
+  await check(
+    "V8.7 Stufe C (10/12/13): BLOCKED/RETURNED ohne gespeicherten Grund (currentDecisionReason null) zeigt keine Grundzeile und nichts Erfundenes",
+    async () => {
+      setOrders([
+        { id: "v87c-blocked-no-reason", title: "Blockiert ohne gespeicherten Grund", status: "BLOCKED", updatedAt: new Date().toISOString() },
+        { id: "v87c-returned-no-reason", title: "Zurückgegeben ohne gespeicherten Grund", status: "RETURNED", updatedAt: new Date().toISOString() },
+      ]);
+      await reload();
+      const section = sectionHtml("today");
+      assert.doesNotMatch(section, /Warum blockiert\?/);
+      assert.doesNotMatch(section, /Warum zurückgegeben\?/);
+      assert.ok(
+        section.includes("Der Auftrag ist blockiert und wartet auf deine Entscheidung."),
+        "die bestehende Fallback-Zeile bleibt der einzige Text, kein Ersatz erfunden",
+      );
+      assert.ok(section.includes("Der Auftrag wurde zurückgegeben und wartet auf deine nächste Entscheidung."));
+    },
+  );
+
+  await check("V8.7 Stufe C (11): currentDecisionReason undefined zerstört die Karte nicht (isolierte Funktionsprüfung)", () => {
+    ui.getState().todayOverviewByOrderId["v87c-undefined-unit"] = {
+      openDecision: null,
+      nextStep: null,
+      handoffs: [],
+      risksAndLimits: [],
+      currentDecisionReason: undefined,
+    };
+    assert.doesNotThrow(() => ui.decisionReasonTextFor({ id: "v87c-undefined-unit", status: "BLOCKED" }));
+    assert.strictEqual(ui.decisionReasonTextFor({ id: "v87c-undefined-unit", status: "BLOCKED" }), null);
+    delete ui.getState().todayOverviewByOrderId["v87c-undefined-unit"];
+  });
+
+  await check(
+    "V8.7 Stufe C (15): ein inkonsistenter DRAFT-Auftrag mit currentDecisionReason zeigt keine Grundzeile (isolierte Funktionsprüfung)",
+    () => {
+      ui.getState().todayOverviewByOrderId["v87c-draft-unit"] = {
+        openDecision: null,
+        nextStep: null,
+        handoffs: [],
+        risksAndLimits: [],
+        currentDecisionReason: makeDecisionReason({ text: "Grund bei einem Entwurf – darf nie erscheinen." }),
+      };
+      assert.strictEqual(ui.decisionReasonTextFor({ id: "v87c-draft-unit", status: "DRAFT" }), null);
+      delete ui.getState().todayOverviewByOrderId["v87c-draft-unit"];
+    },
+  );
+
+  await check("V8.7 Stufe C (16): decisionReasonHistory wird nirgends gerendert", async () => {
+    setOrders([
+      { id: "v87c-history-hidden", title: "Auftrag mit Historie im Rohvertrag", status: "BLOCKED", updatedAt: new Date().toISOString() },
+    ]);
+    setCurrentDecisionReason("v87c-history-hidden", makeDecisionReason());
+    await reload();
+    const visible = outputHtml();
+    assert.ok(!visible.includes("Historischer Testgrund"), "der Historientext darf niemals erscheinen");
+    assert.ok(!visible.includes("user-secret-history-actor"));
+    clearDecisionReasonOverrides();
+  });
+
+  await check("V8.7 Stufe C (17): decisionReasonHistory wird nicht in den Chefmodus-State kopiert", async () => {
+    setOrders([
+      { id: "v87c-history-state", title: "Auftrag mit Historie im Rohvertrag", status: "RETURNED", updatedAt: new Date().toISOString() },
+    ]);
+    setCurrentDecisionReason("v87c-history-state", makeDecisionReason({ kind: "RETURN", toStatus: "RETURNED" }));
+    await reload();
+    const entry = ui.getState().todayOverviewByOrderId["v87c-history-state"];
+    assert.ok(entry, "der Overview-Eintrag muss vorhanden sein");
+    assert.strictEqual(
+      Object.prototype.hasOwnProperty.call(entry, "decisionReasonHistory"),
+      false,
+      "decisionReasonHistory darf nicht in den Chefmodus-State übernommen werden",
+    );
+    clearDecisionReasonOverrides();
+  });
+
+  await check(
+    "V8.7 Stufe C (18/19/20/21/22): setAt, setByUserId, fromStatus und orderRevision sind im sichtbaren Text nicht enthalten",
+    async () => {
+      setOrders([
+        { id: "v87c-rawfields", title: "Auftrag mit vollständigem Rohvertrag", status: "BLOCKED", updatedAt: new Date().toISOString() },
+      ]);
+      setCurrentDecisionReason(
+        "v87c-rawfields",
+        makeDecisionReason({
+          setAt: "2026-06-15T08:30:00.000Z",
+          setByUserId: "user-secret-visible-check",
+          fromStatus: "IN_EXECUTION",
+          toStatus: "BLOCKED",
+          orderRevision: 9,
+        }),
+      );
+      await reload();
+      const visibleText = sectionHtml("today").replace(/<[^>]*>/g, " ");
+      assert.doesNotMatch(visibleText, /2026-06-15/);
+      assert.doesNotMatch(visibleText, /user-secret-visible-check/);
+      assert.doesNotMatch(visibleText, /IN_EXECUTION/);
+      assert.doesNotMatch(visibleText, /\bBLOCKED\b/);
+      assert.doesNotMatch(visibleText, /\b9\b/);
+      clearDecisionReasonOverrides();
+    },
+  );
+
+  await check(
+    "V8.7 Stufe C (23/24): die rohen Werte BLOCK/RETURN erscheinen nicht als eigenständige Token im sichtbaren Text",
+    async () => {
+      setOrders([
+        { id: "v87c-raw-block", title: "Auftrag mit Blockiergrund", status: "BLOCKED", updatedAt: new Date().toISOString() },
+        { id: "v87c-raw-return", title: "Auftrag mit Rückgabegrund", status: "RETURNED", updatedAt: new Date().toISOString() },
+      ]);
+      setCurrentDecisionReason("v87c-raw-block", makeDecisionReason({ kind: "BLOCK" }));
+      setCurrentDecisionReason(
+        "v87c-raw-return",
+        makeDecisionReason({ kind: "RETURN", toStatus: "RETURNED", text: "Der Auftrag muss zurück an den Kunden." }),
+      );
+      await reload();
+      const visibleText = sectionHtml("today").replace(/<[^>]*>/g, " ");
+      assert.doesNotMatch(visibleText, /\bBLOCK\b/);
+      assert.doesNotMatch(visibleText, /\bRETURN\b/);
+      clearDecisionReasonOverrides();
+    },
+  );
+
+  await check("V8.7 Stufe C (25): keine technischen Statuscodes im sichtbaren Text der neuen Grundzeile", () => {
+    const visibleText = sectionHtml("today").replace(/<[^>]*>/g, " ");
+    assert.doesNotMatch(visibleText, /READY_FOR|IN_EXECUTION/);
+  });
+
+  await check(
+    "V8.7 Stufe C (26/27/28/29): HTML-artiger Grundtext wird sicher maskiert; Umlaute, Klammern und Anführungszeichen bleiben erhalten",
+    async () => {
+      const dangerousText =
+        'Kunde verlangt <b>sofort</b> Rückruf & "Klarheit" (dringend) <script>alert(1)</script><img src=x onerror=alert(1)>';
+      setOrders([
+        { id: "v87c-danger", title: "Auftrag mit heiklem Grundtext", status: "BLOCKED", updatedAt: new Date().toISOString() },
+      ]);
+      setCurrentDecisionReason("v87c-danger", makeDecisionReason({ text: dangerousText }));
+      await reload();
+      const section = sectionHtml("today");
+      assert.ok(
+        section.includes(ui.escapeHtml(dangerousText)),
+        "der Grundtext muss vollständig, aber ausschließlich maskiert enthalten sein",
+      );
+      assert.doesNotMatch(section, /<script>/i);
+      assert.doesNotMatch(section, /<img[^>]*onerror/i);
+      assert.doesNotMatch(section, /<b>sofort<\/b>/);
+      assert.ok(section.includes("Rückruf"), "Umlaute bleiben erhalten");
+      assert.ok(section.includes("(dringend)"), "Klammern bleiben erhalten");
+      assert.ok(
+        section.includes(ui.escapeHtml('"Klarheit"')),
+        "Anführungszeichen bleiben als sichtbarer, maskierter Text erhalten",
+      );
+      clearDecisionReasonOverrides();
+    },
+  );
+
+  await check("V8.7 Stufe C (30): Zeilenumbrüche im Grundtext werden kompakt behandelt (kein <br>)", async () => {
+    setOrders([
+      { id: "v87c-newline", title: "Auftrag mit Zeilenumbruch im Grund", status: "BLOCKED", updatedAt: new Date().toISOString() },
+    ]);
+    setCurrentDecisionReason("v87c-newline", makeDecisionReason({ text: "Erste Zeile.\nZweite Zeile." }));
+    await reload();
+    const section = sectionHtml("today");
+    assert.doesNotMatch(section, /<br/i);
+    assert.ok(section.includes("Erste Zeile.") && section.includes("Zweite Zeile."), "beide Teile des Grundtextes bleiben vorhanden");
+    clearDecisionReasonOverrides();
+  });
+
+  await check(
+    "V8.7 Stufe C (31): ein Grund über 200 Zeichen wird über die bestehende Logik gekürzt, die reine Ableitungsfunktion liefert weiterhin den vollen Text",
+    async () => {
+      const longReasonText = "Ausführliche Begründung für die Blockierung. ".repeat(10).trim();
+      assert.ok(longReasonText.length > ui.CHEF_TODAY_ROW_TEXT_DISPLAY_LIMIT, "der Testtext muss die bestehende Anzeigegrenze überschreiten");
+      setOrders([
+        { id: "v87c-long-reason", title: "Auftrag mit sehr langem Grund", status: "BLOCKED", updatedAt: new Date().toISOString() },
+      ]);
+      setCurrentDecisionReason("v87c-long-reason", makeDecisionReason({ text: longReasonText }));
+      await reload();
+      const order = ui.getState().orders[0];
+      assert.strictEqual(ui.decisionReasonTextFor(order), longReasonText, "die reine Ableitungsfunktion liefert weiterhin den vollen Text");
+      const section = sectionHtml("today");
+      assert.ok(!section.includes(longReasonText), "die Anzeige selbst darf den vollen Text nicht unbegrenzt zeigen");
+      assert.ok(section.includes("\u2026"), "eine gekürzte Anzeige muss erkennbar sein (Ellipse)");
+      clearDecisionReasonOverrides();
+    },
+  );
+
+  await check("V8.7 Stufe C (32): keine neue Kürzungsgrenze – weiterhin nur die drei bestehenden *_LIMIT-Konstanten", () => {
+    const limitDeclarations = js.match(/var\s+[A-Z_]*LIMIT[A-Z_]*\s*=/g) || [];
+    assert.deepStrictEqual(
+      limitDeclarations.slice().sort(),
+      ["var CHEF_TODAY_ROW_TEXT_DISPLAY_LIMIT =", "var RUNNING_LIMIT =", "var TODAY_OVERVIEW_FETCH_LIMIT ="].sort(),
+      "es darf keine zusätzliche *_LIMIT-Konstante für den Entscheidungsgrund entstehen",
+    );
+  });
+
+  await check(
+    "V8.7 Stufe C (33/34): der gespeicherte Originaltext und das Overview bleiben durch die Darstellung unverändert",
+    async () => {
+      const originalReason = makeDecisionReason({ text: "Unveränderter Ausgangsgrund." });
+      setOrders([{ id: "v87c-no-mutation", title: "Auftrag ohne Mutation", status: "RETURNED", updatedAt: new Date().toISOString() }]);
+      setCurrentDecisionReason("v87c-no-mutation", originalReason);
+      await reload();
+      const order = ui.getState().orders[0];
+      ui.decisionReasonTextFor(order);
+      ui.render();
+      assert.strictEqual(originalReason.text, "Unveränderter Ausgangsgrund.");
+      assert.strictEqual(
+        ui.getState().todayOverviewByOrderId["v87c-no-mutation"].currentDecisionReason,
+        originalReason,
+        "dasselbe Overview-Objekt bleibt referenzgleich, keine Kopie mit Veränderung",
+      );
+      clearDecisionReasonOverrides();
+    },
+  );
+
+  await check("V8.7 Stufe C (35): wiederholtes Rendern der Grundzeile bleibt konsistent", () => {
+    const first = outputHtml();
+    ui.render();
+    ui.render();
+    const second = outputHtml();
+    assert.strictEqual(first, second);
+  });
+
+  await check(
+    "V8.7 Stufe C (36/37): die neue Grundzeile enthält kein data-action/data-chef-today-action und löst keine eigene Aktion aus",
+    async () => {
+      setOrders([{ id: "v87c-no-action", title: "Auftrag mit Grund ohne eigene Aktion", status: "BLOCKED", updatedAt: new Date().toISOString() }]);
+      setCurrentDecisionReason("v87c-no-action", makeDecisionReason());
+      await reload();
+      const section = sectionHtml("today");
+      const line = reasonLineHtml(section);
+      assert.ok(line, "die Grundzeile muss auffindbar sein");
+      assert.doesNotMatch(line, /data-action/);
+      assert.doesNotMatch(line, /data-chef-today-action/);
+      clearDecisionReasonOverrides();
+    },
+  );
+
+  await check("V8.7 Stufe C (38/39): weiterhin kein schreibender Request und keine neue Route über den gesamten Testlauf hinweg", () => {
+    assert.deepStrictEqual(postCalls(), []);
+    const urls = Array.from(new Set(js.match(/"\/api\/[^"]*"/g) || []));
+    assert.deepStrictEqual(urls.sort(), ['"/api/pilot-work-order/orders"', '"/api/pilot-work-order/orders/"'].sort());
+  });
+
+  await check("V8.7 Stufe C (40): „Entscheidung öffnen“ bleibt unverändert sichtbar, auch bei vorhandenem Grund", async () => {
+    setOrders([{ id: "v87c-open-label", title: "Auftrag mit Grund", status: "BLOCKED", updatedAt: new Date().toISOString() }]);
+    setCurrentDecisionReason("v87c-open-label", makeDecisionReason());
+    await reload();
+    const section = sectionHtml("today");
+    assert.ok(section.includes('<span class="chef-today-row-open">Entscheidung öffnen</span>'));
+    clearDecisionReasonOverrides();
+  });
+
+  await check("V8.7 Stufe C: Öffnen einer Zeile mit Grund nutzt weiterhin ausschließlich das bestehende openOrder()", () => {
+    pilotControls = ui.getState().orders.map((order) => makePilotControl("select-order", order.id));
+    pilotClicks.length = 0;
+    fetchCalls.length = 0;
+    const opened = ui.openOrder("v87c-open-label");
+    assert.strictEqual(opened, true);
+    assert.deepStrictEqual(pilotClicks, [{ action: "select-order", orderId: "v87c-open-label" }]);
+    assert.deepStrictEqual(fetchCalls, [], "das Öffnen selbst löst keinen weiteren Abruf aus");
+  });
+
+  await check("V8.7 Stufe C (41): die Abrufgrenze bleibt bei maximal fünf Overviews, auch mit gespeicherten Gründen", async () => {
+    setOrders(
+      Array.from({ length: 7 }, (unused, index) => ({
+        id: `v87c-limit-${index + 1}`,
+        title: `Wichtiger Vorgang mit Grund ${index + 1}`,
+        status: "BLOCKED",
+        updatedAt: new Date().toISOString(),
+      })),
+    );
+    fetchCalls.length = 0;
+    await reload();
+    const detailCalls = fetchCalls.filter((entry) => /^\/api\/pilot-work-order\/orders\/.+/.test(entry.url));
+    assert.strictEqual(ui.TODAY_OVERVIEW_FETCH_LIMIT, 5);
+    assert.strictEqual(detailCalls.length, 5);
+  });
+
+  await check("V8.7 Stufe C: kein zusätzlicher Hinweis auf die Detailansicht im sichtbaren Text („Entscheidung öffnen“ reicht)", () => {
+    const visibleText = sectionHtml("today").replace(/<[^>]*>/g, " ");
+    assert.doesNotMatch(visibleText, /Detailansicht/i);
+  });
+
+  // Quelltext-/CSS-Prüfungen (43–50).
+
+  await check("V8.7 Stufe C (43): die neue CSS-Klasse .chef-today-row-reason ist vorhanden", () => {
+    assert.match(css, /\.chef-today-row-reason\b/);
+  });
+
+  await check(
+    "V8.7 Stufe C (44): der Entscheidungsgrund nutzt ausschließlich die bestehende renderTodayRowLine()-/escapeHtml-Konvention",
+    () => {
+      const fnMatch = js.match(/function decisionReasonTextFor\(order\)\s*\{[\s\S]*?\n  \}/);
+      assert.ok(fnMatch, "decisionReasonTextFor muss auffindbar sein");
+      assert.doesNotMatch(fnMatch[0], /innerHTML/);
+      assert.match(js, /renderTodayRowLine\(\s*\n?\s*"chef-today-row-reason"/);
+    },
+  );
+
+  await check("V8.7 Stufe C (45): keine neue POST-/PATCH-/DELETE-Logik", () => {
+    assert.doesNotMatch(js, /"POST"|'POST'|"PATCH"|'PATCH'|"DELETE"|'DELETE'/);
+  });
+
+  await check("V8.7 Stufe C (46): kein tatsächlicher Zugriff (Property-Lesezugriff) auf decisionReasonHistory im Quelltext", () => {
+    // Bewusst nur ein echter Property-Zugriff (führender Punkt) ist ein
+    // Befund – der Modulkopf erklärt in Prosa/Backticks ausdrücklich, WARUM
+    // decisionReasonHistory bewusst NICHT gelesen wird, das ist erlaubt.
+    assert.doesNotMatch(js, /\.decisionReasonHistory\b/);
+  });
+
+  await check("V8.7 Stufe C (47): keine Nutzung von setAt/setByUserId/fromStatus/toStatus/orderRevision im Quelltext", () => {
+    assert.doesNotMatch(js, /\.setAt\b/);
+    assert.doesNotMatch(js, /\.setByUserId\b/);
+    assert.doesNotMatch(js, /\.fromStatus\b/);
+    assert.doesNotMatch(js, /\.toStatus\b/);
+    assert.doesNotMatch(js, /\.orderRevision\b/);
+  });
+
+  await check("V8.7 Stufe C (48): keine Änderung an der Chefmodus-Navigation (weiterhin genau drei bekannte Aktionen)", () => {
+    const actions = Array.from(new Set(js.match(/data-chef-today-action="([a-z-]+)"/g) || []));
+    assert.deepStrictEqual(
+      actions.slice().sort(),
+      ['data-chef-today-action="open-order"', 'data-chef-today-action="open-recommended"', 'data-chef-today-action="open-new-order"'].sort(),
+    );
+  });
+
+  await check("V8.7 Stufe C (49): pilot-work-order-ui.js enthält keine neue Logik dieses Arbeitspakets (keine Änderung)", () => {
+    assert.doesNotMatch(pilotUiJs, /chef-today-row-reason/);
+    assert.doesNotMatch(pilotUiJs, /decisionReasonLineLabel/);
+    assert.doesNotMatch(pilotUiJs, /decisionReasonTextFor/);
+    assert.doesNotMatch(pilotUiJs, /V8\.7 Stufe C/);
+  });
+
+  await check("V8.7 Stufe C (50): pilot-work-order-service.js enthält keine neue Logik dieses Arbeitspakets (keine Service-Änderung)", () => {
+    assert.doesNotMatch(pilotServiceJs, /chef-today-row-reason/);
+    assert.doesNotMatch(pilotServiceJs, /decisionReasonLineLabel/);
+    assert.doesNotMatch(pilotServiceJs, /decisionReasonTextFor/);
+    assert.doesNotMatch(pilotServiceJs, /V8\.7 Stufe C/);
+  });
+
+  await check(
+    "V8.7 Stufe C: die neue Zeile wirkt gleichwertig, nicht stärker als „Zu entscheiden“ (keine Warnfarbe, kein Icon, keine zusätzliche Karte)",
+    () => {
+      const reasonRuleMatches = css.match(/\.chef-today-row-reason[^{}]*\{[^}]*\}/g) || [];
+      assert.ok(reasonRuleMatches.length > 0, "es muss mindestens eine CSS-Regel für .chef-today-row-reason existieren");
+      reasonRuleMatches.forEach((rule) => {
+        assert.doesNotMatch(rule, /color:\s*(red|orange|#c0392b|#e74c3c|var\(--danger|var\(--warning)/i);
+        assert.doesNotMatch(rule, /background/i);
+        assert.doesNotMatch(rule, /::before|content:/i);
+      });
+    },
+  );
 
   console.log(`chef-today-ui.test.js: ${passed} Prüfpunkte erfolgreich`);
 }

@@ -10459,7 +10459,13 @@ details.local-agent-assignment-details > summary {
   font-weight: var(--font-medium);
 }
 
+/* V8.7 Stufe C – der konkrete Entscheidungsgrund ("Warum blockiert?"/
+   "Warum zurückgegeben?") ergänzt "Zu entscheiden" direkt darunter und
+   wirkt deshalb bewusst gleichwertig, nicht stärker: keine eigene
+   Textgröße, keine Warnfarbe, kein Icon, keine zusätzliche Karte – reine
+   Textzeile wie die übrigen .chef-today-row-line-Varianten. */
 .chef-today-row-decision .chef-today-row-line-label,
+.chef-today-row-reason .chef-today-row-line-label,
 .chef-today-row-recommendation .chef-today-row-line-label,
 .chef-today-row-risk .chef-today-row-line-label,
 .chef-today-row-action .chef-today-row-line-label {
