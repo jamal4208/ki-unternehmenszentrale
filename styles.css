@@ -10467,8 +10467,7 @@ details.local-agent-assignment-details > summary {
 .chef-today-row-decision .chef-today-row-line-label,
 .chef-today-row-reason .chef-today-row-line-label,
 .chef-today-row-recommendation .chef-today-row-line-label,
-.chef-today-row-risk .chef-today-row-line-label,
-.chef-today-row-action .chef-today-row-line-label {
+.chef-today-row-risk .chef-today-row-line-label {
   color: var(--muted);
 }
 

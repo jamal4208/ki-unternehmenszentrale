@@ -1437,44 +1437,35 @@ async function run() {
     delete ui.getState().todayOverviewByOrderId["v85-risk-invalid"];
   });
 
-  await check("V8.5 (13): verf\u00fcgbare Aktion RETURNED korrekt", () => {
-    assert.strictEqual(ui.primaryActionLabelFor({ status: "RETURNED" }), "Erneut als Entwurf starten");
-  });
-
-  await check("V8.5 (14): verf\u00fcgbare Aktion READY_FOR_REVIEW korrekt", () => {
-    assert.strictEqual(ui.primaryActionLabelFor({ status: "READY_FOR_REVIEW" }), "Ergebnis abnehmen");
-  });
-
+  // V8.8.4 ("Verf\u00fcgbare Aktion aus 'Heute wichtig' entfernen"): die vier
+  // isolierten V8.5-Pr\u00fcfpunkte (13)\u2013(16) f\u00fcr die inzwischen entfernte
+  // Funktion primaryActionLabelFor() entfallen ersatzlos (siehe Auftrag
+  // V8.8.4, TESTANFORDERUNGEN) \u2013 die Funktion und ihre Konstante
+  // PRIMARY_ACTION_LABEL_BY_STATUS existieren nicht mehr. (17) pr\u00fcft jetzt
+  // stattdessen das Gegenteil des urspr\u00fcnglichen V8.5-Befunds: keine der
+  // vier ehemaligen Aktionsbeschriftungen und keine Zeile "Verf\u00fcgbare
+  // Aktion" erscheint mehr auf Ebene 1. Die Auftrags-IDs bleiben
+  // unver\u00e4ndert (v85-action-blocked wird von V8.5 (19) weiterhin
+  // verwendet).
   await check(
-    "V8.5 (15): verf\u00fcgbare Aktion BLOCKED korrekt (spiegelt wortgleich den tats\u00e4chlichen Button-Text \u201eEntsperren (zur\u00fcckgeben)\u201c)",
-    () => {
-      assert.strictEqual(ui.primaryActionLabelFor({ status: "BLOCKED" }), "Entsperren (zur\u00fcckgeben)");
+    "V8.8.4 (17): keine Zeile \u201eVerf\u00fcgbare Aktion\u201c und keiner der vier ehemaligen Aktionstexte mehr auf Ebene 1",
+    async () => {
+      setOrders([
+        { id: "v85-action-returned", title: "Zur\u00fcckgegeben", status: "RETURNED", updatedAt: new Date().toISOString() },
+        { id: "v85-action-review", title: "Pr\u00fcfung", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+        { id: "v85-action-blocked", title: "Blockiert", status: "BLOCKED", updatedAt: new Date().toISOString() },
+        { id: "v85-action-approval", title: "Freigabe", status: "READY_FOR_JAMAL_APPROVAL", updatedAt: new Date().toISOString() },
+      ]);
+      await reload();
+      const section = sectionHtml("today");
+      assert.doesNotMatch(section, /Verf\u00fcgbare Aktion/, "die Zeile \u201eVerf\u00fcgbare Aktion\u201c darf nicht mehr erscheinen");
+      assert.doesNotMatch(section, /chef-today-row-action/, "die zugeh\u00f6rige CSS-Klasse darf nicht mehr gerendert werden");
+      assert.doesNotMatch(section, /Erneut als Entwurf starten/);
+      assert.doesNotMatch(section, /Ergebnis abnehmen/);
+      assert.doesNotMatch(section, /Entsperren \(zur\u00fcckgeben\)/);
+      assert.doesNotMatch(section, /Ausf\u00fchrung freigeben/);
     },
   );
-
-  await check("V8.5 (16): verf\u00fcgbare Aktion READY_FOR_JAMAL_APPROVAL korrekt", () => {
-    assert.strictEqual(ui.primaryActionLabelFor({ status: "READY_FOR_JAMAL_APPROVAL" }), "Ausf\u00fchrung freigeben");
-    assert.strictEqual(ui.primaryActionLabelFor({ status: "DRAFT" }), null, "keine weiteren Statuswerte erfunden");
-    assert.strictEqual(ui.primaryActionLabelFor(null), null);
-  });
-
-  await check("V8.5 (17): keine erfundene zweite Option sichtbar (genau eine verf\u00fcgbare Aktion je Eintrag)", async () => {
-    setOrders([
-      { id: "v85-action-returned", title: "Zur\u00fcckgegeben", status: "RETURNED", updatedAt: new Date().toISOString() },
-      { id: "v85-action-review", title: "Pr\u00fcfung", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
-      { id: "v85-action-blocked", title: "Blockiert", status: "BLOCKED", updatedAt: new Date().toISOString() },
-      { id: "v85-action-approval", title: "Freigabe", status: "READY_FOR_JAMAL_APPROVAL", updatedAt: new Date().toISOString() },
-    ]);
-    await reload();
-    const section = sectionHtml("today");
-    const actionLines = section.match(/Verf\u00fcgbare Aktion:/g) || [];
-    assert.strictEqual(actionLines.length, 4, "genau eine verf\u00fcgbare Aktion je Eintrag, keine zweite");
-    assert.ok(section.includes("Erneut als Entwurf starten"));
-    assert.ok(section.includes("Ergebnis abnehmen"));
-    assert.ok(section.includes("Entsperren (zur\u00fcckgeben)"));
-    assert.ok(section.includes("Ausf\u00fchrung freigeben"));
-    assert.doesNotMatch(section, /Optionen/, "keine Darstellung als Options-Plural");
-  });
 
   await check("V8.5 (18): keine direkte Aktionsschaltfl\u00e4che auf der Startkarte (nur der bestehende Zeilen-Button)", () => {
     const section = sectionHtml("today");
@@ -2160,6 +2151,199 @@ async function run() {
       });
     },
   );
+
+  // -------------------------------------------------------------------
+  // V8.8.4 ("Verfügbare Aktion aus 'Heute wichtig' entfernen", rein
+  // darstellend) – Nummerierung folgt den TESTANFORDERUNGEN aus dem
+  // freigegebenen Architekturbericht V8.8.4. Eine gemischte Liste (je ein
+  // Auftrag BLOCKED, RETURNED, READY_FOR_REVIEW, READY_FOR_JAMAL_APPROVAL)
+  // deckt zugleich die vier Einzelfälle A–D und den gemischten Fall E der
+  // Browserabnahme ab. Alle bereits bestehenden Zeilenbestandteile
+  // (Kategorie, Titel, Zu entscheiden, Warum blockiert/zurückgegeben,
+  // Empfehlung, Wichtig zu beachten, Wartedauer, Entscheidung öffnen)
+  // müssen unverändert vollständig bleiben – ausschließlich "Verfügbare
+  // Aktion" entfällt.
+  // -------------------------------------------------------------------
+
+  await check("V8.8.4 (1): kein Chefmodus-Eintrag enthält den Text „Verfügbare Aktion“", async () => {
+    setOrders([
+      { id: "v884-blocked", title: "Blockierter Auftrag", status: "BLOCKED", updatedAt: isoAtLocalDaysAgo(3) },
+      { id: "v884-returned", title: "Zurückgegebener Auftrag", status: "RETURNED", updatedAt: isoAtLocalDaysAgo(0) },
+      { id: "v884-review", title: "Prüfung wartet", status: "READY_FOR_REVIEW", updatedAt: isoAtLocalDaysAgo(1) },
+      { id: "v884-approval", title: "Freigabe wartet", status: "READY_FOR_JAMAL_APPROVAL", updatedAt: isoAtLocalDaysAgo(0) },
+    ]);
+    setCurrentDecisionReason(
+      "v884-blocked",
+      makeDecisionReason({ kind: "BLOCK", text: "Die Schnittstelle ist noch nicht abgenommen." }),
+    );
+    setCurrentDecisionReason(
+      "v884-returned",
+      makeDecisionReason({ kind: "RETURN", text: "Der Text muss vor Freigabe gek\u00fcrzt werden." }),
+    );
+    setHandoffs("v884-review", [makeDocumentationHandoff({ resultOrRecommendation: "Die Dokumentation empfiehlt die Freigabe." })]);
+    setRisksAndLimits("v884-approval", ["Die Datenbasis ist noch unvollst\u00e4ndig."]);
+    await reload();
+    const section = sectionHtml("today");
+    assert.doesNotMatch(section, /Verf\u00fcgbare Aktion/, "die Zeile „Verfügbare Aktion“ darf in keinem Eintrag mehr erscheinen");
+  });
+
+  await check("V8.8.4 (2): keiner der vier ehemaligen Aktionstexte erscheint mehr auf Ebene 1", () => {
+    const section = sectionHtml("today");
+    assert.doesNotMatch(section, /Erneut als Entwurf starten/);
+    assert.doesNotMatch(section, /Ergebnis abnehmen/);
+    assert.doesNotMatch(section, /Entsperren \(zur\u00fcckgeben\)/);
+    assert.doesNotMatch(section, /Ausf\u00fchrung freigeben/);
+  });
+
+  await check("V8.8.4 (3): Kategorie bleibt für jeden Eintrag vollständig erhalten", () => {
+    const section = sectionHtml("today");
+    assert.ok(section.includes("Entscheidung notwendig"));
+    assert.ok(section.includes("Ergebnis wartet auf Pr\u00fcfung"));
+    assert.ok(section.includes("Auftrag blockiert"));
+    assert.ok(section.includes("Freigabe erforderlich"));
+  });
+
+  await check("V8.8.4 (4): Titel bleibt für jeden Eintrag vollständig erhalten", () => {
+    assert.deepStrictEqual(rowTitles("today"), [
+      "Zur\u00fcckgegebener Auftrag",
+      "Pr\u00fcfung wartet",
+      "Blockierter Auftrag",
+      "Freigabe wartet",
+    ]);
+  });
+
+  await check(
+    "V8.8.4 (5): „Zu entscheiden“ bleibt für jeden Eintrag vollständig erhalten (statusspezifischer Fallback-Satz)",
+    () => {
+      const section = sectionHtml("today");
+      assert.ok(section.includes("Zu entscheiden:"));
+      assert.ok(section.includes("Der Auftrag wurde zur\u00fcckgegeben und wartet auf deine n\u00e4chste Entscheidung."));
+      assert.ok(section.includes("Das Ergebnis wartet auf deine Pr\u00fcfung."));
+      assert.ok(section.includes("Der Auftrag ist blockiert und wartet auf deine Entscheidung."));
+      assert.ok(section.includes("Der Auftrag wartet auf deine Freigabe."));
+    },
+  );
+
+  await check("V8.8.4 (6): „Warum blockiert?“/„Warum zurückgegeben?“ bleibt vollständig erhalten", () => {
+    const section = sectionHtml("today");
+    assert.ok(section.includes("Warum blockiert?"));
+    assert.ok(section.includes("Die Schnittstelle ist noch nicht abgenommen."));
+    assert.ok(section.includes("Warum zur\u00fcckgegeben?"));
+    assert.ok(section.includes("Der Text muss vor Freigabe gek\u00fcrzt werden."));
+  });
+
+  await check("V8.8.4 (7): „Empfehlung“ bleibt vollständig erhalten", () => {
+    const section = sectionHtml("today");
+    assert.ok(section.includes("Empfehlung:"));
+    assert.ok(section.includes("Die Dokumentation empfiehlt die Freigabe."));
+  });
+
+  await check("V8.8.4 (8): „Wichtig zu beachten“ bleibt vollständig erhalten", () => {
+    const section = sectionHtml("today");
+    assert.ok(section.includes("Wichtig zu beachten:"));
+    assert.ok(section.includes("Die Datenbasis ist noch unvollst\u00e4ndig."));
+  });
+
+  await check("V8.8.4 (9): Wartedauer bleibt für jeden Eintrag vollständig erhalten", () => {
+    const section = sectionHtml("today");
+    const waitLabels = (section.match(/<span class="chef-today-row-wait">([^<]*)<\/span>/g) || []).map((entry) =>
+      entry.replace(/<[^>]+>/g, ""),
+    );
+    assert.deepStrictEqual(waitLabels.slice().sort(), ["Gestern", "Heute", "Heute", "Seit 3 Tagen"].sort());
+  });
+
+  await check("V8.8.4 (10): „Entscheidung öffnen“ bleibt für jeden Eintrag vollständig erhalten", () => {
+    const section = sectionHtml("today");
+    const openLabels = section.match(/<span class="chef-today-row-open">Entscheidung \u00f6ffnen<\/span>/g) || [];
+    assert.strictEqual(openLabels.length, 4, "jede Zeile beh\u00e4lt ihre eigene „Entscheidung öffnen“-Beschriftung");
+  });
+
+  await check(
+    "V8.8.4 (11): die Detailansicht (Pilotauftrags-Karte) enthält weiterhin den echten, unveränderten Aktionsknopf",
+    () => {
+      assert.match(pilotUiJs, /function renderPrimaryAction/, "renderPrimaryAction() bleibt vollst\u00e4ndig in der Pilotauftrags-Karte erhalten");
+      assert.doesNotMatch(js, /function renderPrimaryAction/, "chef-today-ui.js erzeugt keinen eigenen Aktionsknopf");
+      assert.doesNotMatch(pilotUiJs, /V8\.8\.4/, "die Pilotauftrags-Karte wird durch V8.8.4 nicht ver\u00e4ndert");
+    },
+  );
+
+  await check("V8.8.4 (12): keine POST-/PATCH-/DELETE-Aufrufe", () => {
+    assert.deepStrictEqual(postCalls(), []);
+    assert.doesNotMatch(js, /"POST"|'POST'|"PATCH"|'PATCH'|"DELETE"|'DELETE'/);
+  });
+
+  await check("V8.8.4 (13): keine neue Route", () => {
+    const routeMatches = js.match(/\/api\/[a-zA-Z0-9\-\/]+/g) || [];
+    assert.ok(routeMatches.length > 0, "die bestehenden Leseroute muss weiterhin verwendet werden");
+    routeMatches.forEach((route) => {
+      assert.ok(route.startsWith("/api/pilot-work-order/orders"), `keine neue Route erwartet, gefunden: ${route}`);
+    });
+  });
+
+  await check("V8.8.4 (14): keine Mutation der Auftragsdaten", () => {
+    const orders = ui.getState().orders;
+    const before = orders.map((order) => JSON.stringify(order));
+    ui.render();
+    const after = ui.getState().orders.map((order) => JSON.stringify(order));
+    assert.deepStrictEqual(before, after, "das Rendern der Startkarte darf die Auftragsdaten nicht ver\u00e4ndern");
+  });
+
+  await check(
+    "V8.8.4 (15): Navigation unverändert (weiterhin genau drei bekannte Aktionen, „Entscheidung öffnen“ ruft weiterhin openOrder())",
+    () => {
+      const actions = Array.from(new Set(js.match(/data-chef-today-action="([a-z-]+)"/g) || []));
+      assert.deepStrictEqual(
+        actions.slice().sort(),
+        ['data-chef-today-action="open-order"', 'data-chef-today-action="open-recommended"', 'data-chef-today-action="open-new-order"'].sort(),
+      );
+      pilotControls = ui.getState().orders.map((order) => makePilotControl("select-order", order.id));
+      pilotClicks.length = 0;
+      fetchCalls.length = 0;
+      const opened = ui.openOrder("v884-blocked");
+      assert.strictEqual(opened, true);
+      assert.deepStrictEqual(pilotClicks, [{ action: "select-order", orderId: "v884-blocked" }]);
+      assert.deepStrictEqual(fetchCalls, [], "\u201eEntscheidung \u00f6ffnen\u201c l\u00f6st weiterhin keinen Abruf aus");
+    },
+  );
+
+  await check(
+    "V8.8.4: styles.css enthält keine .chef-today-row-action-Regel mehr, die übrigen Zeilenklassen bleiben unverändert",
+    () => {
+      assert.doesNotMatch(css, /\.chef-today-row-action\b/);
+      assert.match(css, /\.chef-today-row-decision\b/);
+      assert.match(css, /\.chef-today-row-reason\b/);
+      assert.match(css, /\.chef-today-row-recommendation\b/);
+      assert.match(css, /\.chef-today-row-risk\b/);
+      assert.match(css, /\.chef-today-row-line\b/);
+      assert.match(css, /\.chef-today-row-open\b/);
+    },
+  );
+
+  await check(
+    "V8.8.4: chef-today-ui.js enthält keinen Rest von PRIMARY_ACTION_LABEL_BY_STATUS/primaryActionLabelFor mehr (nur die erklärende Prosa im Modulkopf über die Entfernung bleibt zulässig)",
+    () => {
+      // Bewusst nur echte Code-Nutzung ist ein Befund (Definition, Zugriff,
+      // Aufruf, Export) – dieselbe Konvention wie bei der bestehenden
+      // decisionReasonHistory-Prüfung (siehe V8.7 Stufe C (46)): der
+      // Modulkopf erklärt in Prosa ausdrücklich, WARUM/WAS entfernt wurde,
+      // das ist erlaubt und gewollt.
+      assert.doesNotMatch(js, /\bvar PRIMARY_ACTION_LABEL_BY_STATUS\b/);
+      assert.doesNotMatch(js, /PRIMARY_ACTION_LABEL_BY_STATUS\[/);
+      assert.doesNotMatch(js, /PRIMARY_ACTION_LABEL_BY_STATUS:\s*PRIMARY_ACTION_LABEL_BY_STATUS/);
+      assert.doesNotMatch(js, /\bfunction primaryActionLabelFor\b/);
+      assert.doesNotMatch(js, /primaryActionLabelFor\(order\)/);
+      assert.doesNotMatch(js, /primaryActionLabelFor:\s*primaryActionLabelFor/);
+      assert.strictEqual(typeof ui.primaryActionLabelFor, "undefined", "die Funktion darf nicht mehr exportiert werden");
+      assert.strictEqual(typeof ui.PRIMARY_ACTION_LABEL_BY_STATUS, "undefined", "die Konstante darf nicht mehr exportiert werden");
+    },
+  );
+
+  await check("V8.8.4: weiterhin kein schreibender Request über den gesamten V8.8.4-Testlauf hinweg", () => {
+    assert.deepStrictEqual(postCalls(), []);
+  });
+
+  clearDecisionReasonOverrides();
+  clearHandoffAndRiskOverrides();
 
   console.log(`chef-today-ui.test.js: ${passed} Prüfpunkte erfolgreich`);
 }

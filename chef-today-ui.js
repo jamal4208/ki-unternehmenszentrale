@@ -146,6 +146,22 @@
  * dadurch gar nicht mehr. Sobald mindestens ein Eintrag vorhanden ist,
  * bleibt die Darstellung (Überschrift, Zeilen, Fortschritt/Statuslabel)
  * byte- bzw. inhaltsgleich zum Stand vor V8.8.1.
+ *
+ * V8.8.4 ("Verfügbare Aktion aus 'Heute wichtig' entfernen", rein
+ * darstellend): die Zeile "Verfügbare Aktion" (V8.5, siehe oben) wird aus
+ * jeder Zeile in "Heute wichtig" entfernt – sie ist vollständig aus der
+ * bereits sichtbaren Kategorie (TODAY_REASON_BY_STATUS) ableitbar und trägt
+ * keine zusätzliche Information. Entfernt wurden ausschließlich: der
+ * renderTodayRowLine()-Aufruf für diese Zeile in renderTodayRow(), die
+ * Ableitungsfunktion primaryActionLabelFor() sowie die dafür verwendete
+ * Konstante PRIMARY_ACTION_LABEL_BY_STATUS (inklusive ihrer Exporte für
+ * chef-today-ui.test.js). Kategorie, Titel, "Zu entscheiden", "Warum
+ * blockiert"/"Warum zurückgegeben", Empfehlung, "Wichtig zu beachten",
+ * Wartedauer und "Entscheidung öffnen" bleiben unverändert – ebenso die
+ * eigentliche Primäraktion als echter Button in der bestehenden
+ * Pilotauftrags-Karte (pilot-work-order-ui.js#renderPrimaryAction),
+ * erreichbar wie zuvor über openOrder(). Keine neue Funktion, keine neue
+ * Route, kein neuer Bedienzustand, keine Statusänderung.
  */
 
 (function () {
@@ -321,11 +337,18 @@
   }
 
   // -----------------------------------------------------------------------
-  // V8.5 ("Entscheidungen im Chefmodus besser vorbereiten") – Empfehlung,
-  // Risiko/Grenze und verfügbare Aktion. Alle drei Funktionen sind reine
-  // Lesefunktionen auf dem bereits geladenen state.todayOverviewByOrderId
-  // (siehe loadTodayOverviews() oben) bzw. auf order.status – keine neue
-  // Regel, keine neue Priorisierung, keine Statusänderung.
+  // V8.5 ("Entscheidungen im Chefmodus besser vorbereiten") – Empfehlung und
+  // Risiko/Grenze. Beide Funktionen sind reine Lesefunktionen auf dem
+  // bereits geladenen state.todayOverviewByOrderId (siehe
+  // loadTodayOverviews() oben) bzw. auf order.status – keine neue Regel,
+  // keine neue Priorisierung, keine Statusänderung.
+  //
+  // V8.8.4 ("Verfügbare Aktion aus 'Heute wichtig' entfernen"): die dritte,
+  // ursprünglich hier beschriebene Ableitung (primaryActionLabelFor(),
+  // PRIMARY_ACTION_LABEL_BY_STATUS) wurde entfernt – siehe Modulkopf oben
+  // für die Begründung. Die eigentliche Primäraktion bleibt vollständig in
+  // der bestehenden Pilotauftrags-Karte erhalten; hier entfällt lediglich
+  // die zusätzliche, aus der Kategorie ohnehin ableitbare Klartextzeile.
   // -----------------------------------------------------------------------
 
   // Dieselbe Rolle, an die die bestehende Pilotauftrags-Karte
@@ -442,24 +465,6 @@
     if (!reason || typeof reason.text !== "string") return null;
     if (reason.text.trim().length === 0) return null;
     return reason.text;
-  }
-
-  // Verfügbare Aktion (Auftrag Abschnitt "D. Verfügbare Aktion"): eine reine,
-  // statische Status-zu-Klartext-Ableitung. Die Werte spiegeln wortgleich
-  // die vier tatsächlichen Primäraktionen aus
-  // pilot-work-order-ui.js#renderPrimaryAction – kein DOM-Zugriff, keine
-  // Aktion, kein neuer Statuswert. BLOCKED spiegelt bewusst den tatsächlichen
-  // Button-Text "Entsperren (zurückgeben)" (nicht "Entsperren und
-  // zurückgeben") – so lautet der reale, im UI verdrahtete Text.
-  var PRIMARY_ACTION_LABEL_BY_STATUS = {
-    RETURNED: "Erneut als Entwurf starten",
-    READY_FOR_REVIEW: "Ergebnis abnehmen",
-    BLOCKED: "Entsperren (zur\u00fcckgeben)",
-    READY_FOR_JAMAL_APPROVAL: "Ausf\u00fchrung freigeben",
-  };
-
-  function primaryActionLabelFor(order) {
-    return (order && PRIMARY_ACTION_LABEL_BY_STATUS[order.status]) || null;
   }
 
   // Rein darstellende, nachvollziehbare Begrenzung (Auftrag Abschnitt "F.
@@ -671,9 +676,10 @@
   // decisionReasonTextFor()/decisionReasonLineLabel() – ergänzt die Zeile
   // darüber, ersetzt sie nie), optional "Empfehlung"
   // (recommendationTextFor()), optional "Wichtig zu beachten"
-  // (riskTextFor()), Wartedauer, "Verfügbare Aktion"
-  // (primaryActionLabelFor()) und die sichtbare Beschriftung "Entscheidung
-  // öffnen". Die ganze Zeile bleibt EIN bestehender Button
+  // (riskTextFor()), Wartedauer und die sichtbare Beschriftung "Entscheidung
+  // öffnen". V8.8.4: die zuvor hier zusätzlich gerenderte, aus der Kategorie
+  // bereits ableitbare Zeile "Verfügbare Aktion" entfällt (siehe Modulkopf).
+  // Die ganze Zeile bleibt EIN bestehender Button
   // (data-chef-today-action="open-order", siehe bindActionHandlersOnce) –
   // jede Beschriftung ist ausschließlich sichtbarer Text, kein zweites,
   // eigenständiges Bedienelement, keine Aktion, kein neuer Navigationspfad.
@@ -697,7 +703,6 @@
       renderTodayRowLine("chef-today-row-recommendation", "Empfehlung", recommendationTextFor(order)) +
       renderTodayRowLine("chef-today-row-risk", "Wichtig zu beachten", riskTextFor(order)) +
       (wait ? '<span class="chef-today-row-wait">' + escapeHtml(wait) + "</span>" : "") +
-      renderTodayRowLine("chef-today-row-action", "Verf\u00fcgbare Aktion", primaryActionLabelFor(order)) +
       '<span class="chef-today-row-open">Entscheidung \u00f6ffnen</span>' +
       "</button>"
     );
@@ -999,8 +1004,6 @@
       riskTextFor: riskTextFor,
       decisionReasonLineLabel: decisionReasonLineLabel,
       decisionReasonTextFor: decisionReasonTextFor,
-      primaryActionLabelFor: primaryActionLabelFor,
-      PRIMARY_ACTION_LABEL_BY_STATUS: PRIMARY_ACTION_LABEL_BY_STATUS,
       CHEF_TODAY_ROW_TEXT_DISPLAY_LIMIT: CHEF_TODAY_ROW_TEXT_DISPLAY_LIMIT,
       truncateForRowDisplay: truncateForRowDisplay,
       openOrder: openOrder,
