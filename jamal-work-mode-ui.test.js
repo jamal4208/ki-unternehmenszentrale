@@ -268,4 +268,62 @@ check("alle Aktionen laufen ausschließlich über /api/jamal-work-mode/*", () =>
   assert.doesNotMatch(js, /\/api\/(owner|portal|v71)\//);
 });
 
+// ---------------------------------------------------------------------------
+// 29. V8.8.2 – "Bisheriger Tageslauf" (Guided Work, Execution Bridge) bleibt
+//     vollständig vorhanden, ist aber standardmäßig geschlossen. Prüft
+//     gezielt das äußere <details class="jamal-work-secondary">-Element
+//     (nicht irgendein inneres <details>) und alle bisherigen
+//     Vollständigkeitsmerkmale bleiben additiv erhalten.
+// ---------------------------------------------------------------------------
+
+check(
+  "„Bisheriger Tageslauf“ (Guided Work, Execution Bridge) ist vollständig vorhanden und standardmäßig geschlossen (V8.8.2)",
+  () => {
+    const classIndex = html.indexOf('class="jamal-work-secondary"');
+    assert.ok(classIndex >= 0, "Container .jamal-work-secondary muss weiterhin vorhanden sein");
+
+    const outerDetailsStart = html.lastIndexOf("<details", classIndex);
+    assert.ok(
+      outerDetailsStart >= 0 && outerDetailsStart < classIndex,
+      "äußeres <details>-Element von .jamal-work-secondary muss auffindbar sein"
+    );
+
+    const outerDetailsTagEnd = html.indexOf(">", classIndex);
+    assert.ok(outerDetailsTagEnd > classIndex, "öffnendes <details>-Tag muss abgeschlossen sein");
+    const outerDetailsOpenTag = html.slice(outerDetailsStart, outerDetailsTagEnd + 1);
+
+    assert.strictEqual(
+      outerDetailsOpenTag,
+      '<details class="jamal-work-secondary">',
+      "das äußere <details>-Element von .jamal-work-secondary darf kein open-Attribut tragen"
+    );
+    assert.doesNotMatch(
+      outerDetailsOpenTag,
+      /\bopen\b/,
+      "das äußere <details>-Element von .jamal-work-secondary darf kein open-Attribut tragen"
+    );
+
+    const summaryText = "<summary>Bisheriger Tageslauf (Guided Work, Execution Bridge)</summary>";
+    assert.ok(html.includes(summaryText), "Zusammenfassungszeile muss unverändert weiterhin vorhanden sein");
+    const summaryIndex = html.indexOf(summaryText);
+    assert.ok(
+      summaryIndex > outerDetailsStart,
+      "Zusammenfassungszeile muss innerhalb des äußeren <details>-Elements von .jamal-work-secondary stehen"
+    );
+
+    assert.ok(html.includes('id="daily-work-run-section"'), "#daily-work-run-section muss weiterhin enthalten sein");
+    const dailyRunIndex = html.indexOf('id="daily-work-run-section"');
+    assert.ok(
+      dailyRunIndex > summaryIndex,
+      "#daily-work-run-section muss innerhalb des Bereichs nach der Zusammenfassungszeile stehen"
+    );
+
+    const outerDetailsCloseIndex = html.indexOf("</details>", dailyRunIndex);
+    assert.ok(
+      outerDetailsCloseIndex > dailyRunIndex,
+      "das äußere <details>-Element von .jamal-work-secondary muss erst nach #daily-work-run-section schließen"
+    );
+  }
+);
+
 console.log(`jamal-work-mode-ui.test.js: ${passed} Prüfpunkte erfolgreich`);
