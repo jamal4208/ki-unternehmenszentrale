@@ -199,6 +199,25 @@
  * wichtig" ohne Klammerzusatz. Keine Pluralregel, keine Formatierung,
  * keine Begrenzung, keine neue CSS-Klasse, keine Badge-/Pillenwirkung –
  * die Zahl ist reiner Text innerhalb der bereits vorhandenen Überschrift.
+ *
+ * V8.9.3 ("Ein einziger, klarer Abschlusssatz im Leerzustand", rein
+ * darstellend – Jamals Produktentscheidung zu Wortlaut und Verteilung liegt
+ * vor): vor V8.9.3 zeigte ein leerer Tag zwei Verneinungen direkt
+ * untereinander ("Heute wartet nichts auf deine Entscheidung." unter "Heute
+ * wichtig" UND "Es gibt heute keine Arbeit, die auf dich wartet." unter
+ * "Empfohlene nächste Arbeit") – R7 aus dem Architekturbericht "V8.9 – Der
+ * 15-Sekunden-Chefmodus". Jetzt trägt ausschließlich der Empfehlungsabschnitt
+ * eine Aussage im Leerzustand ("Im Moment wartet keine Entscheidung auf
+ * dich.", bewusst enger gefasst als "der ganze Tag" – bleibt wahr, auch
+ * solange DRAFT/APPROVED_FOR_EXECUTION im Chefmodus unsichtbar sind, siehe
+ * offene Lücke R3). renderTodaySection() liefert im Leerzustand jetzt einen
+ * leeren Abschnittskörper ohne Ersatztext ("" statt renderEmpty(...)) – die
+ * Überschrift "Heute wichtig" (unverändert seit V8.9.2 ohne "(0)") bleibt
+ * stehen, die Sektion selbst bleibt vollständig gerendert (kein Vorgriff auf
+ * die bei V8.8.1 freigegebene Regel, dass die drei handlungsorientierten
+ * Bereiche im Leerzustand erhalten bleiben). Der Nicht-Leerzustand beider
+ * Abschnitte, die Reihenfolge (sectionOrder()) und jede andere Sektion
+ * bleiben byte-/inhaltsgleich zum Stand vor V8.9.3.
  */
 
 (function () {
@@ -760,7 +779,10 @@
   function renderTodaySection(orders) {
     var items = selectToday(orders);
     if (items.length === 0) {
-      return renderSection("today", "Heute wichtig", renderEmpty("Heute wartet nichts auf deine Entscheidung."));
+      // V8.9.3 – die frühere Verneinung entfällt ersatzlos: die Sektion
+      // bleibt bestehen (Überschrift unverändert), ihr Körper ist absichtlich
+      // leer. Die eine verbleibende Aussage steht in renderRecommendationSection().
+      return renderSection("today", "Heute wichtig", "");
     }
     // V8.4 – die Abrufgrenze (TODAY_OVERVIEW_FETCH_LIMIT) begrenzt nur die
     // Anzahl der nachgeladenen Einzel-Overviews, nie die Sichtbarkeit:
@@ -836,10 +858,13 @@
   function renderRecommendationSection(orders) {
     var recommended = selectRecommendedNextWork(orders);
     if (!recommended) {
+      // V8.9.3 – der einzige verbleibende Abschlusssatz im Leerzustand:
+      // bewusst enger gefasst auf offene Entscheidungen statt auf "den
+      // ganzen Tag" (siehe Modulkopf V8.9.3 und offene Lücke R3).
       return renderSection(
         "recommendation",
         "Empfohlene n\u00e4chste Arbeit",
-        renderEmpty("Es gibt heute keine Arbeit, die auf dich wartet."),
+        renderEmpty("Im Moment wartet keine Entscheidung auf dich."),
       );
     }
     var reason = reasonFor(recommended) || progressTextFor(recommended);

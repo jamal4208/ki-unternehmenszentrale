@@ -803,7 +803,9 @@ async function run() {
 
   await check("ohne entscheidungsrelevanten Vorgang empfiehlt die Startseite genau eine laufende Arbeit", () => {
     assert.deepStrictEqual(rowTitles("today"), []);
-    assert.ok(sectionHtml("today").includes("Heute wartet nichts auf deine Entscheidung."));
+    // V8.9.3 – "Heute wichtig" trägt im Leerzustand keine eigene Aussage mehr
+    // (leerer Abschnittskörper, kein Verneinungstext).
+    assert.ok(!sectionHtml("today").includes('class="chef-today-empty"'));
     const titles = sectionHtml("recommendation").match(/<p class="chef-today-recommendation-title">/g) || [];
     assert.strictEqual(titles.length, 1);
     assert.strictEqual(ui.selectRecommendedNextWork(ui.getState().orders).title, "Laufende Arbeit 1");
@@ -814,9 +816,12 @@ async function run() {
     async () => {
       setOrders([]);
       await reload();
-      // 1/2/3 – die drei handlungsorientierten Bereiche bleiben vollständig.
-      assert.ok(sectionHtml("today").includes("Heute wartet nichts auf deine Entscheidung."));
-      assert.ok(sectionHtml("recommendation").includes("Es gibt heute keine Arbeit, die auf dich wartet."));
+      // 1/2/3 – die drei handlungsorientierten Bereiche bleiben vollständig
+      // (Sektionen weiterhin gerendert). Seit V8.9.3 trägt ausschließlich
+      // "Empfohlene nächste Arbeit" eine Aussage im Leerzustand – siehe die
+      // dortigen V8.9.3-Prüfpunkte weiter unten.
+      assert.ok(!sectionHtml("today").includes('class="chef-today-empty"'));
+      assert.ok(sectionHtml("recommendation").includes("Im Moment wartet keine Entscheidung auf dich."));
       assert.ok(sectionHtml("new-order").includes("Neuen Auftrag anlegen"));
       // 4/6 – "Läuft" und "Fertig" werden im Leerzustand gar nicht gerendert.
       assert.strictEqual(sectionExists("running"), false, 'V8.8.1: die leere Sektion "L\u00e4uft" darf im Leerzustand nicht gerendert werden');
@@ -2659,12 +2664,14 @@ async function run() {
     return match[1];
   }
 
-  await check('V8.9.2 (1): Leerzustand zeigt exakt "Heute wichtig" ohne "(0)", Leertext unver\u00e4ndert', async () => {
+  await check('V8.9.2 (1): Leerzustand zeigt exakt "Heute wichtig" ohne "(0)"', async () => {
     setOrders([]);
     await reload();
     assert.strictEqual(todayHeadingText(), "Heute wichtig");
     assert.doesNotMatch(todayHeadingText(), /\(0\)/);
-    assert.ok(sectionHtml("today").includes("Heute wartet nichts auf deine Entscheidung."));
+    // Seit V8.9.3 trägt "Heute wichtig" im Leerzustand keinen eigenen Text
+    // mehr (siehe dortige V8.9.3-Prüfpunkte) – hier wird ausschließlich die
+    // Überschrift selbst geprüft, unverändert seit V8.9.2.
   });
 
   await check('V8.9.2 (2): genau 1 entscheidungsrelevanter Auftrag zeigt exakt "Heute wichtig (1)"', async () => {
@@ -2846,6 +2853,129 @@ async function run() {
 
   await check("V8.9.2: weiterhin kein schreibender Request \u00fcber den gesamten V8.9.2-Testlauf hinweg", () => {
     assert.deepStrictEqual(postCalls(), []);
+  });
+
+  // -------------------------------------------------------------------------
+  // V8.9.3 – Ein einziger, klarer Abschlusssatz im Leerzustand: die frühere
+  // doppelte Verneinung (R7 aus dem Architekturbericht "V8.9 – Der
+  // 15-Sekunden-Chefmodus") entfällt. "Heute wichtig" zeigt im Leerzustand
+  // keinen eigenen Text mehr (leerer Abschnittskörper, Überschrift
+  // unverändert). "Empfohlene nächste Arbeit" trägt jetzt den einen
+  // verbleibenden Satz "Im Moment wartet keine Entscheidung auf dich." –
+  // bewusst auf offene Entscheidungen begrenzt statt auf "den ganzen Tag",
+  // damit der Satz unabhängig von der offenen Statuslücke R3
+  // (DRAFT/APPROVED_FOR_EXECUTION bleiben im Chefmodus unsichtbar) wahr
+  // bleibt. Ausschließlich Textänderungen in chef-today-ui.js – keine neue
+  // Route, kein neuer Zustand, keine Änderung an styles.css oder index.html.
+  // -------------------------------------------------------------------------
+
+  await check('V8.9.3 (1): leerer Tag – "Heute wichtig" bleibt gerendert, aber ohne eigenen Text', async () => {
+    setOrders([]);
+    await reload();
+    assert.strictEqual(sectionExists("today"), true, '"Heute wichtig" muss auch im Leerzustand weiterhin gerendert werden');
+    assert.strictEqual(todayHeadingText(), "Heute wichtig");
+    assert.ok(
+      !sectionHtml("today").includes('class="chef-today-empty"'),
+      '"Heute wichtig" darf im Leerzustand keinen Verneinungs-/Ersatztext mehr enthalten',
+    );
+  });
+
+  await check('V8.9.3 (2): leerer Tag – "Empfohlene n\u00e4chste Arbeit" tr\u00e4gt exakt den einen Abschlusssatz', () => {
+    assert.ok(sectionHtml("recommendation").includes("Im Moment wartet keine Entscheidung auf dich."));
+  });
+
+  await check("V8.9.3 (3): leerer Tag – beide fr\u00fcheren Verneinungstexte erscheinen nirgends mehr", () => {
+    assert.ok(!outputHtml().includes("Heute wartet nichts auf deine Entscheidung."));
+    assert.ok(!outputHtml().includes("Es gibt heute keine Arbeit, die auf dich wartet."));
+  });
+
+  await check("V8.9.3 (4): leerer Tag – der eine Abschlusssatz erscheint genau einmal im gesamten Output", () => {
+    const matches = outputHtml().match(/Im Moment wartet keine Entscheidung auf dich\./g) || [];
+    assert.strictEqual(matches.length, 1);
+  });
+
+  await check('V8.9.3 (5): leerer Tag – "Neuer Auftrag anlegen" bleibt als dritter handlungsorientierter Bereich unver\u00e4ndert vorhanden (keine Ausweitung auf V8.9.5)', () => {
+    assert.ok(sectionHtml("new-order").includes("Neuen Auftrag anlegen"));
+    const buttons = outputHtml().match(/class="primary-button"/g) || [];
+    assert.strictEqual(buttons.length, 1, "weiterhin genau ein prim\u00e4rer Startknopf im Leerzustand");
+  });
+
+  await check(
+    'V8.9.3 (6): "nur l\u00e4uft" (mindestens ein IN_EXECUTION, keine Entscheidung offen) – "Heute wichtig" bleibt ohne Text, die Empfehlung zeigt echte laufende Arbeit statt des Abschlusssatzes',
+    async () => {
+      setOrders([{ id: "v893-only-running", title: "Laufender Auftrag ohne Entscheidung", status: "IN_EXECUTION" }]);
+      await reload();
+      assert.ok(!sectionHtml("today").includes('class="chef-today-empty"'));
+      assert.ok(!sectionHtml("recommendation").includes("Im Moment wartet keine Entscheidung auf dich."));
+      const titles = sectionHtml("recommendation").match(/<p class="chef-today-recommendation-title">([^<]*)<\/p>/);
+      assert.ok(titles, "die Empfehlung muss die laufende Arbeit als echte Empfehlung zeigen");
+      assert.strictEqual(titles[1], "Laufender Auftrag ohne Entscheidung");
+    },
+  );
+
+  await check(
+    'V8.9.3 (7): "nur fertig" (mindestens ein COMPLETED, keine Entscheidung offen, nichts l\u00e4uft) – "Heute wichtig" bleibt ohne Text, die Empfehlung zeigt den einen Abschlusssatz',
+    async () => {
+      setOrders([{ id: "v893-only-done", title: "Abgeschlossener Auftrag", status: "COMPLETED" }]);
+      await reload();
+      assert.ok(!sectionHtml("today").includes('class="chef-today-empty"'));
+      assert.ok(sectionHtml("recommendation").includes("Im Moment wartet keine Entscheidung auf dich."));
+      assert.ok(sectionHtml("done").includes("Abgeschlossener Auftrag"), '"Fertig" bleibt von V8.9.3 unber\u00fchrt');
+    },
+  );
+
+  await check(
+    "V8.9.3 (8): Normalfall (mindestens eine offene Entscheidung) – Gegenprobe: nichts wurde ver\u00e4ndert",
+    async () => {
+      setOrders([{ id: "v893-decision-open", title: "Wichtiger Auftrag", status: "BLOCKED" }]);
+      await reload();
+      assert.strictEqual(todayHeadingText(), "Heute wichtig (1)");
+      assert.deepStrictEqual(rowTitles("today"), ["Wichtiger Auftrag"]);
+      assert.ok(!outputHtml().includes("Im Moment wartet keine Entscheidung auf dich."));
+      assert.ok(!outputHtml().includes("Heute wartet nichts auf deine Entscheidung."));
+      assert.ok(!outputHtml().includes("Es gibt heute keine Arbeit, die auf dich wartet."));
+      const titles = sectionHtml("recommendation").match(/<p class="chef-today-recommendation-title">([^<]*)<\/p>/);
+      assert.ok(titles, "im Normalfall bleibt die Empfehlung die tats\u00e4chlich empfohlene Arbeit");
+      assert.strictEqual(titles[1], "Wichtiger Auftrag");
+    },
+  );
+
+  await check("V8.9.3 (9): die beiden Reihenfolge-Anker bleiben unber\u00fchrt (Nicht-Leerzustand)", async () => {
+    setOrders([
+      { id: "v893-order-today", title: "Wichtiger Auftrag", status: "BLOCKED" },
+      { id: "v893-order-running", title: "Laufender Auftrag", status: "IN_EXECUTION" },
+      { id: "v893-order-done", title: "Fertiger Auftrag", status: "COMPLETED" },
+    ]);
+    await reload();
+    assert.deepStrictEqual(sectionOrder(), ["today", "recommendation", "new-order", "running", "done"]);
+  });
+
+  await check("V8.9.3 (10): renderTodaySection() liefert im Leerzustand einen leeren String statt renderEmpty(...)", () => {
+    const section = js.match(/function renderTodaySection\(orders\)\s*\{[\s\S]*?\n  \}/);
+    assert.ok(section, "renderTodaySection muss auffindbar sein");
+    assert.match(section[0], /return renderSection\("today", "Heute wichtig", ""\);/, "der Leerzustand von \u201eHeute wichtig\u201c muss einen leeren Abschnittsk\u00f6rper liefern");
+    assert.doesNotMatch(section[0], /renderEmpty\(/, "renderEmpty darf im Leerzustand von \u201eHeute wichtig\u201c nicht mehr aufgerufen werden");
+  });
+
+  await check('V8.9.3 (11): renderRecommendationSection() nutzt exakt den festgelegten Wortlaut, keine neue Ableitungsfunktion', () => {
+    const section = js.match(/function renderRecommendationSection\(orders\)\s*\{[\s\S]*?\n  \}/);
+    assert.ok(section, "renderRecommendationSection muss auffindbar sein");
+    assert.match(
+      section[0],
+      /renderEmpty\("Im Moment wartet keine Entscheidung auf dich\."\)/,
+      "der Leerzustand von \u201eEmpfohlene n\u00e4chste Arbeit\u201c muss exakt den festgelegten Wortlaut verwenden",
+    );
+  });
+
+  await check("V8.9.3 (12): keine Ver\u00e4nderung an styles.css oder index.html durch dieses Paket", () => {
+    assert.doesNotMatch(css, /chef-today-empty[a-z-]/i, "keine neue, spezialisierte CSS-Klasse f\u00fcr den Leerzustand");
+    assert.doesNotMatch(html, /Im Moment wartet keine Entscheidung auf dich/, "der Text lebt ausschlie\u00dflich in chef-today-ui.js, nicht statisch in index.html");
+  });
+
+  await check("V8.9.3 (13): keine neue Route, kein schreibender Aufruf, keine Mutation \u00fcber den gesamten V8.9.3-Testlauf hinweg", () => {
+    assert.deepStrictEqual(postCalls(), []);
+    const urls = Array.from(new Set(js.match(/"\/api\/[^"]*"/g) || []));
+    assert.deepStrictEqual(urls.sort(), ['"/api/pilot-work-order/orders"', '"/api/pilot-work-order/orders/"'].sort());
   });
 
   clearDecisionReasonOverrides();
