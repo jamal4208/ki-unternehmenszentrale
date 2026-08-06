@@ -2643,6 +2643,211 @@ async function run() {
     assert.deepStrictEqual(postCalls(), []);
   });
 
+  // -------------------------------------------------------------------------
+  // V8.9.2 – Anzahl offener Entscheidungen in "Heute wichtig" sichtbar
+  // machen: renderTodaySection() zeigt im Nicht-Leerzustand jetzt
+  // "Heute wichtig (" + items.length + ")" statt immer nur "Heute wichtig".
+  // items ist unverändert dasselbe, bereits vorhandene selectToday(orders)-
+  // Ergebnis – keine neue Berechnung, kein neuer State, keine Begrenzung
+  // durch TODAY_OVERVIEW_FETCH_LIMIT. Der Leerzustand bleibt exakt "Heute
+  // wichtig" ohne "(0)".
+  // -------------------------------------------------------------------------
+
+  function todayHeadingText() {
+    const match = sectionHtml("today").match(/<h3>([^<]*)<\/h3>/);
+    assert.ok(match, 'die \u00dcberschrift von "Heute wichtig" muss auffindbar sein');
+    return match[1];
+  }
+
+  await check('V8.9.2 (1): Leerzustand zeigt exakt "Heute wichtig" ohne "(0)", Leertext unver\u00e4ndert', async () => {
+    setOrders([]);
+    await reload();
+    assert.strictEqual(todayHeadingText(), "Heute wichtig");
+    assert.doesNotMatch(todayHeadingText(), /\(0\)/);
+    assert.ok(sectionHtml("today").includes("Heute wartet nichts auf deine Entscheidung."));
+  });
+
+  await check('V8.9.2 (2): genau 1 entscheidungsrelevanter Auftrag zeigt exakt "Heute wichtig (1)"', async () => {
+    setOrders([{ id: "v892-one", title: "Einzelner wichtiger Auftrag", status: "BLOCKED" }]);
+    await reload();
+    assert.strictEqual(todayHeadingText(), "Heute wichtig (1)");
+  });
+
+  await check('V8.9.2 (3): genau 2 entscheidungsrelevante Auftr\u00e4ge zeigen exakt "Heute wichtig (2)"', async () => {
+    setOrders([
+      { id: "v892-two-1", title: "Auftrag 1", status: "RETURNED" },
+      { id: "v892-two-2", title: "Auftrag 2", status: "BLOCKED" },
+    ]);
+    await reload();
+    assert.strictEqual(todayHeadingText(), "Heute wichtig (2)");
+  });
+
+  await check('V8.9.2 (4): genau 3 entscheidungsrelevante Auftr\u00e4ge zeigen exakt "Heute wichtig (3)"', async () => {
+    setOrders([
+      { id: "v892-three-1", title: "Auftrag 1", status: "RETURNED" },
+      { id: "v892-three-2", title: "Auftrag 2", status: "READY_FOR_REVIEW" },
+      { id: "v892-three-3", title: "Auftrag 3", status: "BLOCKED" },
+    ]);
+    await reload();
+    assert.strictEqual(todayHeadingText(), "Heute wichtig (3)");
+  });
+
+  await check('V8.9.2 (5): genau 5 entscheidungsrelevante Auftr\u00e4ge zeigen exakt "Heute wichtig (5)"', async () => {
+    setOrders(
+      Array.from({ length: 5 }, (unused, index) => ({
+        id: `v892-five-${index + 1}`,
+        title: `Auftrag ${index + 1}`,
+        status: "BLOCKED",
+      })),
+    );
+    await reload();
+    assert.strictEqual(todayHeadingText(), "Heute wichtig (5)");
+  });
+
+  await check(
+    'V8.9.2 (6): mehr als f\u00fcnf (acht) entscheidungsrelevante Auftr\u00e4ge zeigen exakt "Heute wichtig (8)", nicht "(5)" – die Overview-Abrufgrenze begrenzt die sichtbare Zahl nicht',
+    async () => {
+      setOrders(
+        Array.from({ length: 8 }, (unused, index) => ({
+          id: `v892-eight-${index + 1}`,
+          title: `Auftrag ${index + 1}`,
+          status: "BLOCKED",
+        })),
+      );
+      await reload();
+      assert.strictEqual(ui.TODAY_OVERVIEW_FETCH_LIMIT, 5, "die Abrufgrenze selbst bleibt unver\u00e4ndert 5");
+      assert.strictEqual(todayHeadingText(), "Heute wichtig (8)");
+      assert.notStrictEqual(todayHeadingText(), "Heute wichtig (5)");
+      // alle acht entscheidungsrelevanten Aufträge bleiben sichtbar –
+      // die Abrufgrenze begrenzt nur das Nachladen der Einzel-Overviews.
+      assert.strictEqual(rowTitles("today").length, 8);
+    },
+  );
+
+  await check("V8.9.2 (7): die Zahl basiert ausschlie\u00dflich auf selectToday()", async () => {
+    const orders = ui.getState().orders;
+    const match = todayHeadingText().match(/^Heute wichtig \((\d+)\)$/);
+    assert.ok(match, "die \u00dcberschrift muss dem Muster \u201eHeute wichtig (n)\u201c entsprechen");
+    assert.strictEqual(Number(match[1]), ui.selectToday(orders).length);
+  });
+
+  await check(
+    "V8.9.2 (8/9/10/11/12/13/14/15): gemischte Statusliste – DRAFT, APPROVED_FOR_EXECUTION, IN_EXECUTION und COMPLETED z\u00e4hlen nicht; RETURNED, READY_FOR_REVIEW, BLOCKED und READY_FOR_JAMAL_APPROVAL z\u00e4hlen",
+    async () => {
+      setOrders([
+        { id: "v892-mixed-draft", title: "Entwurf", status: "DRAFT" },
+        { id: "v892-mixed-approved", title: "Freigegeben, nicht gestartet", status: "APPROVED_FOR_EXECUTION" },
+        { id: "v892-mixed-running", title: "L\u00e4uft gerade", status: "IN_EXECUTION" },
+        { id: "v892-mixed-done", title: "Abgeschlossen", status: "COMPLETED" },
+        { id: "v892-mixed-returned", title: "Zur\u00fcckgegeben", status: "RETURNED" },
+        { id: "v892-mixed-review", title: "Ergebnis liegt vor", status: "READY_FOR_REVIEW" },
+        { id: "v892-mixed-blocked", title: "Blockiert", status: "BLOCKED" },
+        { id: "v892-mixed-approval", title: "Wartet auf Freigabe", status: "READY_FOR_JAMAL_APPROVAL" },
+      ]);
+      await reload();
+      assert.strictEqual(todayHeadingText(), "Heute wichtig (4)");
+      assert.strictEqual(ui.selectToday(ui.getState().orders).length, 4);
+    },
+  );
+
+  await check(
+    "V8.9.2 (16/17): Reihenfolge der Vorg\u00e4nge und Inhalt der Zeilen bleiben unver\u00e4ndert",
+    () => {
+      assert.deepStrictEqual(rowTitles("today"), [
+        "Zur\u00fcckgegeben",
+        "Ergebnis liegt vor",
+        "Blockiert",
+        "Wartet auf Freigabe",
+      ]);
+      const section = sectionHtml("today");
+      assert.ok(section.includes("Entscheidung notwendig"));
+      assert.ok(section.includes("Ergebnis wartet auf Pr\u00fcfung"));
+      assert.ok(section.includes("Auftrag blockiert"));
+      assert.ok(section.includes("Freigabe erforderlich"));
+      assert.ok(section.includes("Entscheidung \u00f6ffnen"));
+    },
+  );
+
+  await check(
+    'V8.9.2 (18): Leerzustand von "L\u00e4uft" und "Fertig" bleibt unver\u00e4ndert (weiterhin nicht gerendert, wenn kein laufender/abgeschlossener Auftrag vorhanden ist)',
+    async () => {
+      setOrders([{ id: "v892-only-today", title: "Nur ein wichtiger Auftrag", status: "BLOCKED" }]);
+      await reload();
+      assert.strictEqual(sectionExists("running"), false);
+      assert.strictEqual(sectionExists("done"), false);
+      assert.strictEqual(todayHeadingText(), "Heute wichtig (1)");
+    },
+  );
+
+  await check("V8.9.2 (19/21/22): keine neue API-Anfrage, keine schreibenden Aufrufe, keine neue Route", () => {
+    assert.deepStrictEqual(postCalls(), []);
+    fetchCalls.forEach((entry) => {
+      assert.strictEqual(entry.method, "GET");
+      assert.match(entry.url, /^\/api\/pilot-work-order\/orders/);
+    });
+    const urls = Array.from(new Set(js.match(/"\/api\/[^"]*"/g) || []));
+    assert.deepStrictEqual(urls.sort(), ['"/api/pilot-work-order/orders"', '"/api/pilot-work-order/orders/"'].sort());
+  });
+
+  await check("V8.9.2 (20): keine Mutation der Auftragsdaten", () => {
+    const before = ui.getState().orders.map((order) => `${order.id}:${order.status}`);
+    ui.render();
+    const after = ui.getState().orders.map((order) => `${order.id}:${order.status}`);
+    assert.deepStrictEqual(before, after);
+    assert.deepStrictEqual(
+      ui.getState().orders.map((order) => `${order.id}:${order.status}`),
+      backendOrders.map((order) => `${order.id}:${order.status}`),
+    );
+  });
+
+  await check("V8.9.2 (23): keine neue Interaktion – dieselben drei bestehenden Aktionen, kein neuer Handler an der \u00dcberschrift", () => {
+    const actions = Array.from(new Set(js.match(/data-chef-today-action="([a-z-]+)"/g) || []));
+    assert.deepStrictEqual(
+      actions.slice().sort(),
+      ['data-chef-today-action="open-order"', 'data-chef-today-action="open-recommended"', 'data-chef-today-action="open-new-order"'].sort(),
+    );
+    const headingMatch = sectionHtml("today").match(/<h3>[^<]*<\/h3>/);
+    assert.ok(headingMatch, "die \u00dcberschrift muss auffindbar sein");
+    assert.doesNotMatch(headingMatch[0], /data-|onclick=/i, "die \u00dcberschrift selbst bleibt reiner Text ohne Bedienelement");
+  });
+
+  await check('V8.9.2 (24): der V8.9.1-R\u00fcckweg "Zur\u00fcck zu Heute" bleibt unver\u00e4ndert vorhanden', () => {
+    const matches = html.match(/Zur\u00fcck zu Heute/g) || [];
+    assert.strictEqual(matches.length, 1);
+    const backLinkMatch = html.match(/<a\s[^>]*>Zur\u00fcck zu Heute<\/a>/);
+    assert.ok(backLinkMatch, "der R\u00fcckweg muss weiterhin als <a>-Element existieren");
+    assert.match(backLinkMatch[0], /href="#chef-today-card"/);
+  });
+
+  await check("V8.9.2 (25): der sichtbare Zahl-Zusatz enth\u00e4lt keine technische Sprache", async () => {
+    setOrders([{ id: "v892-final", title: "Letzter Test-Auftrag", status: "RETURNED" }]);
+    await reload();
+    const heading = todayHeadingText();
+    assert.strictEqual(heading, "Heute wichtig (1)");
+    assert.doesNotMatch(heading, /ID|API|JSON|URL|Route|Status|DRAFT|RETURNED|BLOCKED/i);
+    assert.doesNotMatch(heading, /[_#{}<>%]/);
+  });
+
+  await check("V8.9.2: keine neue Hilfsfunktion und keine Pluralregel wurden erg\u00e4nzt", () => {
+    const section = js.match(/function renderTodaySection\(orders\)\s*\{[\s\S]*?\n  \}/);
+    assert.ok(section, "renderTodaySection muss auffindbar sein");
+    assert.match(
+      section[0],
+      /"Heute wichtig \(" \+ items\.length \+ "\)"/,
+      "die \u00dcberschrift muss items.length direkt und unformatiert einsetzen",
+    );
+    assert.doesNotMatch(
+      section[0],
+      /items\.length === 1 \?|items\.length > 1 \?/,
+      "keine Fallunterscheidung nach Anzahl (keine Pluralregel)",
+    );
+    assert.doesNotMatch(section[0], /toFixed|toLocaleString|Math\.min|Math\.max/, "keine Zahlformatierung oder Begrenzung");
+  });
+
+  await check("V8.9.2: weiterhin kein schreibender Request \u00fcber den gesamten V8.9.2-Testlauf hinweg", () => {
+    assert.deepStrictEqual(postCalls(), []);
+  });
+
   clearDecisionReasonOverrides();
   clearHandoffAndRiskOverrides();
 

@@ -185,6 +185,20 @@
  * unverändert, unangetastet weiter. Kein neuer Zustand, keine
  * Aufklapplogik, keine Kritikalitätsklassifizierung, keine automatische
  * Zusammenfassung, kein Zugriff auf andere Daten, keine Mutation.
+ *
+ * V8.9.2 ("Anzahl offener Entscheidungen in 'Heute wichtig' sichtbar
+ * machen", rein darstellend): renderTodaySection() zeigt im
+ * Nicht-Leerzustand jetzt "Heute wichtig (" + items.length + ")" statt
+ * des zuvor immer gleichen Textes "Heute wichtig" – items ist unverändert
+ * dasselbe, bereits vorhandene Ergebnis von selectToday(orders), keine
+ * neue Berechnung, kein neuer State. Die Zahl ist deshalb bewusst NICHT
+ * durch TODAY_OVERVIEW_FETCH_LIMIT begrenzt: bei acht entscheidungs-
+ * relevanten Aufträgen steht "Heute wichtig (8)", auch wenn nur fünf
+ * Einzel-Overviews nachgeladen werden (siehe loadTodayOverviews() oben).
+ * Der Leerzustand (items.length === 0) bleibt exakt wie zuvor "Heute
+ * wichtig" ohne Klammerzusatz. Keine Pluralregel, keine Formatierung,
+ * keine Begrenzung, keine neue CSS-Klasse, keine Badge-/Pillenwirkung –
+ * die Zahl ist reiner Text innerhalb der bereits vorhandenen Überschrift.
  */
 
 (function () {
@@ -760,7 +774,7 @@
         : "";
     return renderSection(
       "today",
-      "Heute wichtig",
+      "Heute wichtig (" + items.length + ")",
       '<div class="chef-today-list">' +
         items
           .map(function (order) {
