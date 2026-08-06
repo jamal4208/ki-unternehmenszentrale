@@ -210,6 +210,15 @@
             </div>
             <div id="pilot-work-order-list-output" class="pilot-work-order-list-wrap" aria-live="polite">Lade Pilotaufträge…</div>
             <div id="pilot-work-order-output" aria-live="polite">Lade Pilotauftrag…</div>
+            <!--
+              V8.9.1 – Sichtbarer Rückweg zur Startkarte: reine Navigation
+              zurück zur bereits vorhandenen Karte #chef-today-card, nativer
+              HTML-Anker ohne JavaScript, ohne Event-Handler, ohne
+              Zustandslogik. Bewusst nach der sichtbaren Auftragsdetailfläche
+              #pilot-work-order-output und vor dem unteren aufklappbaren
+              Nachschaubereich (.pilot-work-order-details).
+            -->
+            <a href="#chef-today-card" id="pilot-work-order-back-to-today" class="pilot-work-order-back-to-today">Zurück zu Heute</a>
             <details class="pilot-work-order-details">
               <summary>Agentenzuordnung, Qualitätskriterien, Werkzeuge, Freigaben, Rollenübergaben</summary>
               <div id="pilot-work-order-diagnostics-output" aria-live="polite">Keine Details verfügbar.</div>

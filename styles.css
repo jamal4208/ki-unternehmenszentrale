@@ -10041,6 +10041,34 @@ details.local-agent-assignment-details > summary {
   margin-top: 6px;
 }
 
+/* V8.9.1 – Sichtbarer Rückweg "Zurück zu Heute" (kleinstmöglicher additiver
+   Klassenraum): ruhiger, sekundärer Textlink, kein Primärbutton, keine
+   Alarmfarbe, keine Animation. Zurückhaltend passend zur bestehenden
+   Kartengestaltung, ausreichend groß für Touch-Bedienung (iPad/Handy) und
+   mit sichtbarem Tastaturfokus über die bestehende --focus-Variable. */
+.pilot-work-order-back-to-today {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+  padding: 10px 2px;
+  border-radius: var(--radius-sm, 4px);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.pilot-work-order-back-to-today:hover {
+  color: var(--ink);
+}
+
+.pilot-work-order-back-to-today:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+
 .pilot-work-order-details summary {
   cursor: pointer;
   font-weight: var(--font-medium);

@@ -2552,6 +2552,97 @@ async function run() {
     assert.deepStrictEqual(postCalls(), []);
   });
 
+  // -------------------------------------------------------------------------
+  // V8.9.1 – Sichtbarer Rückweg "Zurück zu Heute" in der Pilotauftrags-Karte:
+  // rein statische Prüfung von index.html/styles.css. Nativer HTML-Anker,
+  // reine Navigation zu #chef-today-card, kein JavaScript, kein neuer
+  // Event-Handler, keine Zustandslogik. chef-today-ui.js und
+  // pilot-work-order-ui.js bleiben durch dieses Arbeitspaket unverändert.
+  // -------------------------------------------------------------------------
+
+  await check('V8.9.1 (1): der sichtbare Text "Zurück zu Heute" existiert exakt einmal', () => {
+    const matches = html.match(/Zur\u00fcck zu Heute/g) || [];
+    assert.strictEqual(matches.length, 1);
+  });
+
+  await check("V8.9.1 (2/3/4): der Rückweg steht innerhalb von #pilot-work-order-card, nach #pilot-work-order-output und vor dem unteren aufklappbaren Nachschaubereich", () => {
+    const cardOpenIndex = html.indexOf('id="pilot-work-order-card"');
+    const cardCloseIndex = html.indexOf("</section>", cardOpenIndex);
+    const outputIndex = html.indexOf('id="pilot-work-order-output"', cardOpenIndex);
+    const backLinkIndex = html.indexOf("Zur\u00fcck zu Heute", cardOpenIndex);
+    const detailsIndex = html.indexOf('<details class="pilot-work-order-details">', cardOpenIndex);
+    assert.ok(cardOpenIndex > -1, "#pilot-work-order-card muss existieren");
+    assert.ok(outputIndex > -1 && backLinkIndex > -1 && detailsIndex > -1, "alle vier Bezugspunkte müssen existieren");
+    assert.ok(backLinkIndex < cardCloseIndex, "der Rückweg muss innerhalb von #pilot-work-order-card stehen");
+    assert.ok(outputIndex < backLinkIndex, "der Rückweg muss nach #pilot-work-order-output stehen");
+    assert.ok(backLinkIndex < detailsIndex, "der Rückweg muss vor dem unteren aufklappbaren Nachschaubereich stehen");
+  });
+
+  await check("V8.9.1 (5/6): href lautet exakt #chef-today-card, die Ziel-ID chef-today-card existiert exakt einmal", () => {
+    const backLinkMatch = html.match(/<a\s[^>]*>Zur\u00fcck zu Heute<\/a>/);
+    assert.ok(backLinkMatch, "der Rückweg muss als <a>-Element mit exakt diesem Text vorliegen");
+    assert.match(backLinkMatch[0], /href="#chef-today-card"/, "href muss exakt #chef-today-card sein");
+    const targetIdMatches = html.match(/id="chef-today-card"/g) || [];
+    assert.strictEqual(targetIdMatches.length, 1, "die Ziel-ID chef-today-card darf nur exakt einmal existieren");
+  });
+
+  await check("V8.9.1 (7/8/9/10/11/12): der Rückweg ist ein reiner <a>, kein Button/Formularelement, ohne data-action/data-chef-today-action/data-view-jump/data-view-anchor", () => {
+    const backLinkMatch = html.match(/<a\s[^>]*>Zur\u00fcck zu Heute<\/a>/);
+    assert.ok(backLinkMatch, "der Rückweg muss ein <a>-Element sein");
+    const tag = backLinkMatch[0];
+    assert.doesNotMatch(tag, /data-action=/);
+    assert.doesNotMatch(tag, /data-chef-today-action=/);
+    assert.doesNotMatch(tag, /data-view-jump=/);
+    assert.doesNotMatch(tag, /data-view-anchor=/);
+    assert.doesNotMatch(tag, /role="button"/);
+    const cardOpenIndex = html.indexOf('id="pilot-work-order-card"');
+    const cardCloseIndex = html.indexOf("</section>", cardOpenIndex);
+    const cardSection = html.slice(cardOpenIndex, cardCloseIndex);
+    assert.ok(!/<button[^>]*>Zur\u00fcck zu Heute<\/button>/.test(cardSection), "kein <button> mit diesem Text");
+    assert.ok(!/<(input|select|textarea|form)\b[^>]*Zur\u00fcck zu Heute/.test(cardSection), "kein Formularelement mit diesem Text");
+  });
+
+  await check("V8.9.1 (13/14/15): kein neuer JavaScript-Handler, chef-today-ui.js und pilot-work-order-ui.js bleiben unverändert", () => {
+    assert.doesNotMatch(js, /V8\.9\.1/, "chef-today-ui.js wird durch V8.9.1 nicht verändert");
+    assert.doesNotMatch(pilotUiJs, /V8\.9\.1/, "pilot-work-order-ui.js wird durch V8.9.1 nicht verändert");
+    const backLinkMatch = html.match(/<a\s[^>]*>Zur\u00fcck zu Heute<\/a>/);
+    assert.ok(backLinkMatch, "der Rückweg muss als <a>-Element auffindbar sein");
+    assert.doesNotMatch(backLinkMatch[0], /data-view-jump/, "der neue Rückweg selbst darf keinen data-view-jump-Mechanismus verwenden");
+    assert.doesNotMatch(backLinkMatch[0], /data-view-anchor/, "der neue Rückweg selbst darf keinen data-view-anchor-Mechanismus verwenden");
+    assert.doesNotMatch(backLinkMatch[0], /onclick=/i, "kein neuer inline Event-Handler");
+  });
+
+  await check("V8.9.1 (16): der Rückweg erzeugt keine API-Anfrage und keine Schreibaktion", () => {
+    assert.deepStrictEqual(postCalls(), []);
+    const backLinkMatch = html.match(/<a\s[^>]*>Zur\u00fcck zu Heute<\/a>/);
+    assert.doesNotMatch(backLinkMatch[0], /\/api\//, "der native Anker darf keine API-Route referenzieren");
+  });
+
+  await check("V8.9.1 (17): der sichtbare Text enthält keine technische Sprache", () => {
+    const visibleText = "Zur\u00fcck zu Heute";
+    assert.strictEqual(visibleText, "Zurück zu Heute");
+    assert.doesNotMatch(visibleText, /ID|API|JSON|URL|Route|Anker|Handler|Event/i);
+    assert.doesNotMatch(visibleText, /[_#{}<>/]/, "keine technischen Sonderzeichen im sichtbaren Text");
+  });
+
+  await check("V8.9.1 (18/19): die CSS-Klasse ist additiv vorhanden und nicht als Primärbutton gestaltet", () => {
+    assert.match(css, /\.pilot-work-order-back-to-today\s*\{/, "die neue Klasse muss additiv in styles.css existieren");
+    const classBlockMatch = css.match(/\.pilot-work-order-back-to-today\s*\{[^}]*\}/);
+    assert.ok(classBlockMatch, "der Regelblock muss auffindbar sein");
+    assert.doesNotMatch(classBlockMatch[0], /border-radius:\s*999px/, "keine Pillenform wie die echten Primärbuttons");
+    assert.doesNotMatch(classBlockMatch[0], /^\s*background:/m, "keine gefüllte Hintergrundfläche wie ein Primärbutton");
+    assert.match(classBlockMatch[0], /text-decoration:\s*underline/, "als normaler Textlink erkennbar");
+    const backLinkMatch = html.match(/<a\s[^>]*>Zur\u00fcck zu Heute<\/a>/);
+    assert.match(backLinkMatch[0], /class="pilot-work-order-back-to-today"/, "das <a>-Element muss die neue Klasse tragen");
+  });
+
+  await check("V8.9.1 (20): bestehende Chefmodus-, Navigations- und Sicherheitsprüfungen dieser Datei bleiben vollständig grün", () => {
+    assert.match(html, /id="chef-today-card"/);
+    assert.match(html, /id="pilot-work-order-card"/);
+    assert.match(html, /id="pilot-work-order-output"/);
+    assert.deepStrictEqual(postCalls(), []);
+  });
+
   clearDecisionReasonOverrides();
   clearHandoffAndRiskOverrides();
 
