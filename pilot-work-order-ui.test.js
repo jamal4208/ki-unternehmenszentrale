@@ -393,4 +393,129 @@ check("RÜCK-Q11. die neuen deutschen Literale folgen der bestehenden \\uXXXX-Ko
   assert.match(js, /Wird zur\\u00fcckgegeben\\u2026/);
 });
 
+// ---------------------------------------------------------------------------
+// Arbeitspaket "Rein darstellende Fehler in der Pilotauftragskarte bereinigen":
+// die sichtbare Überschrift der Schritt-Empfehlung in der Kettenstatuskarte
+// wird ausschließlich beim Zusammenbau von .pilot-chain-status-card__next
+// gesetzt. Vorher setzten zusätzlich sieben Textzweige und nextChainStepHint()
+// dieselbe Überschrift in ihren eigenen Text, wodurch sichtbar
+// "Nächster sicherer Schritt: Nächster sicherer Schritt: …" bzw.
+// "Nächster sicherer Schritt: Nächster erlaubter Schritt: …" entstand.
+// ---------------------------------------------------------------------------
+
+const NEXT_STEP_LABEL_SAFE_SOURCE = 'var NEXT_STEP_LABEL_SAFE = "N\\u00e4chster sicherer Schritt";';
+const NEXT_STEP_LABEL_ALLOWED_SOURCE = 'var NEXT_STEP_LABEL_ALLOWED = "N\\u00e4chster erlaubter Schritt";';
+
+function chainStatusCardSource() {
+  const match = js.match(/function renderChainStatusCard\(overview\)\s*\{[\s\S]*?\n {2}\}/);
+  assert.ok(match, "renderChainStatusCard muss auffindbar sein");
+  return match[0];
+}
+
+function nextChainStepHintSource() {
+  const match = js.match(/function nextChainStepHint\(chain\)\s*\{[\s\S]*?\n {2}\}/);
+  assert.ok(match, "nextChainStepHint muss auffindbar sein");
+  return match[0];
+}
+
+check("DARST-Q1. beide sichtbaren Überschriften existieren genau einmal als Konstante (eine einzige Quelle, \\uXXXX-Konvention)", () => {
+  assert.ok(js.includes(NEXT_STEP_LABEL_SAFE_SOURCE), "NEXT_STEP_LABEL_SAFE muss als Konstante existieren");
+  assert.ok(js.includes(NEXT_STEP_LABEL_ALLOWED_SOURCE), "NEXT_STEP_LABEL_ALLOWED muss als Konstante existieren");
+  // Die Überschrift darf nirgends sonst als Literal auftauchen – weder als
+  // Klartext noch in \uXXXX-Schreibweise. Genau diese Doppelung war der Fehler.
+  const safeLiterals = js.match(/N(?:ä|\\u00e4)chster sicherer Schritt/g) || [];
+  const allowedLiterals = js.match(/N(?:ä|\\u00e4)chster erlaubter Schritt/g) || [];
+  assert.strictEqual(safeLiterals.length, 1, "„Nächster sicherer Schritt“ darf ausschließlich in NEXT_STEP_LABEL_SAFE stehen");
+  assert.strictEqual(allowedLiterals.length, 1, "„Nächster erlaubter Schritt“ darf ausschließlich in NEXT_STEP_LABEL_ALLOWED stehen");
+});
+
+check("DARST-Q2. genau eine Stelle setzt die sichtbare Überschrift: die Renderzeile der Kettenstatuskarte", () => {
+  assert.match(
+    js,
+    /html \+= '<p class="pilot-chain-status-card__next"><strong>' \+ escapeHtml\(nextStepLabel\) \+ ':<\/strong> ' \+ escapeHtml\(nextStepText\) \+ "<\/p>";/,
+    "die Überschrift muss aus nextStepLabel kommen, nicht aus einem festen Literal",
+  );
+  const cardSource = chainStatusCardSource();
+  assert.match(cardSource, /var nextStepLabel = NEXT_STEP_LABEL_SAFE;/, "Standardüberschrift ist „sicher“");
+  // Kein Textzweig darf die Überschrift in nextStepText schreiben.
+  const textAssignments = cardSource.match(/nextStepText = [^\n]*/g) || [];
+  assert.ok(textAssignments.length >= 8, "die bekannten Textzweige müssen erhalten bleiben");
+  textAssignments.forEach((assignment) => {
+    assert.doesNotMatch(assignment, /NEXT_STEP_LABEL_(SAFE|ALLOWED)/, `kein Textzweig darf die Überschrift in den Text schreiben: ${assignment}`);
+    assert.doesNotMatch(assignment, /Schritt: /, `kein Textzweig darf eine Überschrift mit Doppelpunkt voranstellen: ${assignment}`);
+  });
+});
+
+check("DARST-Q3. die fachliche Abschwächung „erlaubt“ bleibt erhalten und wird ausschließlich über die Überschrift getragen", () => {
+  const cardSource = chainStatusCardSource();
+  const hintSource = nextChainStepHintSource();
+  // Der Zweig der vollständig durchgelaufenen Kette schwächt bewusst ab.
+  assert.match(
+    cardSource,
+    /nextStepLabel = NEXT_STEP_LABEL_ALLOWED;\s*\n\s*nextStepText = "bei Bedarf oben manuell zur Abschlussprüfung vorlegen\.";/,
+    "der COMPLETED-Kettenzweig muss weiterhin „erlaubt“ statt „sicher“ sagen",
+  );
+  assert.match(
+    hintSource,
+    /chain\.chainStatus === "COMPLETED"[\s\S]*?label: NEXT_STEP_LABEL_ALLOWED/,
+    "nextChainStepHint muss die Abschwächung für die abgeschlossene Kette beibehalten",
+  );
+  const allowedUses = (cardSource + hintSource).match(/NEXT_STEP_LABEL_ALLOWED/g) || [];
+  assert.strictEqual(allowedUses.length, 2, "genau zwei fachlich begründete Abschwächungsstellen");
+});
+
+check("DARST-Q4. nextChainStepHint liefert Überschrift und Text getrennt und erzeugt damit kein Doppelpräfix", () => {
+  const hintSource = nextChainStepHintSource();
+  const returns = hintSource.match(/return [^\n]*/g) || [];
+  assert.strictEqual(returns.length, 4, "alle vier bisherigen Rückgabewege bleiben erhalten");
+  returns.forEach((entry) => {
+    assert.match(entry, /\{ label: NEXT_STEP_LABEL_(SAFE|ALLOWED), text: /, `jeder Rückgabeweg muss label und text trennen: ${entry}`);
+    assert.doesNotMatch(entry, /Schritt: /, `kein Rückgabetext darf eine Überschrift voranstellen: ${entry}`);
+  });
+  assert.match(js, /var chainStepHint = nextChainStepHint\(activeChain\);\s*\n\s*nextStepLabel = chainStepHint\.label;\s*\n\s*nextStepText = chainStepHint\.text;/);
+});
+
+check("DARST-Q5. keine fragile String-Reparatur: das Doppelpräfix wird strukturell vermieden, nicht nachträglich weggeschnitten", () => {
+  const cardSource = chainStatusCardSource();
+  const hintSource = nextChainStepHintSource();
+  [cardSource, hintSource].forEach((source) => {
+    assert.doesNotMatch(source, /\.replace\(/, "keine nachträgliche String-Reparatur an der Schritt-Empfehlung");
+    assert.doesNotMatch(source, /indexOf\("N/, "kein Suchen-und-Abschneiden der Überschrift");
+    assert.doesNotMatch(source, /startsWith\(/, "kein Präfix-Abgleich zur Laufzeit");
+  });
+});
+
+check("DARST-Q6. reine Darstellungsänderung: keine neue Route, kein neuer Fetch, kein neuer Zustand, kein neuer Eventlistener", () => {
+  const cardSource = chainStatusCardSource();
+  const hintSource = nextChainStepHintSource();
+  [cardSource, hintSource].forEach((source) => {
+    assert.doesNotMatch(source, /fetch\(|fetchJson\(|postAction\(/, "die Kettenstatuskarte bleibt rein darstellend");
+    assert.doesNotMatch(source, /addEventListener/, "kein neuer Eventlistener");
+    assert.doesNotMatch(source, /state\.[a-zA-Z]+ = /, "kein neuer oder veränderter Bedienzustand beim Rendern");
+  });
+  // Der lokale Zustand der Karte bleibt exakt derselbe wie zuvor.
+  assert.doesNotMatch(js, /nextStepLabel:/, "nextStepLabel ist eine lokale Rendervariable, kein neues State-Feld");
+});
+
+check("DARST-Q7. alle bisherigen Kettenzustände und ihre Hinweise bleiben im Quelltext vollständig erhalten", () => {
+  const cardSource = chainStatusCardSource();
+  [
+    /title = "Drei-Agenten-Kette ist noch nicht aktiv\.";/,
+    /title = "Noch keine Drei-Agenten-Kette vorbereitet\.";/,
+    /title = "Start wurde angenommen\. Der Agent wird gestartet\.";/,
+    /title = "Verbindung unterbrochen – Statusprüfung läuft weiter\.";/,
+    /title = "Alle drei Schritte abgeschlossen\.";/,
+    /lines\.push\("Codex arbeitet ausschließlich lesend\."\);/,
+    /lines\.push\("Typische Dauer: 1-3 Minuten\."\);/,
+    /lines\.push\("Bitte nicht erneut klicken\."\);/,
+    /lines\.push\("Gestartet um " \+ startedAtClock \+ " Uhr\."\);/,
+    /lines\.push\("Läuft seit " \+ elapsedText \+ "\."\);/,
+    /lines\.push\("Es wurde nichts automatisch weitergestartet\."\);/,
+    /lines\.push\("Der 15-Minuten-Sicherheitsdeckel wurde erreicht\."\);/,
+    /technicalDetailsHtml = buildChainFailureTechnicalDetailsHtml\(context, failurePresentation\);/,
+    /nextStepText = failurePresentation\.action;/,
+    /data-action="reload-chain-status"/,
+  ].forEach((pattern) => assert.match(cardSource, pattern, `erhaltener Kettenzustand/Hinweis fehlt: ${pattern}`));
+});
+
 console.log(`pilot-work-order-ui.test.js: ${passed} Prüfpunkte erfolgreich`);

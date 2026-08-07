@@ -2453,6 +2453,122 @@ async function run() {
     [1, 2, 3].forEach((stepNumber) => assert.match(html, new RegExp(v82RunIds[stepNumber])));
   });
 
+  // -------------------------------------------------------------------------
+  // Arbeitspaket "Rein darstellende Fehler in der Pilotauftragskarte
+  // bereinigen": die sichtbare Überschrift der Schritt-Empfehlung
+  // (.pilot-chain-status-card__next) setzt ausschließlich
+  // renderChainStatusCard. Vorher setzten sieben Textzweige und
+  // nextChainStepHint() dieselbe Überschrift zusätzlich in ihren eigenen Text –
+  // sichtbar entstand dadurch "Nächster sicherer Schritt: Nächster sicherer
+  // Schritt: …" bzw. die Präfixkollision mit "Nächster erlaubter Schritt:".
+  //
+  // Geprüft wird am tatsächlich gerenderten HTML beider Ausgabecontainer über
+  // alle Kettenzustände, die die Fixtur bis hierher real aufgebaut hat.
+  // -------------------------------------------------------------------------
+
+  const NEXT_LABEL_SAFE = "Nächster sicherer Schritt";
+  const NEXT_LABEL_ALLOWED = "Nächster erlaubter Schritt";
+
+  function chainStatusCardSections(html) {
+    return html.match(/<section class="pilot-chain-status-card[\s\S]*?<\/section>/g) || [];
+  }
+
+  function assertNextStepLineIsClean(cardHtml, context) {
+    assert.doesNotMatch(cardHtml, new RegExp(`${NEXT_LABEL_SAFE}:\\s*${NEXT_LABEL_SAFE}:`), `${context}: doppeltes „${NEXT_LABEL_SAFE}“`);
+    assert.doesNotMatch(cardHtml, new RegExp(`${NEXT_LABEL_SAFE}:\\s*${NEXT_LABEL_ALLOWED}:`), `${context}: Präfixkollision sicher/erlaubt`);
+    assert.doesNotMatch(cardHtml, new RegExp(`${NEXT_LABEL_ALLOWED}:\\s*${NEXT_LABEL_SAFE}:`), `${context}: Präfixkollision erlaubt/sicher`);
+    const safeCount = (cardHtml.match(new RegExp(NEXT_LABEL_SAFE, "g")) || []).length;
+    const allowedCount = (cardHtml.match(new RegExp(NEXT_LABEL_ALLOWED, "g")) || []).length;
+    assert.strictEqual(safeCount + allowedCount, 1, `${context}: die Schritt-Überschrift muss je Kettenstatuskarte genau einmal erscheinen`);
+    const nextLine = cardHtml.match(/<p class="pilot-chain-status-card__next">([\s\S]*?)<\/p>/);
+    assert.ok(nextLine, `${context}: die Schritt-Empfehlung muss vorhanden bleiben`);
+    assert.match(
+      nextLine[1],
+      new RegExp(`^<strong>(?:${NEXT_LABEL_SAFE}|${NEXT_LABEL_ALLOWED}):</strong> \\S`),
+      `${context}: genau eine Überschrift, danach ein nicht leerer Text`,
+    );
+  }
+
+  await check(
+    "DARST-1./2./3./6./9.: über alle real vorhandenen Kettenzustände erscheint die Schritt-Überschrift je Kettenstatuskarte genau einmal, in beiden Ausgabecontainern",
+    async () => {
+      const orderIds = Array.from(backend.orders.keys());
+      assert.ok(orderIds.length >= 5, "Testfixtur: mehrere Aufträge mit unterschiedlichen Kettenzuständen müssen vorliegen");
+      let inspectedCards = 0;
+      let failureCardsSeen = 0;
+      for (const orderId of orderIds) {
+        forcedOrderReadFailureCount = 0;
+        fetchCalls.length = 0;
+        // eslint-disable-next-line no-await-in-loop
+        await ui.selectOrder(orderId);
+        ui.render();
+        [
+          ["obere Karte", orderHtml()],
+          ["Detailbereich", diagnosticsHtml()],
+        ].forEach(([where, html]) => {
+          const cards = chainStatusCardSections(html);
+          assert.strictEqual(cards.length, 1, `${orderId} / ${where}: genau eine Kettenstatuskarte je Container`);
+          cards.forEach((card) => {
+            assertNextStepLineIsClean(card, `${orderId} / ${where}`);
+            assert.match(card, /<h4 class="pilot-chain-status-card__title">\S/, `${orderId} / ${where}: der Zustandstitel bleibt erhalten`);
+            if (/pilot-chain-status-card--failure/.test(card)) {
+              failureCardsSeen += 1;
+              assert.match(card, /<details class="pilot-chain-status-card__technical"><summary>Technische Details<\/summary>/, `${orderId} / ${where}: technische Fehlerdetails bleiben erreichbar`);
+            }
+            inspectedCards += 1;
+          });
+        });
+        assert.strictEqual(
+          fetchCalls.filter((entry) => entry.method === "POST").length,
+          0,
+          `${orderId}: reines Auswählen und Rendern darf keinen POST auslösen`,
+        );
+      }
+      assert.ok(inspectedCards >= 8, `es müssen mehrere Karten geprüft worden sein (geprüft: ${inspectedCards})`);
+      assert.ok(failureCardsSeen >= 1, "mindestens ein Fehlerzustand muss mitgeprüft worden sein");
+      timerHarness.clearAll();
+    },
+  );
+
+  await check(
+    "DARST-4./5.: die fachliche Abschwächung „Nächster erlaubter Schritt“ bleibt bei vollständig durchgelaufener Kette sichtbar erhalten",
+    async () => {
+      const order = backend.orders.get(v81CompletedOrderId);
+      assert.ok(order, "Testfixtur: der Auftrag mit vollständig abgeschlossener Kette muss vorhanden sein");
+      const originalStatus = order.status;
+      const originalStatusLabel = order.statusLabel;
+      // Der Zweig der abgeschlossenen Kette ist nur im laufenden
+      // Ausführungsstatus erreichbar (siehe renderChainStatusCard); der
+      // Auftragsstatus wird ausschließlich in der Fixtur gesetzt und danach
+      // wieder zurückgestellt – keine echte Statusänderung über die UI.
+      order.status = "IN_EXECUTION";
+      order.statusLabel = "In Ausführung";
+      order.revision += 1;
+      ui.getState().chainStartBridge = null;
+      fetchCalls.length = 0;
+      await ui.selectOrder(v81CompletedOrderId);
+      await ui.reloadSelectedOrder();
+      ui.render();
+      const card = chainStatusCardSections(orderHtml())[0] || "";
+      assert.match(card, /Alle drei Schritte abgeschlossen\./, "Testfixtur muss den Zweig der abgeschlossenen Kette erreichen");
+      assert.match(
+        card,
+        new RegExp(`<strong>${NEXT_LABEL_ALLOWED}:</strong> bei Bedarf oben manuell zur Abschlussprüfung vorlegen\\.`),
+        "die Abschwächung „erlaubt“ muss sichtbar bleiben",
+      );
+      assert.doesNotMatch(card, new RegExp(NEXT_LABEL_SAFE), "hier darf ausdrücklich NICHT „sicher“ stehen");
+      assertNextStepLineIsClean(card, "abgeschlossene Kette");
+      assert.match(card, /Der Pilotauftrag selbst ist damit noch nicht automatisch abgenommen\./);
+      assert.match(card, /Es wurde nichts automatisch weitergestartet\./);
+      assert.strictEqual(fetchCalls.filter((entry) => entry.method === "POST").length, 0, "kein POST durch diese Darstellung");
+      order.status = originalStatus;
+      order.statusLabel = originalStatusLabel;
+      order.revision += 1;
+      await ui.reloadSelectedOrder();
+      assert.strictEqual(ui.getState().overview.status, originalStatus, "der Auftragsstatus der Fixtur ist wieder zurückgestellt");
+    },
+  );
+
   console.log(`pilot-agent-execution-chain-ui.test.js: ${passed} Prüfpunkte erfolgreich`);
 }
 

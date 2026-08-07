@@ -2340,6 +2340,20 @@
     return "Schritt " + context.step.stepNumber + " wartet";
   }
 
+  // Die sichtbare Überschrift der Schritt-Empfehlung in der Kettenstatuskarte
+  // wird AUSSCHLIESSLICH an einer Stelle gesetzt (renderChainStatusCard unten,
+  // beim Zusammenbau von .pilot-chain-status-card__next). Kein Textzweig und
+  // keine Hilfsfunktion darf sie zusätzlich in den eigenen Text schreiben –
+  // sonst erscheint sie doppelt.
+  //
+  // "erlaubt" statt "sicher" ist eine bewusste fachliche Abschwächung: der
+  // Schritt ist zulässig, aber nicht der empfohlene Weg (heute genutzt, wenn
+  // die Kette vollständig durchgelaufen ist und ein Vorlegen zur
+  // Abschlussprüfung nur noch "bei Bedarf" sinnvoll ist). Diese Unterscheidung
+  // wird über nextStepLabel getragen, nicht über den Textinhalt.
+  var NEXT_STEP_LABEL_SAFE = "N\u00e4chster sicherer Schritt";
+  var NEXT_STEP_LABEL_ALLOWED = "N\u00e4chster erlaubter Schritt";
+
   function renderChainStatusCard(overview) {
     if (!overview || !overview.order) return "";
     var orderId = overview.order.id;
@@ -2357,18 +2371,19 @@
     var title = "Kettenstatus wird geladen.";
     var lines = [];
     var nextStepText = "Oben arbeiten. Unten nachschauen.";
+    var nextStepLabel = NEXT_STEP_LABEL_SAFE;
     var primaryButtonHtml = "";
     var technicalDetailsHtml = "";
 
     if (overview.status !== "IN_EXECUTION") {
       title = "Drei-Agenten-Kette ist noch nicht aktiv.";
       lines.push("Die Kette kann erst im laufenden Ausführungsstatus gestartet werden.");
-      nextStepText = "Nächster sicherer Schritt: " + (overview.nextStep || "oben die nächste Auftragsaktion ausführen.");
+      nextStepText = overview.nextStep || "oben die nächste Auftragsaktion ausführen.";
     } else if (!activeChain) {
       title = "Noch keine Drei-Agenten-Kette vorbereitet.";
       lines.push("Oben arbeiten. Unten nachschauen.");
       lines.push("Es läuft aktuell kein Agent.");
-      nextStepText = "Nächster sicherer Schritt: unten eine neue Agentenkette vorbereiten.";
+      nextStepText = "unten eine neue Agentenkette vorbereiten.";
     } else if (bridge && !hasRunning) {
       variant = "running";
       if (bridge.connectionInterrupted) {
@@ -2377,7 +2392,7 @@
           "Die Verbindung wurde während des Laufs unterbrochen. Der Lauf kann weiterlaufen oder bereits fertig sein. " +
             "Der Stand wird automatisch weiter geprüft. Bitte nicht erneut starten.",
         );
-        nextStepText = "Nächster sicherer Schritt: auf den bestätigten Serverstand warten.";
+        nextStepText = "auf den bestätigten Serverstand warten.";
       } else {
         title = "Start wurde angenommen. Der Agent wird gestartet.";
         lines.push("Die serverseitige Bestätigung wird automatisch geprüft.");
@@ -2388,7 +2403,7 @@
           }
         }
         lines.push("Bitte nicht erneut klicken.");
-        nextStepText = "Nächster sicherer Schritt: auf die erste bestätigte Servermeldung warten.";
+        nextStepText = "auf die erste bestätigte Servermeldung warten.";
       }
     } else if (hasRunning) {
       variant = "running";
@@ -2421,7 +2436,7 @@
             "Der Stand wird automatisch weiter geprüft. Bitte nicht erneut starten.",
         );
       }
-      nextStepText = "Nächster sicherer Schritt: auf den Abschluss dieses Schritts warten.";
+      nextStepText = "auf den Abschluss dieses Schritts warten.";
     } else if (activeChain.chainStatus === "COMPLETED") {
       variant = "success";
       title = "Alle drei Schritte abgeschlossen.";
@@ -2432,7 +2447,8 @@
       lines.push("Das Gesamturteil des Projektmanager-Agenten steht unten unter Details.");
       lines.push("Der Pilotauftrag selbst ist damit noch nicht automatisch abgenommen.");
       lines.push("Es wurde nichts automatisch weitergestartet.");
-      nextStepText = "Nächster erlaubter Schritt: bei Bedarf oben manuell zur Abschlussprüfung vorlegen.";
+      nextStepLabel = NEXT_STEP_LABEL_ALLOWED;
+      nextStepText = "bei Bedarf oben manuell zur Abschlussprüfung vorlegen.";
     } else if (activeStep && activeStep.stepStatus === "SUCCEEDED") {
       variant = "success";
       title = "Schritt " + activeStep.stepNumber + " erfolgreich abgeschlossen.";
@@ -2442,7 +2458,9 @@
       }
       lines.push("Das vollständige Ergebnis steht unten unter Details.");
       lines.push("Es wurde nichts automatisch weitergestartet.");
-      nextStepText = nextChainStepHint(activeChain);
+      var chainStepHint = nextChainStepHint(activeChain);
+      nextStepLabel = chainStepHint.label;
+      nextStepText = chainStepHint.text;
     } else if (activeChain.chainStatus === "FAILED" || activeChain.chainStatus === "BLOCKED" || (activeStep && activeStep.stepStatus === "FAILED") || state.chainActionError) {
       variant = "failure";
       title = activeChain.chainStatus === "BLOCKED" ? "Die Kette ist blockiert." : "Der Kettenschritt ist fehlgeschlagen.";
@@ -2463,7 +2481,7 @@
       if (waitingHasToken) {
         title = "Schritt " + waitingStep + " kann jetzt gestartet werden.";
         lines.push("Der Server bestätigt aktuell keinen laufenden Agenten.");
-        nextStepText = "Nächster sicherer Schritt: Schritt " + waitingStep + " unten manuell starten.";
+        nextStepText = "Schritt " + waitingStep + " unten manuell starten.";
       } else {
         title = "Schritt " + waitingStep + " wartet auf Freigabe.";
         lines.push("Der Server bestätigt aktuell keinen laufenden Agenten.");
@@ -2483,7 +2501,7 @@
         lines.push("Der 15-Minuten-Sicherheitsdeckel wurde erreicht.");
       }
       lines.push("Zuletzt bestätigter Stand: " + summarizeLastKnownChainStatus(context) + ".");
-      nextStepText = "Nächster sicherer Schritt: den aktuellen Stand manuell neu laden.";
+      nextStepText = "den aktuellen Stand manuell neu laden.";
       primaryButtonHtml = '<button type="button" class="primary-button" data-action="reload-chain-status">Aktuellen Stand neu laden</button>';
     }
 
@@ -2495,7 +2513,7 @@
     lines.forEach(function (line) {
       html += '<p class="pilot-chain-status-card__text">' + escapeHtml(line) + "</p>";
     });
-    html += '<p class="pilot-chain-status-card__next"><strong>Nächster sicherer Schritt:</strong> ' + escapeHtml(nextStepText) + "</p>";
+    html += '<p class="pilot-chain-status-card__next"><strong>' + escapeHtml(nextStepLabel) + ':</strong> ' + escapeHtml(nextStepText) + "</p>";
     if (primaryButtonHtml) {
       html += '<div class="pilot-chain-status-card__actions">' + primaryButtonHtml + "</div>";
     }
@@ -3463,16 +3481,20 @@
     return html;
   }
 
+  // Liefert Überschrift UND Text getrennt (siehe NEXT_STEP_LABEL_SAFE oben):
+  // die sichtbare Überschrift setzt ausschließlich renderChainStatusCard, damit
+  // sie nicht zweimal erscheint. Der COMPLETED-Fall behält die fachliche
+  // Abschwächung "erlaubt" über die Überschrift.
   function nextChainStepHint(chain) {
-    if (!chain) return "Nächster sicherer Schritt: unten den bestätigten Status prüfen.";
+    if (!chain) return { label: NEXT_STEP_LABEL_SAFE, text: "unten den bestätigten Status prüfen." };
     var waitingStep = waitingStepNumberForChain(chain);
     if (waitingStep === 1 || waitingStep === 2 || waitingStep === 3) {
-      return "Schritt " + waitingStep + " kann jetzt freigegeben werden.";
+      return { label: NEXT_STEP_LABEL_SAFE, text: "Schritt " + waitingStep + " kann jetzt freigegeben werden." };
     }
     if (chain.chainStatus === "COMPLETED") {
-      return "Nächster erlaubter Schritt: bei Bedarf oben manuell zur Abschlussprüfung vorlegen.";
+      return { label: NEXT_STEP_LABEL_ALLOWED, text: "bei Bedarf oben manuell zur Abschlussprüfung vorlegen." };
     }
-    return "Nächster sicherer Schritt: unten den bestätigten Status prüfen.";
+    return { label: NEXT_STEP_LABEL_SAFE, text: "unten den bestätigten Status prüfen." };
   }
 
   // Eine Schaltfläche für genau eine Stufe. `kind` ist "approve" oder
