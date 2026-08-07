@@ -507,6 +507,205 @@ async function run() {
     assert.deepStrictEqual(overview.decisionReasonHistory, []);
   });
 
+  // -------------------------------------------------------------------
+  // Teilpaket 1 – "Historischen decisionNeeded-Text nicht mehr als aktuelle
+  // Entscheidung anzeigen".
+  //
+  // `openDecision` beantwortet ausschließlich die Frage "was ist JETZT zu
+  // entscheiden?". `handoffs[].decisionNeeded` ist dagegen der historische
+  // Freitext einer einzelnen Rollenübergabe. Er wurde bis hierher als
+  // Rückfallwert für `openDecision` verwendet, ohne den aktuellen Status zu
+  // berücksichtigen – und blieb dadurch nach jedem Statuswechsel als
+  // vermeintlich offene Entscheidung stehen, bei COMPLETED sogar dauerhaft,
+  // obwohl dort nach assertOrderIsMutable() gar keine Aktion mehr möglich ist.
+  //
+  // Die Regel lautet jetzt: der Rückfallwert greift ausschließlich bei
+  // IN_EXECUTION. Das ist der einzige Status, in dem der Text aktuell sein
+  // KANN, denn submitHandoff() legt eine Übergabe nur aus IN_EXECUTION heraus
+  // an – jeder andere Status beweist damit einen zwischenzeitlichen
+  // Statuswechsel und macht den Text zu Historie.
+  //
+  // Die folgenden Prüfpunkte fahren dazu jeweils einen echten Auftrag über
+  // die regulären Dienstfunktionen durch die Statusmaschine; es wird nichts
+  // direkt in die Datenbank geschrieben und kein Status künstlich gesetzt.
+  const HISTORIC_DECISION_NEEDED =
+    "Jamal entscheidet über den Abschluss dieses Pilotlaufs (COMPLETED) oder gibt ihn zur Überarbeitung zurück.";
+
+  // Bringt einen frischen Auftrag bis IN_EXECUTION und hinterlässt dort genau
+  // eine angenommene Dokumentations-Übergabe mit historischem
+  // decisionNeeded-Text. Ab hier ist jeder weitere Statuswechsel im jeweiligen
+  // Prüfpunkt fachlich echt.
+  function orderInExecutionWithDecisionNeeded(prefix, title) {
+    const { db: tpDb } = makeIsolatedDb(prefix);
+    const created = service.createPilotOrder(tpDb, validCreateOrderInput({ title }));
+    const pilotOrderId = created.order.id;
+    service.markReadyForApproval(tpDb, { pilotOrderId });
+    service.approveForExecution(tpDb, { pilotOrderId, confirmed: true });
+    service.startExecution(tpDb, { pilotOrderId });
+    const submitted = service.submitHandoff(
+      tpDb,
+      validHandoffInput({
+        pilotOrderId,
+        fromPilotRole: "RECHERCHE_ANALYSE",
+        toPilotRole: "DOKUMENTATION",
+        decisionNeeded: HISTORIC_DECISION_NEEDED,
+      }),
+    );
+    assert.strictEqual(submitted.filterResult.passed, true);
+    const overview = service.getPilotOrderOverview(tpDb, pilotOrderId);
+    assert.strictEqual(overview.status, "IN_EXECUTION");
+    assert.strictEqual(overview.handoffs.length, 1);
+    assert.strictEqual(overview.handoffs[0].pmFilterStatus, "PASSED");
+    assert.strictEqual(overview.handoffs[0].decisionNeeded, HISTORIC_DECISION_NEEDED);
+    return { db: tpDb, pilotOrderId, overview };
+  }
+
+  // Der historische Text darf durch diese Korrektur nirgends verloren gehen –
+  // er bleibt unverkürzt und unverändert in der Übergabe erhalten, aus der
+  // die Detailansicht ihre "Übergabedetails" speist.
+  function assertHistoryPreserved(overview) {
+    const lastHandoff = overview.handoffs[overview.handoffs.length - 1];
+    assert.strictEqual(overview.handoffs.length, 1, "es darf keine Übergabe verschwinden oder hinzukommen");
+    assert.strictEqual(
+      lastHandoff.decisionNeeded,
+      HISTORIC_DECISION_NEEDED,
+      "der historische Text muss vollständig und unverändert in der Übergabe erhalten bleiben",
+    );
+  }
+
+  await check("TP1-1. IN_EXECUTION zeigt einen aktuellen decisionNeeded-Text weiterhin unverändert als offene Entscheidung", () => {
+    const { overview } = orderInExecutionWithDecisionNeeded("pilot-work-order-test-tp1-in-execution-", "TP1 laufender Auftrag");
+    assert.strictEqual(overview.openDecision, HISTORIC_DECISION_NEEDED, "in IN_EXECUTION bleibt der Text die aktuelle Entscheidung");
+  });
+
+  await check("TP1-2. IN_EXECUTION ohne decisionNeeded erfindet weiterhin keine offene Entscheidung", () => {
+    const { db: tpDb } = makeIsolatedDb("pilot-work-order-test-tp1-no-decision-");
+    const created = service.createPilotOrder(tpDb, validCreateOrderInput({ title: "TP1 ohne Entscheidungsbedarf" }));
+    const pilotOrderId = created.order.id;
+    service.markReadyForApproval(tpDb, { pilotOrderId });
+    service.approveForExecution(tpDb, { pilotOrderId, confirmed: true });
+    service.startExecution(tpDb, { pilotOrderId });
+    service.submitHandoff(tpDb, validHandoffInput({ pilotOrderId, toPilotRole: "DOKUMENTATION" }));
+    const overview = service.getPilotOrderOverview(tpDb, pilotOrderId);
+    assert.strictEqual(overview.status, "IN_EXECUTION");
+    assert.strictEqual(overview.handoffs[0].decisionNeeded, null);
+    assert.strictEqual(overview.openDecision, null);
+  });
+
+  await check("TP1-3. COMPLETED liefert keine offene Entscheidung mehr, behält den historischen Text aber vollständig in der Übergabe", () => {
+    const { db: tpDb, pilotOrderId } = orderInExecutionWithDecisionNeeded("pilot-work-order-test-tp1-completed-", "TP1 abgeschlossener Auftrag");
+
+    const review = service.submitForReview(tpDb, { pilotOrderId });
+    assert.strictEqual(review.status, "READY_FOR_REVIEW");
+    assert.strictEqual(
+      review.openDecision,
+      "Jamal muss das Ergebnis abnehmen (COMPLETED) oder zur Überarbeitung zurückgeben.",
+      "die explizite Abschlussentscheidung bleibt unverändert bestehen",
+    );
+
+    const completed = service.approveCompletion(tpDb, { pilotOrderId, confirmed: true });
+    assert.strictEqual(completed.status, "COMPLETED");
+    assert.strictEqual(completed.openDecision, null, "ein abgeschlossener Auftrag hat keine offene Entscheidung mehr");
+    assertHistoryPreserved(completed);
+
+    // Auch beim erneuten Laden (nicht nur im Rückgabewert des Übergangs).
+    const reloaded = service.getPilotOrderOverview(tpDb, pilotOrderId);
+    assert.strictEqual(reloaded.status, "COMPLETED");
+    assert.strictEqual(reloaded.openDecision, null);
+    assertHistoryPreserved(reloaded);
+
+    // Statusmaschine unverändert: COMPLETED bleibt terminal.
+    assert.throws(() => service.returnOrder(tpDb, { pilotOrderId, note: "Nachträgliche Rückgabe versuchen." }), /abgeschlossen/);
+    assert.strictEqual(service.getPilotOrderOverview(tpDb, pilotOrderId).status, "COMPLETED");
+  });
+
+  await check("TP1-4. RETURNED zeigt keinen historischen Text mehr, der aktuelle Rückgabegrund bleibt vollständig erhalten", () => {
+    const { db: tpDb, pilotOrderId } = orderInExecutionWithDecisionNeeded("pilot-work-order-test-tp1-returned-", "TP1 zurückgegebener Auftrag");
+    service.submitForReview(tpDb, { pilotOrderId });
+
+    const returnNote = "Zurückgegeben: die Quellenangaben im Ergebnis sind noch nicht belastbar.";
+    const returned = service.returnOrder(tpDb, { pilotOrderId, note: returnNote, actorUserId: "owner-1" });
+    assert.strictEqual(returned.status, "RETURNED");
+    assert.strictEqual(returned.openDecision, null, "der historische Übergabetext darf hier nicht mehr als aktuelle Entscheidung erscheinen");
+    assertHistoryPreserved(returned);
+
+    // Der aktuelle Rückgabegrund stammt aus der eigenen, revisionsgebundenen
+    // Quelle und bleibt von dieser Korrektur unberührt.
+    assert.ok(returned.currentDecisionReason, "der Rückgabegrund muss unverändert vorliegen");
+    assert.strictEqual(returned.currentDecisionReason.kind, "RETURN");
+    assert.strictEqual(returned.currentDecisionReason.text, returnNote);
+    assert.strictEqual(returned.currentDecisionReason.toStatus, "RETURNED");
+    assert.strictEqual(returned.currentDecisionReason.orderRevision, returned.order.revision);
+    assert.strictEqual(returned.decisionReasonHistory.length, 1);
+  });
+
+  await check("TP1-5. DRAFT nach Rückgabe und Neustart zeigt keinen historischen Text als aktuelle Entscheidung", () => {
+    const { db: tpDb, pilotOrderId } = orderInExecutionWithDecisionNeeded("pilot-work-order-test-tp1-draft-", "TP1 neu gestarteter Auftrag");
+    service.submitForReview(tpDb, { pilotOrderId });
+    service.returnOrder(tpDb, { pilotOrderId, note: "Zurückgegeben: die Auftragsfrage ist noch nicht vollständig beantwortet." });
+
+    const draft = service.reopenFromReturned(tpDb, { pilotOrderId });
+    assert.strictEqual(draft.status, "DRAFT");
+    assert.strictEqual(draft.openDecision, null);
+    assertHistoryPreserved(draft);
+  });
+
+  await check("TP1-6. READY_FOR_JAMAL_APPROVAL und APPROVED_FOR_EXECUTION im zweiten Durchlauf zeigen keinen historischen Text", () => {
+    const { db: tpDb, pilotOrderId } = orderInExecutionWithDecisionNeeded("pilot-work-order-test-tp1-approved-", "TP1 Auftrag im zweiten Durchlauf");
+    service.submitForReview(tpDb, { pilotOrderId });
+    service.returnOrder(tpDb, { pilotOrderId, note: "Zurückgegeben: der Auftrag wird in einem zweiten Durchlauf geschärft." });
+    service.reopenFromReturned(tpDb, { pilotOrderId });
+
+    const readyForApproval = service.markReadyForApproval(tpDb, { pilotOrderId });
+    assert.strictEqual(readyForApproval.status, "READY_FOR_JAMAL_APPROVAL");
+    assert.strictEqual(
+      readyForApproval.openDecision,
+      "Jamal muss die Ausführung freigeben (APPROVED_FOR_EXECUTION) oder den Auftrag zurückgeben.",
+      "die explizite Freigabeentscheidung bleibt unverändert bestehen",
+    );
+
+    const approved = service.approveForExecution(tpDb, { pilotOrderId, confirmed: true });
+    assert.strictEqual(approved.status, "APPROVED_FOR_EXECUTION");
+    assert.strictEqual(approved.openDecision, null, "vor dem Ausführungsstart gilt der Text des vorigen Durchlaufs nicht mehr");
+    assertHistoryPreserved(approved);
+
+    // Sobald die Ausführung wieder läuft, ist der Text erneut aktuell – die
+    // Regel hängt allein am Status, nicht am Alter des Textes.
+    const running = service.startExecution(tpDb, { pilotOrderId });
+    assert.strictEqual(running.status, "IN_EXECUTION");
+    assert.strictEqual(running.openDecision, HISTORIC_DECISION_NEEDED);
+  });
+
+  await check("TP1-7. BLOCKED zeigt trotz historischem Übergabetext unverändert die explizite Blockierentscheidung", () => {
+    const { db: tpDb, pilotOrderId } = orderInExecutionWithDecisionNeeded("pilot-work-order-test-tp1-blocked-", "TP1 blockierter Auftrag");
+
+    const blockReason = "Blockiert: die benötigte Quelle ist derzeit nicht zugänglich.";
+    const blocked = service.blockOrder(tpDb, { pilotOrderId, reason: blockReason });
+    assert.strictEqual(blocked.status, "BLOCKED");
+    assert.strictEqual(
+      blocked.openDecision,
+      "Jamal muss den Blocker klären, bevor der Pilotlauf fortgesetzt werden kann.",
+      "die explizite Blockierentscheidung hat weiterhin Vorrang und bleibt wortgleich",
+    );
+    assert.ok(blocked.currentDecisionReason);
+    assert.strictEqual(blocked.currentDecisionReason.kind, "BLOCK");
+    assert.strictEqual(blocked.currentDecisionReason.text, blockReason);
+    assertHistoryPreserved(blocked);
+  });
+
+  await check("TP1-8. die acht bekannten Auftragsstatus bleiben unverändert (keine neue Statusmaschine)", () => {
+    assert.deepStrictEqual(service.PILOT_WORK_ORDER_STATUS_VALUES, [
+      "DRAFT",
+      "READY_FOR_JAMAL_APPROVAL",
+      "APPROVED_FOR_EXECUTION",
+      "IN_EXECUTION",
+      "READY_FOR_REVIEW",
+      "COMPLETED",
+      "RETURNED",
+      "BLOCKED",
+    ]);
+  });
+
   await check("die Autonomiegrenzen dieses Pilotlaufs schließen jede externe Aktion aus", () => {
     const boundaries = service.getPilotOverview(db).autonomyBoundaries;
     assert.strictEqual(boundaries.noExternalAction, true);

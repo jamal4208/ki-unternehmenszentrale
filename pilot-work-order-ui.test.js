@@ -518,4 +518,31 @@ check("DARST-Q7. alle bisherigen Kettenzustände und ihre Hinweise bleiben im Qu
   ].forEach((pattern) => assert.match(cardSource, pattern, `erhaltener Kettenzustand/Hinweis fehlt: ${pattern}`));
 });
 
+// ---------------------------------------------------------------------------
+// Teilpaket 1 – "Historischen decisionNeeded-Text nicht mehr als aktuelle
+// Entscheidung anzeigen". Die Korrektur selbst liegt vollständig im Dienst
+// (pilot-work-order-service.js#buildOverview, geprüft in
+// pilot-work-order.test.js). Hier wird ausschließlich nachgewiesen, dass die
+// Darstellung dabei unangetastet bleibt: die Faktenzeile verschwindet nicht,
+// und der historische Text bleibt in den Übergabedetails vollständig lesbar.
+// ---------------------------------------------------------------------------
+
+check("TP1-UI-1. die Faktenzeile \"Offene Entscheidung\" bleibt erhalten und zeigt ohne aktuelle Entscheidung weiterhin \"Keine\"", () => {
+  assert.match(js, /\["Offene Entscheidung", overview\.openDecision \? escapeHtml\(overview\.openDecision\) : "Keine"\]/);
+});
+
+check("TP1-UI-2. der historische Übergabetext bleibt in den Übergabedetails vollständig sichtbar", () => {
+  assert.match(js, /if \(handoff\.decisionNeeded\) \{/);
+  assert.match(js, /rows\.push\("<p>Ben\\u00f6tigte Entscheidung: " \+ escapeHtml\(handoff\.decisionNeeded\) \+ "<\/p>"\);/);
+  assert.match(js, /<summary>\\u00dcbergabedetails<\/summary>/);
+});
+
+check("TP1-UI-3. die Darstellung leitet die offene Entscheidung weiterhin allein aus dem Server-Overview ab (keine eigene UI-Regel)", () => {
+  // Genau zwei Fundstellen für decisionNeeded in der Darstellungsrichtung:
+  // die Übergabedetails oben (Anzeige) und ihre Bedingung. Alle weiteren
+  // Fundstellen gehören zum Übergabe-Entwurfsformular (Eingaberichtung).
+  const factsSection = js.slice(js.indexOf('["Offene Entscheidung"'), js.indexOf('["Offene Entscheidung"') + 400);
+  assert.doesNotMatch(factsSection, /decisionNeeded/, "die Faktenzeile darf niemals selbst auf einen Handofftext zurückgreifen");
+});
+
 console.log(`pilot-work-order-ui.test.js: ${passed} Prüfpunkte erfolgreich`);

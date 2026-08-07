@@ -1447,6 +1447,60 @@ async function run() {
   });
 
   // -------------------------------------------------------------------
+  // Teilpaket 1 ("Historischen decisionNeeded-Text nicht mehr als aktuelle
+  // Entscheidung anzeigen") – Regressionsschutz für den Chefmodus, der in
+  // diesem Paket bewusst KEINE eigene Codeänderung erhalten hat.
+  //
+  // Bis zu dieser Korrektur lieferte der Server für einen zurückgegebenen
+  // Auftrag den historischen `decisionNeeded`-Text einer alten Rollenübergabe
+  // als `openDecision` – der Chefmodus zeigte ihn dadurch wortwörtlich als
+  // "Zu entscheiden" an, obwohl die Rückgabe längst erfolgt war. Der Server
+  // liefert jetzt `null` (nachgewiesen in pilot-work-order.test.js#TP1-4),
+  // und genau das ist hier der Vorgabewert des Fake-Backends. Geprüft wird
+  // deshalb, was der Chefmodus aus dieser korrigierten Antwort macht: sein
+  // bereits vorhandener fachlicher RETURNED-Satz bleibt wirksam, der
+  // aktuelle Rückgabegrund bleibt sichtbar, und der Handofftext taucht an
+  // keiner Stelle der Zeile auf.
+  // -------------------------------------------------------------------
+
+  await check(
+    "TP1: RETURNED zeigt keinen historischen Handoff-Text als aktuelle Entscheidung; RETURNED-Fallback und aktueller R\u00fcckgabegrund bleiben wirksam",
+    async () => {
+      const historicDecisionNeeded =
+        "Jamal entscheidet \u00fcber den Abschluss dieses Pilotlaufs oder gibt ihn zur \u00dcberarbeitung zur\u00fcck.";
+      const returnReason = "Zur\u00fcckgegeben: die Quellenangaben im Ergebnis sind noch nicht belastbar.";
+      setOrders([
+        { id: "tp1-returned", title: "Zur\u00fcckgegeben mit altem Entscheidungstext", status: "RETURNED", updatedAt: new Date().toISOString() },
+      ]);
+      setHandoffs("tp1-returned", [makeDocumentationHandoff({ decisionNeeded: historicDecisionNeeded })]);
+      setCurrentDecisionReason(
+        "tp1-returned",
+        makeDecisionReason({ kind: "RETURN", text: returnReason, fromStatus: "READY_FOR_REVIEW", toStatus: "RETURNED" }),
+      );
+      await reload();
+
+      const section = sectionHtml("today");
+      assert.strictEqual(
+        ui.getState().todayOverviewByOrderId["tp1-returned"].openDecision,
+        null,
+        "der Server liefert f\u00fcr RETURNED keine offene Entscheidung mehr",
+      );
+      assert.ok(
+        section.includes("Der Auftrag wurde zur\u00fcckgegeben und wartet auf deine n\u00e4chste Entscheidung."),
+        "der bestehende fachliche RETURNED-Fallback bleibt unver\u00e4ndert wirksam",
+      );
+      assert.ok(!section.includes("Jamal entscheidet"), "der historische Handofftext darf nirgends als aktuelle Entscheidung erscheinen");
+      assert.ok(!section.includes("Pilotlaufs"), "auch kein Bruchst\u00fcck des historischen Textes darf erscheinen");
+      assert.ok(section.includes("Warum zur\u00fcckgegeben?"), "der aktuelle R\u00fcckgabegrund bleibt unver\u00e4ndert beschriftet");
+      assert.ok(section.includes(returnReason), "der aktuelle R\u00fcckgabegrund bleibt unver\u00e4ndert sichtbar");
+      assert.deepStrictEqual(postCalls(), [], "diese Pr\u00fcfung bleibt vollst\u00e4ndig lesend");
+
+      clearHandoffAndRiskOverrides();
+      clearDecisionReasonOverrides();
+    },
+  );
+
+  // -------------------------------------------------------------------
   // V8.5 ("Entscheidungen im Chefmodus besser vorbereiten") – Empfehlung,
   // Risiko/Grenze und verfügbare Aktion je Eintrag in "Heute wichtig".
   // Nummerierung der Prüfpunkte folgt dem Arbeitspaket (TESTANFORDERUNGEN).

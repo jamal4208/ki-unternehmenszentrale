@@ -1016,6 +1016,33 @@ function buildOverview(db, orderRow) {
     .listPilotAgentExecutionRunsForOrder(db, orderRow.id)
     .map(rowToAgentExecutionRunSummary);
 
+  // Teilpaket 1 ("Historischen decisionNeeded-Text nicht mehr als aktuelle
+  // Entscheidung anzeigen"): `openDecision` beschreibt ausschließlich die
+  // JETZT offene Entscheidung. Die ersten drei Zweige leiten sie explizit aus
+  // dem aktuellen Status ab; nur der letzte greift auf einen gespeicherten
+  // Freitext zurück.
+  //
+  // `lastHandoff.decisionNeeded` ist reiner historischer Freitext einer
+  // einzelnen Rollenübergabe: er wird beim Anlegen der Übergabe genau einmal
+  // gespeichert (submitHandoff unten), danach nie verändert und nach einem
+  // Statuswechsel nirgends fachlich entwertet. Ohne die Statusbedingung
+  // konnte er deshalb bei DRAFT, APPROVED_FOR_EXECUTION, RETURNED und
+  // COMPLETED beliebig lange als AKTUELLE Handlungsaufforderung erscheinen –
+  // bei COMPLETED sogar dauerhaft, obwohl dieser Status terminal ist
+  // (assertOrderIsMutable oben) und dort keine Aktion mehr zulässig ist.
+  //
+  // IN_EXECUTION ist der einzige Status, in dem dieser Text aktuell sein
+  // KANN, und das ist keine Konvention, sondern strukturell erzwungen:
+  // submitHandoff() legt eine Übergabe ausschließlich aus IN_EXECUTION heraus
+  // an. Ist der Auftrag also nicht (mehr) IN_EXECUTION, liegt zwischen der
+  // letzten Übergabe und dem jetzigen Zustand zwingend mindestens ein
+  // Statuswechsel – der Text ist dann nachweislich Historie.
+  //
+  // Es wird dabei NICHTS gelöscht, gekürzt oder migriert: die Übergabe samt
+  // decisionNeeded bleibt unverändert in `handoffs` enthalten und dadurch in
+  // der bestehenden Detailfläche „Übergabedetails“ vollständig sichtbar.
+  // Ebenso unberührt bleibt der aktuelle Rückgabe-/Blockiergrund, der aus der
+  // eigenen, revisionsgebundenen Quelle `currentDecisionReason` oben stammt.
   const lastHandoff = handoffs.length > 0 ? handoffs[handoffs.length - 1] : null;
   let openDecision = null;
   if (order.status === "READY_FOR_JAMAL_APPROVAL") {
@@ -1024,7 +1051,7 @@ function buildOverview(db, orderRow) {
     openDecision = "Jamal muss das Ergebnis abnehmen (COMPLETED) oder zur Überarbeitung zurückgeben.";
   } else if (order.status === "BLOCKED") {
     openDecision = "Jamal muss den Blocker klären, bevor der Pilotlauf fortgesetzt werden kann.";
-  } else if (lastHandoff && lastHandoff.decisionNeeded) {
+  } else if (order.status === "IN_EXECUTION" && lastHandoff && lastHandoff.decisionNeeded) {
     openDecision = lastHandoff.decisionNeeded;
   }
 
