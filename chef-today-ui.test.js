@@ -426,6 +426,36 @@ function rowTitles(key) {
   return matches.map((entry) => entry.replace(/<[^>]+>/g, ""));
 }
 
+// V8.9.6 – die neue, benannte Fußzone (kein Tagesabschnitt, siehe
+// renderFootActions()/Modulkopf V8.9.6): eigener Marker
+// data-chef-today-foot="actions" statt data-chef-today-section, damit
+// sectionHtml()/sectionExists()/sectionOrder() sie bewusst NICHT als
+// Tagesabschnitt behandeln.
+function footHtml() {
+  const match = outputHtml().match(/<div class="chef-today-foot" data-chef-today-foot="actions">[\s\S]*?<\/div>/);
+  assert.ok(match, "die Fu\u00dfzone muss gerendert sein");
+  return match[0];
+}
+
+function footCount() {
+  const matches = outputHtml().match(/data-chef-today-foot="actions"/g) || [];
+  return matches.length;
+}
+
+// V8.9.6 – die Fußzone ist niemals Teil von sectionOrder() (kein
+// data-chef-today-section), muss aber real das letzte Element innerhalb
+// von #chef-today-output sein: ihr Startindex muss hinter dem des letzten
+// Tagesabschnitts-Markers liegen (bzw. an Index 0 stehen, falls kein
+// einziger Tagesabschnitt sichtbar ist).
+function footIsLast() {
+  const html = outputHtml();
+  const footIndex = html.indexOf('data-chef-today-foot="actions"');
+  assert.ok(footIndex > -1, "die Fu\u00dfzone muss auffindbar sein");
+  const sectionIndexes = (html.match(/data-chef-today-section="[a-z-]+"/g) || []).map((marker) => html.indexOf(marker));
+  const lastSectionIndex = sectionIndexes.length > 0 ? Math.max(...sectionIndexes) : -1;
+  return footIndex > lastSectionIndex;
+}
+
 function postCalls() {
   return fetchCalls.filter((entry) => entry.method !== "GET");
 }
@@ -684,8 +714,8 @@ async function run() {
     );
   });
 
-  await check("jeder Bereich hat h\u00f6chstens eine Hauptaktion", () => {
-    ["today", "done", "running", "new-order"].forEach((key) => {
+  await check("jeder Bereich hat h\u00f6chstens eine Hauptaktion (V8.9.6: kein Bereich mehr besitzt \u00fcberhaupt einen primary-button)", () => {
+    ["today", "done", "running"].forEach((key) => {
       const buttons = sectionHtml(key).match(/class="primary-button"/g) || [];
       assert.ok(buttons.length <= 1, `Bereich ${key} h\u00e4tte ${buttons.length} Hauptaktionen`);
     });
@@ -693,6 +723,10 @@ async function run() {
     // "recommendation" vollst\u00e4ndig (siehe oben): kein Bereich, keine
     // Hauptaktion zu pr\u00fcfen.
     assert.strictEqual(sectionExists("recommendation"), false);
+    // V8.9.6 – "new-order" ist kein Bereich mehr; der gesamte Output enth\u00e4lt
+    // \u00fcberhaupt keinen primary-button mehr.
+    assert.strictEqual(sectionExists("new-order"), false);
+    assert.doesNotMatch(outputHtml(), /class="primary-button"/);
   });
 
   await check("erneutes Rendern l\u00f6st keinen Request aus", () => {
@@ -906,17 +940,21 @@ async function run() {
   );
 
   await check(
-    "V8.8.1 (1/2/3/4/5/6/7/8/9): ein leerer Tag bleibt ruhig, zeigt weiterhin Heute wichtig/Empfehlung/Neuer Auftrag, aber keine leeren Sektionen \u201eL\u00e4uft\u201c/\u201eFertig\u201c mehr, kein Fehler, keine Aktion au\u00dfer dem neuen Auftrag",
+    "V8.8.1 (1/2/3/4/5/6/7/8/9): ein leerer Tag bleibt ruhig, zeigt weiterhin Heute wichtig/Empfehlung, aber keine leeren Sektionen \u201eL\u00e4uft\u201c/\u201eFertig\u201c mehr, kein Fehler; V8.9.6: \u201eNeuer Auftrag\u201c ist kein eigener Bereich mehr, die Aktion bleibt vollst\u00e4ndig \u00fcber die Fu\u00dfzone erhalten",
     async () => {
       setOrders([]);
       await reload();
-      // 1/2/3 – die drei handlungsorientierten Bereiche bleiben vollständig
-      // (Sektionen weiterhin gerendert). Seit V8.9.3 trägt ausschließlich
-      // "Empfohlene nächste Arbeit" eine Aussage im Leerzustand – siehe die
-      // dortigen V8.9.3-Prüfpunkte weiter unten.
+      // 1/2/3 – die zwei verbleibenden handlungsorientierten Bereiche bleiben
+      // vollständig (Sektionen weiterhin gerendert). Seit V8.9.3 trägt
+      // ausschließlich "Empfohlene nächste Arbeit" eine Aussage im
+      // Leerzustand – siehe die dortigen V8.9.3-Prüfpunkte weiter unten.
+      // V8.9.6: "Neuer Auftrag" ist kein Bereich mehr, sondern die Fußzone
+      // (siehe eigene Prüfpunkte weiter unten) – die Handlungsmöglichkeit
+      // selbst geht dadurch nicht verloren.
       assert.ok(!sectionHtml("today").includes('class="chef-today-empty"'));
       assert.ok(sectionHtml("recommendation").includes("Im Moment wartet keine Entscheidung auf dich."));
-      assert.ok(sectionHtml("new-order").includes("Neuen Auftrag anlegen"));
+      assert.strictEqual(sectionExists("new-order"), false, "V8.9.6: \u201eNeuer Auftrag\u201c ist kein eigener Bereich mehr");
+      assert.ok(footHtml().includes("Neuen Auftrag anlegen"), "die Aktion bleibt \u00fcber die Fu\u00dfzone vollst\u00e4ndig erhalten");
       // 4/6 – "Läuft" und "Fertig" werden im Leerzustand gar nicht gerendert.
       assert.strictEqual(sectionExists("running"), false, 'V8.8.1: die leere Sektion "L\u00e4uft" darf im Leerzustand nicht gerendert werden');
       assert.strictEqual(sectionExists("done"), false, 'V8.8.1: die leere Sektion "Fertig" darf im Leerzustand nicht gerendert werden');
@@ -930,9 +968,12 @@ async function run() {
         "V8.8.1: der bisherige Verneinungstext zu \u201eFertig\u201c darf im Leerzustand nicht mehr erscheinen",
       );
       assert.strictEqual(ui.selectRecommendedNextWork(ui.getState().orders), null);
-      // 8 – genau ein primärer Startknopf bleibt im Leerzustand übrig.
+      // 8 – V8.9.6: kein primärer Startknopf mehr im Leerzustand; die
+      // Fußaktion bleibt als einzige verbleibende Bedienmöglichkeit
+      // (sekundär, secondary-button).
       const buttons = outputHtml().match(/class="primary-button"/g) || [];
-      assert.strictEqual(buttons.length, 1, "\u00fcbrig bleibt genau die Anlage eines neuen Auftrags");
+      assert.strictEqual(buttons.length, 0, "V8.9.6: kein primary-button mehr im Chefmodus-Output");
+      assert.strictEqual(footCount(), 1, "genau eine Fu\u00dfzone bleibt \u00fcbrig");
       // 9 – kein schreibender Request im Leerzustand.
       assert.deepStrictEqual(postCalls(), []);
     },
@@ -950,7 +991,7 @@ async function run() {
   // -------------------------------------------------------------------
 
   await check(
-    "V8.8.1 (10): bei vorhandenem Inhalt steht Heute wichtig vor Neuen Auftrag anlegen vor L\u00e4uft vor Fertig (V8.9.5: \u201eEmpfohlene n\u00e4chste Arbeit\u201c entf\u00e4llt hier, da eine offene Entscheidung vorliegt und die Empfehlung sie nur wiederholen w\u00fcrde)",
+    "V8.8.1 (10): bei vorhandenem Inhalt steht Heute wichtig vor L\u00e4uft vor Fertig (V8.9.5: \u201eEmpfohlene n\u00e4chste Arbeit\u201c entf\u00e4llt hier, da eine offene Entscheidung vorliegt und die Empfehlung sie nur wiederholen w\u00fcrde; V8.9.6: \u201eNeuer Auftrag\u201c ist kein Bereich mehr, die Fu\u00dfaktion steht zus\u00e4tzlich und immer zuletzt)",
     async () => {
       setOrders([
         { id: "v881-today", title: "Wichtiger Auftrag", status: "BLOCKED", updatedAt: new Date().toISOString() },
@@ -958,8 +999,11 @@ async function run() {
         { id: "v881-done", title: "Fertiger Auftrag", status: "COMPLETED" },
       ]);
       await reload();
-      assert.deepStrictEqual(sectionOrder(), ["today", "new-order", "running", "done"]);
+      assert.deepStrictEqual(sectionOrder(), ["today", "running", "done"]);
       assert.strictEqual(sectionExists("recommendation"), false);
+      assert.strictEqual(sectionExists("new-order"), false, "V8.9.6: \u201eNeuer Auftrag\u201c ist kein eigener Bereich mehr");
+      assert.strictEqual(footCount(), 1);
+      assert.ok(footIsLast(), "die Fu\u00dfzone steht hinter dem letzten Tagesabschnitt");
     },
   );
 
@@ -1000,7 +1044,11 @@ async function run() {
     assert.strictEqual(first, second);
     // V8.9.5 – weiterhin dieselbe Fixture wie V8.8.1 (10) (offene Entscheidung
     // vorhanden), deshalb bleibt "recommendation" konsistent abwesend.
-    assert.deepStrictEqual(sectionOrder(), ["today", "new-order", "running", "done"]);
+    // V8.9.6 – "new-order" ist kein Bereich mehr; die Fußzone bleibt bei
+    // mehrfachem Rendern konsistent genau einmal und zuletzt.
+    assert.deepStrictEqual(sectionOrder(), ["today", "running", "done"]);
+    assert.strictEqual(footCount(), 1, "kein Doppel- oder Restcontainer nach mehrfachem Rendern");
+    assert.ok(footIsLast());
   });
 
   await check('V8.8.1 (15): nur laufender Inhalt zeigt "L\u00e4uft", aber nicht "Fertig"', async () => {
@@ -3011,10 +3059,11 @@ async function run() {
     assert.strictEqual(matches.length, 1);
   });
 
-  await check('V8.9.3 (5): leerer Tag – "Neuer Auftrag anlegen" bleibt als dritter handlungsorientierter Bereich unver\u00e4ndert vorhanden (keine Ausweitung auf V8.9.5)', () => {
-    assert.ok(sectionHtml("new-order").includes("Neuen Auftrag anlegen"));
+  await check('V8.9.3 (5): leerer Tag – "Neuen Auftrag anlegen" bleibt vollst\u00e4ndig erhalten (V8.9.6: nicht mehr als eigener Bereich, sondern als Fu\u00dfaktion)', () => {
+    assert.strictEqual(sectionExists("new-order"), false, "V8.9.6: \u201eNeuer Auftrag\u201c ist kein eigener Bereich mehr");
+    assert.ok(footHtml().includes("Neuen Auftrag anlegen"));
     const buttons = outputHtml().match(/class="primary-button"/g) || [];
-    assert.strictEqual(buttons.length, 1, "weiterhin genau ein prim\u00e4rer Startknopf im Leerzustand");
+    assert.strictEqual(buttons.length, 0, "V8.9.6: kein prim\u00e4rer Startknopf mehr im Leerzustand");
   });
 
   await check(
@@ -3064,14 +3113,16 @@ async function run() {
     },
   );
 
-  await check("V8.9.3 (9): die beiden Reihenfolge-Anker bleiben unber\u00fchrt (Nicht-Leerzustand); V8.9.5: \u201eEmpfohlene n\u00e4chste Arbeit\u201c entf\u00e4llt hier zus\u00e4tzlich, da eine offene Entscheidung vorliegt", async () => {
+  await check("V8.9.3 (9): die beiden Reihenfolge-Anker bleiben unber\u00fchrt (Nicht-Leerzustand); V8.9.5: \u201eEmpfohlene n\u00e4chste Arbeit\u201c entf\u00e4llt hier zus\u00e4tzlich, da eine offene Entscheidung vorliegt; V8.9.6: \u201eNeuer Auftrag\u201c ist kein Bereich mehr", async () => {
     setOrders([
       { id: "v893-order-today", title: "Wichtiger Auftrag", status: "BLOCKED" },
       { id: "v893-order-running", title: "Laufender Auftrag", status: "IN_EXECUTION" },
       { id: "v893-order-done", title: "Fertiger Auftrag", status: "COMPLETED" },
     ]);
     await reload();
-    assert.deepStrictEqual(sectionOrder(), ["today", "new-order", "running", "done"]);
+    assert.deepStrictEqual(sectionOrder(), ["today", "running", "done"]);
+    assert.strictEqual(footCount(), 1);
+    assert.ok(footIsLast());
   });
 
   await check("V8.9.3 (10): renderTodaySection() liefert im Leerzustand einen leeren String statt renderEmpty(...)", () => {
@@ -3280,8 +3331,8 @@ async function run() {
     assert.deepStrictEqual(postCalls(), []);
   });
 
-  await check("V8.9.4 (24): die bestehenden primary-button-Regeln bleiben unver\u00e4ndert (h\u00f6chstens eine Hauptaktion je Bereich)", () => {
-    ["today", "new-order"].forEach((key) => {
+  await check("V8.9.4 (24): die bestehenden primary-button-Regeln bleiben unver\u00e4ndert (h\u00f6chstens eine Hauptaktion je Bereich); V8.9.6: kein Bereich und kein Output tr\u00e4gt \u00fcberhaupt noch einen primary-button", () => {
+    ["today"].forEach((key) => {
       const buttons = sectionHtml(key).match(/class="primary-button"/g) || [];
       assert.ok(buttons.length <= 1, `Bereich ${key} h\u00e4tte ${buttons.length} Hauptaktionen`);
     });
@@ -3289,6 +3340,10 @@ async function run() {
     // (siehe V8.9.4 (20)/(21) oben), "recommendation" entf\u00e4llt deshalb
     // vollst\u00e4ndig.
     assert.strictEqual(sectionExists("recommendation"), false);
+    // V8.9.6 – "new-order" ist kein Bereich mehr; der gesamte Output enth\u00e4lt
+    // keinen primary-button mehr.
+    assert.strictEqual(sectionExists("new-order"), false);
+    assert.doesNotMatch(outputHtml(), /class="primary-button"/);
   });
 
   await check("V8.9.4 (25): der V8.9.3-Leerzustand bleibt unver\u00e4ndert, der Button bleibt sichtbar und bedienbar", async () => {
@@ -3354,7 +3409,7 @@ async function run() {
   // -------------------------------------------------------------------------
 
   await check(
-    "V8.9.5 (A): vollst\u00e4ndig leerer Tag \u2013 Empfehlungsabschnitt bleibt vorhanden, \u00dcberschrift und Satz exakt, \u201eNeuer Auftrag\u201c bleibt",
+    "V8.9.5 (A): vollst\u00e4ndig leerer Tag \u2013 Empfehlungsabschnitt bleibt vorhanden, \u00dcberschrift und Satz exakt; V8.9.6: \u201eNeuer Auftrag\u201c bleibt \u00fcber die Fu\u00dfzone erhalten (kein eigener Bereich mehr)",
     async () => {
       setOrders([]);
       await reload();
@@ -3375,7 +3430,9 @@ async function run() {
         section.includes("Im Moment wartet keine Entscheidung auf dich."),
         "der V8.9.3-Satz muss exakt unver\u00e4ndert sichtbar sein",
       );
-      assert.ok(sectionHtml("new-order").includes("Neuen Auftrag anlegen"), "\u201eNeuer Auftrag\u201c bleibt unabh\u00e4ngig bestehen");
+      assert.strictEqual(sectionExists("new-order"), false, "V8.9.6: \u201eNeuer Auftrag\u201c ist kein eigener Bereich mehr");
+      assert.ok(footHtml().includes("Neuen Auftrag anlegen"), "\u201eNeuer Auftrag\u201c bleibt unabh\u00e4ngig \u00fcber die Fu\u00dfzone bestehen");
+      assert.ok(footIsLast());
     },
   );
 
@@ -3487,7 +3544,7 @@ async function run() {
   );
 
   await check(
-    "V8.9.5 (H): Abschnittsreihenfolge \u2013 nicht-leerer Mischfall ohne recommendation, vollst\u00e4ndiger Leerzustand weiterhin mit recommendation an zweiter Stelle",
+    "V8.9.5 (H): Abschnittsreihenfolge \u2013 nicht-leerer Mischfall ohne recommendation, vollst\u00e4ndiger Leerzustand weiterhin mit recommendation an zweiter Stelle; V8.9.6: die Fu\u00dfzone ist in beiden F\u00e4llen zus\u00e4tzlich und immer zuletzt, aber nie Teil von sectionOrder()",
     async () => {
       setOrders([
         { id: "v895-order-decision", title: "Wichtiger Auftrag", status: "BLOCKED" },
@@ -3495,11 +3552,15 @@ async function run() {
         { id: "v895-order-done", title: "Fertiger Auftrag", status: "COMPLETED" },
       ]);
       await reload();
-      assert.deepStrictEqual(sectionOrder(), ["today", "new-order", "running", "done"]);
+      assert.deepStrictEqual(sectionOrder(), ["today", "running", "done"]);
+      assert.strictEqual(footCount(), 1);
+      assert.ok(footIsLast());
 
       setOrders([]);
       await reload();
-      assert.deepStrictEqual(sectionOrder(), ["today", "recommendation", "new-order"]);
+      assert.deepStrictEqual(sectionOrder(), ["today", "recommendation"]);
+      assert.strictEqual(footCount(), 1);
+      assert.ok(footIsLast());
     },
   );
 
@@ -3578,6 +3639,273 @@ async function run() {
   );
 
   await check("V8.9.5: weiterhin kein schreibender Request \u00fcber den gesamten V8.9.5-Testlauf hinweg", () => {
+    assert.deepStrictEqual(postCalls(), []);
+  });
+
+  // -------------------------------------------------------------------------
+  // V8.9.6 ("'Neuer Auftrag' zur sekund\u00e4ren Fu\u00dfaktion herabstufen", rein
+  // darstellend \u2013 Ergebnis des von Jamal gepr\u00fcften und freigegebenen
+  // V8.9.6-Analyseberichts): der bisherige eigene Abschnitt "Neuer Auftrag"
+  // (renderNewOrderSection(), <section data-chef-today-section="new-order">,
+  // eigene \u00dcberschrift, eigener Erkl\u00e4rsatz, primary-button) entf\u00e4llt
+  // vollst\u00e4ndig. renderFootActions() rendert stattdessen eine benannte,
+  // ungestylte Fu\u00dfzone (<div class="chef-today-foot"
+  // data-chef-today-foot="actions">) mit genau einem secondary-button, der
+  // weiterhin exakt data-chef-today-action="open-new-order" tr\u00e4gt und
+  // openNewOrder() unver\u00e4ndert ausl\u00f6st. render() h\u00e4ngt die Fu\u00dfzone jetzt
+  // als letztes Element an #chef-today-output an.
+  // -------------------------------------------------------------------------
+
+  await check(
+    "V8.9.6 (A): kein new-order-Abschnitt mehr in irgendeinem gepr\u00fcften Datenzustand \u2013 weder Marker noch \u00dcberschrift noch Erkl\u00e4rsatz",
+    async () => {
+      const states = [
+        [],
+        [{ id: "v896-a-decision", title: "Offene Entscheidung", status: "BLOCKED" }],
+        [{ id: "v896-a-running", title: "Laufender Auftrag", status: "IN_EXECUTION" }],
+        [{ id: "v896-a-done", title: "Fertiger Auftrag", status: "COMPLETED" }],
+        [
+          { id: "v896-a-decision2", title: "Offene Entscheidung 2", status: "BLOCKED" },
+          { id: "v896-a-running2", title: "Laufender Auftrag 2", status: "IN_EXECUTION" },
+          { id: "v896-a-done2", title: "Fertiger Auftrag 2", status: "COMPLETED" },
+        ],
+      ];
+      for (const orders of states) {
+        setOrders(orders);
+        await reload();
+        assert.strictEqual(sectionExists("new-order"), false, 'kein data-chef-today-section="new-order"');
+        assert.doesNotMatch(outputHtml(), /Neuer Auftrag(?!\s*<)/, 'die \u00dcberschrift "Neuer Auftrag" darf nirgends erscheinen');
+        assert.doesNotMatch(
+          outputHtml(),
+          /Ein neuer Auftrag entsteht weiterhin im Pilotauftrag\./,
+          "der bisherige Erkl\u00e4rsatz darf nirgends erscheinen",
+        );
+      }
+      assert.doesNotMatch(js, /data-chef-today-section="new-order"/, "der Quelltext selbst darf dieses Literal nicht mehr enthalten");
+      assert.doesNotMatch(js, /function renderNewOrderSection/, "renderNewOrderSection() muss vollst\u00e4ndig entfernt sein");
+    },
+  );
+
+  await check(
+    "V8.9.6 (B): genau eine Fu\u00dfzone im Output, eindeutiger Marker data-chef-today-foot=\"actions\", sie ist das letzte Element und steht hinter dem letzten sichtbaren Tagesabschnitt",
+    async () => {
+      setOrders([
+        { id: "v896-b-decision", title: "Offene Entscheidung", status: "BLOCKED" },
+        { id: "v896-b-running", title: "Laufender Auftrag", status: "IN_EXECUTION" },
+        { id: "v896-b-done", title: "Fertiger Auftrag", status: "COMPLETED" },
+      ]);
+      await reload();
+      assert.strictEqual(footCount(), 1);
+      assert.ok(footIsLast());
+      const currentHtml = outputHtml();
+      const footIndex = currentHtml.indexOf('data-chef-today-foot="actions"');
+      const lastSectionCloseIndex = currentHtml.lastIndexOf("</section>");
+      assert.ok(footIndex > lastSectionCloseIndex, "die Fu\u00dfzone steht nach dem letzten schlie\u00dfenden </section>-Tag");
+      assert.ok(currentHtml.trim().endsWith("</div>"), "die Fu\u00dfzone ist das letzte Element im Output");
+    },
+  );
+
+  await check(
+    'V8.9.6 (C): genau ein Button in der Fu\u00dfzone, echtes <button type="button">, class="secondary-button", kein primary-button, data-chef-today-action="open-new-order", exakter Wortlaut, kein <a>/href/role/disabled/aria-hidden',
+    () => {
+      const foot = footHtml();
+      const buttonTags = foot.match(/<button\b[^>]*>/g) || [];
+      assert.strictEqual(buttonTags.length, 1, "genau ein Button in der Fu\u00dfzone");
+      const buttonTag = buttonTags[0];
+      assert.match(buttonTag, /type="button"/);
+      assert.match(buttonTag, /class="secondary-button"/);
+      assert.doesNotMatch(buttonTag, /primary-button/);
+      assert.match(buttonTag, /data-chef-today-action="open-new-order"/);
+      assert.doesNotMatch(buttonTag, /href=/);
+      assert.doesNotMatch(buttonTag, /\brole=/);
+      assert.doesNotMatch(buttonTag, /disabled/);
+      assert.doesNotMatch(buttonTag, /aria-hidden/);
+      assert.doesNotMatch(foot, /<a[\s>]/);
+      const wordingMatch = foot.match(/<button[^>]*>([^<]*)<\/button>/);
+      assert.ok(wordingMatch, "der Button-Text muss auffindbar sein");
+      assert.strictEqual(wordingMatch[1], "Neuen Auftrag anlegen");
+    },
+  );
+
+  await check(
+    "V8.9.6 (D): Regressionsguard gegen Wiederaufstieg \u2013 chef-today-ui.js enth\u00e4lt kein primary-button-Literal mehr, der Output enth\u00e4lt in keinem gepr\u00fcften Datenzustand einen primary-button, die Aktion bleibt trotzdem sichtbar und bedienbar",
+    async () => {
+      // Bewusst nur das tatsächliche Code-Literal (Attributwert in
+      // Anführungszeichen), nicht das bloße Wort in erklärender Prosa: der
+      // Modulkopf beschreibt die Entfernung von "primary-button" additiv
+      // (siehe V8.9.6-Eintrag oben) – das ist gewollte Dokumentation, kein
+      // Wiederaufstieg des Codes selbst.
+      assert.doesNotMatch(js, /class="primary-button"/, "chef-today-ui.js darf das primary-button-Klassenliteral nicht mehr enthalten");
+      const states = [
+        [],
+        [{ id: "v896-d-decision", title: "Entscheidung", status: "BLOCKED" }],
+        [{ id: "v896-d-running", title: "L\u00e4uft", status: "IN_EXECUTION" }],
+        [{ id: "v896-d-done", title: "Fertig", status: "COMPLETED" }],
+      ];
+      for (const orders of states) {
+        setOrders(orders);
+        await reload();
+        assert.doesNotMatch(outputHtml(), /class="primary-button"/);
+        assert.ok(footHtml().includes("Neuen Auftrag anlegen"), "die Aktion bleibt sichtbar");
+      }
+    },
+  );
+
+  await check(
+    "V8.9.6 (E): Section-Reihenfolge in allen gepr\u00fcften Zust\u00e4nden \u2013 die Fu\u00dfzone ist jeweils zus\u00e4tzlich und immer zuletzt, aber niemals Teil von sectionOrder()",
+    async () => {
+      const matrix = [
+        { label: "leerer Tag", orders: [], expected: ["today", "recommendation"] },
+        {
+          label: "eine offene Entscheidung",
+          orders: [{ id: "v896-e-1", title: "Entscheidung 1", status: "BLOCKED" }],
+          expected: ["today"],
+        },
+        {
+          label: "mehrere offene Entscheidungen",
+          orders: [
+            { id: "v896-e-2a", title: "Entscheidung 2a", status: "RETURNED" },
+            { id: "v896-e-2b", title: "Entscheidung 2b", status: "BLOCKED" },
+          ],
+          expected: ["today"],
+        },
+        {
+          label: "nur l\u00e4uft",
+          orders: [{ id: "v896-e-3", title: "L\u00e4uft 3", status: "IN_EXECUTION" }],
+          expected: ["today", "running"],
+        },
+        {
+          label: "nur fertig",
+          orders: [{ id: "v896-e-4", title: "Fertig 4", status: "COMPLETED" }],
+          expected: ["today", "recommendation", "done"],
+        },
+        {
+          label: "offen + l\u00e4uft",
+          orders: [
+            { id: "v896-e-5a", title: "Entscheidung 5", status: "BLOCKED" },
+            { id: "v896-e-5b", title: "L\u00e4uft 5", status: "IN_EXECUTION" },
+          ],
+          expected: ["today", "running"],
+        },
+        {
+          label: "offen + l\u00e4uft + fertig",
+          orders: [
+            { id: "v896-e-6a", title: "Entscheidung 6", status: "BLOCKED" },
+            { id: "v896-e-6b", title: "L\u00e4uft 6", status: "IN_EXECUTION" },
+            { id: "v896-e-6c", title: "Fertig 6", status: "COMPLETED" },
+          ],
+          expected: ["today", "running", "done"],
+        },
+      ];
+      for (const testCase of matrix) {
+        setOrders(testCase.orders);
+        await reload();
+        assert.deepStrictEqual(sectionOrder(), testCase.expected, `Zustand "${testCase.label}"`);
+        assert.strictEqual(sectionExists("new-order"), false, `Zustand "${testCase.label}": kein new-order-Bereich`);
+        assert.strictEqual(footCount(), 1, `Zustand "${testCase.label}": genau eine Fu\u00dfzone`);
+        assert.ok(footIsLast(), `Zustand "${testCase.label}": Fu\u00dfzone steht zuletzt`);
+      }
+    },
+  );
+
+  await check(
+    "V8.9.6 (F): Bestandsschutz V8.9.1\u2013V8.9.5 \u2013 \u201eHeute wichtig (n)\u201c, V8.9.3-Satz, Reload-Button, Recommendation-Sichtbarkeit und R\u00fcckweg bleiben unver\u00e4ndert",
+    async () => {
+      setOrders([
+        { id: "v896-f-1", title: "Auftrag F1", status: "RETURNED" },
+        { id: "v896-f-2", title: "Auftrag F2", status: "BLOCKED" },
+      ]);
+      await reload();
+      // V8.9.2
+      assert.strictEqual(todayHeadingText(), "Heute wichtig (2)");
+      // V8.9.5 – Empfehlung entfällt bei offener Entscheidung
+      assert.strictEqual(sectionExists("recommendation"), false);
+
+      setOrders([]);
+      await reload();
+      // V8.9.2 Leerzustand ohne Klammerzusatz
+      assert.strictEqual(todayHeadingText(), "Heute wichtig");
+      // V8.9.3-Satz
+      assert.ok(sectionHtml("recommendation").includes("Im Moment wartet keine Entscheidung auf dich."));
+
+      // V8.9.4 – Reload-Button
+      assert.strictEqual((html.match(/Aktuellen Stand neu laden/g) || []).length, 1);
+      fetchCalls.length = 0;
+      clickChefTodayAction("reload-today");
+      await flushAsync();
+      assert.strictEqual(
+        fetchCalls.filter((call) => call.url === "/api/pilot-work-order/orders").length,
+        1,
+        "der V8.9.4-Reload-Button bleibt unver\u00e4ndert bedienbar",
+      );
+
+      // V8.9.1 – Rückweg
+      const backLinkMatch = html.match(/<a\s[^>]*>Zur\u00fcck zu Heute<\/a>/);
+      assert.ok(backLinkMatch);
+      assert.match(backLinkMatch[0], /href="#chef-today-card"/);
+    },
+  );
+
+  await check(
+    "V8.9.6 (G): ein delegierter Klick auf die neue Fu\u00dfaktion l\u00f6st weiterhin exakt das bestehende openNewOrder()-Verhalten aus \u2013 Formular \u00f6ffnet sich, Titelfeld wird gescrollt und fokussiert, kein zweites Formular, kein Fetch, kein POST, keine Statusänderung; ein bereits ge\u00f6ffnetes Formular wird nicht geschlossen",
+    async () => {
+      delete domElements["pilot-order-create-title"];
+      createFormOpen = false;
+      setOrders([{ id: "v896-g-1", title: "Auftrag G1", status: "BLOCKED" }]);
+      await reload();
+      const statusesBefore = ui.getState().orders.map((order) => order.status);
+
+      pilotControls = [makePilotControl("toggle-create-form")];
+      pilotClicks.length = 0;
+      scrollTargets.length = 0;
+      focusCalls = 0;
+      fetchCalls.length = 0;
+      clickChefTodayAction("open-new-order");
+      assert.deepStrictEqual(pilotClicks, [{ action: "toggle-create-form", orderId: null }], "das bestehende Anlageformular wird ge\u00f6ffnet");
+      assert.deepStrictEqual(scrollTargets, ["create-form-title"], "das Titelfeld wird gescrollt");
+      assert.strictEqual(focusCalls, 1, "das Titelfeld wird fokussiert");
+      assert.deepStrictEqual(postCalls(), [], "kein Fetch, kein POST durch den Klick");
+      assert.deepStrictEqual(
+        ui.getState().orders.map((order) => order.status),
+        statusesBefore,
+        "keine Statusänderung durch den Klick",
+      );
+
+      // Erneutes Auslösen bei bereits offenem Formular: es bleibt offen.
+      pilotClicks.length = 0;
+      scrollTargets.length = 0;
+      focusCalls = 0;
+      clickChefTodayAction("open-new-order");
+      assert.deepStrictEqual(pilotClicks, [], "ein bereits offenes Formular wird nicht erneut umgeschaltet, also nicht geschlossen");
+      assert.deepStrictEqual(scrollTargets, ["create-form-title"]);
+      assert.strictEqual(focusCalls, 1, "das bereits offene Formular wird weiterhin korrekt fokussiert");
+
+      delete domElements["pilot-order-create-title"];
+      createFormOpen = false;
+    },
+  );
+
+  await check(
+    "V8.9.6 (H): keine neue Komplexit\u00e4t \u2013 keine neue Route, keine neue API, kein neuer State, kein neuer Event-Listener, kein neuer Export, kein Auto-Refresh, kein Polling, kein Timer, keine neue CSS-Regel",
+    () => {
+      assert.deepStrictEqual(postCalls(), []);
+      const urls = Array.from(new Set(js.match(/"\/api\/[^"]*"/g) || []));
+      assert.deepStrictEqual(urls.sort(), ['"/api/pilot-work-order/orders"', '"/api/pilot-work-order/orders/"'].sort());
+      assert.strictEqual(chefTodayCardClickHandlerCount, 1, "weiterhin genau ein click-Listener auf #chef-today-card");
+      assert.doesNotMatch(js, /setInterval|setTimeout\(load|requestAnimationFrame|visibilitychange/);
+      assert.doesNotMatch(css, /\.chef-today-foot/, "styles.css bleibt ohne eigene Regel f\u00fcr die neue Fu\u00dfzone (erster Versuch bewusst ungestylt)");
+      assert.deepStrictEqual(
+        Object.keys(ui.getState()).sort(),
+        ["error", "loading", "orders", "progressByOrderId", "todayOverviewByOrderId"].sort(),
+        "kein neues State-Feld",
+      );
+      assert.strictEqual(typeof ui.renderFootActions, "undefined", "renderFootActions() ist bewusst nicht exportiert (wie zuvor renderNewOrderSection())");
+      assert.strictEqual(typeof ui.renderNewOrderSection, "undefined");
+      assert.strictEqual(Object.keys(ui).length, 30, "die Anzahl exportierter Namen bleibt unver\u00e4ndert");
+    },
+  );
+
+  await check("V8.9.6: weiterhin kein schreibender Request \u00fcber den gesamten V8.9.6-Testlauf hinweg", () => {
     assert.deepStrictEqual(postCalls(), []);
   });
 

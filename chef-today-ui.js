@@ -273,6 +273,45 @@
  * wichtig"/"Läuft" erreichbar (openOrder(), unverändert). Keine neue
  * Route, keine API-Änderung, keine Statusmaschinenänderung, kein
  * Auto-Refresh, kein Polling, keine neue CSS-Klasse.
+ *
+ * V8.9.6 ("'Neuer Auftrag' zur sekundären Fußaktion herabstufen", rein
+ * darstellend – Ergebnis des von Jamal geprüften und freigegebenen
+ * V8.9.6-Analyseberichts): der bisherige eigene Abschnitt "Neuer Auftrag"
+ * (renderNewOrderSection(), eigene <section data-chef-today-section=
+ * "new-order">, eigene Überschrift, eigener Erklärsatz, primary-button)
+ * entfällt vollständig. Das freigegebene V8.9-Zielbild sieht die Aktion
+ * ausdrücklich "am Fuß der Karte", "nicht als eigenen Abschnitt mit
+ * Überschrift" – sie soll sichtbar, aber klar sekundär sein, statt mit
+ * offenen Entscheidungen, laufender Arbeit oder fertigen Ergebnissen zu
+ * konkurrieren. renderFootActions() ersetzt renderNewOrderSection(): kein
+ * renderSection(), keine Überschrift, kein Erklärsatz ("Ein neuer Auftrag
+ * entsteht weiterhin im Pilotauftrag." trug ohnehin keine für den
+ * Tagesüberblick nötige Information), keine section, kein
+ * data-chef-today-section. Stattdessen eine benannte, aber ungestylte
+ * Fußzone (<div class="chef-today-foot" data-chef-today-foot="actions">)
+ * mit genau einem <button type="button" class="secondary-button"
+ * data-chef-today-action="open-new-order">Neuen Auftrag anlegen</button> –
+ * dieselbe sekundäre Buttonklasse, die seit V8.9.4 bereits für "Aktuellen
+ * Stand neu laden" verwendet und real browserabgenommen wurde. render()
+ * hängt renderFootActions() jetzt als letztes Element an #chef-today-output
+ * an, hinter allen Tagesabschnitten, unabhängig davon, welche Abschnitte im
+ * jeweiligen Zustand leer sind und deshalb entfallen (V8.8.1/V8.9.5). Der
+ * Chefmodus enthält dadurch keinen primary-button mehr.
+ *
+ * Unverändert: data-chef-today-action="open-new-order", openNewOrder()
+ * (inklusive Export), bindActionHandlersOnce() und deren Klick-Delegation,
+ * alle Auswahl- und Ableitungsfunktionen, load(), openOrder(), Routen, API,
+ * Statuslogik, styles.css, index.html. Es geht keine Handlungsmöglichkeit
+ * verloren: derselbe Klick löst weiterhin exakt dasselbe openNewOrder()
+ * aus – nur an anderer, sekundärer Stelle. Bewusste Weiterentwicklung der
+ * bei V8.8.1 freigegebenen Regel, dass der vollständige Leerzustand drei
+ * handlungsorientierte Bereiche zeigt (today, recommendation, new-order):
+ * "Neuer Auftrag" ist ab V8.9.6 kein eigener Bereich mehr, die
+ * Handlungsmöglichkeit selbst bleibt vollständig erhalten. Bewusst NICHT
+ * Teil von V8.9.6: V8.9.7, V8.9.8, Tageslage-Zeile, Sprach-/
+ * Mikrofoneinstieg, neues Icon, neue Empfehlungslogik, DRAFT/
+ * APPROVED_FOR_EXECUTION-Sichtbarkeit, Auto-Refresh, Polling, CSS-
+ * Aufräumarbeiten.
  */
 
 (function () {
@@ -949,14 +988,17 @@
     );
   }
 
-  // Bereich E verweist ausdrücklich auf die bestehende Auftragserstellung.
-  // Diese Karte enthält deshalb kein einziges Eingabefeld.
-  function renderNewOrderSection() {
-    return renderSection(
-      "new-order",
-      "Neuer Auftrag",
-      '<p class="chef-today-empty">Ein neuer Auftrag entsteht weiterhin im Pilotauftrag.</p>' +
-        '<button type="button" class="primary-button" data-chef-today-action="open-new-order">Neuen Auftrag anlegen</button>',
+  // V8.9.6 – die einzige verbleibende Fußzone der Karte (kein Tagesabschnitt,
+  // siehe Modulkopf): kein renderSection(), keine Überschrift, kein
+  // Erklärsatz, kein primary-button, kein Icon, kein Platzhalter für eine
+  // spätere Sprachfunktion. "Neuen Auftrag anlegen" verweist ausdrücklich
+  // auf die bestehende Auftragserstellung; diese Karte enthält deshalb
+  // weiterhin kein einziges Eingabefeld.
+  function renderFootActions() {
+    return (
+      '<div class="chef-today-foot" data-chef-today-foot="actions">' +
+      '<button type="button" class="secondary-button" data-chef-today-action="open-new-order">Neuen Auftrag anlegen</button>' +
+      "</div>"
     );
   }
 
@@ -975,9 +1017,9 @@
     output.innerHTML =
       renderTodaySection(orders) +
       renderRecommendationSection(orders) +
-      renderNewOrderSection() +
       renderRunningSection(orders) +
-      renderDoneSection(orders);
+      renderDoneSection(orders) +
+      renderFootActions();
   }
 
   // -----------------------------------------------------------------------
