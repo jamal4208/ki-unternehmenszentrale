@@ -218,6 +218,32 @@
  * Bereiche im Leerzustand erhalten bleiben). Der Nicht-Leerzustand beider
  * Abschnitte, die Reihenfolge (sectionOrder()) und jede andere Sektion
  * bleiben byte-/inhaltsgleich zum Stand vor V8.9.3.
+ *
+ * V8.9.4 ("Manuelles 'Tag neu laden' im Chefmodus", additiv – Jamals
+ * Produktentscheidung zum exakten Wortlaut "Aktuellen Stand neu laden" liegt
+ * vor): schließt die zuvor dokumentierte Lücke, dass sich der Chefmodus nach
+ * der Rückkehr aus der Pilotauftrags-Karte nicht von selbst aktualisiert.
+ * Der neue, statische Button (index.html, innerhalb von .chef-today-head,
+ * außerhalb von #chef-today-output) trägt das bereits bestehende
+ * Delegationsattribut data-chef-today-action mit dem neuen Aktionswert
+ * "reload-today" und wird über die seit P1 bestehende Klick-Delegation in
+ * bindActionHandlersOnce() (siehe
+ * unten) erfasst – dort ruft der neue Aktionszweig ausschließlich das
+ * unveränderte, bereits bestehende load() direkt auf. Kein Wrapper, kein
+ * neuer Event-Listener, kein neuer State, keine neue Route, kein
+ * Auto-Refresh, kein Timer, kein Polling, keine Aktualisierung ohne
+ * bewusste Nutzerhandlung. load() selbst, todayOverviewByOrderId und
+ * progressByOrderId bleiben funktional unangetastet. Bewusst statisch statt
+ * innerhalb von #chef-today-output platziert: dieser Bereich wird bei jedem
+ * render() vollständig per innerHTML ersetzt (siehe render() unten) – ein
+ * dort erzeugter Button verschwände im Erstlade- und im Fehlerzustand
+ * (state.orders.length === 0) genau dann, wenn er am nötigsten wäre, und
+ * verlöre bei jedem Klick seinen Tastaturfokus. Die Pilotauftrags-Karte und
+ * ein dort eventuell geöffneter Auftrag bleiben unberührt – dieser Button
+ * aktualisiert ausschließlich die Chefmodus-Karte. Bewusst ohne
+ * Ladeanzeige, ohne Deaktivieren des Buttons während des Ladens und ohne
+ * In-Flight-Schutz: mehrfaches oder paralleles Auslösen ist unbedenklich,
+ * da load() ausschließlich bestehende, lesende GET-Aufrufe auslöst.
  */
 
 (function () {
@@ -1025,6 +1051,12 @@
         openRecommendedWork();
       } else if (action === "open-new-order") {
         openNewOrder();
+      } else if (action === "reload-today") {
+        // V8.9.4 – manuelles "Tag neu laden": ruft ausschließlich das
+        // bereits bestehende load() auf (siehe Modulkopf). Kein Wrapper,
+        // kein neuer State, kein In-Flight-Schutz, keine Ladeanzeige, kein
+        // Deaktivieren des Buttons – load() selbst bleibt unverändert.
+        load();
       }
     });
   }

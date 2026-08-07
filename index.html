@@ -119,6 +119,18 @@
             <div class="chef-today-head">
               <p class="eyebrow">Chefmodus</p>
               <h2 id="chef-today-title">Heute</h2>
+              <!--
+                V8.9.4 – Manuelles "Tag neu laden": statischer, sekundärer
+                Button außerhalb von #chef-today-output, damit er weder beim
+                Erstladen noch im Fehlerzustand (beide ersetzen #chef-today-
+                output vollständig, siehe chef-today-ui.js#render) verschwindet
+                und seinen Tastaturfokus über ein Neuladen hinweg behält. Löst
+                über die bestehende Klick-Delegation in bindActionHandlersOnce()
+                ausschließlich das bereits vorhandene, unveränderte load() aus –
+                kein Auto-Refresh, kein Timer, kein Polling, keine neue Route,
+                keine neue CSS-Klasse (wiederverwendet .secondary-button).
+              -->
+              <button type="button" class="secondary-button" data-chef-today-action="reload-today">Aktuellen Stand neu laden</button>
             </div>
             <div id="chef-today-output" aria-live="polite">Lade deinen Tag…</div>
           </section>

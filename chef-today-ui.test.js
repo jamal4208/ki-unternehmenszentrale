@@ -56,9 +56,46 @@ const STATUS_LABELS = pilotService.PILOT_STATUS_LABELS_DE;
 
 const domElements = {};
 domElements["chef-today-output"] = { innerHTML: "" };
+
+// V8.9.4 – im Unterschied zum bisherigen No-Op hält dieser Stub den
+// tatsächlich gebundenen Klick-Handler fest (bindActionHandlersOnce() bindet
+// weiterhin genau einen einzigen "click"-Listener auf #chef-today-card,
+// siehe die eigene Prüfung dazu unten). So lässt sich ein bewusster Klick
+// auf den neuen, statischen "Aktuellen Stand neu laden"-Button real über
+// dieselbe Delegation auslösen wie im echten Browser – ohne einen zweiten,
+// eigenen Aufrufpfad im Test zu erfinden.
+let chefTodayCardClickHandlerCount = 0;
+let chefTodayCardClickHandler = null;
 domElements["chef-today-card"] = {
-  addEventListener() {},
+  addEventListener(type, handler) {
+    if (type === "click") {
+      chefTodayCardClickHandlerCount += 1;
+      chefTodayCardClickHandler = handler;
+    }
+  },
 };
+
+// V8.9.4 – bildet exakt das echte DOM-Verhalten von Element.closest() für
+// ein einzelnes, bereits mit dem gesuchten Attribut versehenes Zielelement
+// nach (kein Elternketten-Nachbau nötig, da der neue Button selbst das
+// Attribut trägt, siehe index.html).
+function makeChefTodayActionTarget(action, orderId) {
+  return {
+    closest(selector) {
+      return selector === "[data-chef-today-action]" ? this : null;
+    },
+    getAttribute(name) {
+      if (name === "data-chef-today-action") return action;
+      if (name === "data-order-id") return orderId === undefined ? null : orderId;
+      return null;
+    },
+  };
+}
+
+function clickChefTodayAction(action, orderId) {
+  assert.ok(chefTodayCardClickHandler, "der Klick-Handler auf #chef-today-card muss gebunden sein");
+  chefTodayCardClickHandler({ target: makeChefTodayActionTarget(action, orderId) });
+}
 
 // Nachbau der bestehenden Pilotauftrags-Karte: ausschließlich die
 // Bedienelemente, an die die Startseite delegiert. Jeder Klick wird
@@ -393,6 +430,30 @@ function postCalls() {
   return fetchCalls.filter((entry) => entry.method !== "GET");
 }
 
+// V8.9.4 – saubere Trennung zwischen den drei bestehenden Navigations-/
+// Arbeitsaktionen aus chef-today-ui.js (jsChefTodayActions(), unverändert
+// seit P1/V8.4/V8.5/V8.7 Stufe C) und der einen statischen Aktualisierungs-
+// aktion aus index.html (htmlStaticChefTodayActions()). Die vier
+// bestehenden Guard-Prüfungen zur Aktionsmenge (V8.7 Stufe C (48), V8.8.4
+// (15), V8.8.5 (21/22/23/24/25), V8.9.2 (23)) nutzen ab V8.9.4 beide Helfer
+// zusätzlich zueinander, damit sie nicht stillschweigend grün blieben,
+// obwohl index.html inzwischen eine vierte Aktion besitzt – ein reiner
+// js-Quelltextvergleich allein würde diese vierte, rein statische Aktion
+// nie erfassen (siehe V8.9.4-Prüfpunkte unten).
+function jsChefTodayActions() {
+  return Array.from(new Set(js.match(/data-chef-today-action="([a-z-]+)"/g) || []));
+}
+
+function htmlChefTodayCardSection() {
+  const match = html.match(/<section class="chef-today-card"[\s\S]*?<\/section>/);
+  assert.ok(match, "die Startkarte muss in index.html auffindbar sein");
+  return match[0];
+}
+
+function htmlStaticChefTodayActions() {
+  return Array.from(new Set(htmlChefTodayCardSection().match(/data-chef-today-action="([a-z-]+)"/g) || []));
+}
+
 // V8.7 Stufe C – extrahiert ausschließlich die neue Grundzeile (falls
 // gerendert) aus einem Abschnitts-HTML, damit data-Attribut-/Aktionsprüfungen
 // nicht versehentlich den umschließenden Zeilen-Button (mit seinem
@@ -400,6 +461,17 @@ function postCalls() {
 function reasonLineHtml(sectionHtmlText) {
   const match = sectionHtmlText.match(/<span class="chef-today-row-line chef-today-row-reason">[\s\S]*?<\/span><\/span>/);
   return match ? match[0] : null;
+}
+
+// V8.9.4 – lässt die von fetchStub() erzeugten, bereits aufgelösten
+// Promise-Ketten (Promise.resolve()-basiert) tatsächlich durchlaufen, ohne
+// wie reload() den Rückgabewert von load() zu kennen (ein realer Klick über
+// clickChefTodayAction() hat, wie im echten Browser, keinen direkten Zugriff
+// auf das von load() zurückgegebene Promise). setTimeout(0) läuft erst nach
+// allen bereits eingereihten Microtasks – ausreichend für die hier
+// verwendeten, synchron auflösenden Fake-Backend-Promises.
+function flushAsync() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 async function reload() {
@@ -2135,11 +2207,16 @@ async function run() {
   });
 
   await check("V8.7 Stufe C (48): keine Änderung an der Chefmodus-Navigation (weiterhin genau drei bekannte Aktionen)", () => {
-    const actions = Array.from(new Set(js.match(/data-chef-today-action="([a-z-]+)"/g) || []));
+    const actions = jsChefTodayActions();
     assert.deepStrictEqual(
       actions.slice().sort(),
       ['data-chef-today-action="open-order"', 'data-chef-today-action="open-recommended"', 'data-chef-today-action="open-new-order"'].sort(),
     );
+    // V8.9.4 – zusätzlich zur unveränderten Dreierliste aus chef-today-ui.js
+    // ehrlich mitprüfen, dass index.html seit V8.9.4 genau eine zusätzliche,
+    // rein statische Aktion trägt (kein stillschweigendes Vorbeirutschen an
+    // dieser Stelle).
+    assert.deepStrictEqual(htmlStaticChefTodayActions(), ['data-chef-today-action="reload-today"']);
   });
 
   await check("V8.7 Stufe C (49): pilot-work-order-ui.js enthält keine neue Logik dieses Arbeitspakets (keine Änderung)", () => {
@@ -2309,11 +2386,14 @@ async function run() {
   await check(
     "V8.8.4 (15): Navigation unverändert (weiterhin genau drei bekannte Aktionen, „Entscheidung öffnen“ ruft weiterhin openOrder())",
     () => {
-      const actions = Array.from(new Set(js.match(/data-chef-today-action="([a-z-]+)"/g) || []));
+      const actions = jsChefTodayActions();
       assert.deepStrictEqual(
         actions.slice().sort(),
         ['data-chef-today-action="open-order"', 'data-chef-today-action="open-recommended"', 'data-chef-today-action="open-new-order"'].sort(),
       );
+      // V8.9.4 – ehrliche Ergänzung: die eine statische Aktualisierungsaktion
+      // aus index.html bleibt von der Navigation getrennt und unverändert.
+      assert.deepStrictEqual(htmlStaticChefTodayActions(), ['data-chef-today-action="reload-today"']);
       pilotControls = ui.getState().orders.map((order) => makePilotControl("select-order", order.id));
       pilotClicks.length = 0;
       fetchCalls.length = 0;
@@ -2544,11 +2624,14 @@ async function run() {
       routeMatches.forEach((route) => {
         assert.ok(route.startsWith("/api/pilot-work-order/orders"), `keine neue Route erwartet, gefunden: ${route}`);
       });
-      const actions = Array.from(new Set(js.match(/data-chef-today-action="([a-z-]+)"/g) || []));
+      const actions = jsChefTodayActions();
       assert.deepStrictEqual(
         actions.slice().sort(),
         ['data-chef-today-action="open-order"', 'data-chef-today-action="open-recommended"', 'data-chef-today-action="open-new-order"'].sort(),
       );
+      // V8.9.4 – ehrliche Ergänzung: die eine statische Aktualisierungsaktion
+      // aus index.html bleibt von der Navigation getrennt und unverändert.
+      assert.deepStrictEqual(htmlStaticChefTodayActions(), ['data-chef-today-action="reload-today"']);
       assert.doesNotMatch(js, /INSERT INTO|UPDATE .* SET|DELETE FROM/i, "keine Datenbankzugriffe in chef-today-ui.js");
     },
   );
@@ -2808,11 +2891,14 @@ async function run() {
   });
 
   await check("V8.9.2 (23): keine neue Interaktion – dieselben drei bestehenden Aktionen, kein neuer Handler an der \u00dcberschrift", () => {
-    const actions = Array.from(new Set(js.match(/data-chef-today-action="([a-z-]+)"/g) || []));
+    const actions = jsChefTodayActions();
     assert.deepStrictEqual(
       actions.slice().sort(),
       ['data-chef-today-action="open-order"', 'data-chef-today-action="open-recommended"', 'data-chef-today-action="open-new-order"'].sort(),
     );
+    // V8.9.4 – ehrliche Ergänzung: die eine statische Aktualisierungsaktion
+    // aus index.html bleibt von der Navigation getrennt und unverändert.
+    assert.deepStrictEqual(htmlStaticChefTodayActions(), ['data-chef-today-action="reload-today"']);
     const headingMatch = sectionHtml("today").match(/<h3>[^<]*<\/h3>/);
     assert.ok(headingMatch, "die \u00dcberschrift muss auffindbar sein");
     assert.doesNotMatch(headingMatch[0], /data-|onclick=/i, "die \u00dcberschrift selbst bleibt reiner Text ohne Bedienelement");
@@ -2976,6 +3062,237 @@ async function run() {
     assert.deepStrictEqual(postCalls(), []);
     const urls = Array.from(new Set(js.match(/"\/api\/[^"]*"/g) || []));
     assert.deepStrictEqual(urls.sort(), ['"/api/pilot-work-order/orders"', '"/api/pilot-work-order/orders/"'].sort());
+  });
+
+  // -------------------------------------------------------------------------
+  // V8.9.4 – Manuelles "Tag neu laden" im Chefmodus (Jamals Produktentscheidung
+  // zum exakten Wortlaut "Aktuellen Stand neu laden" liegt vor): ein neuer,
+  // statischer Button in index.html (innerhalb von .chef-today-head, außerhalb
+  // von #chef-today-output) löst über die bestehende Klick-Delegation in
+  // bindActionHandlersOnce() ausschließlich das bereits bestehende,
+  // unveränderte load() aus. Kein Wrapper, kein neuer Event-Listener, kein
+  // neuer State, keine neue Route, kein Auto-Refresh, kein Timer, kein
+  // Polling, keine Aktualisierung ohne bewusste Nutzerhandlung.
+  // -------------------------------------------------------------------------
+
+  await check('V8.9.4 (1): der Button "Aktuellen Stand neu laden" existiert genau einmal in index.html', () => {
+    const matches = html.match(/Aktuellen Stand neu laden/g) || [];
+    assert.strictEqual(matches.length, 1);
+  });
+
+  await check("V8.9.4 (2): der Button liegt innerhalb von #chef-today-card", () => {
+    assert.match(htmlChefTodayCardSection(), /Aktuellen Stand neu laden/);
+  });
+
+  await check("V8.9.4 (3): der Button liegt innerhalb von .chef-today-head", () => {
+    const headMatch = htmlChefTodayCardSection().match(/<div class="chef-today-head">[\s\S]*?<\/div>\s*<div id="chef-today-output"/);
+    assert.ok(headMatch, "der Kartenkopf .chef-today-head muss auffindbar und vor #chef-today-output geschlossen sein");
+    assert.match(headMatch[0], /Aktuellen Stand neu laden/);
+  });
+
+  await check("V8.9.4 (4): der Button steht statisch vor #chef-today-output", () => {
+    const card = htmlChefTodayCardSection();
+    const buttonIndex = card.indexOf("Aktuellen Stand neu laden");
+    const outputIndex = card.indexOf('id="chef-today-output"');
+    assert.ok(buttonIndex > -1 && outputIndex > -1);
+    assert.ok(buttonIndex < outputIndex, "der Button muss vor #chef-today-output im Markup stehen");
+  });
+
+  await check('V8.9.4 (5): der Button ist ein echtes <button type="button">-Element', () => {
+    const tagMatch = htmlChefTodayCardSection().match(/<button[^>]*>Aktuellen Stand neu laden<\/button>/);
+    assert.ok(tagMatch, "muss als <button>...</button> vorliegen");
+    assert.match(tagMatch[0], /type="button"/);
+  });
+
+  await check("V8.9.4 (6): der Button ist kein Link (kein <a>, kein href, kein role)", () => {
+    const tagMatch = htmlChefTodayCardSection().match(/<button[^>]*>Aktuellen Stand neu laden<\/button>/);
+    assert.ok(tagMatch);
+    assert.doesNotMatch(tagMatch[0], /href=/);
+    assert.doesNotMatch(tagMatch[0], /role=/);
+    assert.doesNotMatch(htmlChefTodayCardSection(), /<a\s[^>]*>Aktuellen Stand neu laden<\/a>/);
+  });
+
+  await check('V8.9.4 (7): der Button verwendet class="secondary-button"', () => {
+    const tagMatch = htmlChefTodayCardSection().match(/<button[^>]*>Aktuellen Stand neu laden<\/button>/);
+    assert.match(tagMatch[0], /class="secondary-button"/);
+  });
+
+  await check('V8.9.4 (8): der Button verwendet nicht class="primary-button"', () => {
+    const tagMatch = htmlChefTodayCardSection().match(/<button[^>]*>Aktuellen Stand neu laden<\/button>/);
+    assert.doesNotMatch(tagMatch[0], /primary-button/);
+  });
+
+  await check('V8.9.4 (9): der sichtbare Wortlaut lautet exakt "Aktuellen Stand neu laden" (Jamals Produktentscheidung)', () => {
+    const match = htmlChefTodayCardSection().match(/<button[^>]*data-chef-today-action="reload-today"[^>]*>([^<]*)<\/button>/);
+    assert.ok(match, 'der Button mit data-chef-today-action="reload-today" muss auffindbar sein');
+    assert.strictEqual(match[1], "Aktuellen Stand neu laden");
+  });
+
+  await check("V8.9.4 (10): der Wortlaut kommt genau einmal innerhalb der Chefmodus-Karte vor", () => {
+    const matches = htmlChefTodayCardSection().match(/Aktuellen Stand neu laden/g) || [];
+    assert.strictEqual(matches.length, 1);
+  });
+
+  await check("V8.9.4 (11): styles.css enth\u00e4lt keine neue CSS-Klasse f\u00fcr diesen Button (secondary-button wird wiederverwendet)", () => {
+    assert.doesNotMatch(css, /reload-today/i);
+    assert.doesNotMatch(css, /chef-today-reload/i);
+    assert.doesNotMatch(css, /chef-today-head[^{]*secondary-button/i);
+  });
+
+  await check("V8.9.4 (12): kein zus\u00e4tzlicher Event-Listener (weiterhin genau ein click-Listener auf #chef-today-card, genau zwei addEventListener-Stellen im Quelltext)", () => {
+    assert.strictEqual(chefTodayCardClickHandlerCount, 1, "bindActionHandlersOnce() darf w\u00e4hrend des gesamten Testlaufs nur genau einmal binden");
+    const addEventListenerCalls = js.match(/\.addEventListener\(/g) || [];
+    assert.strictEqual(addEventListenerCalls.length, 2, "weiterhin genau zwei addEventListener-Aufrufe (Kartendelegation, DOMContentLoaded) – kein dritter, neuer Listener");
+  });
+
+  await check("V8.9.4 (13): weiterhin kein Auto-Refresh (kein setInterval/setTimeout/requestAnimationFrame/visibilitychange/fokusbasierter Refresh/Polling-Implementierung)", () => {
+    assert.doesNotMatch(js, /setInterval/);
+    assert.doesNotMatch(js, /setTimeout/);
+    assert.doesNotMatch(js, /requestAnimationFrame/);
+    assert.doesNotMatch(js, /visibilitychange/);
+    assert.doesNotMatch(js, /addEventListener\(\s*["']focus["']/);
+    // Bewusst keine reine Textsuche nach dem Wort "Polling": der Modulkopf
+    // dokumentiert an mehreren Stellen ausdrücklich dessen Abwesenheit ("kein
+    // Polling"). Stattdessen werden die tatsächlichen, aus pilot-work-order-
+    // ui.js bekannten Polling-Bausteine ausgeschlossen.
+    assert.doesNotMatch(js, /startStatusPolling|stopStatusPolling|statusPolling[A-Za-z]*|syncStatusPollingFromOverview/);
+  });
+
+  await check("V8.9.4 (14): weiterhin ausschlie\u00dflich die beiden bestehenden GET-Leserouten, keine neue Route durch den neuen Aktionszweig", () => {
+    const urls = Array.from(new Set(js.match(/"\/api\/[^"]*"/g) || []));
+    assert.deepStrictEqual(urls.sort(), ['"/api/pilot-work-order/orders"', '"/api/pilot-work-order/orders/"'].sort());
+    const methods = js.match(/method:\s*"([A-Z]+)"/g) || [];
+    assert.deepStrictEqual(methods, ['method: "GET"']);
+  });
+
+  await check("V8.9.4 (15): ein bewusster Klick sendet keinen Anfragek\u00f6rper", async () => {
+    setOrders([{ id: "v894-a", title: "Auftrag A", status: "BLOCKED" }]);
+    await reload();
+    fetchCalls.length = 0;
+    clickChefTodayAction("reload-today");
+    await flushAsync();
+    assert.ok(fetchCalls.length > 0, "der Klick muss mindestens einen Abruf ausl\u00f6sen");
+    fetchCalls.forEach((call) => assert.strictEqual(call.body, undefined));
+  });
+
+  await check("V8.9.4 (16): ein bewusster Klick l\u00f6st genau einen GET auf /api/pilot-work-order/orders aus", async () => {
+    fetchCalls.length = 0;
+    clickChefTodayAction("reload-today");
+    await flushAsync();
+    const listCalls = fetchCalls.filter((call) => call.url === "/api/pilot-work-order/orders");
+    assert.strictEqual(listCalls.length, 1);
+  });
+
+  await check("V8.9.4 (17): mehrfaches render() ohne Klick l\u00f6st keinen neuen Abruf aus", () => {
+    fetchCalls.length = 0;
+    ui.render();
+    ui.render();
+    ui.render();
+    assert.deepStrictEqual(fetchCalls, []);
+  });
+
+  await check("V8.9.4 (18): Warten ohne Nutzerhandlung l\u00f6st keinen neuen Abruf aus (kein Auto-Refresh in Echtzeit)", async () => {
+    fetchCalls.length = 0;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.deepStrictEqual(fetchCalls, [], "ohne Klick darf w\u00e4hrend des Wartens kein einziger Abruf entstehen");
+  });
+
+  await check("V8.9.4 (19): zwei bewusste Klicks l\u00f6sen genau zwei Listenabrufe aus, kein Fehler", async () => {
+    fetchCalls.length = 0;
+    clickChefTodayAction("reload-today");
+    clickChefTodayAction("reload-today");
+    await flushAsync();
+    const listCalls = fetchCalls.filter((call) => call.url === "/api/pilot-work-order/orders");
+    assert.strictEqual(listCalls.length, 2);
+  });
+
+  await check("V8.9.4 (20): eine Statusänderung im Test-Backend bleibt vor dem Klick unsichtbar", () => {
+    const before = outputHtml();
+    setOrders([
+      { id: "v894-b1", title: "Neuer Auftrag B1", status: "RETURNED" },
+      { id: "v894-b2", title: "Neuer Auftrag B2", status: "BLOCKED" },
+    ]);
+    // Bewusst kein reload(), kein Klick – reine Backend-\u00c4nderung, die
+    // Karte darf sich davon nicht von selbst beeinflussen lassen.
+    assert.strictEqual(outputHtml(), before, "der sichtbare Stand darf sich ohne Klick nicht \u00e4ndern");
+  });
+
+  await check("V8.9.4 (21): nach dem bewussten Klick zeigt der Chefmodus den neuen Serverstand", async () => {
+    fetchCalls.length = 0;
+    clickChefTodayAction("reload-today");
+    await flushAsync();
+    assert.ok(outputHtml().includes("Neuer Auftrag B1"));
+    assert.ok(outputHtml().includes("Neuer Auftrag B2"));
+    assert.strictEqual(todayHeadingText(), "Heute wichtig (2)");
+  });
+
+  await check("V8.9.4 (22): der Aktualisierungsklick l\u00f6st weder einen Pilotauftrags-Klick noch eine Navigation/Fokus\u00e4nderung aus", async () => {
+    pilotClicks.length = 0;
+    scrollTargets.length = 0;
+    focusCalls = 0;
+    fetchCalls.length = 0;
+    clickChefTodayAction("reload-today");
+    await flushAsync();
+    assert.deepStrictEqual(pilotClicks, [], "die Startseite darf dabei selbst nichts in der Pilotauftrags-Karte ausl\u00f6sen");
+    assert.deepStrictEqual(scrollTargets, [], "kein Scrollziel wird durch das Aktualisieren ausgel\u00f6st");
+    assert.strictEqual(focusCalls, 0, "kein Fokuswechsel wird durch das Aktualisieren ausgel\u00f6st");
+  });
+
+  await check("V8.9.4 (23): \u00fcber den gesamten V8.9.4-Testlauf hinweg keine POST-/PATCH-/DELETE-Operation", () => {
+    assert.deepStrictEqual(postCalls(), []);
+  });
+
+  await check("V8.9.4 (24): die bestehenden primary-button-Regeln bleiben unver\u00e4ndert (h\u00f6chstens eine Hauptaktion je Bereich)", () => {
+    ["today", "recommendation", "new-order"].forEach((key) => {
+      const buttons = sectionHtml(key).match(/class="primary-button"/g) || [];
+      assert.ok(buttons.length <= 1, `Bereich ${key} h\u00e4tte ${buttons.length} Hauptaktionen`);
+    });
+  });
+
+  await check("V8.9.4 (25): der V8.9.3-Leerzustand bleibt unver\u00e4ndert, der Button bleibt sichtbar und bedienbar", async () => {
+    setOrders([]);
+    await reload();
+    assert.strictEqual(todayHeadingText(), "Heute wichtig");
+    assert.ok(sectionHtml("recommendation").includes("Im Moment wartet keine Entscheidung auf dich."));
+    // Der Button selbst ist statisch in index.html verankert, nicht Teil von
+    // #chef-today-output – er bleibt unabh\u00e4ngig vom Leerzustand vorhanden.
+    assert.strictEqual((html.match(/Aktuellen Stand neu laden/g) || []).length, 1);
+    fetchCalls.length = 0;
+    clickChefTodayAction("reload-today");
+    await flushAsync();
+    assert.strictEqual(
+      fetchCalls.filter((call) => call.url === "/api/pilot-work-order/orders").length,
+      1,
+      "der Button bleibt auch im Leerzustand bedienbar",
+    );
+  });
+
+  await check('V8.9.4 (26): V8.9.2 "Heute wichtig (n)" bleibt nach einem manuellen Neuladen unver\u00e4ndert korrekt', async () => {
+    setOrders([
+      { id: "v894-c1", title: "Auftrag C1", status: "BLOCKED" },
+      { id: "v894-c2", title: "Auftrag C2", status: "RETURNED" },
+      { id: "v894-c3", title: "Auftrag C3", status: "READY_FOR_REVIEW" },
+    ]);
+    fetchCalls.length = 0;
+    clickChefTodayAction("reload-today");
+    await flushAsync();
+    assert.strictEqual(todayHeadingText(), "Heute wichtig (3)");
+  });
+
+  await check('V8.9.4 (27): V8.9.1 "Zur\u00fcck zu Heute" bleibt unver\u00e4ndert vorhanden und korrekt verlinkt', () => {
+    const matches = html.match(/Zur\u00fcck zu Heute/g) || [];
+    assert.strictEqual(matches.length, 1);
+    const backLinkMatch = html.match(/<a\s[^>]*>Zur\u00fcck zu Heute<\/a>/);
+    assert.ok(backLinkMatch, "der R\u00fcckweg muss weiterhin als <a>-Element existieren");
+    assert.match(backLinkMatch[0], /href="#chef-today-card"/);
+  });
+
+  await check("V8.9.4: load() selbst, todayOverviewByOrderId und progressByOrderId wurden funktional nicht ver\u00e4ndert (nur der neue Aufrufpfad kam hinzu)", () => {
+    const loadFn = js.match(/function load\(\)\s*\{[\s\S]*?\n  \}/);
+    assert.ok(loadFn, "load() muss auffindbar sein");
+    assert.match(loadFn[0], /fetchJson\("\/api\/pilot-work-order\/orders"\)/);
+    assert.match(loadFn[0], /Promise\.all\(\[loadRunningProgress\(\), loadTodayOverviews\(\)\]\)/);
+    assert.doesNotMatch(loadFn[0], /reload-today/, "load() selbst kennt den neuen Aktionsnamen nicht \u2013 er wird ausschlie\u00dflich in bindActionHandlersOnce() verwendet");
   });
 
   clearDecisionReasonOverrides();
