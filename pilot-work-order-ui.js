@@ -155,6 +155,16 @@
     // (siehe DRAFT_FIELD_TARGETS/CREATE_FORM_FIELD_IDS oben) – bewusst im
     // DOM (HANDOFF_DRAFT_FIELD_TARGETS unten), nicht in diesem Objekt.
     handoffDraft: null,
+    // Arbeitspaket Rückgabe Pilotauftrag ("Rückgabe im Pilotauftrag über die
+    // Oberfläche bedienbar machen"): rein lokaler, nicht persistierter
+    // Rückgabezustand für GENAU einen Auftrag. Wird ausschließlich durch
+    // openReturnDraft() gesetzt (kein Request beim Öffnen), durch
+    // cancelReturnDraft() bzw. bei jedem Auftragswechsel (siehe selectOrder)
+    // verworfen und nach erfolgreicher Rückgabe wieder auf null gesetzt.
+    // Form: { pilotOrderId, submitting, error }. Der eingegebene Grund lebt –
+    // wie beim Rollenübergabe-Entwurf oben – bewusst im DOM
+    // (RETURN_DRAFT_NOTE_FIELD_ID unten), nicht in diesem Objekt.
+    returnDraft: null,
   };
 
   var STATUS_POLLING_INTERVAL_MS = 5000;
@@ -615,6 +625,13 @@
     // Verwerfen des lokalen Zustands (gleiche Grundregel wie
     // jamalConfirmation oben).
     state.handoffDraft = null;
+    // Arbeitspaket Rückgabe Pilotauftrag: eine offene Rückgabefläche gehört
+    // ausschließlich zum zuvor ausgewählten Auftrag. Ohne diesen Reset
+    // bliebe ein bereits eingegebener Rückgabegrund beim Auftragswechsel für
+    // den falschen Auftrag stehen. Reines Verwerfen des lokalen Zustands –
+    // kein API-Aufruf, kein Statuswechsel (gleiche Grundregel wie
+    // handoffDraft/jamalConfirmation oben).
+    state.returnDraft = null;
     // Korrekturlauf F5 (V8.0): der flüchtige V8.0-Vorschlagszustand des
     // Anlageformulars (draftResult/draftFilledValues/draftSentenceAtBuild)
     // gehört ausschließlich zum zuvor geöffneten Auftrag – ohne diesen
@@ -1289,6 +1306,239 @@
       (submitting ? "Wird eingereicht\u2026" : "Rollen\u00fcbergabe einreichen") +
       "</button>";
     html += "</div></div>";
+    return html;
+  }
+
+  // ---------------------------------------------------------------------
+  // Arbeitspaket Rückgabe Pilotauftrag ("Rückgabe im Pilotauftrag über die
+  // Oberfläche bedienbar machen"): schließt eine reine Bedienlücke. Der
+  // Server kann die Rückgabe seit V8.7 Stufe A vollständig
+  // (pilot-work-order-service.js#returnOrder, Pflichtgrund `note`,
+  // Zielstatus RETURNED, dauerhafte Speicherung in
+  // pilot_work_order_decision_reasons) und die Route
+  // (pilot-work-order-routes.js#PILOT_ACTIONS["return-order"], Felder
+  // ausschließlich `note` und `expectedRevision`) existiert unverändert –
+  // die Oberfläche hat diese Handlung bislang aber an drei Stellen
+  // ANGEKÜNDIGT (openDecision in beiden Entscheidungsstatus, nextStep bei
+  // READY_FOR_REVIEW), ohne sie bedienbar anzubieten. Dieses Modul fügt
+  // AUSSCHLIESSLICH einen bedienbaren Aufrufer der bereits bestehenden,
+  // unveränderten return-order-Route hinzu:
+  //   - keine Serveränderung, keine neue Route, kein neuer Status,
+  //   - genau zwei Status (READY_FOR_JAMAL_APPROVAL/READY_FOR_REVIEW),
+  //   - IN_EXECUTION bleibt bewusst ohne Rückgabeaktion, obwohl der Service
+  //     sie dort erlaubt (ein laufender Agentenlauf/Kettenschritt würde
+  //     Race-/Recovery-Fragen aufwerfen, siehe
+  //     pilot-agent-execution-service.js#attemptHandoffForSucceededRun, das
+  //     seinerseits IN_EXECUTION verlangt),
+  //   - block-order bleibt vollständig außerhalb dieses Pakets.
+  //
+  // Bewusst KEINE zweite Bestätigungsstufe (anders als
+  // approve-for-execution/approve-completion): `returnOrder` verlangt
+  // serverseitig kein `confirmed`, und RETURNED ist über
+  // reopenFromReturned → DRAFT vollständig umkehrbar. Die Reibung entsteht
+  // stattdessen aus dem bewussten Öffnen der Fläche (kein Request), dem
+  // Pflichtgrund und einem eigenen zweiten Klick zum Absenden – exakt das
+  // bereits etablierte Muster des Rollenübergabe-Entwurfs oben.
+  //
+  // Produktentscheidungen Jamals (verbindlich): sichtbarer Wortlaut
+  // „Zur Überarbeitung zurückgeben“, identisch in beiden Status; die
+  // positive Hauptaktion erhält in genau diesen beiden Status die
+  // bestehende Klasse `primary-button`, die Rückgabe die bestehende Klasse
+  // `secondary-button`. Kein Rot, keine Danger-Klasse, keine neue
+  // CSS-Klasse – die Rückgabe ist eine normale, umkehrbare
+  // Chefentscheidung, keine destruktive Aktion.
+  // ---------------------------------------------------------------------
+
+  // Der eingegebene Grund lebt bewusst im DOM (gleiches Muster wie
+  // HANDOFF_DRAFT_FIELD_TARGETS/CREATE_FORM_FIELD_IDS oben) und wird bei
+  // jedem render() gesichert und zurückgeschrieben (siehe
+  // captureReturnDraftNoteValue/restoreReturnDraftNoteValue unten).
+  var RETURN_DRAFT_NOTE_FIELD_ID = "pilot-return-draft-note";
+
+  // Die einzigen beiden Status, in denen die Rückgabe über die Oberfläche
+  // angeboten wird. Bewusst NICHT aus der Serverliste abgeleitet: der
+  // Service erlaubt zusätzlich IN_EXECUTION (siehe Kopfkommentar oben).
+  var RETURN_DRAFT_STATUSES = ["READY_FOR_JAMAL_APPROVAL", "READY_FOR_REVIEW"];
+
+  function isReturnDraftStatus(status) {
+    return RETURN_DRAFT_STATUSES.indexOf(status) !== -1;
+  }
+
+  function captureReturnDraftNoteValue() {
+    var el = byId(RETURN_DRAFT_NOTE_FIELD_ID);
+    return el ? el.value : null;
+  }
+
+  function restoreReturnDraftNoteValue(value) {
+    if (value === null || value === undefined) return;
+    var el = byId(RETURN_DRAFT_NOTE_FIELD_ID);
+    if (el) el.value = value;
+  }
+
+  function isReturnDraftOpenForOrder(orderId) {
+    return Boolean(state.returnDraft) && state.returnDraft.pilotOrderId === orderId;
+  }
+
+  // Öffnet die Rückgabefläche für GENAU den aktuell ausgewählten Auftrag.
+  // Setzt ausschließlich lokalen Zustand – KEIN fetch, KEIN POST, KEINE
+  // Statusänderung. Wird der Auftrag inzwischen in einem Status angezeigt,
+  // in dem die Rückgabe nicht angeboten wird, passiert bewusst nichts.
+  function openReturnDraft() {
+    if (!state.selectedPilotOrderId || !state.overview) return;
+    if (!isReturnDraftStatus(state.overview.status)) return;
+    state.returnDraft = {
+      pilotOrderId: state.selectedPilotOrderId,
+      submitting: false,
+      error: null,
+    };
+    render();
+  }
+
+  // Abbrechen: verwirft ausschließlich lokalen Zustand, niemals ein
+  // Request. Es wurde zu keinem Zeitpunkt etwas gesendet, es gibt daher
+  // nichts rückgängig zu machen. Ein laufender Absendeversuch blockiert das
+  // Abbrechen (keine widersprüchliche Doppelaktion).
+  function cancelReturnDraft() {
+    if (state.returnDraft && state.returnDraft.submitting) return;
+    state.returnDraft = null;
+    render();
+  }
+
+  // Die EINZIGE Stelle in dieser Datei, die jemals die return-order-Route
+  // aufruft. Genau ein POST je bewusstem Absendevorgang (submitting-Schutz,
+  // gleiches Muster wie submitHandoffDraft/confirmJamalConfirmation oben).
+  //
+  // Die Oberfläche prüft AUSSCHLIESSLICH, dass der Grund nach trim() nicht
+  // leer ist – jede weitere Regel (Mindestlänge 5, Höchstlänge 500, keine
+  // Steuerzeichen/HTML/Zugangsdaten) bleibt Serverwahrheit
+  // (pilot-work-order-service.js#validateDecisionReasonText) und wird als
+  // Servermeldung in der bestehenden Fehlerfläche angezeigt. Bewusst KEINE
+  // zweite Validierungslogik im Frontend, damit beide Seiten niemals
+  // auseinanderlaufen können. Der eingegebene Text wird unverändert
+  // gesendet (keine clientseitige Kürzung, kein stiller Umbau) – die
+  // Normalisierung (trim, CRLF→LF) macht ausschließlich der Server.
+  function submitReturnDraft() {
+    var draft = state.returnDraft;
+    if (!draft || draft.submitting) return Promise.resolve();
+    if (state.selectedPilotOrderId !== draft.pilotOrderId || !state.overview) return Promise.resolve();
+    var pilotOrderId = draft.pilotOrderId;
+    var expectedRevision = state.overview.order.revision;
+    var noteField = byId(RETURN_DRAFT_NOTE_FIELD_ID);
+    var note = noteField ? String(noteField.value || "") : "";
+    if (!isNonEmptyString(note)) {
+      // Leer oder ausschließlich Leerzeichen: KEIN Request. Die Fläche
+      // bleibt geöffnet, der eingegebene Text bleibt unangetastet stehen.
+      draft.error = "Bitte einen Grund angeben.";
+      render();
+      return Promise.resolve();
+    }
+    draft.submitting = true;
+    draft.error = null;
+    render();
+    return postAction(pilotOrderId, "return-order", { note: note, expectedRevision: expectedRevision })
+      .then(function (response) {
+        if (state.returnDraft !== draft) return;
+        if (state.selectedPilotOrderId !== pilotOrderId) return;
+        if (response.statusCode === 200 && response.data && response.data.ok) {
+          // Erfolg: Fläche schließen und den Auftrag neu laden. Der
+          // Freigabeknopf verschwindet dadurch zwangsläufig (renderPrimaryAction
+          // rendert rein statusabhängig), „Erneut als Entwurf starten“
+          // erscheint, und der gespeicherte Grund wird über die bereits
+          // bestehende Gründe-Karte sichtbar (renderDecisionReasonCard).
+          state.returnDraft = null;
+          state.actionError = null;
+          state.conflict = null;
+          return reloadSelectedOrder();
+        }
+        if (response.statusCode === 409) {
+          // Bestehendes Konfliktmuster (identisch zu
+          // confirmJamalConfirmation/runOrderAction): nichts wurde
+          // überschrieben, es wird nichts automatisch wiederholt und keine
+          // zweite Rückgabe versucht – der Serverzustand bleibt die Wahrheit.
+          var details = response.data || {};
+          state.returnDraft = null;
+          state.conflict = {
+            pilotOrderId: details.pilotOrderId || pilotOrderId,
+            expectedRevision: details.expectedRevision,
+            currentRevision: details.currentRevision,
+            message:
+              "Dieser Auftrag wurde zwischenzeitlich ver\u00e4ndert. Der aktuelle Stand wurde noch nicht \u00fcberschrieben. " +
+              "Bitte laden Sie den Auftrag neu und pr\u00fcfen Sie die n\u00e4chste Aktion.",
+          };
+          render();
+          return;
+        }
+        // 400/jeder andere Fehlerstatus: die Fläche bleibt bewusst geöffnet,
+        // der eingegebene Grund bleibt im DOM stehen (siehe capture/restore
+        // in renderSelectedOrderOutput unten) – nur `submitting` wird
+        // zurückgesetzt. Kein automatischer Retry.
+        draft.submitting = false;
+        draft.error =
+          (response.data && response.data.message) ||
+          "Die R\u00fcckgabe konnte nicht gespeichert werden. Der bisherige Status bleibt unver\u00e4ndert.";
+        render();
+      })
+      .catch(function () {
+        if (state.returnDraft !== draft) return;
+        if (state.selectedPilotOrderId !== pilotOrderId) return;
+        draft.submitting = false;
+        draft.error =
+          "Die R\u00fcckgabe konnte wegen eines Verbindungsproblems nicht gesendet werden. " +
+          "Der bisherige Status bleibt unver\u00e4ndert. Bitte erneut versuchen.";
+        render();
+      });
+  }
+
+  // Die sekundäre Aktion neben der jeweiligen positiven Hauptaktion.
+  // Bewusst dieselbe Beschriftung in beiden Entscheidungsstatus (ein
+  // Statusübergang, ein Begriff) und bewusst eine eigene, von der
+  // Routenaktion getrennte data-action: ein Klick darf NIEMALS unmittelbar
+  // einen Request auslösen, sondern ausschließlich die Fläche öffnen.
+  function renderReturnActionButton(disabledAttr) {
+    return (
+      '<button type="button" class="secondary-button" data-action="open-return-draft"' +
+      disabledAttr +
+      ">Zur \u00dcberarbeitung zur\u00fcckgeben</button>"
+    );
+  }
+
+  // Rendert die Rückgabefläche. Bewusst ohne eigene CSS-Klasse und ohne
+  // jede Änderung an styles.css: der klassenlose Container verhält sich
+  // exakt wie der bereits produktiv abgenommene Rollenübergabe-Entwurf
+  // (.pilot-handoff-draft besitzt keine einzige CSS-Regel), das Textfeld
+  // trägt die globalen textarea-Regeln, die Knöpfe die bestehenden Klassen
+  // primary-button/secondary-button und die Knopfzeile die bestehende
+  // Klasse button-row. Kein role="alertdialog", kein aria-modal, kein
+  // Modal – ausschließlich eine benannte Gruppe, wie beim
+  // Rollenübergabe-Entwurf.
+  function renderReturnDraftPanel(draft) {
+    var submitting = draft.submitting;
+    var disabledAttr = submitting ? " disabled" : "";
+    var html = '<div role="group" aria-label="Zur \u00dcberarbeitung zur\u00fcckgeben">';
+    html += "<p><strong>Zur \u00dcberarbeitung zur\u00fcckgeben</strong></p>";
+    html +=
+      "<p>Bitte kurz begr\u00fcnden, was noch fehlt oder ge\u00e4ndert werden soll. " +
+      "Der Grund bleibt dauerhaft bei diesem Auftrag sichtbar.</p>";
+    html +=
+      "<label>Grund der R\u00fcckgabe<textarea id=\"" +
+      RETURN_DRAFT_NOTE_FIELD_ID +
+      '"' +
+      disabledAttr +
+      "></textarea></label>";
+    if (draft.error) {
+      html += '<p class="pilot-work-order-action-error">' + escapeHtml(draft.error) + "</p>";
+    }
+    html += "<p><em>Der Auftrag wird erst mit deinem Klick zur\u00fcckgegeben.</em></p>";
+    html += '<div class="button-row">';
+    html += '<button type="button" class="secondary-button" data-action="cancel-return-draft"' + disabledAttr + ">Abbrechen</button>";
+    html +=
+      '<button type="button" class="primary-button" data-action="submit-return-draft"' +
+      disabledAttr +
+      ">" +
+      (submitting ? "Wird zur\u00fcckgegeben\u2026" : "Zur \u00dcberarbeitung zur\u00fcckgeben") +
+      "</button>";
+    html += "</div>";
+    html += "</div>";
     return html;
   }
 
@@ -2009,12 +2259,35 @@
         "</div>"
       );
     }
+    // Arbeitspaket Rückgabe Pilotauftrag: eine geöffnete Rückgabefläche
+    // ersetzt für GENAU diesen Auftrag die normale Primäraktion – kein
+    // doppelt sichtbares Nebeneinander von Freigabeknopf und Rückgabefläche
+    // (gleiches Muster wie Jamal-Bestätigung und Handoff-Entwurf oben). Die
+    // Fläche lebt damit vollständig innerhalb der bestehenden
+    // renderPrimaryAction()-Struktur; es gibt keine zweite Renderkette.
+    if (isReturnDraftStatus(status) && isReturnDraftOpenForOrder(overview.order.id)) {
+      return (
+        '<div class="pilot-work-order-primary-action">' +
+        "<p><strong>N\u00e4chster Schritt:</strong> " + escapeHtml(overview.nextStep) + "</p>" +
+        renderReturnDraftPanel(state.returnDraft) +
+        "</div>"
+      );
+    }
     var button = "";
     var disabledAttr = state.actionInFlight ? " disabled" : "";
     if (status === "DRAFT") {
       button = '<button type="button" data-action="mark-ready-for-approval"' + disabledAttr + ">Zur Freigabe vorlegen</button>";
     } else if (status === "READY_FOR_JAMAL_APPROVAL") {
-      button = '<button type="button" data-action="approve-for-execution"' + disabledAttr + ">Ausf\u00fchrung freigeben</button>";
+      // Arbeitspaket Rückgabe Pilotauftrag: erst hier (und bei
+      // READY_FOR_REVIEW unten) steht Jamal eine echte Entscheidung offen –
+      // deshalb bekommt genau hier die positive Hauptaktion die bestehende
+      // Klasse primary-button und die Rückgabe die bestehende Klasse
+      // secondary-button (Produktentscheidung Jamals).
+      button =
+        '<button type="button" class="primary-button" data-action="approve-for-execution"' +
+        disabledAttr +
+        ">Ausf\u00fchrung freigeben</button>" +
+        renderReturnActionButton(disabledAttr);
     } else if (status === "APPROVED_FOR_EXECUTION") {
       button = '<button type="button" data-action="start-execution"' + disabledAttr + ">Ausf\u00fchrung starten</button>";
     } else if (status === "IN_EXECUTION") {
@@ -2039,7 +2312,11 @@
         button += '<button type="button" data-action="prepare-handoff-draft"' + disabledAttr + ">Rollen\u00fcbergabe vorbereiten</button>";
       }
     } else if (status === "READY_FOR_REVIEW") {
-      button = '<button type="button" data-action="approve-completion"' + disabledAttr + ">Ergebnis abnehmen</button>";
+      button =
+        '<button type="button" class="primary-button" data-action="approve-completion"' +
+        disabledAttr +
+        ">Ergebnis abnehmen</button>" +
+        renderReturnActionButton(disabledAttr);
     } else if (status === "RETURNED") {
       button = '<button type="button" data-action="reopen-from-returned"' + disabledAttr + ">Erneut als Entwurf starten</button>";
     } else if (status === "BLOCKED") {
@@ -3969,6 +4246,12 @@
       // gerade für den aktuell angezeigten Auftrag geöffnet ist.
       var handoffDraftOpenHere = state.overview && isHandoffDraftOpenForOrder(state.overview.order.id);
       var preservedHandoffDraftValues = handoffDraftOpenHere ? captureHandoffDraftFieldValues() : null;
+      // Arbeitspaket Rückgabe Pilotauftrag: exakt dasselbe Grundmuster für
+      // den eingegebenen Rückgabegrund – nach einem abgelehnten Absenden
+      // (Servermeldung) oder einem fehlenden Grund darf der bereits
+      // getippte Text niemals verloren gehen.
+      var returnDraftOpenHere = state.overview && isReturnDraftOpenForOrder(state.overview.order.id);
+      var preservedReturnDraftNote = returnDraftOpenHere ? captureReturnDraftNoteValue() : null;
       if (state.overviewLoading && !state.overview) {
         output.innerHTML = "<p>Lade Pilotauftrag\u2026</p>";
       } else if (state.overviewError && !state.overview) {
@@ -3993,6 +4276,9 @@
       }
       if (handoffDraftOpenHere) {
         restoreHandoffDraftFieldValues(preservedHandoffDraftValues);
+      }
+      if (returnDraftOpenHere) {
+        restoreReturnDraftNoteValue(preservedReturnDraftNote);
       }
     }
 
@@ -4104,6 +4390,14 @@
         cancelHandoffDraft();
       } else if (action === "submit-handoff-draft") {
         submitHandoffDraft();
+      } else if (action === "open-return-draft") {
+        // Arbeitspaket Rückgabe Pilotauftrag: öffnet ausschließlich die
+        // lokale Rückgabefläche – kein Request (siehe openReturnDraft oben).
+        openReturnDraft();
+      } else if (action === "cancel-return-draft") {
+        cancelReturnDraft();
+      } else if (action === "submit-return-draft") {
+        submitReturnDraft();
       } else if (isKnownPrimaryAction(action)) {
         runOrderAction(action, {});
       }
@@ -4184,6 +4478,15 @@
       submitHandoffDraft: submitHandoffDraft,
       hasPassedDocumentationHandoff: hasPassedDocumentationHandoff,
       HANDOFF_DRAFT_FIELD_TARGETS: HANDOFF_DRAFT_FIELD_TARGETS,
+      // Arbeitspaket Rückgabe Pilotauftrag: additiv exportiert, damit
+      // pilot-work-order-command-center-ui.test.js den Rückgabeweg direkt
+      // prüfen kann (kein fetch/POST beim Öffnen und beim Abbrechen, genau
+      // ein POST je bewusstem Absendevorgang).
+      openReturnDraft: openReturnDraft,
+      cancelReturnDraft: cancelReturnDraft,
+      submitReturnDraft: submitReturnDraft,
+      RETURN_DRAFT_NOTE_FIELD_ID: RETURN_DRAFT_NOTE_FIELD_ID,
+      RETURN_DRAFT_STATUSES: RETURN_DRAFT_STATUSES,
     };
   }
 })();

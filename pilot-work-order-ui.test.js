@@ -260,4 +260,137 @@ check("58. keine Änderung an dieser Detailansicht durch den Chefmodus (pilot-wo
   assert.doesNotMatch(chefJs, /\.decisionReasonHistory/);
 });
 
+// ---------------------------------------------------------------------------
+// Arbeitspaket Rückgabe Pilotauftrag ("Rückgabe im Pilotauftrag über die
+// Oberfläche bedienbar machen"): rein additive Quelltextprüfungen. Das
+// tatsächliche Verhalten (kein Request beim Öffnen, genau ein POST beim
+// Absenden, Konflikt-/Fehlerverhalten, Bestandsschutz der positiven
+// Hauptaktionen) wird in pilot-work-order-command-center-ui.test.js
+// ausgeführt geprüft.
+// ---------------------------------------------------------------------------
+
+const RETURN_LABEL_SOURCE = "Zur \\u00dcberarbeitung zur\\u00fcckgeben";
+
+function returnDraftSubmitSource() {
+  const match = js.match(/function submitReturnDraft\(\)\s*\{[\s\S]*?\n {2}\}/);
+  assert.ok(match, "submitReturnDraft muss auffindbar sein");
+  return match[0];
+}
+
+function returnDraftPanelSource() {
+  const match = js.match(/function renderReturnDraftPanel\(draft\)\s*\{[\s\S]*?\n {2}\}/);
+  assert.ok(match, "renderReturnDraftPanel muss auffindbar sein");
+  return match[0];
+}
+
+check("RÜCK-Q1. der Rückgabe-Wortlaut ist genau einmal definiert und gilt dadurch identisch in beiden Entscheidungsstatus", () => {
+  const buttonFnMatch = js.match(/function renderReturnActionButton\(disabledAttr\)\s*\{[\s\S]*?\n {2}\}/);
+  assert.ok(buttonFnMatch, "renderReturnActionButton muss auffindbar sein");
+  assert.ok(buttonFnMatch[0].includes(RETURN_LABEL_SOURCE), "der verbindliche Wortlaut muss unverändert im Quelltext stehen");
+  // Beide Entscheidungsstatus verwenden denselben Aufruf – ein abweichender
+  // Wortlaut je Status ist dadurch strukturell ausgeschlossen.
+  // genau eine Definition und genau zwei Aufrufstellen (die beiden
+  // Entscheidungsstatus) – nirgends sonst.
+  const occurrences = js.match(/renderReturnActionButton\(disabledAttr\)/g) || [];
+  assert.strictEqual(occurrences.length, 3, "die Rückgabeaktion darf ausschließlich in den beiden Entscheidungsstatus stehen");
+});
+
+check("RÜCK-Q2. visuelle Hierarchie: positive Hauptaktion primary-button, Rückgabe secondary-button, kein Rot, keine Danger-Klasse", () => {
+  assert.match(js, /<button type="button" class="primary-button" data-action="approve-for-execution"/);
+  assert.match(js, /<button type="button" class="primary-button" data-action="approve-completion"/);
+  assert.match(js, /<button type="button" class="secondary-button" data-action="open-return-draft"/);
+  const classAttributes = (js.match(/class="[^"]*"/g) || []).join(" ");
+  assert.doesNotMatch(classAttributes, /danger|warn|error-button|destructive/i, "keine destruktive/rote Semantik");
+  assert.doesNotMatch(classAttributes, /pilot-return/, "die Rückgabe darf keine eigene CSS-Klasse einführen");
+});
+
+check("RÜCK-Q3. keine neue CSS-Klasse und keine Änderung an styles.css/index.html für die Rückgabe", () => {
+  assert.doesNotMatch(css, /pilot-return/, "styles.css darf keine Regel für die Rückgabefläche enthalten");
+  assert.doesNotMatch(html, /pilot-return/, "index.html darf kein statisches Rückgabe-Markup enthalten");
+  // Die verwendeten Klassen existieren bereits.
+  assert.match(css, /\.primary-button/);
+  assert.match(css, /\.secondary-button/);
+  assert.match(css, /\.button-row \{/);
+  assert.match(css, /\.pilot-work-order-action-error/);
+});
+
+check("RÜCK-Q4. kein neuer Endpunkt: die Rückgabe nutzt ausschließlich die bestehende return-order-Route über das bestehende postAction-Muster", () => {
+  const submitSource = returnDraftSubmitSource();
+  assert.match(submitSource, /postAction\(pilotOrderId, "return-order", \{ note: note, expectedRevision: expectedRevision \}\)/);
+  assert.doesNotMatch(submitSource, /fetch\(/, "kein eigener fetch außerhalb des bestehenden postAction-Musters");
+  assert.doesNotMatch(submitSource, /fetchJson\(/);
+  // Die einzige Stelle, die die Route überhaupt nennt.
+  const returnOrderCalls = js.match(/postAction\([^,]+, "return-order"/g) || [];
+  assert.strictEqual(returnOrderCalls.length, 1, "die return-order-Aktion darf im Quelltext genau einmal aufgerufen werden");
+  const apiCalls = js.match(/\/api\/[a-z0-9\-/]+/gi) || [];
+  apiCalls.forEach((call) => assert.match(call, /^\/api\/pilot-work-order\//));
+});
+
+check("RÜCK-Q5. der Rückgabe-Body enthält ausschließlich note und expectedRevision – insbesondere niemals confirmed", () => {
+  const submitSource = returnDraftSubmitSource();
+  assert.doesNotMatch(submitSource, /confirmed/, "die Rückgabe verlangt serverseitig kein confirmed und darf es niemals senden");
+  // Die einzige Validierung im Frontend ist die leere Eingabe.
+  assert.match(submitSource, /isNonEmptyString\(note\)/);
+  assert.match(submitSource, /Bitte einen Grund angeben\./);
+  assert.doesNotMatch(submitSource, /length < 5|length > 500|\.slice\(|substring\(/, "keine zweite Validierungslogik und keine stille Kürzung im Frontend");
+});
+
+check("RÜCK-Q6. kein neuer Status und keine neue Bedienhandlung: IN_EXECUTION und block-order bleiben ausgeschlossen", () => {
+  assert.match(js, /var RETURN_DRAFT_STATUSES = \["READY_FOR_JAMAL_APPROVAL", "READY_FOR_REVIEW"\];/);
+  assert.doesNotMatch(js, /data-action="block-order"/);
+  assert.doesNotMatch(js, /"block-order"/);
+});
+
+check("RÜCK-Q7. Accessibility: echte Buttons, echtes Textfeld, echtes Label, sichtbares Abbrechen – kein Modal, kein alertdialog, kein aria-modal", () => {
+  const panelSource = returnDraftPanelSource();
+  assert.match(panelSource, /<label>Grund der R\\u00fcckgabe<textarea id=\\"/, "echtes Label mit echtem textarea");
+  assert.match(panelSource, /RETURN_DRAFT_NOTE_FIELD_ID/);
+  assert.match(panelSource, /<\/textarea><\/label>/);
+  assert.match(panelSource, /data-action="cancel-return-draft"[^]*?Abbrechen/);
+  assert.match(panelSource, /role="group" aria-label="/);
+  assert.doesNotMatch(panelSource, /alertdialog/);
+  assert.doesNotMatch(panelSource, /aria-modal/);
+  assert.doesNotMatch(panelSource, /type="checkbox"/, "keine zweite Bestätigungsstufe");
+  const buttonTags = panelSource.match(/<button[^>]*/g) || [];
+  assert.strictEqual(buttonTags.length, 2, "die Rückgabefläche hat genau zwei Knöpfe (Abbrechen und Absenden)");
+  buttonTags.forEach((tag) => assert.match(tag, /type="button"/));
+});
+
+check("RÜCK-Q8. die Rückgabefläche lebt innerhalb der bestehenden renderPrimaryAction()-Struktur (keine zweite Renderkette)", () => {
+  const primaryFnMatch = js.match(/function renderPrimaryAction\(overview\)\s*\{[\s\S]*?\n {2}\}/);
+  assert.ok(primaryFnMatch, "renderPrimaryAction muss auffindbar sein");
+  assert.match(primaryFnMatch[0], /renderReturnDraftPanel\(state\.returnDraft\)/);
+  assert.match(primaryFnMatch[0], /isReturnDraftStatus\(status\) && isReturnDraftOpenForOrder\(overview\.order\.id\)/);
+  // genau eine Definition und genau eine Aufrufstelle (in renderPrimaryAction).
+  const panelOccurrences = js.match(/renderReturnDraftPanel\(/g) || [];
+  assert.strictEqual(panelOccurrences.length, 2, "die Rückgabefläche darf ausschließlich aus renderPrimaryAction heraus gerendert werden");
+});
+
+check("RÜCK-Q9. der lokale Rückgabezustand ist an den Auftrag gebunden und wird beim Auftragswechsel verworfen", () => {
+  assert.match(js, /returnDraft: null,/);
+  assert.match(js, /state\.returnDraft\.pilotOrderId === orderId/);
+  const selectFnMatch = js.match(/function selectOrder\(orderId\)\s*\{[\s\S]*?\n {2}\}/);
+  assert.ok(selectFnMatch, "selectOrder muss auffindbar sein");
+  assert.match(selectFnMatch[0], /state\.returnDraft = null;/);
+  const openFnMatch = js.match(/function openReturnDraft\(\)\s*\{[\s\S]*?\n {2}\}/);
+  const cancelFnMatch = js.match(/function cancelReturnDraft\(\)\s*\{[\s\S]*?\n {2}\}/);
+  [openFnMatch[0], cancelFnMatch[0]].forEach((source) => {
+    assert.doesNotMatch(source, /postAction\(|fetch\(|fetchJson\(/, "Öffnen und Abbrechen dürfen niemals einen Request auslösen");
+  });
+});
+
+check("RÜCK-Q10. der Chefmodus bleibt vollständig unberührt und read-only", () => {
+  const chefJs = readFile("chef-today-ui.js");
+  assert.doesNotMatch(chefJs, /return-order/);
+  assert.doesNotMatch(chefJs, /open-return-draft/);
+  assert.doesNotMatch(chefJs, /"POST"|'POST'/);
+});
+
+check("RÜCK-Q11. die neuen deutschen Literale folgen der bestehenden \\uXXXX-Konvention", () => {
+  assert.ok(js.includes(RETURN_LABEL_SOURCE));
+  assert.match(js, /Grund der R\\u00fcckgabe/);
+  assert.match(js, /Der Auftrag wird erst mit deinem Klick zur\\u00fcckgegeben\./);
+  assert.match(js, /Wird zur\\u00fcckgegeben\\u2026/);
+});
+
 console.log(`pilot-work-order-ui.test.js: ${passed} Prüfpunkte erfolgreich`);

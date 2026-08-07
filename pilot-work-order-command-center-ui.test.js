@@ -127,6 +127,15 @@ const HANDOFF_DRAFT_FIELD_IDS = [
   "pilot-handoff-draft-decision-needed",
 ];
 
+// Arbeitspaket Rückgabe Pilotauftrag: dieselbe Feld-ID wie
+// RETURN_DRAFT_NOTE_FIELD_ID in pilot-work-order-ui.js. Das Textfeld ist
+// ebenfalls Kindknoten von #pilot-work-order-output und muss daher (wie in
+// einem echten Browser) bei jedem Setzen von dessen innerHTML geleert
+// werden – nur so ist nachweisbar, dass der eingegebene Rückgabegrund über
+// Neurenderungen hinweg tatsächlich erhalten bleibt.
+const RETURN_DRAFT_NOTE_FIELD_ID = "pilot-return-draft-note";
+const OUTPUT_OWNED_FIELD_IDS = HANDOFF_DRAFT_FIELD_IDS.concat([RETURN_DRAFT_NOTE_FIELD_ID]);
+
 function makeHandoffDraftAwareOutputElement() {
   const el = { value: "" };
   let html = "";
@@ -136,7 +145,7 @@ function makeHandoffDraftAwareOutputElement() {
     },
     set(newHtml) {
       html = newHtml;
-      HANDOFF_DRAFT_FIELD_IDS.forEach((id) => {
+      OUTPUT_OWNED_FIELD_IDS.forEach((id) => {
         if (domElements[id]) domElements[id].value = "";
       });
     },
@@ -149,7 +158,7 @@ function makeHandoffDraftAwareOutputElement() {
 // als eigenständige, dauerhafte Einträge ergänzt (gleiches Muster wie die
 // pilot-order-create-*-Felder oben).
 domElements["pilot-work-order-output"] = makeHandoffDraftAwareOutputElement();
-HANDOFF_DRAFT_FIELD_IDS.forEach((id) => {
+OUTPUT_OWNED_FIELD_IDS.forEach((id) => {
   domElements[id] = makeElement();
 });
 
@@ -547,6 +556,71 @@ function makeFakeBackend() {
         order.updatedAt = nowIso();
         return respond(200, { ok: true, handoff, overview: overviewFor(order) });
       }
+      // Arbeitspaket Rückgabe Pilotauftrag: bildet exakt den bereits
+      // bestehenden HTTP-Vertrag von
+      // pilot-work-order-routes.js#PILOT_ACTIONS["return-order"] und
+      // pilot-work-order-service.js#returnOrder nach – Pflichtgrund `note`
+      // (5–500 Zeichen nach trim, keine stille Kürzung), erlaubte
+      // Ausgangsstatus READY_FOR_JAMAL_APPROVAL/READY_FOR_REVIEW/IN_EXECUTION
+      // (der Service erlaubt IN_EXECUTION weiterhin, die Oberfläche bietet es
+      // bewusst nicht an), Zielstatus RETURNED, Revision +1 sowie die
+      // dauerhafte Speicherung des Grundes (currentDecisionReason/
+      // decisionReasonHistory). Bewusst ein eigener Zweig statt eines
+      // TRANSITIONS-Eintrags, weil mehrere Ausgangsstatus zulässig sind und
+      // ein Grund geschrieben wird (gleiches Muster wie submit-handoff oben).
+      if (action === "return-order") {
+        if (body.expectedRevision !== undefined && body.expectedRevision !== order.revision) {
+          return respond(409, {
+            ok: false,
+            message: `Der Pilotauftrag "${orderId}" wurde zwischenzeitlich verändert (erwartete Revision ${body.expectedRevision}, aktuell ${order.revision}).`,
+            pilotOrderId: orderId,
+            expectedRevision: body.expectedRevision,
+            currentRevision: order.revision,
+          });
+        }
+        if (!["READY_FOR_JAMAL_APPROVAL", "READY_FOR_REVIEW", "IN_EXECUTION"].includes(order.status)) {
+          return respond(409, {
+            ok: false,
+            message: `Eine Rückgabe ist aus ${order.status} nicht möglich.`,
+            pilotOrderId: orderId,
+            currentStatus: order.status,
+          });
+        }
+        if (!body.note || !String(body.note).trim()) {
+          return respond(400, { ok: false, message: "note ist erforderlich (Grund der Rückgabe)." });
+        }
+        const normalizedNote = String(body.note).replace(/\r\n/g, "\n").trim();
+        if (normalizedNote.length < 5) {
+          return respond(400, {
+            ok: false,
+            message:
+              "note ist zu kurz: mindestens 5 Zeichen sind erforderlich, damit die Begründung später nachvollziehbar bleibt.",
+          });
+        }
+        if (normalizedNote.length > 500) {
+          return respond(400, {
+            ok: false,
+            message: `note ist zu lang: höchstens 500 Zeichen sind erlaubt (eingegeben: ${normalizedNote.length}).`,
+          });
+        }
+        const fromStatus = order.status;
+        order.status = "RETURNED";
+        order.statusLabel = STATUS_LABELS.RETURNED;
+        order.revision += 1;
+        order.updatedAt = nowIso();
+        const reasonEntry = {
+          kind: "RETURN",
+          text: normalizedNote,
+          setAt: nowIso(),
+          setByUserId: "test-actor",
+          fromStatus,
+          toStatus: "RETURNED",
+          orderRevision: order.revision,
+        };
+        order.currentDecisionReason = reasonEntry;
+        order.decisionReasonHistory = (order.decisionReasonHistory || []).concat([reasonEntry]);
+        return respond(200, { ok: true, overview: overviewFor(order) });
+      }
       const transition = TRANSITIONS[action];
       if (!transition) return respond(404, { ok: false, message: "Nicht gefunden." });
       if (body.expectedRevision !== undefined && body.expectedRevision !== order.revision) {
@@ -606,6 +680,12 @@ function makeFakeBackend() {
 
 const backend = makeFakeBackend();
 const fetchCalls = [];
+// Arbeitspaket Rückgabe Pilotauftrag: `fetchCalls` wird von den einzelnen
+// Prüfpunkten bewusst geleert. Für den abschließenden Nachweis "über den
+// GESAMTEN Testlauf wurde ausschließlich die bestehende return-order-Route
+// angesprochen und niemals block-order" wird zusätzlich ein niemals
+// geleerter Mitschnitt geführt.
+const allFetchCalls = [];
 // V7.7.1 ("Explizite Jamal-Ausführungsfreigabe bedienbar machen") – 8.: ein
 // einmaliger Schalter, um den NÄCHSTEN fetch()-Aufruf als Netzwerkfehler
 // (rejected Promise, kein HTTP-Statuscode) zu simulieren, ohne eine echte
@@ -624,7 +704,9 @@ let forceNextCreateOrderResponse = null;
 // Revisionsprüfung) verändern zu müssen.
 let forceNextSubmitHandoffResponse = null;
 global.fetch = (url, opts) => {
-  fetchCalls.push({ url, method: (opts && opts.method) || "GET", body: opts && opts.body ? JSON.parse(opts.body) : undefined });
+  const call = { url, method: (opts && opts.method) || "GET", body: opts && opts.body ? JSON.parse(opts.body) : undefined };
+  fetchCalls.push(call);
+  allFetchCalls.push(call);
   if (forceNextFetchNetworkFailure) {
     forceNextFetchNetworkFailure = false;
     return Promise.reject(new Error("Simulierter Netzwerkfehler (Testfixtur)."));
@@ -2626,6 +2708,352 @@ async function run() {
   });
 
   assert.strictEqual(backend.getWriteCallCount(), writeCallCountBeforeDecisionReasonTests, "V8.7 Stufe B darf über die gesamte Testreihe hinweg keinen einzigen Schreib-Request auslösen");
+
+  // -------------------------------------------------------------------
+  // Arbeitspaket Rückgabe Pilotauftrag ("Rückgabe im Pilotauftrag über die
+  // Oberfläche bedienbar machen"): reine Bedienlücke. Der Server konnte die
+  // Rückgabe bereits vollständig (returnOrder + return-order-Route,
+  // unverändert), die Oberfläche hat sie in beiden Entscheidungsstatus
+  // ANGEKÜNDIGT, aber nie angeboten. Die folgenden Prüfpunkte weisen
+  // ausschließlich die neue Bedienbarkeit nach – sowie ausdrücklich, dass
+  // sämtliche bestehenden Wege unverändert bleiben.
+  // -------------------------------------------------------------------
+
+  const RETURN_EXCLUDED_STATUSES = ["DRAFT", "APPROVED_FOR_EXECUTION", "IN_EXECUTION", "COMPLETED", "RETURNED", "BLOCKED"];
+  const RETURN_ACTION_LABEL = "Zur \u00dcberarbeitung zur\u00fcckgeben";
+  let returnOrderCounter = 0;
+  let revisionBeforeReturn = null;
+
+  function makeReturnTestOrder(status, overrides) {
+    returnOrderCounter += 1;
+    const id = `pilot-order-test-return-${status.toLowerCase()}-${returnOrderCounter}`;
+    setRawOrder(
+      id,
+      Object.assign(
+        {
+          title: `R\u00fcckgabe-Testauftrag ${status}`,
+          status,
+          statusLabel: STATUS_LABELS[status],
+          revision: 4,
+          agentChains: [],
+        },
+        overrides || {},
+      ),
+    );
+    return id;
+  }
+
+  function returnPostCalls() {
+    return fetchCalls.filter((c) => c.method === "POST" && /\/return-order$/.test(c.url));
+  }
+
+  await check("RÜCK-1. READY_FOR_JAMAL_APPROVAL zeigt die positive Hauptaktion als primary-button und die Rückgabe als sekundäre Aktion", async () => {
+    const orderId = makeReturnTestOrder("READY_FOR_JAMAL_APPROVAL");
+    fetchCalls.length = 0;
+    await ui.selectOrder(orderId);
+    const html = domElements["pilot-work-order-output"].innerHTML;
+    assert.match(html, /<button type="button" class="primary-button" data-action="approve-for-execution">Ausf\u00fchrung freigeben<\/button>/);
+    assert.match(
+      html,
+      new RegExp(`<button type="button" class="secondary-button" data-action="open-return-draft">${RETURN_ACTION_LABEL}</button>`),
+    );
+    // Reihenfolge: die positive Hauptaktion steht vor der Rückgabe.
+    assert.ok(
+      html.indexOf('data-action="approve-for-execution"') < html.indexOf('data-action="open-return-draft"'),
+      "die positive Hauptaktion muss vor der Rückgabeaktion stehen",
+    );
+    // Kein Rot, keine Danger-Klasse, keine neue CSS-Klasse.
+    assert.doesNotMatch(html, /class="[^"]*danger[^"]*"/i);
+    assert.strictEqual(returnPostCalls().length, 0, "das reine Anzeigen darf keinen Request auslösen");
+  });
+
+  await check("RÜCK-2. READY_FOR_REVIEW zeigt „Ergebnis abnehmen“ als primary-button und dieselbe Rückgabeaktion als secondary-button", async () => {
+    const orderId = makeReturnTestOrder("READY_FOR_REVIEW");
+    await ui.selectOrder(orderId);
+    const html = domElements["pilot-work-order-output"].innerHTML;
+    assert.match(html, /<button type="button" class="primary-button" data-action="approve-completion">Ergebnis abnehmen<\/button>/);
+    assert.match(
+      html,
+      new RegExp(`<button type="button" class="secondary-button" data-action="open-return-draft">${RETURN_ACTION_LABEL}</button>`),
+    );
+  });
+
+  await check("RÜCK-3./22. in allen sechs übrigen Status erscheint keinerlei Rückgabeaktion (IN_EXECUTION bewusst eingeschlossen)", async () => {
+    for (const status of RETURN_EXCLUDED_STATUSES) {
+      const orderId = makeReturnTestOrder(status);
+      fetchCalls.length = 0;
+      await ui.selectOrder(orderId);
+      const html = domElements["pilot-work-order-output"].innerHTML;
+      assert.doesNotMatch(html, /data-action="open-return-draft"/, `${status} darf keine Rückgabeaktion anbieten`);
+      assert.ok(!html.includes(RETURN_ACTION_LABEL), `${status} darf den Rückgabe-Wortlaut nicht als Bedienhandlung zeigen`);
+      // Öffnen ist auch programmatisch ausgeschlossen (Schutz gegen einen
+      // veralteten Klick auf eine zwischenzeitlich verschwundene Fläche).
+      ui.openReturnDraft();
+      assert.strictEqual(ui.getState().returnDraft, null, `${status} darf keine Rückgabefläche öffnen können`);
+      assert.strictEqual(returnPostCalls().length, 0, `${status} darf keinen return-order-Request auslösen`);
+    }
+  });
+
+  await check("RÜCK-23. es existiert an keiner Stelle ein block-order-Bedienpfad in der Oberfläche", async () => {
+    for (const status of ["READY_FOR_JAMAL_APPROVAL", "READY_FOR_REVIEW"].concat(RETURN_EXCLUDED_STATUSES)) {
+      const orderId = makeReturnTestOrder(status);
+      await ui.selectOrder(orderId);
+      // Bewusst exakt: "unblock-order" (bestehender BLOCKED-Weg) enthält
+      // dieselbe Zeichenfolge und bleibt ausdrücklich erlaubt.
+      assert.doesNotMatch(
+        domElements["pilot-work-order-output"].innerHTML,
+        /data-action="block-order"/,
+        `${status} darf keinen block-order-Pfad zeigen`,
+      );
+    }
+  });
+
+  // Ab hier ein einziger, durchgehender Auftrag im Entscheidungsstatus.
+  const returnFlowOrderId = makeReturnTestOrder("READY_FOR_JAMAL_APPROVAL");
+  await ui.selectOrder(returnFlowOrderId);
+
+  await check("RÜCK-4. das Öffnen der Rückgabefläche löst keinen Request aus und zeigt Überschrift, beschriftetes Textfeld, Hinweis, Abbrechen und Absenden – ohne Checkbox und ohne Modal", () => {
+    fetchCalls.length = 0;
+    ui.openReturnDraft();
+    assert.strictEqual(fetchCalls.length, 0, "das reine Öffnen der Rückgabefläche darf keinen Request auslösen");
+    const draft = ui.getState().returnDraft;
+    assert.ok(draft, "die Rückgabefläche muss lokal geöffnet sein");
+    assert.strictEqual(draft.pilotOrderId, returnFlowOrderId, "der lokale Zustand muss an genau diesen Auftrag gebunden sein");
+    assert.strictEqual(draft.submitting, false);
+    const html = domElements["pilot-work-order-output"].innerHTML;
+    assert.match(html, /<p><strong>Zur \u00dcberarbeitung zur\u00fcckgeben<\/strong><\/p>/);
+    assert.match(html, /<label>Grund der R\u00fcckgabe<textarea id="pilot-return-draft-note"><\/textarea><\/label>/);
+    assert.match(html, /Der Auftrag wird erst mit deinem Klick zur\u00fcckgegeben\./);
+    assert.match(html, /<button type="button" class="secondary-button" data-action="cancel-return-draft">Abbrechen<\/button>/);
+    assert.match(html, new RegExp(`<button type="button" class="primary-button" data-action="submit-return-draft">${RETURN_ACTION_LABEL}</button>`));
+    // Keine zweite Bestätigungsstufe, kein Modal, keine erfundene A11y-Architektur.
+    assert.doesNotMatch(html, /type="checkbox"/, "die Rückgabe darf keine zusätzliche Bestätigungsstufe verlangen");
+    assert.doesNotMatch(html, /alertdialog/);
+    assert.doesNotMatch(html, /aria-modal/);
+    assert.match(html, /role="group" aria-label="Zur \u00dcberarbeitung zur\u00fcckgeben"/);
+    // Keine neue CSS-Klasse: die Fläche verwendet ausschließlich bereits
+    // bestehende Klassen (primary-button/secondary-button/button-row sowie
+    // die bestehende Fehlerfläche).
+    const usedClasses = (html.match(/class="([^"]*)"/g) || []).join(" ");
+    assert.doesNotMatch(usedClasses, /pilot-return/, "die Rückgabefläche darf keine eigene neue CSS-Klasse einführen");
+    assert.match(html, /<div class="button-row">/, "die Knopfzeile nutzt die bestehende Klasse button-row");
+    // Solange die Fläche offen ist, gibt es keinen doppelt sichtbaren Freigabeknopf.
+    assert.doesNotMatch(html, /data-action="approve-for-execution"/);
+  });
+
+  await check("RÜCK-5. Abbrechen verwirft ausschließlich den lokalen Zustand, ohne jeden Request", () => {
+    fetchCalls.length = 0;
+    ui.cancelReturnDraft();
+    assert.strictEqual(fetchCalls.length, 0, "Abbrechen darf keinen Request auslösen");
+    assert.strictEqual(ui.getState().returnDraft, null);
+    const html = domElements["pilot-work-order-output"].innerHTML;
+    assert.match(html, /data-action="approve-for-execution"/, "nach dem Abbrechen muss die normale Primäraktion zurückkehren");
+    assert.match(html, /data-action="open-return-draft"/);
+    assert.doesNotMatch(html, /data-action="submit-return-draft"/);
+    assert.strictEqual(ui.getState().overview.status, "READY_FOR_JAMAL_APPROVAL", "Abbrechen darf nichts am Status ändern");
+  });
+
+  await check("RÜCK-6. leerer Grund: kein Request, verständliche Meldung, die Fläche bleibt geöffnet", async () => {
+    ui.openReturnDraft();
+    domElements[RETURN_DRAFT_NOTE_FIELD_ID].value = "";
+    fetchCalls.length = 0;
+    await ui.submitReturnDraft();
+    assert.strictEqual(fetchCalls.length, 0, "ohne Grund darf kein Request gesendet werden");
+    const draft = ui.getState().returnDraft;
+    assert.ok(draft, "die Fläche muss geöffnet bleiben");
+    assert.strictEqual(draft.error, "Bitte einen Grund angeben.");
+    assert.strictEqual(draft.submitting, false);
+    assert.match(domElements["pilot-work-order-output"].innerHTML, /Bitte einen Grund angeben\./);
+  });
+
+  await check("RÜCK-7. nur Leerzeichen: kein Request, der eingegebene Text bleibt unangetastet erhalten", async () => {
+    const whitespaceOnly = "   \n  ";
+    domElements[RETURN_DRAFT_NOTE_FIELD_ID].value = whitespaceOnly;
+    fetchCalls.length = 0;
+    await ui.submitReturnDraft();
+    assert.strictEqual(fetchCalls.length, 0, "ein Grund aus reinen Leerzeichen darf keinen Request auslösen");
+    assert.strictEqual(domElements[RETURN_DRAFT_NOTE_FIELD_ID].value, whitespaceOnly, "der eingegebene Text darf nicht verloren gehen");
+    assert.strictEqual(ui.getState().returnDraft.error, "Bitte einen Grund angeben.");
+  });
+
+  await check("RÜCK-Server. eine serverseitige Ablehnung (zu kurzer Grund) wird verständlich angezeigt, ohne im Frontend nachgebaut zu werden: genau ein POST, Text bleibt erhalten, Status unverändert", async () => {
+    domElements[RETURN_DRAFT_NOTE_FIELD_ID].value = "kurz";
+    fetchCalls.length = 0;
+    await ui.submitReturnDraft();
+    const posts = returnPostCalls();
+    assert.strictEqual(posts.length, 1, "die UI prüft die Mindestlänge bewusst nicht selbst – der Server entscheidet");
+    assert.strictEqual(domElements[RETURN_DRAFT_NOTE_FIELD_ID].value, "kurz", "der eingegebene Text darf nach einem Serverfehler nicht verloren gehen");
+    const draft = ui.getState().returnDraft;
+    assert.ok(draft, "die Fläche muss nach einem Serverfehler geöffnet bleiben");
+    assert.strictEqual(draft.submitting, false, "die Fläche muss wieder bedienbar sein");
+    assert.match(draft.error, /mindestens 5 Zeichen/);
+    assert.strictEqual(ui.getState().overview.status, "READY_FOR_JAMAL_APPROVAL", "ein abgelehnter Versuch darf den Status nicht ändern");
+  });
+
+  await check("RÜCK-Netz. Netzwerkfehler: genau ein tatsächlich gesendeter Versuch, kein automatischer Retry, Text bleibt erhalten", async () => {
+    domElements[RETURN_DRAFT_NOTE_FIELD_ID].value = "Verbindungstest f\u00fcr die R\u00fcckgabe.";
+    forceNextFetchNetworkFailure = true;
+    fetchCalls.length = 0;
+    await ui.submitReturnDraft();
+    assert.strictEqual(fetchCalls.length, 1, "kein automatischer Retry");
+    assert.strictEqual(domElements[RETURN_DRAFT_NOTE_FIELD_ID].value, "Verbindungstest f\u00fcr die R\u00fcckgabe.");
+    const draft = ui.getState().returnDraft;
+    assert.ok(draft && draft.submitting === false);
+    assert.match(draft.error, /Verbindungsproblem/);
+    assert.strictEqual(ui.getState().overview.status, "READY_FOR_JAMAL_APPROVAL");
+  });
+
+  await check("RÜCK-Wechsel. ein Auftragswechsel verwirft eine offene Rückgabefläche ohne jeden Request", async () => {
+    assert.ok(ui.getState().returnDraft, "zu Beginn dieses Prüfpunkts muss die Fläche geöffnet sein");
+    fetchCalls.length = 0;
+    await ui.selectOrder(CANONICAL_ID);
+    assert.strictEqual(ui.getState().returnDraft, null, "beim Auftragswechsel darf kein Grund für den falschen Auftrag stehen bleiben");
+    assert.strictEqual(fetchCalls.filter((c) => c.method === "POST").length, 0, "ein Auftragswechsel darf keinen Schreib-Request auslösen");
+    await ui.selectOrder(returnFlowOrderId);
+    assert.strictEqual(ui.getState().returnDraft, null);
+  });
+
+  await check("RÜCK-16. veraltete Revision: bestehendes Konfliktmuster, kein Retry, keine zweite Rückgabe, Serverzustand bleibt Wahrheit", async () => {
+    ui.openReturnDraft();
+    domElements[RETURN_DRAFT_NOTE_FIELD_ID].value = "Konflikttest: bitte \u00fcberarbeiten.";
+    const rawOrder = backend.orders.get(returnFlowOrderId);
+    rawOrder.revision += 1; // simuliert eine zwischenzeitliche externe Änderung
+    fetchCalls.length = 0;
+    await ui.submitReturnDraft();
+    const posts = returnPostCalls();
+    assert.strictEqual(posts.length, 1, "genau ein Versuch, kein automatischer zweiter");
+    const state = ui.getState();
+    assert.strictEqual(state.returnDraft, null, "nach einem Konflikt wird die Fläche geschlossen (bestehendes Konfliktmuster)");
+    assert.ok(state.conflict, "das bestehende Konfliktbanner muss erscheinen");
+    assert.strictEqual(state.conflict.pilotOrderId, returnFlowOrderId);
+    assert.match(state.conflict.message, /zwischenzeitlich ver\u00e4ndert/);
+    assert.strictEqual(rawOrder.status, "READY_FOR_JAMAL_APPROVAL", "der Serverzustand darf nicht überschrieben worden sein");
+    assert.strictEqual(state.overview.status, "READY_FOR_JAMAL_APPROVAL");
+  });
+
+  await check("RÜCK-15. Doppelklick: ein zweiter, gleichzeitig ausgelöster Klick erzeugt keinen zweiten POST", async () => {
+    await ui.reloadSelectedOrder();
+    revisionBeforeReturn = ui.getState().overview.order.revision;
+    ui.openReturnDraft();
+    domElements[RETURN_DRAFT_NOTE_FIELD_ID].value = "Doppelklicktest: bitte \u00fcberarbeiten.";
+    fetchCalls.length = 0;
+    const first = ui.submitReturnDraft();
+    assert.strictEqual(ui.getState().returnDraft.submitting, true, "während des Absendens muss der Zustand als 'submitting' erkennbar sein");
+    assert.match(domElements["pilot-work-order-output"].innerHTML, /data-action="submit-return-draft" disabled/);
+    assert.match(domElements["pilot-work-order-output"].innerHTML, /data-action="cancel-return-draft" disabled/);
+    const second = ui.submitReturnDraft();
+    await Promise.all([first, second]);
+    assert.strictEqual(returnPostCalls().length, 1, "ein bewusster Absendevorgang erzeugt maximal einen POST");
+  });
+
+  await check("RÜCK-8./9./10./11./12. erfolgreiche Rückgabe: genau ein POST auf /return-order mit exakt note + expectedRevision, ohne confirmed", () => {
+    const posts = returnPostCalls();
+    assert.strictEqual(posts.length, 1);
+    assert.strictEqual(posts[0].url, `/api/pilot-work-order/orders/${encodeURIComponent(returnFlowOrderId)}/return-order`);
+    assert.strictEqual(posts[0].method, "POST");
+    assert.deepStrictEqual(Object.keys(posts[0].body).sort(), ["expectedRevision", "note"]);
+    assert.strictEqual(posts[0].body.confirmed, undefined, "die Rückgabe darf niemals confirmed senden");
+    assert.strictEqual(posts[0].body.note, "Doppelklicktest: bitte \u00fcberarbeiten.");
+    assert.strictEqual(posts[0].body.expectedRevision, revisionBeforeReturn, "expectedRevision muss dem zuletzt geladenen Overview entsprechen");
+  });
+
+  await check("RÜCK-13./14. nach der Rückgabe: Status RETURNED, Revision erhöht, Freigabeknopf verschwunden, „Erneut als Entwurf starten“ sichtbar, Grund in der bestehenden Gründe-Karte", () => {
+    const state = ui.getState();
+    assert.strictEqual(state.returnDraft, null, "die Rückgabefläche muss nach Erfolg geschlossen sein");
+    assert.strictEqual(state.actionError, null);
+    assert.strictEqual(state.conflict, null);
+    assert.strictEqual(state.selectedPilotOrderId, returnFlowOrderId, "der Auftrag muss ausgewählt bleiben");
+    assert.strictEqual(state.overview.status, "RETURNED");
+    assert.strictEqual(state.overview.order.revision, revisionBeforeReturn + 1, "die Revision muss um genau eins erhöht sein");
+    const html = domElements["pilot-work-order-output"].innerHTML;
+    assert.doesNotMatch(html, /data-action="approve-for-execution"/, "der Freigabeknopf muss verschwunden sein");
+    assert.doesNotMatch(html, /data-action="open-return-draft"/, "RETURNED darf keine erneute Rückgabe anbieten");
+    assert.match(html, /data-action="reopen-from-returned">Erneut als Entwurf starten<\/button>/);
+    const cardHtml = extractDecisionReasonCardHtml(html);
+    assert.match(cardHtml, /<h4>Warum der Auftrag zur\u00fcckgegeben wurde<\/h4>/);
+    assert.ok(cardHtml.includes(ui.escapeHtml("Doppelklicktest: bitte \u00fcberarbeiten.")), "der gespeicherte Rückgabegrund muss sichtbar sein");
+  });
+
+  await check("RÜCK-20. reopen-from-returned bleibt unverändert bedienbar", async () => {
+    fetchCalls.length = 0;
+    await ui.runOrderAction("reopen-from-returned", {});
+    const posts = fetchCalls.filter((c) => c.method === "POST");
+    assert.strictEqual(posts.length, 1);
+    assert.match(posts[0].url, /\/reopen-from-returned$/);
+    assert.strictEqual(ui.getState().overview.status, "DRAFT");
+    assert.doesNotMatch(domElements["pilot-work-order-output"].innerHTML, /data-action="open-return-draft"/, "DRAFT darf keine Rückgabe anbieten");
+  });
+
+  await check("RÜCK-17./19. READY_FOR_JAMAL_APPROVAL: die positive Hauptaktion inklusive unveränderter Checkbox-Pflicht funktioniert weiterhin", async () => {
+    const orderId = makeReturnTestOrder("READY_FOR_JAMAL_APPROVAL");
+    await ui.selectOrder(orderId);
+    ui.openJamalConfirmationDialog("approve-for-execution");
+    assert.match(domElements["pilot-work-order-output"].innerHTML, /type="checkbox"/, "die bestehende Checkbox-Pflicht muss unverändert bestehen");
+    fetchCalls.length = 0;
+    await ui.confirmJamalConfirmation();
+    assert.strictEqual(fetchCalls.filter((c) => c.method === "POST").length, 0, "ohne gesetzte Checkbox darf kein POST entstehen");
+    ui.setJamalConfirmationChecked(true);
+    const expectedRevision = ui.getState().overview.order.revision;
+    fetchCalls.length = 0;
+    await ui.confirmJamalConfirmation();
+    const posts = fetchCalls.filter((c) => c.method === "POST" && /\/approve-for-execution$/.test(c.url));
+    assert.strictEqual(posts.length, 1);
+    assert.strictEqual(posts[0].body.confirmed, true, "die positive Freigabe sendet unverändert confirmed: true");
+    assert.strictEqual(posts[0].body.expectedRevision, expectedRevision);
+    assert.strictEqual(ui.getState().overview.status, "APPROVED_FOR_EXECUTION");
+  });
+
+  await check("RÜCK-18./19. READY_FOR_REVIEW: „Ergebnis abnehmen“ inklusive unveränderter Checkbox-Pflicht funktioniert weiterhin", async () => {
+    const orderId = makeReturnTestOrder("READY_FOR_REVIEW");
+    await ui.selectOrder(orderId);
+    ui.openJamalConfirmationDialog("approve-completion");
+    assert.match(domElements["pilot-work-order-output"].innerHTML, /type="checkbox"/);
+    fetchCalls.length = 0;
+    await ui.confirmJamalConfirmation();
+    assert.strictEqual(fetchCalls.filter((c) => c.method === "POST").length, 0);
+    ui.setJamalConfirmationChecked(true);
+    fetchCalls.length = 0;
+    await ui.confirmJamalConfirmation();
+    const posts = fetchCalls.filter((c) => c.method === "POST" && /\/approve-completion$/.test(c.url));
+    assert.strictEqual(posts.length, 1);
+    assert.strictEqual(posts[0].body.confirmed, true);
+    assert.strictEqual(ui.getState().overview.status, "COMPLETED");
+  });
+
+  await check("RÜCK-21. unblock-order bleibt unverändert bedienbar und behält seinen bestehenden Wortlaut", async () => {
+    const orderId = makeReturnTestOrder("BLOCKED");
+    await ui.selectOrder(orderId);
+    const html = domElements["pilot-work-order-output"].innerHTML;
+    assert.match(html, /data-action="unblock-order">Entsperren \(zur\u00fcckgeben\)<\/button>/);
+    assert.doesNotMatch(html, /data-action="open-return-draft"/);
+    fetchCalls.length = 0;
+    await ui.runOrderAction("unblock-order", {});
+    const posts = fetchCalls.filter((c) => c.method === "POST");
+    assert.strictEqual(posts.length, 1);
+    assert.match(posts[0].url, /\/unblock-order$/);
+    assert.strictEqual(ui.getState().overview.status, "RETURNED");
+  });
+
+  await check("RÜCK-25./27. über den gesamten Rückgabe-Testlauf wurde ausschließlich die bestehende return-order-Route und kein neuer Endpunkt angesprochen", () => {
+    const returnRelatedActions = allFetchCalls
+      .map((call) => {
+        const match = call.url.match(/^\/api\/pilot-work-order\/orders\/[^/]+\/([^/]+)$/);
+        return match ? match[1] : null;
+      })
+      .filter((action) => action !== null && action.includes("return"));
+    returnRelatedActions.forEach((action) => {
+      assert.ok(
+        action === "return-order" || action === "reopen-from-returned",
+        `unerwartete Route-Aktion: ${action} (es darf ausschließlich die bestehende return-order-Route genutzt werden)`,
+      );
+    });
+    assert.ok(returnRelatedActions.includes("return-order"), "der Rückgabeweg muss tatsächlich die bestehende return-order-Route genutzt haben");
+    assert.strictEqual(
+      allFetchCalls.filter((c) => /\/block-order$/.test(c.url)).length,
+      0,
+      "block-order darf über den gesamten Testlauf nie aufgerufen werden",
+    );
+  });
 
   console.log(`pilot-work-order-command-center-ui.test.js: ${passed} Prüfpunkte erfolgreich`);
 }
