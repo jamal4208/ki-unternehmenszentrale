@@ -661,13 +661,17 @@ async function run() {
     });
   });
 
-  await check("es gibt genau eine empfohlene n\u00e4chste Arbeit", () => {
-    const section = sectionHtml("recommendation");
-    const titles = section.match(/<p class="chef-today-recommendation-title">([^<]*)<\/p>/g) || [];
-    assert.strictEqual(titles.length, 1);
-    assert.ok(section.includes("Auftrag E: Zur\u00fcckgegeben"));
-    assert.strictEqual(ui.selectRecommendedNextWork(ui.getState().orders).id, "order-zurueck");
-  });
+  await check(
+    "V8.9.5: die Auswahlfunktion bestimmt weiterhin genau eine empfohlene n\u00e4chste Arbeit, aber der Abschnitt selbst entf\u00e4llt (reine Wiederholung der ersten Zeile aus \u201eHeute wichtig\u201c)",
+    () => {
+      assert.strictEqual(ui.selectRecommendedNextWork(ui.getState().orders).id, "order-zurueck");
+      assert.strictEqual(
+        sectionExists("recommendation"),
+        false,
+        "die Empfehlung entspricht exakt der ersten Zeile aus \u201eHeute wichtig\u201c und tr\u00e4gt keine eigene Aussage",
+      );
+    },
+  );
 
   await check("die Empfehlung ist genau der erste Eintrag derselben Tagesordnung (keine zweite Priorisierung)", () => {
     const orders = ui.getState().orders;
@@ -681,10 +685,14 @@ async function run() {
   });
 
   await check("jeder Bereich hat h\u00f6chstens eine Hauptaktion", () => {
-    ["today", "done", "running", "recommendation", "new-order"].forEach((key) => {
+    ["today", "done", "running", "new-order"].forEach((key) => {
       const buttons = sectionHtml(key).match(/class="primary-button"/g) || [];
       assert.ok(buttons.length <= 1, `Bereich ${key} h\u00e4tte ${buttons.length} Hauptaktionen`);
     });
+    // V8.9.5 – in diesem Fixture (mehrere offene Entscheidungen) entf\u00e4llt
+    // "recommendation" vollst\u00e4ndig (siehe oben): kein Bereich, keine
+    // Hauptaktion zu pr\u00fcfen.
+    assert.strictEqual(sectionExists("recommendation"), false);
   });
 
   await check("erneutes Rendern l\u00f6st keinen Request aus", () => {
@@ -762,19 +770,26 @@ async function run() {
     },
   );
 
-  await check("die empfohlene Arbeit \u00f6ffnet genau diesen einen Vorgang und \u00e4ndert keinen Status", () => {
-    pilotClicks.length = 0;
-    fetchCalls.length = 0;
-    const statusesBefore = ui.getState().orders.map((order) => order.status);
-    ui.openRecommendedWork();
-    assert.deepStrictEqual(pilotClicks, [{ action: "select-order", orderId: "order-zurueck" }]);
-    assert.deepStrictEqual(postCalls(), []);
-    assert.deepStrictEqual(
-      ui.getState().orders.map((order) => order.status),
-      statusesBefore,
-      "eine Hauptaktion der Startseite ver\u00e4ndert keinen Status",
-    );
-  });
+  await check(
+    "V8.9.5: openRecommendedWork()/\u201eopen-recommended\u201c existieren nicht mehr (totes Markup entfernt) – der von selectRecommendedNextWork() bestimmte Auftrag bleibt vollst\u00e4ndig \u00fcber seine sichtbare Zeile in \u201eHeute wichtig\u201c \u00f6ffenbar (keine Handlungsm\u00f6glichkeit verloren)",
+    () => {
+      assert.strictEqual(typeof ui.openRecommendedWork, "undefined", "openRecommendedWork() muss vollst\u00e4ndig entfernt sein");
+      pilotClicks.length = 0;
+      fetchCalls.length = 0;
+      const statusesBefore = ui.getState().orders.map((order) => order.status);
+      const recommended = ui.selectRecommendedNextWork(ui.getState().orders);
+      assert.strictEqual(recommended.id, "order-zurueck");
+      const opened = ui.openOrder(recommended.id);
+      assert.strictEqual(opened, true);
+      assert.deepStrictEqual(pilotClicks, [{ action: "select-order", orderId: "order-zurueck" }]);
+      assert.deepStrictEqual(postCalls(), []);
+      assert.deepStrictEqual(
+        ui.getState().orders.map((order) => order.status),
+        statusesBefore,
+        "das \u00d6ffnen einer Zeile \u00e4ndert keinen Status",
+      );
+    },
+  );
 
   await check("Neuer Auftrag verwendet die bestehende Anlage des Pilotauftrags", () => {
     pilotClicks.length = 0;
@@ -873,15 +888,22 @@ async function run() {
     assert.strictEqual(detailCalls.length, 5);
   });
 
-  await check("ohne entscheidungsrelevanten Vorgang empfiehlt die Startseite genau eine laufende Arbeit", () => {
-    assert.deepStrictEqual(rowTitles("today"), []);
-    // V8.9.3 – "Heute wichtig" trägt im Leerzustand keine eigene Aussage mehr
-    // (leerer Abschnittskörper, kein Verneinungstext).
-    assert.ok(!sectionHtml("today").includes('class="chef-today-empty"'));
-    const titles = sectionHtml("recommendation").match(/<p class="chef-today-recommendation-title">/g) || [];
-    assert.strictEqual(titles.length, 1);
-    assert.strictEqual(ui.selectRecommendedNextWork(ui.getState().orders).title, "Laufende Arbeit 1");
-  });
+  await check(
+    "V8.9.5 (Fall D, \u201enur l\u00e4uft\u201c): ohne entscheidungsrelevanten Vorgang bestimmt die Auswahlfunktion weiterhin genau eine laufende Arbeit, aber der Empfehlungsabschnitt entf\u00e4llt (reine Wiederholung der ersten Zeile aus \u201eL\u00e4uft\u201c)",
+    () => {
+      assert.deepStrictEqual(rowTitles("today"), []);
+      // V8.9.3 – "Heute wichtig" trägt im Leerzustand keine eigene Aussage mehr
+      // (leerer Abschnittskörper, kein Verneinungstext).
+      assert.ok(!sectionHtml("today").includes('class="chef-today-empty"'));
+      assert.strictEqual(ui.selectRecommendedNextWork(ui.getState().orders).title, "Laufende Arbeit 1");
+      assert.strictEqual(
+        sectionExists("recommendation"),
+        false,
+        "die Empfehlung entspricht exakt der ersten Zeile aus \u201eL\u00e4uft\u201c und tr\u00e4gt keine eigene Aussage",
+      );
+      assert.deepStrictEqual(rowTitles("running")[0], "Laufende Arbeit 1", "die empfohlene Arbeit bleibt vollst\u00e4ndig \u00fcber \u201eL\u00e4uft\u201c sichtbar/\u00f6ffenbar");
+    },
+  );
 
   await check(
     "V8.8.1 (1/2/3/4/5/6/7/8/9): ein leerer Tag bleibt ruhig, zeigt weiterhin Heute wichtig/Empfehlung/Neuer Auftrag, aber keine leeren Sektionen \u201eL\u00e4uft\u201c/\u201eFertig\u201c mehr, kein Fehler, keine Aktion au\u00dfer dem neuen Auftrag",
@@ -928,7 +950,7 @@ async function run() {
   // -------------------------------------------------------------------
 
   await check(
-    "V8.8.1 (10): bei vorhandenem Inhalt steht Heute wichtig vor Empfohlener n\u00e4chster Arbeit vor Neuen Auftrag anlegen vor L\u00e4uft vor Fertig",
+    "V8.8.1 (10): bei vorhandenem Inhalt steht Heute wichtig vor Neuen Auftrag anlegen vor L\u00e4uft vor Fertig (V8.9.5: \u201eEmpfohlene n\u00e4chste Arbeit\u201c entf\u00e4llt hier, da eine offene Entscheidung vorliegt und die Empfehlung sie nur wiederholen w\u00fcrde)",
     async () => {
       setOrders([
         { id: "v881-today", title: "Wichtiger Auftrag", status: "BLOCKED", updatedAt: new Date().toISOString() },
@@ -936,7 +958,8 @@ async function run() {
         { id: "v881-done", title: "Fertiger Auftrag", status: "COMPLETED" },
       ]);
       await reload();
-      assert.deepStrictEqual(sectionOrder(), ["today", "recommendation", "new-order", "running", "done"]);
+      assert.deepStrictEqual(sectionOrder(), ["today", "new-order", "running", "done"]);
+      assert.strictEqual(sectionExists("recommendation"), false);
     },
   );
 
@@ -975,7 +998,9 @@ async function run() {
     ui.render();
     const second = outputHtml();
     assert.strictEqual(first, second);
-    assert.deepStrictEqual(sectionOrder(), ["today", "recommendation", "new-order", "running", "done"]);
+    // V8.9.5 – weiterhin dieselbe Fixture wie V8.8.1 (10) (offene Entscheidung
+    // vorhanden), deshalb bleibt "recommendation" konsistent abwesend.
+    assert.deepStrictEqual(sectionOrder(), ["today", "new-order", "running", "done"]);
   });
 
   await check('V8.8.1 (15): nur laufender Inhalt zeigt "L\u00e4uft", aber nicht "Fertig"', async () => {
@@ -2206,11 +2231,14 @@ async function run() {
     assert.doesNotMatch(js, /\.orderRevision\b/);
   });
 
-  await check("V8.7 Stufe C (48): keine Änderung an der Chefmodus-Navigation (weiterhin genau drei bekannte Aktionen)", () => {
+  await check("V8.7 Stufe C (48): keine Änderung an der Chefmodus-Navigation (weiterhin genau zwei bekannte Aktionen, seit V8.9.5 ohne open-recommended)", () => {
     const actions = jsChefTodayActions();
+    // V8.9.5 – "open-recommended" wurde entfernt (sein Markup wird nie mehr
+    // gerendert, siehe renderRecommendationSection()); die verbleibende
+    // Zielhandlung bleibt vollständig über "open-order" erreichbar.
     assert.deepStrictEqual(
       actions.slice().sort(),
-      ['data-chef-today-action="open-order"', 'data-chef-today-action="open-recommended"', 'data-chef-today-action="open-new-order"'].sort(),
+      ['data-chef-today-action="open-order"', 'data-chef-today-action="open-new-order"'].sort(),
     );
     // V8.9.4 – zusätzlich zur unveränderten Dreierliste aus chef-today-ui.js
     // ehrlich mitprüfen, dass index.html seit V8.9.4 genau eine zusätzliche,
@@ -2384,12 +2412,13 @@ async function run() {
   });
 
   await check(
-    "V8.8.4 (15): Navigation unverändert (weiterhin genau drei bekannte Aktionen, „Entscheidung öffnen“ ruft weiterhin openOrder())",
+    "V8.8.4 (15): Navigation unverändert (weiterhin genau zwei bekannte Aktionen seit V8.9.5, „Entscheidung öffnen“ ruft weiterhin openOrder())",
     () => {
       const actions = jsChefTodayActions();
+      // V8.9.5 – "open-recommended" entfernt, siehe V8.7 Stufe C (48).
       assert.deepStrictEqual(
         actions.slice().sort(),
-        ['data-chef-today-action="open-order"', 'data-chef-today-action="open-recommended"', 'data-chef-today-action="open-new-order"'].sort(),
+        ['data-chef-today-action="open-order"', 'data-chef-today-action="open-new-order"'].sort(),
       );
       // V8.9.4 – ehrliche Ergänzung: die eine statische Aktualisierungsaktion
       // aus index.html bleibt von der Navigation getrennt und unverändert.
@@ -2625,9 +2654,10 @@ async function run() {
         assert.ok(route.startsWith("/api/pilot-work-order/orders"), `keine neue Route erwartet, gefunden: ${route}`);
       });
       const actions = jsChefTodayActions();
+      // V8.9.5 – "open-recommended" entfernt, siehe V8.7 Stufe C (48).
       assert.deepStrictEqual(
         actions.slice().sort(),
-        ['data-chef-today-action="open-order"', 'data-chef-today-action="open-recommended"', 'data-chef-today-action="open-new-order"'].sort(),
+        ['data-chef-today-action="open-order"', 'data-chef-today-action="open-new-order"'].sort(),
       );
       // V8.9.4 – ehrliche Ergänzung: die eine statische Aktualisierungsaktion
       // aus index.html bleibt von der Navigation getrennt und unverändert.
@@ -2890,11 +2920,12 @@ async function run() {
     );
   });
 
-  await check("V8.9.2 (23): keine neue Interaktion – dieselben drei bestehenden Aktionen, kein neuer Handler an der \u00dcberschrift", () => {
+  await check("V8.9.2 (23): keine neue Interaktion – dieselben zwei bestehenden Aktionen seit V8.9.5, kein neuer Handler an der \u00dcberschrift", () => {
     const actions = jsChefTodayActions();
+    // V8.9.5 – "open-recommended" entfernt, siehe V8.7 Stufe C (48).
     assert.deepStrictEqual(
       actions.slice().sort(),
-      ['data-chef-today-action="open-order"', 'data-chef-today-action="open-recommended"', 'data-chef-today-action="open-new-order"'].sort(),
+      ['data-chef-today-action="open-order"', 'data-chef-today-action="open-new-order"'].sort(),
     );
     // V8.9.4 – ehrliche Ergänzung: die eine statische Aktualisierungsaktion
     // aus index.html bleibt von der Navigation getrennt und unverändert.
@@ -2987,15 +3018,19 @@ async function run() {
   });
 
   await check(
-    'V8.9.3 (6): "nur l\u00e4uft" (mindestens ein IN_EXECUTION, keine Entscheidung offen) – "Heute wichtig" bleibt ohne Text, die Empfehlung zeigt echte laufende Arbeit statt des Abschlusssatzes',
+    'V8.9.3 (6)/V8.9.5 (Fall D): "nur l\u00e4uft" (mindestens ein IN_EXECUTION, keine Entscheidung offen) – "Heute wichtig" bleibt ohne Text, die Empfehlung entf\u00e4llt jetzt vollst\u00e4ndig (reine Wiederholung der ersten Zeile aus "L\u00e4uft", keine eigene Aussage), der Abschlusssatz erscheint zu Recht nicht',
     async () => {
       setOrders([{ id: "v893-only-running", title: "Laufender Auftrag ohne Entscheidung", status: "IN_EXECUTION" }]);
       await reload();
       assert.ok(!sectionHtml("today").includes('class="chef-today-empty"'));
-      assert.ok(!sectionHtml("recommendation").includes("Im Moment wartet keine Entscheidung auf dich."));
-      const titles = sectionHtml("recommendation").match(/<p class="chef-today-recommendation-title">([^<]*)<\/p>/);
-      assert.ok(titles, "die Empfehlung muss die laufende Arbeit als echte Empfehlung zeigen");
-      assert.strictEqual(titles[1], "Laufender Auftrag ohne Entscheidung");
+      assert.strictEqual(
+        sectionExists("recommendation"),
+        false,
+        "V8.9.5: die Empfehlung entspricht exakt der ersten Zeile aus \u201eL\u00e4uft\u201c und darf nicht gerendert werden",
+      );
+      assert.ok(!outputHtml().includes("Im Moment wartet keine Entscheidung auf dich."));
+      assert.strictEqual(ui.selectRecommendedNextWork(ui.getState().orders).title, "Laufender Auftrag ohne Entscheidung");
+      assert.deepStrictEqual(rowTitles("running"), ["Laufender Auftrag ohne Entscheidung"], "die empfohlene Arbeit bleibt vollst\u00e4ndig \u00fcber \u201eL\u00e4uft\u201c sichtbar/\u00f6ffenbar");
     },
   );
 
@@ -3011,7 +3046,7 @@ async function run() {
   );
 
   await check(
-    "V8.9.3 (8): Normalfall (mindestens eine offene Entscheidung) – Gegenprobe: nichts wurde ver\u00e4ndert",
+    "V8.9.3 (8)/V8.9.5 (Fall B): Normalfall (genau eine offene Entscheidung) – der Abschlusssatz erscheint zu Recht nicht, die Empfehlung entf\u00e4llt jetzt vollst\u00e4ndig (reine Wiederholung der einzigen Zeile aus \u201eHeute wichtig\u201c)",
     async () => {
       setOrders([{ id: "v893-decision-open", title: "Wichtiger Auftrag", status: "BLOCKED" }]);
       await reload();
@@ -3020,20 +3055,23 @@ async function run() {
       assert.ok(!outputHtml().includes("Im Moment wartet keine Entscheidung auf dich."));
       assert.ok(!outputHtml().includes("Heute wartet nichts auf deine Entscheidung."));
       assert.ok(!outputHtml().includes("Es gibt heute keine Arbeit, die auf dich wartet."));
-      const titles = sectionHtml("recommendation").match(/<p class="chef-today-recommendation-title">([^<]*)<\/p>/);
-      assert.ok(titles, "im Normalfall bleibt die Empfehlung die tats\u00e4chlich empfohlene Arbeit");
-      assert.strictEqual(titles[1], "Wichtiger Auftrag");
+      assert.strictEqual(
+        sectionExists("recommendation"),
+        false,
+        "V8.9.5: die Empfehlung entspricht exakt der einzigen Zeile aus \u201eHeute wichtig\u201c und darf nicht gerendert werden",
+      );
+      assert.strictEqual(ui.selectRecommendedNextWork(ui.getState().orders).title, "Wichtiger Auftrag");
     },
   );
 
-  await check("V8.9.3 (9): die beiden Reihenfolge-Anker bleiben unber\u00fchrt (Nicht-Leerzustand)", async () => {
+  await check("V8.9.3 (9): die beiden Reihenfolge-Anker bleiben unber\u00fchrt (Nicht-Leerzustand); V8.9.5: \u201eEmpfohlene n\u00e4chste Arbeit\u201c entf\u00e4llt hier zus\u00e4tzlich, da eine offene Entscheidung vorliegt", async () => {
     setOrders([
       { id: "v893-order-today", title: "Wichtiger Auftrag", status: "BLOCKED" },
       { id: "v893-order-running", title: "Laufender Auftrag", status: "IN_EXECUTION" },
       { id: "v893-order-done", title: "Fertiger Auftrag", status: "COMPLETED" },
     ]);
     await reload();
-    assert.deepStrictEqual(sectionOrder(), ["today", "recommendation", "new-order", "running", "done"]);
+    assert.deepStrictEqual(sectionOrder(), ["today", "new-order", "running", "done"]);
   });
 
   await check("V8.9.3 (10): renderTodaySection() liefert im Leerzustand einen leeren String statt renderEmpty(...)", () => {
@@ -3243,10 +3281,14 @@ async function run() {
   });
 
   await check("V8.9.4 (24): die bestehenden primary-button-Regeln bleiben unver\u00e4ndert (h\u00f6chstens eine Hauptaktion je Bereich)", () => {
-    ["today", "recommendation", "new-order"].forEach((key) => {
+    ["today", "new-order"].forEach((key) => {
       const buttons = sectionHtml(key).match(/class="primary-button"/g) || [];
       assert.ok(buttons.length <= 1, `Bereich ${key} h\u00e4tte ${buttons.length} Hauptaktionen`);
     });
+    // V8.9.5 – zu diesem Zeitpunkt liegen zwei offene Entscheidungen vor
+    // (siehe V8.9.4 (20)/(21) oben), "recommendation" entf\u00e4llt deshalb
+    // vollst\u00e4ndig.
+    assert.strictEqual(sectionExists("recommendation"), false);
   });
 
   await check("V8.9.4 (25): der V8.9.3-Leerzustand bleibt unver\u00e4ndert, der Button bleibt sichtbar und bedienbar", async () => {
@@ -3293,6 +3335,250 @@ async function run() {
     assert.match(loadFn[0], /fetchJson\("\/api\/pilot-work-order\/orders"\)/);
     assert.match(loadFn[0], /Promise\.all\(\[loadRunningProgress\(\), loadTodayOverviews\(\)\]\)/);
     assert.doesNotMatch(loadFn[0], /reload-today/, "load() selbst kennt den neuen Aktionsnamen nicht \u2013 er wird ausschlie\u00dflich in bindActionHandlersOnce() verwendet");
+  });
+
+  // -------------------------------------------------------------------------
+  // V8.9.5 – Empfehlungsabschnitt nur zeigen, wenn er eine eigene Aussage
+  // trägt (rein darstellend, additiv zu V8.8.1/V8.9.2/V8.9.3/V8.9.4 – Ziel
+  // des von Jamal geprüften und freigegebenen V8.9.5-Analyseberichts):
+  // selectRecommendedNextWork() liefert strukturell immer entweder den
+  // ersten Eintrag aus selectToday() oder, falls dort nichts steht, den
+  // ersten Eintrag aus selectRunning() (siehe buildAgenda()) – also
+  // denselben Auftrag, der bereits als erste Zeile in "Heute wichtig" bzw.
+  // "Läuft" sichtbar ist. renderRecommendationSection() rendert den
+  // Abschnitt deshalb jetzt nur noch, wenn selectRecommendedNextWork()
+  // `null` liefert (keine offene Entscheidung, keine laufende Arbeit) –
+  // dann unverändert mit der bereits in V8.9.3 freigegebenen Überschrift
+  // und dem einen Abschlusssatz. Fälle A–J unten decken exakt die im
+  // freigegebenen Analysebericht benannte Fallmatrix ab.
+  // -------------------------------------------------------------------------
+
+  await check(
+    "V8.9.5 (A): vollst\u00e4ndig leerer Tag \u2013 Empfehlungsabschnitt bleibt vorhanden, \u00dcberschrift und Satz exakt, \u201eNeuer Auftrag\u201c bleibt",
+    async () => {
+      setOrders([]);
+      await reload();
+      assert.strictEqual(
+        sectionExists("recommendation"),
+        true,
+        "im vollst\u00e4ndig leeren Zustand tr\u00e4gt die Sektion die einzige eigene Aussage",
+      );
+      const section = sectionHtml("recommendation");
+      const headingMatch = section.match(/<h3>([^<]*)<\/h3>/);
+      assert.ok(headingMatch, "die \u00dcberschrift muss auffindbar sein");
+      assert.strictEqual(
+        headingMatch[1],
+        "Empfohlene n\u00e4chste Arbeit",
+        "die \u00dcberschrift bleibt exakt unver\u00e4ndert (keine Umbenennung in V8.9.5)",
+      );
+      assert.ok(
+        section.includes("Im Moment wartet keine Entscheidung auf dich."),
+        "der V8.9.3-Satz muss exakt unver\u00e4ndert sichtbar sein",
+      );
+      assert.ok(sectionHtml("new-order").includes("Neuen Auftrag anlegen"), "\u201eNeuer Auftrag\u201c bleibt unabh\u00e4ngig bestehen");
+    },
+  );
+
+  await check(
+    "V8.9.5 (B): genau eine offene Entscheidung \u2013 Empfehlung vollst\u00e4ndig abwesend, \u201eHeute wichtig (1)\u201c korrekt, Auftrag weiterhin \u00f6ffenbar",
+    async () => {
+      setOrders([{ id: "v895-single-decision", title: "Einzelne offene Entscheidung", status: "BLOCKED" }]);
+      await reload();
+      assert.strictEqual(sectionExists("recommendation"), false);
+      assert.strictEqual(todayHeadingText(), "Heute wichtig (1)");
+      pilotControls = ui.getState().orders.map((order) => makePilotControl("select-order", order.id));
+      pilotClicks.length = 0;
+      const opened = ui.openOrder("v895-single-decision");
+      assert.strictEqual(opened, true, "der Auftrag bleibt vollst\u00e4ndig \u00fcber seine Zeile in \u201eHeute wichtig\u201c \u00f6ffenbar");
+      assert.deepStrictEqual(pilotClicks, [{ action: "select-order", orderId: "v895-single-decision" }]);
+    },
+  );
+
+  await check(
+    "V8.9.5 (C): mehrere offene Entscheidungen \u2013 Empfehlung vollst\u00e4ndig abwesend, alle Entscheidungszeilen bleiben sichtbar und \u00f6ffenbar",
+    async () => {
+      setOrders([
+        { id: "v895-multi-1", title: "Erste offene Entscheidung", status: "RETURNED" },
+        { id: "v895-multi-2", title: "Zweite offene Entscheidung", status: "READY_FOR_REVIEW" },
+        { id: "v895-multi-3", title: "Dritte offene Entscheidung", status: "BLOCKED" },
+      ]);
+      await reload();
+      assert.strictEqual(sectionExists("recommendation"), false);
+      assert.deepStrictEqual(rowTitles("today"), [
+        "Erste offene Entscheidung",
+        "Zweite offene Entscheidung",
+        "Dritte offene Entscheidung",
+      ]);
+      pilotControls = ui.getState().orders.map((order) => makePilotControl("select-order", order.id));
+      ["v895-multi-1", "v895-multi-2", "v895-multi-3"].forEach((orderId) => {
+        pilotClicks.length = 0;
+        const opened = ui.openOrder(orderId);
+        assert.strictEqual(opened, true, `${orderId} muss weiterhin \u00f6ffenbar sein`);
+      });
+    },
+  );
+
+  await check(
+    "V8.9.5 (D): nur laufende Arbeit \u2013 Empfehlung vollst\u00e4ndig abwesend, \u201eL\u00e4uft\u201c vorhanden, Auftrag weiterhin \u00f6ffenbar",
+    async () => {
+      setOrders([{ id: "v895-only-running", title: "Laufende Arbeit ohne Entscheidung", status: "IN_EXECUTION" }]);
+      await reload();
+      assert.strictEqual(sectionExists("recommendation"), false);
+      assert.strictEqual(sectionExists("running"), true);
+      assert.deepStrictEqual(rowTitles("running"), ["Laufende Arbeit ohne Entscheidung"]);
+      pilotControls = ui.getState().orders.map((order) => makePilotControl("select-order", order.id));
+      pilotClicks.length = 0;
+      const opened = ui.openOrder("v895-only-running");
+      assert.strictEqual(opened, true, "der laufende Auftrag bleibt vollst\u00e4ndig \u00fcber seine Zeile in \u201eL\u00e4uft\u201c \u00f6ffenbar");
+    },
+  );
+
+  await check(
+    "V8.9.5 (E): nur abgeschlossene Arbeit \u2013 Empfehlung bleibt vorhanden mit dem V8.9.3-Satz, \u201eFertig\u201c korrekt sichtbar",
+    async () => {
+      setOrders([{ id: "v895-only-done", title: "Abgeschlossene Arbeit", status: "COMPLETED" }]);
+      await reload();
+      assert.strictEqual(
+        sectionExists("recommendation"),
+        true,
+        "ohne offene Entscheidung und ohne laufende Arbeit tr\u00e4gt die Sektion wieder die eigene Aussage",
+      );
+      assert.ok(sectionHtml("recommendation").includes("Im Moment wartet keine Entscheidung auf dich."));
+      assert.strictEqual(sectionExists("done"), true);
+      assert.deepStrictEqual(rowTitles("done"), ["Abgeschlossene Arbeit"]);
+    },
+  );
+
+  await check(
+    "V8.9.5 (F): offene Entscheidung + laufende Arbeit \u2013 Empfehlung vollst\u00e4ndig abwesend, \u201eHeute wichtig\u201c und \u201eL\u00e4uft\u201c korrekt, keine Doppelung",
+    async () => {
+      setOrders([
+        { id: "v895-mixed-decision", title: "Offene Entscheidung", status: "BLOCKED" },
+        { id: "v895-mixed-running", title: "Laufende Arbeit", status: "IN_EXECUTION" },
+      ]);
+      await reload();
+      assert.strictEqual(sectionExists("recommendation"), false);
+      assert.deepStrictEqual(rowTitles("today"), ["Offene Entscheidung"]);
+      assert.deepStrictEqual(rowTitles("running"), ["Laufende Arbeit"]);
+      assert.strictEqual(
+        ui.selectRecommendedNextWork(ui.getState().orders).title,
+        "Offene Entscheidung",
+        "Bereich A gewinnt weiterhin vor Bereich C (buildAgenda() unver\u00e4ndert)",
+      );
+    },
+  );
+
+  await check(
+    "V8.9.5 (G): Nachweis der strukturellen Regel \u2013 bei recommended !== null kein Recommendation-Markup, bei recommended === null genau ein Recommendation-Abschnitt",
+    async () => {
+      setOrders([{ id: "v895-structural-decision", title: "Strukturtest-Auftrag", status: "BLOCKED" }]);
+      await reload();
+      assert.ok(ui.selectRecommendedNextWork(ui.getState().orders));
+      assert.doesNotMatch(outputHtml(), /data-chef-today-section="recommendation"/);
+      assert.doesNotMatch(outputHtml(), /chef-today-recommendation-title/);
+      assert.doesNotMatch(outputHtml(), /Diese Arbeit \u00f6ffnen/);
+
+      setOrders([]);
+      await reload();
+      assert.strictEqual(ui.selectRecommendedNextWork(ui.getState().orders), null);
+      const matches = outputHtml().match(/data-chef-today-section="recommendation"/g) || [];
+      assert.strictEqual(matches.length, 1, "genau ein Recommendation-Abschnitt im Leerzustand");
+    },
+  );
+
+  await check(
+    "V8.9.5 (H): Abschnittsreihenfolge \u2013 nicht-leerer Mischfall ohne recommendation, vollst\u00e4ndiger Leerzustand weiterhin mit recommendation an zweiter Stelle",
+    async () => {
+      setOrders([
+        { id: "v895-order-decision", title: "Wichtiger Auftrag", status: "BLOCKED" },
+        { id: "v895-order-running", title: "Laufender Auftrag", status: "IN_EXECUTION" },
+        { id: "v895-order-done", title: "Fertiger Auftrag", status: "COMPLETED" },
+      ]);
+      await reload();
+      assert.deepStrictEqual(sectionOrder(), ["today", "new-order", "running", "done"]);
+
+      setOrders([]);
+      await reload();
+      assert.deepStrictEqual(sectionOrder(), ["today", "recommendation", "new-order"]);
+    },
+  );
+
+  await check(
+    "V8.9.5 (I): Bestandsschutz \u2013 V8.9.2 \u201eHeute wichtig (n)\u201c, V8.9.3-Leerzustand, V8.9.4-Reload-Button und V8.9.1-R\u00fcckweg bleiben unver\u00e4ndert",
+    async () => {
+      setOrders([
+        { id: "v895-regress-1", title: "Auftrag 1", status: "RETURNED" },
+        { id: "v895-regress-2", title: "Auftrag 2", status: "BLOCKED" },
+      ]);
+      await reload();
+      assert.strictEqual(todayHeadingText(), "Heute wichtig (2)");
+
+      setOrders([]);
+      await reload();
+      assert.strictEqual(todayHeadingText(), "Heute wichtig");
+      assert.ok(sectionHtml("recommendation").includes("Im Moment wartet keine Entscheidung auf dich."));
+
+      assert.strictEqual((html.match(/Aktuellen Stand neu laden/g) || []).length, 1);
+      fetchCalls.length = 0;
+      clickChefTodayAction("reload-today");
+      await flushAsync();
+      assert.strictEqual(
+        fetchCalls.filter((call) => call.url === "/api/pilot-work-order/orders").length,
+        1,
+        "der V8.9.4-Button bleibt unver\u00e4ndert bedienbar",
+      );
+
+      const matches = html.match(/Zur\u00fcck zu Heute/g) || [];
+      assert.strictEqual(matches.length, 1);
+      const backLinkMatch = html.match(/<a\s[^>]*>Zur\u00fcck zu Heute<\/a>/);
+      assert.match(backLinkMatch[0], /href="#chef-today-card"/, "der V8.9.1-R\u00fcckweg bleibt unver\u00e4ndert");
+    },
+  );
+
+  await check(
+    "V8.9.5 (J): keine neue Komplexit\u00e4t \u2013 keine neue Route, kein POST/PATCH/DELETE, kein neuer Fetch, keine neue Sortierung/Priorisierung, kein Auto-Refresh, keine neue CSS-Klasse",
+    () => {
+      assert.deepStrictEqual(postCalls(), []);
+      assert.doesNotMatch(js, /"POST"|'POST'|"PATCH"|'PATCH'|"DELETE"|'DELETE'/);
+      const urls = Array.from(new Set(js.match(/"\/api\/[^"]*"/g) || []));
+      assert.deepStrictEqual(urls.sort(), ['"/api/pilot-work-order/orders"', '"/api/pilot-work-order/orders/"'].sort());
+      assert.doesNotMatch(js, /setInterval|setTimeout\(load|requestAnimationFrame|visibilitychange/);
+      const recommend = js.match(/function selectRecommendedNextWork\(orders\)\s*\{[\s\S]*?\n  \}/);
+      assert.ok(recommend, "selectRecommendedNextWork muss auffindbar sein");
+      assert.doesNotMatch(recommend[0], /sort|score|weight|priorit/i, "keine neue Sortierungs-/Priorisierungslogik");
+      const buildAgendaFn = js.match(/function buildAgenda\(orders\)\s*\{[\s\S]*?\n  \}/);
+      assert.ok(buildAgendaFn, "buildAgenda muss auffindbar sein");
+      assert.match(
+        buildAgendaFn[0],
+        /selectToday\(orders\)\.concat\(selectRunning\(orders\)\)/,
+        "buildAgenda() bleibt unver\u00e4ndert",
+      );
+      assert.doesNotMatch(css, /\.chef-today-recommendation-(hidden|collapsed|guard)/, "keine neue CSS-Klasse f\u00fcr das Ausblenden");
+    },
+  );
+
+  await check(
+    "V8.9.5: der tote Bedienpfad \u201eopen-recommended\u201c existiert im produktiven Chefmodus-Markup nicht mehr und ist auch nicht mehr als HTML-Literal im Quelltext vorhanden",
+    () => {
+      assert.doesNotMatch(js, /data-chef-today-action="open-recommended"/);
+      assert.doesNotMatch(html, /data-chef-today-action="open-recommended"/);
+      assert.strictEqual(typeof ui.openRecommendedWork, "undefined", "openRecommendedWork() muss vollst\u00e4ndig entfernt sein");
+    },
+  );
+
+  await check(
+    "V8.9.5: selectRecommendedNextWork(), buildAgenda(), selectToday(), selectRunning() und selectDone() bleiben unver\u00e4ndert exportiert (keine neue Auswahllogik)",
+    () => {
+      assert.strictEqual(typeof ui.selectRecommendedNextWork, "function");
+      assert.strictEqual(typeof ui.buildAgenda, "function");
+      assert.strictEqual(typeof ui.selectToday, "function");
+      assert.strictEqual(typeof ui.selectRunning, "function");
+      assert.strictEqual(typeof ui.selectDone, "function");
+    },
+  );
+
+  await check("V8.9.5: weiterhin kein schreibender Request \u00fcber den gesamten V8.9.5-Testlauf hinweg", () => {
+    assert.deepStrictEqual(postCalls(), []);
   });
 
   clearDecisionReasonOverrides();

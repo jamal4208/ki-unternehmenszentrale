@@ -244,6 +244,35 @@
  * Ladeanzeige, ohne Deaktivieren des Buttons während des Ladens und ohne
  * In-Flight-Schutz: mehrfaches oder paralleles Auslösen ist unbedenklich,
  * da load() ausschließlich bestehende, lesende GET-Aufrufe auslöst.
+ *
+ * V8.9.5 ("Empfehlungsabschnitt nur zeigen, wenn er eine eigene Aussage
+ * trägt", rein darstellend – Ergebnis des von Jamal geprüften und
+ * freigegebenen V8.9.5-Analyseberichts): selectRecommendedNextWork()
+ * liefert strukturell immer entweder den ersten Eintrag aus selectToday()
+ * oder, falls dort nichts steht, den ersten Eintrag aus selectRunning()
+ * (siehe buildAgenda() oben) – also denselben Auftrag, der bereits als
+ * erste Zeile in "Heute wichtig" bzw. "Läuft" sichtbar ist. Titel,
+ * Grund/Fortschritt und Zielhandlung dieses Auftrags waren im
+ * Empfehlungsabschnitt deshalb reine Wiederholung, keine eigene Aussage.
+ * renderRecommendationSection() rendert jetzt ausschließlich noch dann
+ * etwas, wenn selectRecommendedNextWork() `null` liefert (keine offene
+ * Entscheidung, keine laufende Arbeit) – dann unverändert Überschrift
+ * "Empfohlene nächste Arbeit" und der bereits in V8.9.3 freigegebene Satz
+ * "Im Moment wartet keine Entscheidung auf dich.". Liefert die Funktion
+ * einen konkreten Auftrag, entfällt der gesamte Abschnitt ersatzlos (leerer
+ * String statt Section) – exakt nach dem seit V8.8.1 etablierten Muster von
+ * renderRunningSection()/renderDoneSection(). Keine neue Auswahl-,
+ * Priorisierungs- oder Sortierlogik: selectRecommendedNextWork(),
+ * buildAgenda(), selectToday(), selectRunning() und selectDone() bleiben
+ * unverändert. Der dadurch vollständig unerreichbar gewordene Bedienpfad
+ * "open-recommended" (openRecommendedWork(), der zugehörige Zweig in
+ * bindActionHandlersOnce() sowie sein Export) wurde entfernt, nachdem real
+ * bestätigt wurde, dass kein anderes Markup (index.html, styles.css) und
+ * kein externer Aufrufer davon abhängt – der betroffene Auftrag bleibt
+ * vollständig über seinen bestehenden "open-order"-Button in "Heute
+ * wichtig"/"Läuft" erreichbar (openOrder(), unverändert). Keine neue
+ * Route, keine API-Änderung, keine Statusmaschinenänderung, kein
+ * Auto-Refresh, kein Polling, keine neue CSS-Klasse.
  */
 
 (function () {
@@ -881,27 +910,42 @@
     );
   }
 
+  // V8.9.5 ("Empfehlungsabschnitt nur zeigen, wenn er eine eigene Aussage
+  // trägt", rein darstellend): selectRecommendedNextWork() liefert
+  // strukturell immer entweder den ersten Eintrag aus selectToday() oder,
+  // falls dort nichts steht, den ersten Eintrag aus selectRunning() (siehe
+  // buildAgenda() oben) – also exakt denselben Auftrag, der bereits als
+  // erste Zeile in "Heute wichtig" bzw. "Läuft" sichtbar ist. Titel,
+  // Grund/Fortschritt und Zielhandlung dieses Auftrags waren hier reine
+  // Wiederholung, keine eigene Aussage (siehe der von Jamal freigegebene
+  // V8.9.5-Analysebericht). Liefert selectRecommendedNextWork() also einen
+  // konkreten Auftrag, entfällt der gesamte Abschnitt jetzt ersatzlos
+  // (weder Überschrift noch Inhalt noch Button) – exakt nach dem seit
+  // V8.8.1 etablierten Muster von renderRunningSection()/
+  // renderDoneSection() (leerer String statt Section). Einzige
+  // verbleibende, tatsächlich eigenständige Aussage bleibt der bereits in
+  // V8.9.3 freigegebene Leerzustandssatz (siehe dort) – Wortlaut und
+  // Überschrift bleiben davon unverändert, ebenso selectRecommendedNextWork(),
+  // buildAgenda(), selectToday() und selectRunning() selbst: keine neue
+  // Auswahl-, Priorisierungs- oder Sortierlogik. Der dadurch vollständig
+  // unerreichbar gewordene Bedienpfad "open-recommended" (ehemals
+  // openRecommendedWork(), siehe frühere Fassung dieser Datei) wurde
+  // entfernt, nachdem real bestätigt wurde, dass ihn kein anderes Markup
+  // und kein externer Aufrufer mehr verwendet – der betroffene Auftrag
+  // bleibt vollständig über seinen bestehenden "open-order"-Button in
+  // "Heute wichtig"/"Läuft" erreichbar (openOrder(), unverändert).
   function renderRecommendationSection(orders) {
     var recommended = selectRecommendedNextWork(orders);
-    if (!recommended) {
-      // V8.9.3 – der einzige verbleibende Abschlusssatz im Leerzustand:
-      // bewusst enger gefasst auf offene Entscheidungen statt auf "den
-      // ganzen Tag" (siehe Modulkopf V8.9.3 und offene Lücke R3).
-      return renderSection(
-        "recommendation",
-        "Empfohlene n\u00e4chste Arbeit",
-        renderEmpty("Im Moment wartet keine Entscheidung auf dich."),
-      );
+    if (recommended) {
+      return "";
     }
-    var reason = reasonFor(recommended) || progressTextFor(recommended);
+    // V8.9.3 – der einzige verbleibende Abschlusssatz im Leerzustand:
+    // bewusst enger gefasst auf offene Entscheidungen statt auf "den
+    // ganzen Tag" (siehe Modulkopf V8.9.3 und offene Lücke R3).
     return renderSection(
       "recommendation",
       "Empfohlene n\u00e4chste Arbeit",
-      '<p class="chef-today-recommendation-title">' +
-        escapeHtml(recommended.title) +
-        '</p><p class="chef-today-recommendation-reason">' +
-        escapeHtml(reason) +
-        '</p><button type="button" class="primary-button" data-chef-today-action="open-recommended">Diese Arbeit \u00f6ffnen</button>',
+      renderEmpty("Im Moment wartet keine Entscheidung auf dich."),
     );
   }
 
@@ -1001,12 +1045,6 @@
     return Boolean(row);
   }
 
-  function openRecommendedWork() {
-    var recommended = selectRecommendedNextWork(state.orders);
-    if (!recommended) return false;
-    return openOrder(recommended.id);
-  }
-
   // Dasselbe bestehende Feld, das schon vorher erkannt hat, ob das
   // Anlageformular offen ist (kein neues Feld, keine neue ID) – jetzt auch
   // als Scroll- und Fokusziel wiederverwendet.
@@ -1047,8 +1085,6 @@
       var action = target.getAttribute("data-chef-today-action");
       if (action === "open-order") {
         openOrder(target.getAttribute("data-order-id"));
-      } else if (action === "open-recommended") {
-        openRecommendedWork();
       } else if (action === "open-new-order") {
         openNewOrder();
       } else if (action === "reload-today") {
@@ -1114,7 +1150,6 @@
       CHEF_TODAY_ROW_TEXT_DISPLAY_LIMIT: CHEF_TODAY_ROW_TEXT_DISPLAY_LIMIT,
       truncateForRowDisplay: truncateForRowDisplay,
       openOrder: openOrder,
-      openRecommendedWork: openRecommendedWork,
       openNewOrder: openNewOrder,
     };
   }
