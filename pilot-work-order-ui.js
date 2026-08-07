@@ -2354,6 +2354,24 @@
   var NEXT_STEP_LABEL_SAFE = "N\u00e4chster sicherer Schritt";
   var NEXT_STEP_LABEL_ALLOWED = "N\u00e4chster erlaubter Schritt";
 
+  // Vor der Ausführung ist eine Drei-Agenten-Kette noch möglich; nur dort darf
+  // die Kettenstatuskarte überhaupt nach vorn blicken. In jeder anderen Lage
+  // außerhalb von "In Ausführung" ist der Blick ausschließlich rückwärts.
+  var ORDER_STATUSES_BEFORE_EXECUTION = ["DRAFT", "READY_FOR_JAMAL_APPROVAL", "APPROVED_FOR_EXECUTION"];
+
+  // Rein ableitend: belegt kein Schritt dieser Kette einen Start, wurde die
+  // Kette ausschließlich vorbereitet. Bewusst konservativ – jede Spur eines
+  // Starts (Startzeitpunkt, Lauf-Zuordnung, Schrittstatus jenseits von
+  // "wartend") beendet die Aussage sofort.
+  function chainWasNeverStarted(chain) {
+    var steps = chain && Array.isArray(chain.steps) ? chain.steps : [];
+    for (var index = 0; index < steps.length; index += 1) {
+      var step = steps[index];
+      if (step.startedAt || step.executionRunId || step.stepStatus !== "PENDING") return false;
+    }
+    return true;
+  }
+
   function renderChainStatusCard(overview) {
     if (!overview || !overview.order) return "";
     var orderId = overview.order.id;
@@ -2375,10 +2393,55 @@
     var primaryButtonHtml = "";
     var technicalDetailsHtml = "";
 
-    if (overview.status !== "IN_EXECUTION") {
-      title = "Drei-Agenten-Kette ist noch nicht aktiv.";
-      lines.push("Die Kette kann erst im laufenden Ausführungsstatus gestartet werden.");
-      nextStepText = overview.nextStep || "oben die nächste Auftragsaktion ausführen.";
+    // Zeitachse der Kettenstatuskarte.
+    //
+    // Der Auftragsstatus beantwortet ausschließlich "was kann mit dem Auftrag
+    // jetzt passieren?". Er ist niemals ein Beweis darüber, ob eine
+    // Drei-Agenten-Kette existiert hat oder abgeschlossen wurde. Zuvor hat
+    // diese Karte für JEDEN Auftrag außerhalb von "In Ausführung" pauschal
+    // behauptet, die Kette sei noch nicht aktiv – und damit eine real
+    // vorhandene, vollständig abgeschlossene Kette überstimmt.
+    //
+    // Außerhalb des laufenden Ausführungsstatus wird die Kette deshalb
+    // ausschließlich rückblickend beschrieben: Vergangenheitsform, keine
+    // Handlungsaufforderung. Zwei Gegenwartslagen bleiben davon bewusst
+    // ausgenommen, weil sie tatsächlich gerade passieren und eine
+    // Vergangenheitsaussage dort falsch wäre: ein serverseitig bestätigter
+    // laufender Schritt und eine lokal bereits angenommene Startanforderung.
+    // Beide fallen unverändert in die bestehenden Gegenwartszweige.
+    var chainHistoryOnly = overview.status !== "IN_EXECUTION" && !hasRunning && !bridge;
+
+    if (chainHistoryOnly) {
+      // Die Aussage stammt ausschließlich aus den Kettendaten selbst. Der
+      // Auftragsstatus entscheidet hier nur noch über die Zeitachse, niemals
+      // über den Inhalt. Aus 3 von 3 verbuchten Rollen wird ausdrücklich kein
+      // Kettenabschluss abgeleitet – das belegt allein chainStatus.
+      nextStepText = "unten den vollständigen Kettenstand nachlesen.";
+      if (!activeChain) {
+        title = "Für diesen Auftrag wurde keine Drei-Agenten-Kette verwendet.";
+        if (ORDER_STATUSES_BEFORE_EXECUTION.indexOf(overview.status) !== -1) {
+          nextStepText = "eine Drei-Agenten-Kette kann erst im laufenden Ausführungsstatus vorbereitet werden.";
+        }
+      } else if (activeChain.chainStatus === "COMPLETED") {
+        variant = "success";
+        title = "Die Drei-Agenten-Kette wurde vollständig abgeschlossen.";
+      } else if (activeChain.chainStatus === "BLOCKED" || activeChain.chainStatus === "FAILED") {
+        variant = "failure";
+        title = activeChain.chainStatus === "BLOCKED"
+          ? "Die Drei-Agenten-Kette wurde während der Ausführung blockiert."
+          : "Die Drei-Agenten-Kette konnte nicht vollständig abgeschlossen werden.";
+        // Die bereits vorhandene Fehlerdarstellung bleibt erhalten: die
+        // benannte Ursache und die technischen Details gehen nicht verloren.
+        // Der zugehörige Handlungssatz (failurePresentation.action) bleibt
+        // bewusst aus, weil er in die Zukunft weist.
+        var historicFailure = resolveFailurePresentation(resolveFailureReasonCodeFromContext(context), null);
+        lines.push(historicFailure.cause);
+        technicalDetailsHtml = buildChainFailureTechnicalDetailsHtml(context, historicFailure);
+      } else if (chainWasNeverStarted(activeChain)) {
+        title = "Eine Drei-Agenten-Kette wurde vorbereitet, aber nicht gestartet.";
+      } else {
+        title = "Die Drei-Agenten-Kette wurde teilweise ausgeführt.";
+      }
     } else if (!activeChain) {
       title = "Noch keine Drei-Agenten-Kette vorbereitet.";
       lines.push("Oben arbeiten. Unten nachschauen.");
@@ -4480,6 +4543,13 @@
       setStatusTimeHooksForTests: setStatusTimeHooksForTests,
       deriveActiveRun: deriveActiveRun,
       resolveFailurePresentation: resolveFailurePresentation,
+      // Teilpaket 2 ("Kettenstatus nach Ausführung zeitlich und fachlich wahr
+      // darstellen"): additiv exportiert, damit
+      // pilot-agent-execution-chain-ui.test.js die Zeit- und Zustandswahrheit
+      // der Karte für jede Kombination aus Auftragsstatus und Kettenstand
+      // direkt und ohne Umweg über eine erfundene Fixtur prüfen kann. Reine
+      // Darstellungsfunktion: sie liest ausschließlich, sie schreibt nichts.
+      renderChainStatusCard: renderChainStatusCard,
       render: render,
       escapeHtml: escapeHtml,
       CODEX_AGENT_EXECUTION_PRESET_ID: CODEX_AGENT_EXECUTION_PRESET_ID,

@@ -2569,6 +2569,340 @@ async function run() {
     },
   );
 
+  // -------------------------------------------------------------------------
+  // Teilpaket 2 – "Kettenstatus nach Ausführung zeitlich und fachlich wahr
+  // darstellen".
+  //
+  // Ursache: renderChainStatusCard() prüfte als ERSTEN Zweig pauschal
+  // overview.status !== "IN_EXECUTION" und behauptete daraufhin, die
+  // Drei-Agenten-Kette sei "noch nicht aktiv" – auch bei einem COMPLETED-
+  // Auftrag mit vollständig abgeschlossener Kette. Der Auftragsstatus wurde
+  // damit als Beweis über die Kette missbraucht.
+  //
+  // Geprüft wird hier der ECHTE Renderer gegen vollständige, von Hand
+  // aufgebaute Kettenstände. Die Wahrheitshierarchie ist verbindlich:
+  // "vollständig abgeschlossen" darf ausschließlich aus chainStatus ===
+  // "COMPLETED" der konkret dargestellten Kette folgen, niemals aus 3 von 3
+  // verbuchten Rollen und niemals aus dem Auftragsstatus.
+  // -------------------------------------------------------------------------
+
+  const PAST_NO_CHAIN = "Für diesen Auftrag wurde keine Drei-Agenten-Kette verwendet.";
+  const PAST_PREPARED = "Eine Drei-Agenten-Kette wurde vorbereitet, aber nicht gestartet.";
+  const PAST_PARTIAL = "Die Drei-Agenten-Kette wurde teilweise ausgeführt.";
+  const PAST_BLOCKED = "Die Drei-Agenten-Kette wurde während der Ausführung blockiert.";
+  const PAST_FAILED = "Die Drei-Agenten-Kette konnte nicht vollständig abgeschlossen werden.";
+  const PAST_COMPLETED = "Die Drei-Agenten-Kette wurde vollständig abgeschlossen.";
+  const HISTORY_NEXT_LINE = "unten den vollständigen Kettenstand nachlesen.";
+
+  // Formulierungen, die einen Blick nach vorn oder eine Handlung verlangen.
+  const FUTURE_PHRASES = ["jetzt starten", "freigeben", "vorlegen", "bei Bedarf", "erneut", "Bitte ", "warten", "vorbereiten"];
+  // Formulierungen, die zur Auftragsachse gehören und in der Kettenkarte
+  // nichts zu suchen haben (Produktentscheidung P3).
+  const ORDER_AXIS_PHRASES = ["Abschlussprüfung", "abnehmen", "abgenommen", "zurückgegeben", "Rückgabe", "Jamal"];
+
+  const TP2_TIME = "2026-02-01T09:00:00.000Z";
+  const TP2_ORDER_NEXT_STEP = "Jamal entscheidet über die Abnahme des Ergebnisses.";
+
+  function tp2Step(stepNumber, overrides) {
+    return Object.assign(
+      {
+        stepNumber,
+        agentKey: CHAIN_STEP_DEFINITIONS[stepNumber - 1].agentKey,
+        presetId: CHAIN_STEP_DEFINITIONS[stepNumber - 1].presetId,
+        stepStatus: "PENDING",
+        approvalStatus: "NOT_REQUESTED",
+        executionRunId: null,
+        startedAt: null,
+        completedAt: null,
+        roleHandoffBooked: false,
+        failureReasonCode: null,
+      },
+      overrides,
+    );
+  }
+
+  function tp2SucceededStep(stepNumber) {
+    return tp2Step(stepNumber, {
+      stepStatus: "SUCCEEDED",
+      approvalStatus: "GRANTED",
+      executionRunId: `tp2-run-${stepNumber}`,
+      startedAt: TP2_TIME,
+      completedAt: TP2_TIME,
+      roleHandoffBooked: true,
+    });
+  }
+
+  function tp2Chain(overrides) {
+    return Object.assign(
+      {
+        id: "tp2-chain",
+        chainStatus: "PREPARED",
+        currentStep: 1,
+        revision: 0,
+        waitingForJamal: false,
+        blockReason: null,
+        completedAt: null,
+        createdAt: TP2_TIME,
+        updatedAt: TP2_TIME,
+        steps: [tp2Step(1), tp2Step(2), tp2Step(3)],
+      },
+      overrides,
+    );
+  }
+
+  function tp2CompletedChain(overrides) {
+    return tp2Chain(
+      Object.assign(
+        {
+          chainStatus: "COMPLETED",
+          currentStep: 3,
+          completedAt: TP2_TIME,
+          steps: [tp2SucceededStep(1), tp2SucceededStep(2), tp2SucceededStep(3)],
+        },
+        overrides,
+      ),
+    );
+  }
+
+  function tp2Overview(status, chains, overrides) {
+    return Object.assign(
+      {
+        order: { id: "tp2-order", title: "Titel", status, statusLabel: status, revision: 0 },
+        status,
+        statusLabel: status,
+        agentChains: chains,
+        agentExecutionRuns: [],
+        handoffs: [],
+        progress: { rolesPassed: 0, rolesTotal: 3, chainRolesBooked: 0 },
+        chainRoleProgress: { bookedRoles: [], bookedCount: 0, totalCount: 3 },
+        nextStep: TP2_ORDER_NEXT_STEP,
+      },
+      overrides,
+    );
+  }
+
+  // Rendert die Karte aus einem definierten, neutralen Bedienzustand heraus:
+  // keine lokal angenommene Startanforderung, kein Aktionsfehler, kein
+  // angehaltenes Polling. Damit prüft der Test ausschließlich die Zeit- und
+  // Zustandswahrheit, nicht zufällige Restzustände früherer Prüfpunkte.
+  function tp2Card(overview) {
+    const uiState = ui.getState();
+    uiState.chainStartBridge = null;
+    uiState.chainActionError = null;
+    uiState.chainActionErrorReasonCode = null;
+    uiState.statusPollingStoppedByErrors = false;
+    uiState.statusPollingStoppedBySafetyCap = false;
+    uiState.statusPollingRetryNoticeActive = false;
+    fetchCalls.length = 0;
+    const html = ui.renderChainStatusCard(overview);
+    assert.strictEqual(fetchCalls.length, 0, "das Rendern der Kettenstatuskarte darf keinen Request auslösen");
+    return html;
+  }
+
+  function tp2Title(cardHtml) {
+    const match = cardHtml.match(/<h4 class="pilot-chain-status-card__title">([\s\S]*?)<\/h4>/);
+    assert.ok(match, "die Kettenstatuskarte muss einen Titel besitzen");
+    return match[1];
+  }
+
+  function tp2NextLine(cardHtml) {
+    const match = cardHtml.match(/<p class="pilot-chain-status-card__next">([\s\S]*?)<\/p>/);
+    assert.ok(match, "die Kettenstatuskarte muss eine Schritt-Empfehlung besitzen");
+    return match[1];
+  }
+
+  // Die technischen Fehlerdetails sind ein bewusst geschlossener Bereich mit
+  // eigenem, festem Wortlaut; die Zeitform-Prüfung gilt der sichtbaren
+  // Kernaussage der Karte.
+  function tp2VisibleCore(cardHtml) {
+    return cardHtml.replace(/<details class="pilot-chain-status-card__technical">[\s\S]*?<\/details>/, "");
+  }
+
+  function assertPurePastStatement(cardHtml, context) {
+    const core = tp2VisibleCore(cardHtml);
+    FUTURE_PHRASES.forEach((phrase) => {
+      assert.ok(!core.includes(phrase), `${context}: keine Zukunfts-/Handlungsformulierung erlaubt („${phrase}“)`);
+    });
+    ORDER_AXIS_PHRASES.forEach((phrase) => {
+      assert.ok(!core.includes(phrase), `${context}: die Kettenkarte wiederholt die Auftragsachse nicht („${phrase}“)`);
+    });
+    assert.ok(!core.includes(TP2_ORDER_NEXT_STEP), `${context}: der Auftrags-Nächster-Schritt gehört nicht in die Kettenkarte`);
+    assertNextStepLineIsClean(cardHtml, context);
+  }
+
+  await check("TP2-1./20./21.: COMPLETED ohne jede Kette sagt genau das – ohne Zukunftsaufforderung und ohne Auftragsentscheidung", async () => {
+    const card = tp2Card(tp2Overview("COMPLETED", []));
+    assert.strictEqual(tp2Title(card), PAST_NO_CHAIN);
+    assert.ok(tp2NextLine(card).includes(HISTORY_NEXT_LINE));
+    assertPurePastStatement(card, "COMPLETED ohne Kette");
+    assert.ok(!card.includes(PAST_COMPLETED), "ohne Kette darf kein Kettenabschluss behauptet werden");
+  });
+
+  await check("TP2-2.: COMPLETED mit vorbereiteter, nie gestarteter Kette wird sichtbar von „nie verwendet“ unterschieden", async () => {
+    const card = tp2Card(tp2Overview("COMPLETED", [tp2Chain({})]));
+    assert.strictEqual(tp2Title(card), PAST_PREPARED);
+    assert.notStrictEqual(tp2Title(card), PAST_NO_CHAIN, "die beiden Fälle dürfen nicht zusammenfallen");
+    assertPurePastStatement(card, "COMPLETED mit vorbereiteter Kette");
+  });
+
+  await check("TP2-3.: COMPLETED mit teilweise ausgeführter Kette sagt „teilweise ausgeführt“", async () => {
+    const chain = tp2Chain({
+      chainStatus: "WAITING_FOR_DOCUMENTATION_APPROVAL",
+      currentStep: 2,
+      steps: [tp2SucceededStep(1), tp2Step(2), tp2Step(3)],
+    });
+    const card = tp2Card(tp2Overview("COMPLETED", [chain]));
+    assert.strictEqual(tp2Title(card), PAST_PARTIAL);
+    assert.ok(!card.includes(PAST_COMPLETED));
+    assertPurePastStatement(card, "COMPLETED mit teilweiser Kette");
+  });
+
+  await check("TP2-4.: COMPLETED mit chainStatus COMPLETED sagt endlich die Wahrheit – vollständig abgeschlossen, in der Vergangenheitsform", async () => {
+    const card = tp2Card(tp2Overview("COMPLETED", [tp2CompletedChain({})]));
+    assert.strictEqual(tp2Title(card), PAST_COMPLETED);
+    assert.match(card, /pilot-chain-status-card--success/);
+    assertPurePastStatement(card, "COMPLETED mit abgeschlossener Kette");
+    assert.ok(!card.includes("noch nicht aktiv"), "der widerlegte Pauschaltext darf nicht mehr erscheinen");
+  });
+
+  await check("TP2-5./19./30.: COMPLETED mit fehlgeschlagener Kette (trotz gesetztem completedAt) erscheint niemals als „vollständig abgeschlossen“", async () => {
+    const chain = tp2Chain({
+      chainStatus: "FAILED",
+      currentStep: 2,
+      completedAt: TP2_TIME,
+      steps: [tp2SucceededStep(1), tp2Step(2, { stepStatus: "FAILED", approvalStatus: "GRANTED", failureReasonCode: "STEP_EXECUTION_FAILED" }), tp2Step(3)],
+    });
+    const card = tp2Card(tp2Overview("COMPLETED", [chain]));
+    assert.strictEqual(tp2Title(card), PAST_FAILED);
+    assert.ok(!card.includes(PAST_COMPLETED), "completedAt allein beweist keinen Abschluss");
+    assert.match(card, /pilot-chain-status-card--failure/);
+    assert.match(card, /<details class="pilot-chain-status-card__technical"><summary>Technische Details<\/summary>/, "die bestehende Fehlerdarstellung bleibt erhalten");
+    assert.match(card, /Die Ausführung des Schritts ist technisch fehlgeschlagen\./, "die benannte Ursache bleibt sichtbar");
+    assertPurePastStatement(card, "COMPLETED mit fehlgeschlagener Kette");
+  });
+
+  await check("TP2-6.: COMPLETED mit blockierter Kette benennt die Kettenblockade und behält die technischen Details", async () => {
+    const chain = tp2Chain({
+      chainStatus: "BLOCKED",
+      currentStep: 1,
+      blockReason: "MANDATE_DIGEST_MISMATCH",
+      steps: [tp2Step(1, { approvalStatus: "REQUESTED" }), tp2Step(2), tp2Step(3)],
+    });
+    const card = tp2Card(tp2Overview("COMPLETED", [chain]));
+    assert.strictEqual(tp2Title(card), PAST_BLOCKED);
+    assert.match(card, /Der Kernauftrag stimmt nicht mehr mit der signierten Version überein\./);
+    assert.match(card, /<details class="pilot-chain-status-card__technical">/);
+    assertPurePastStatement(card, "COMPLETED mit blockierter Kette");
+  });
+
+  await check("TP2-7.: READY_FOR_REVIEW nach vollständig abgeschlossener Kette zeigt ausschließlich den Kettenabschluss, nicht die Abnahmeentscheidung", async () => {
+    const card = tp2Card(tp2Overview("READY_FOR_REVIEW", [tp2CompletedChain({})]));
+    assert.strictEqual(tp2Title(card), PAST_COMPLETED);
+    assertPurePastStatement(card, "READY_FOR_REVIEW nach abgeschlossener Kette");
+  });
+
+  await check("TP2-8.: RETURNED nach vollständig abgeschlossener Kette zeigt den Kettenabschluss und wiederholt die Rückgabe nicht", async () => {
+    const card = tp2Card(tp2Overview("RETURNED", [tp2CompletedChain({})]));
+    assert.strictEqual(tp2Title(card), PAST_COMPLETED);
+    assertPurePastStatement(card, "RETURNED nach abgeschlossener Kette");
+  });
+
+  await check("TP2-9.: BLOCKED ohne Kette behauptet keine Kettenblockade", async () => {
+    const card = tp2Card(tp2Overview("BLOCKED", []));
+    assert.strictEqual(tp2Title(card), PAST_NO_CHAIN);
+    assert.ok(!card.includes("blockiert"), "eine Auftragsblockade ist keine Kettenblockade");
+    assert.doesNotMatch(card, /pilot-chain-status-card--failure/);
+    assertPurePastStatement(card, "BLOCKED ohne Kette");
+  });
+
+  await check("TP2-10.: BLOCKED mit chainStatus BLOCKED benennt eindeutig die Kette – nicht den Auftrag", async () => {
+    const chain = tp2Chain({ chainStatus: "BLOCKED", blockReason: "MANDATE_DIGEST_MISMATCH" });
+    const card = tp2Card(tp2Overview("BLOCKED", [chain]));
+    assert.strictEqual(tp2Title(card), PAST_BLOCKED);
+    assertPurePastStatement(card, "BLOCKED mit blockierter Kette");
+  });
+
+  await check("TP2-11./12./13./14./15.: alle IN_EXECUTION-Zweige bleiben exakt wie bisher (Gegenwart, mit Handlungsempfehlung)", async () => {
+    const withoutChain = tp2Card(tp2Overview("IN_EXECUTION", []));
+    assert.strictEqual(tp2Title(withoutChain), "Noch keine Drei-Agenten-Kette vorbereitet.");
+    assert.ok(tp2NextLine(withoutChain).includes("unten eine neue Agentenkette vorbereiten."));
+
+    const prepared = tp2Card(tp2Overview("IN_EXECUTION", [tp2Chain({})]));
+    assert.strictEqual(tp2Title(prepared), "Schritt 1 wartet auf Freigabe.");
+
+    const waiting = tp2Card(
+      tp2Overview("IN_EXECUTION", [tp2Chain({ chainStatus: "WAITING_FOR_RESEARCH_APPROVAL", waitingForJamal: true, steps: [tp2Step(1, { approvalStatus: "REQUESTED" }), tp2Step(2), tp2Step(3)] })]),
+    );
+    assert.strictEqual(tp2Title(waiting), "Schritt 1 wartet auf Freigabe.");
+
+    const running = tp2Card(
+      tp2Overview("IN_EXECUTION", [tp2Chain({ chainStatus: "RESEARCH_RUNNING", steps: [tp2Step(1, { stepStatus: "RUNNING", approvalStatus: "GRANTED", startedAt: TP2_TIME, executionRunId: "tp2-run-1" }), tp2Step(2), tp2Step(3)] })]),
+    );
+    assert.strictEqual(tp2Title(running), "Schritt 1 wird gerade ausgeführt.");
+    assert.match(running, /pilot-chain-status-card--running/);
+
+    const completed = tp2Card(tp2Overview("IN_EXECUTION", [tp2CompletedChain({})]));
+    assert.strictEqual(tp2Title(completed), "Alle drei Schritte abgeschlossen.");
+    assert.ok(tp2NextLine(completed).includes("bei Bedarf oben manuell zur Abschlussprüfung vorlegen."));
+    assert.ok(tp2NextLine(completed).includes(NEXT_LABEL_ALLOWED), "die fachliche Abschwächung bleibt erhalten");
+    [withoutChain, prepared, waiting, running, completed].forEach((card, index) => assertNextStepLineIsClean(card, `IN_EXECUTION-Zweig ${index + 1}`));
+  });
+
+  await check("TP2-16.: bei älterer COMPLETED-Kette und neuerer nur vorbereiteter Kette entscheidet die bestehende Auswahl – nicht „neueste Kette gewinnt“", async () => {
+    const completedChain = tp2CompletedChain({ id: "tp2-chain-alt", createdAt: "2026-01-01T08:00:00.000Z" });
+    const preparedChain = tp2Chain({ id: "tp2-chain-neu", createdAt: "2026-03-01T08:00:00.000Z" });
+    const overview = tp2Overview("COMPLETED", [completedChain, preparedChain]);
+    assert.strictEqual(overview.agentChains[overview.agentChains.length - 1].chainStatus, "PREPARED", "Testaufbau: die zuletzt angelegte Kette ist die nur vorbereitete");
+    const card = tp2Card(overview);
+    assert.strictEqual(tp2Title(card), PAST_COMPLETED, "die tatsächlich ausgeführte Kette repräsentiert den Kettenstand");
+    assertPurePastStatement(card, "mehrere Ketten");
+  });
+
+  await check("TP2-17./18.: 3 von 3 verbuchten Rollen erzeugen ohne COMPLETED-Kette niemals eine Abschlussaussage", async () => {
+    const partialA = tp2Chain({
+      id: "tp2-teilkette-a",
+      chainStatus: "FAILED",
+      currentStep: 2,
+      steps: [tp2SucceededStep(1), tp2Step(2, { stepStatus: "FAILED", failureReasonCode: "STEP_EXECUTION_FAILED" }), tp2Step(3)],
+    });
+    const partialB = tp2Chain({
+      id: "tp2-teilkette-b",
+      chainStatus: "WAITING_FOR_PM_APPROVAL",
+      currentStep: 3,
+      steps: [tp2SucceededStep(1), tp2SucceededStep(2), tp2Step(3)],
+    });
+    const overview = tp2Overview("COMPLETED", [partialA, partialB], {
+      progress: { rolesPassed: 3, rolesTotal: 3, chainRolesBooked: 3 },
+      chainRoleProgress: { bookedRoles: ["RECHERCHE_ANALYSE", "DOKUMENTATION", "PROJEKTMANAGEMENT"], bookedCount: 3, totalCount: 3 },
+    });
+    const card = tp2Card(overview);
+    assert.ok(!card.includes(PAST_COMPLETED), "3 von 3 Rollen sind kein Nachweis einer abgeschlossenen Kette");
+    assert.ok(
+      tp2Title(card) === PAST_FAILED || tp2Title(card) === PAST_PARTIAL,
+      `die Aussage muss aus dem Kettenstand kommen (tatsächlich: ${tp2Title(card)})`,
+    );
+    assertPurePastStatement(card, "3 von 3 ohne abgeschlossene Kette");
+  });
+
+  await check("TP2-22./23.: beide Ausgabecontainer zeigen weiterhin genau eine Kettenstatuskarte – mit identischer fachlicher Aussage", async () => {
+    const orderIds = Array.from(backend.orders.keys());
+    let comparedOrders = 0;
+    for (const orderId of orderIds) {
+      forcedOrderReadFailureCount = 0;
+      // eslint-disable-next-line no-await-in-loop
+      await ui.selectOrder(orderId);
+      ui.render();
+      const upper = chainStatusCardSections(orderHtml());
+      const details = chainStatusCardSections(diagnosticsHtml());
+      assert.strictEqual(upper.length, 1, `${orderId}: genau eine Kettenstatuskarte in der oberen Arbeitskarte`);
+      assert.strictEqual(details.length, 1, `${orderId}: genau eine Kettenstatuskarte im Detailbereich`);
+      assert.strictEqual(upper[0], details[0], `${orderId}: beide Container müssen dieselbe fachliche Aussage liefern`);
+      comparedOrders += 1;
+    }
+    assert.ok(comparedOrders >= 5, `es müssen mehrere Aufträge verglichen worden sein (verglichen: ${comparedOrders})`);
+    timerHarness.clearAll();
+  });
+
   console.log(`pilot-agent-execution-chain-ui.test.js: ${passed} Prüfpunkte erfolgreich`);
 }
 

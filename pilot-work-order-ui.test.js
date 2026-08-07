@@ -500,7 +500,11 @@ check("DARST-Q6. reine Darstellungsänderung: keine neue Route, kein neuer Fetch
 check("DARST-Q7. alle bisherigen Kettenzustände und ihre Hinweise bleiben im Quelltext vollständig erhalten", () => {
   const cardSource = chainStatusCardSource();
   [
-    /title = "Drei-Agenten-Kette ist noch nicht aktiv\.";/,
+    // Teilpaket 2: der frühere Pauschaltext „Drei-Agenten-Kette ist noch nicht
+    // aktiv.“ stand hier bewusst NICHT mehr. Er war nachweislich falsch, sobald
+    // ein Auftrag außerhalb von „In Ausführung“ eine real vorhandene Kette
+    // besaß. An seine Stelle treten die kettenbezogenen Vergangenheitsaussagen
+    // (TP2-UI-1 unten). Alle übrigen Zustände bleiben unverändert erhalten.
     /title = "Noch keine Drei-Agenten-Kette vorbereitet\.";/,
     /title = "Start wurde angenommen\. Der Agent wird gestartet\.";/,
     /title = "Verbindung unterbrochen – Statusprüfung läuft weiter\.";/,
@@ -516,6 +520,132 @@ check("DARST-Q7. alle bisherigen Kettenzustände und ihre Hinweise bleiben im Qu
     /nextStepText = failurePresentation\.action;/,
     /data-action="reload-chain-status"/,
   ].forEach((pattern) => assert.match(cardSource, pattern, `erhaltener Kettenzustand/Hinweis fehlt: ${pattern}`));
+});
+
+// ---------------------------------------------------------------------------
+// Teilpaket 2 – "Kettenstatus nach Ausführung zeitlich und fachlich wahr
+// darstellen".
+//
+// Ursache des Fehlers: renderChainStatusCard() hat als ERSTEN Zweig pauschal
+// auf overview.status !== "IN_EXECUTION" geprüft und daraufhin behauptet, die
+// Drei-Agenten-Kette sei "noch nicht aktiv" – auch dann, wenn die Kettendaten
+// eine vollständig abgeschlossene Kette belegten. Der Auftragsstatus wurde
+// damit als Beweis über die Kette missbraucht.
+//
+// Die Korrektur liegt ausschließlich in der Darstellung: außerhalb des
+// laufenden Ausführungsstatus beschreibt die Karte die Kette rückblickend,
+// ausschließlich aus den Kettendaten. Hier wird der Quelltext geprüft; das
+// tatsächlich gerenderte Ergebnis prüft pilot-agent-execution-chain-ui.test.js.
+// ---------------------------------------------------------------------------
+
+check("TP2-UI-1. der pauschale Falschtext existiert nirgends mehr im Quelltext", () => {
+  assert.ok(
+    !js.includes("Drei-Agenten-Kette ist noch nicht aktiv"),
+    "der widerlegte Pauschaltext darf in keiner Form zurückkehren",
+  );
+  assert.ok(
+    !js.includes("Die Kette kann erst im laufenden Ausführungsstatus gestartet werden."),
+    "die Begleitzeile des Pauschaltexts darf nicht zurückkehren",
+  );
+});
+
+check("TP2-UI-2. die Zeitachse ist eine einzige, klar lesbare Entscheidung – der Auftragsstatus überstimmt keine Kettenwahrheit mehr", () => {
+  const cardSource = chainStatusCardSource();
+  assert.match(
+    cardSource,
+    /var chainHistoryOnly = overview\.status !== "IN_EXECUTION" && !hasRunning && !bridge;/,
+    "die Zeitachse muss genau eine Bedingung sein: nicht in Ausführung, nichts läuft, keine angenommene Startanforderung",
+  );
+  assert.match(cardSource, /if \(chainHistoryOnly\) \{/, "der Rückblick ist ein eigener, klar benannter Zweig");
+  // Die Bedingung darf nicht ersatzlos verschwinden: der Auftragsstatus wird
+  // weiterhin gelesen, entscheidet aber nur noch über die Zeitform.
+  const statusComparisons = cardSource.match(/overview\.status !== "IN_EXECUTION"/g) || [];
+  assert.strictEqual(statusComparisons.length, 1, "der Auftragsstatus wird für die Zeitachse genau einmal gelesen");
+});
+
+check("TP2-UI-3. alle sechs verbindlichen Vergangenheitsaussagen stehen genau einmal im Rückblickzweig", () => {
+  const cardSource = chainStatusCardSource();
+  [
+    'title = "Für diesen Auftrag wurde keine Drei-Agenten-Kette verwendet.";',
+    'title = "Eine Drei-Agenten-Kette wurde vorbereitet, aber nicht gestartet.";',
+    'title = "Die Drei-Agenten-Kette wurde teilweise ausgeführt.";',
+    'title = "Die Drei-Agenten-Kette wurde vollständig abgeschlossen.";',
+    '"Die Drei-Agenten-Kette wurde während der Ausführung blockiert."',
+    '"Die Drei-Agenten-Kette konnte nicht vollständig abgeschlossen werden."',
+  ].forEach((literal) => {
+    assert.ok(cardSource.includes(literal), `verbindliche Produktformulierung fehlt: ${literal}`);
+    const occurrences = js.split(literal).length - 1;
+    assert.strictEqual(occurrences, 1, `die Formulierung darf genau einmal existieren: ${literal}`);
+  });
+});
+
+check("TP2-UI-4. „vollständig abgeschlossen“ wird ausschließlich aus chainStatus === \"COMPLETED\" abgeleitet, niemals aus 3 von 3", () => {
+  const cardSource = chainStatusCardSource();
+  assert.match(
+    cardSource,
+    /\} else if \(activeChain\.chainStatus === "COMPLETED"\) \{\s*\n\s*variant = "success";\s*\n\s*title = "Die Drei-Agenten-Kette wurde vollständig abgeschlossen\.";/,
+    "die Abschlussaussage hängt unmittelbar an chainStatus === \"COMPLETED\"",
+  );
+  assert.doesNotMatch(cardSource, /chainRoleProgress/, "die Karte darf die Rollenverbuchung nicht als Abschlussbeweis lesen");
+  assert.doesNotMatch(cardSource, /rolesPassed/, "die Karte darf rolesPassed nicht als Abschlussbeweis lesen");
+  assert.doesNotMatch(cardSource, /bookedCount/, "die Karte darf bookedCount nicht als Abschlussbeweis lesen");
+});
+
+check("TP2-UI-5. im Rückblick erscheint keine Zukunfts-/Handlungsaufforderung und keine Auftragsentscheidung", () => {
+  const cardSource = chainStatusCardSource();
+  const historyBranch = cardSource.match(/if \(chainHistoryOnly\) \{[\s\S]*?\n {4}\} else if \(!activeChain\) \{/);
+  assert.ok(historyBranch, "der Rückblickzweig muss abgrenzbar sein");
+  // Geprüft wird ausschließlich der sichtbar wirksame Code, nicht die
+  // Begründung in den Kommentaren.
+  const branch = historyBranch[0]
+    .split("\n")
+    .filter((line) => !/^\s*\/\//.test(line))
+    .join("\n");
+  [/jetzt starten/, /freigeben/, /oben vorlegen/, /bei Bedarf/, /erneut/, /Abschlussprüfung/, /abnehmen/, /zurückgegeben/].forEach((pattern) => {
+    assert.doesNotMatch(branch, pattern, `im Rückblick darf keine Handlungs-/Auftragsformulierung stehen: ${pattern}`);
+  });
+  // Der Handlungssatz der Fehlerdarstellung weist in die Zukunft und bleibt
+  // deshalb dem Gegenwartszweig vorbehalten.
+  assert.doesNotMatch(branch, /failurePresentation\.action|historicFailure\.action/, "kein Zukunftssatz aus der Fehlerdarstellung im Rückblick");
+  // Die Kettenkarte wiederholt die Auftragsentscheidung nicht mehr.
+  assert.doesNotMatch(cardSource, /overview\.nextStep/, "der Auftrags-Nächster-Schritt gehört in die Primäraktion, nicht in die Kettenkarte");
+  assert.match(js, /"<p><strong>N\\u00e4chster Schritt:<\/strong> " \+ escapeHtml\(overview\.nextStep\) \+ "<\/p>"/, "der Auftrags-Nächster-Schritt bleibt an seiner bisherigen Stelle sichtbar");
+});
+
+check("TP2-UI-6. die bestehende Fehlerdarstellung bleibt auch im Rückblick vollständig erreichbar", () => {
+  const cardSource = chainStatusCardSource();
+  assert.match(
+    cardSource,
+    /var historicFailure = resolveFailurePresentation\(resolveFailureReasonCodeFromContext\(context\), null\);\s*\n\s*lines\.push\(historicFailure\.cause\);\s*\n\s*technicalDetailsHtml = buildChainFailureTechnicalDetailsHtml\(context, historicFailure\);/,
+    "Ursache und technische Details bleiben im Rückblick erhalten",
+  );
+});
+
+check("TP2-UI-7. die neue Ableitung „vorbereitet, aber nie gestartet“ ist rein und ändert keinen Zustand", () => {
+  const match = js.match(/function chainWasNeverStarted\(chain\)\s*\{[\s\S]*?\n {2}\}/);
+  assert.ok(match, "chainWasNeverStarted muss auffindbar sein");
+  const source = match[0];
+  assert.doesNotMatch(source, /fetch\(|fetchJson\(|postAction\(/, "keine Netzwerkaktion");
+  assert.doesNotMatch(source, /addEventListener/, "kein Eventlistener");
+  assert.doesNotMatch(source, /state\./, "kein Zugriff auf den Bedienzustand");
+  assert.doesNotMatch(source, /(chain|step)\.[a-zA-Z]+ = /, "keine Zuweisung an Kettendaten");
+  assert.doesNotMatch(source, /push\(|splice\(|sort\(/, "die übergebenen Kettendaten werden nicht verändert");
+  assert.match(source, /step\.startedAt \|\| step\.executionRunId \|\| step\.stepStatus !== "PENDING"/, "jede Spur eines Starts beendet die Aussage");
+});
+
+check("TP2-UI-8. die Karteninvariante bleibt: genau zwei Aufrufstellen, keine dritte Karte", () => {
+  const calls = js.match(/renderChainStatusCard\(overview\)/g) || [];
+  assert.strictEqual(calls.length, 3, "genau eine Definition und genau zwei Aufrufstellen");
+  assert.match(js, /html \+= renderChainStatusCard\(overview\);/, "obere Arbeitskarte");
+  assert.match(js, /\n\s*renderChainStatusCard\(overview\) \+\n/, "Detailbereich");
+});
+
+check("TP2-UI-9. reine Darstellungsänderung: kein neuer Fetch, kein neuer Zustand, kein neuer Eventlistener, keine neue Route", () => {
+  const cardSource = chainStatusCardSource();
+  assert.doesNotMatch(cardSource, /fetch\(|fetchJson\(|postAction\(/);
+  assert.doesNotMatch(cardSource, /addEventListener/);
+  assert.doesNotMatch(cardSource, /state\.[a-zA-Z]+ = /);
+  assert.doesNotMatch(cardSource, /\/api\//, "die Kettenstatuskarte kennt keine Route");
 });
 
 // ---------------------------------------------------------------------------
