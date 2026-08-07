@@ -312,6 +312,26 @@
  * Mikrofoneinstieg, neues Icon, neue Empfehlungslogik, DRAFT/
  * APPROVED_FOR_EXECUTION-Sichtbarkeit, Auto-Refresh, Polling, CSS-
  * Aufräumarbeiten.
+ *
+ * V8.9.7 ("Zweistufige Zeilendarstellung in 'Heute wichtig'", rein CSS,
+ * diese Datei bleibt funktional bytegleich – Jamals Produktentscheidung
+ * Variante A "Ruhiger, aber vollständig"): die frühere V8.9-Planung sah für
+ * Zeilen 2+ von "Heute wichtig" fachlich weniger Information vor (nur
+ * Kategorie, Titel, Wartedauer, Einstieg). Diese Formulierung wird mit
+ * V8.9.7 bewusst weiterentwickelt: "kompakt" bedeutet ab V8.9.7 verbindlich
+ * ausschließlich optisch kompakter, niemals informationsreduziert.
+ * renderTodayRow(), renderTodaySection(), selectToday(), TODAY_STATUS_ORDER,
+ * selectRunning(), selectDone(), buildAgenda(), selectRecommendedNextWork(),
+ * renderRecommendationSection(), openOrder(), openNewOrder(), load() und die
+ * Reload-Logik bleiben unverändert – auch DOM-Struktur, Inhalt und
+ * Reihenfolge jeder Zeile bleiben exakt wie vor V8.9.7. Die visuelle
+ * Zweistufigkeit (erste Zeile etwas stärker geführt, weitere Zeilen etwas
+ * ruhiger) entsteht ausschließlich über neue, auf
+ * [data-chef-today-section="today"] gescopte CSS-Regeln
+ * (:first-child/:not(:first-child) auf der bereits vorhandenen
+ * .chef-today-row, siehe styles.css) – keine neue Klasse, kein neuer
+ * data-Index, keine neue Priorisierung, kein Score, keine Gewichtung.
+ * "Läuft" und "Fertig" sind von V8.9.7 nicht betroffen.
  */
 
 (function () {

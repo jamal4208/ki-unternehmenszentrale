@@ -426,6 +426,16 @@ function rowTitles(key) {
   return matches.map((entry) => entry.replace(/<[^>]+>/g, ""));
 }
 
+// V8.9.7 – zerlegt den Body von "Heute wichtig" in die einzelnen,
+// vollständigen Zeilen-Buttons (nicht-gierig vom öffnenden bis zum
+// zugehörigen schließenden </button>), damit der Informationsbestand JEDER
+// einzelnen Zeile (nicht nur der ersten, visuell stärker geführten) geprüft
+// werden kann – exakt das, was renderTodayRow() heute unverändert liefert.
+function todayRowHtmlList() {
+  const matches = sectionHtml("today").match(/<button type="button" class="chef-today-row"[\s\S]*?<\/button>/g) || [];
+  return matches;
+}
+
 // V8.9.6 – die neue, benannte Fußzone (kein Tagesabschnitt, siehe
 // renderFootActions()/Modulkopf V8.9.6): eigener Marker
 // data-chef-today-foot="actions" statt data-chef-today-section, damit
@@ -3906,6 +3916,319 @@ async function run() {
   );
 
   await check("V8.9.6: weiterhin kein schreibender Request \u00fcber den gesamten V8.9.6-Testlauf hinweg", () => {
+    assert.deepStrictEqual(postCalls(), []);
+  });
+
+  // -------------------------------------------------------------------------
+  // V8.9.7 ("Zweistufige Zeilendarstellung in 'Heute wichtig'", CSS-only \u2013
+  // Jamals Produktentscheidung Variante A "Ruhiger, aber vollst\u00e4ndig"): die
+  // fr\u00fchere V8.9-Planungsformulierung, nach der Zeilen 2+ fachlich weniger
+  // Information tragen sollten, wird hier bewusst NICHT umgesetzt \u2013
+  // "kompakt" bedeutet ab V8.9.7 verbindlich ausschlie\u00dflich optisch
+  // kompakter, niemals informationsreduziert. renderTodayRow(),
+  // renderTodaySection(), selectToday(), TODAY_STATUS_ORDER, selectRunning(),
+  // selectDone(), buildAgenda(), selectRecommendedNextWork(),
+  // renderRecommendationSection(), openOrder(), openNewOrder(), load() und
+  // die Reload-Logik bleiben unver\u00e4ndert \u2013 chef-today-ui.js ist bis auf den
+  // additiven Modulkopf-Kommentar funktional bytegleich. Die gesamte
+  // visuelle Zweistufigkeit entsteht ausschlie\u00dflich \u00fcber neue, auf
+  // [data-chef-today-section="today"] gescopte CSS-Regeln
+  // (:first-child/:not(:first-child) auf der bereits vorhandenen
+  // .chef-today-row) \u2013 keine neue Klasse, kein neuer Index-Parameter, keine
+  // neue Sortierung, kein Score, keine Gewichtung. "L\u00e4uft" und "Fertig"
+  // sind nicht betroffen.
+  // -------------------------------------------------------------------------
+
+  await check(
+    "V8.9.7 (1): die neuen CSS-Regeln existieren, sind CSS-only und ausschlie\u00dflich auf [data-chef-today-section=\"today\"] gescoped \u2013 keine neue Klasse und kein neuer Index-Parameter in chef-today-ui.js",
+    () => {
+      const v897CssMarker = '[data-chef-today-section="today"] .chef-today-list';
+      const v897CssIndex = css.indexOf(v897CssMarker);
+      assert.ok(v897CssIndex > -1, "die neuen V8.9.7-Regeln m\u00fcssen auffindbar sein");
+      const v897Css = css.slice(v897CssIndex);
+      assert.match(v897Css, /\.chef-today-row:first-child\s*\{/);
+      assert.match(v897Css, /\.chef-today-row:first-child \.chef-today-row-title\s*\{/);
+      assert.match(v897Css, /\.chef-today-row:not\(:first-child\)\s*\{/);
+
+      // Gegenprobe: es existiert im gesamten Stylesheet keine weitere
+      // First-Row-/Compact-Regel als die drei oben genannten \u2013 insbesondere
+      // keine f\u00fcr "L\u00e4uft" oder "Fertig".
+      const firstChildMatches = css.match(/\.chef-today-row:first-child/g) || [];
+      assert.strictEqual(firstChildMatches.length, 2, "genau die Basis- und Titel-Regel der Today-Section, keine weitere");
+      const notFirstChildMatches = css.match(/\.chef-today-row:not\(:first-child\)/g) || [];
+      assert.strictEqual(notFirstChildMatches.length, 1, "genau eine Kompakt-Regel, ausschlie\u00dflich f\u00fcr die Today-Section");
+
+      assert.doesNotMatch(
+        js,
+        /chef-today-row--|chef-today-row-lead|chef-today-row-compact|chef-today-row-first/,
+        "keine neue Modifier-Klasse in chef-today-ui.js",
+      );
+      assert.doesNotMatch(js, /function renderTodayRow\(order, ?\s*index/, "renderTodayRow() erh\u00e4lt keinen neuen Index-Parameter");
+      assert.doesNotMatch(js, /function renderTodaySection\(orders, ?\s*index/, "renderTodaySection() erh\u00e4lt keinen neuen Index-Parameter");
+    },
+  );
+
+  await check(
+    'V8.9.7 (2): "L\u00e4uft" und "Fertig" bekommen keine neue First-Row-/Compact-Regel und bleiben inhaltlich unver\u00e4ndert',
+    async () => {
+      setOrders([
+        { id: "v897-scope-running1", title: "L\u00e4uft 1", status: "IN_EXECUTION" },
+        { id: "v897-scope-running2", title: "L\u00e4uft 2", status: "IN_EXECUTION" },
+        { id: "v897-scope-done1", title: "Fertig 1", status: "COMPLETED" },
+        { id: "v897-scope-done2", title: "Fertig 2", status: "COMPLETED" },
+      ]);
+      await reload();
+      assert.doesNotMatch(css, /\[data-chef-today-section="running"\][^{]*:first-child/);
+      assert.doesNotMatch(css, /\[data-chef-today-section="done"\][^{]*:first-child/);
+      assert.doesNotMatch(css, /\[data-chef-today-section="running"\][^{]*:not\(:first-child\)/);
+      assert.doesNotMatch(css, /\[data-chef-today-section="done"\][^{]*:not\(:first-child\)/);
+      const runningSection = sectionHtml("running");
+      const doneSection = sectionHtml("done");
+      assert.strictEqual((runningSection.match(/<button type="button" class="chef-today-row"/g) || []).length, 2);
+      assert.strictEqual((doneSection.match(/<button type="button" class="chef-today-row"/g) || []).length, 2);
+      assert.match(runningSection, /<span class="chef-today-row-title">L\u00e4uft 1<\/span>/);
+      assert.match(doneSection, /<span class="chef-today-row-title">Fertig 1<\/span>/);
+    },
+  );
+
+  await check(
+    "V8.9.7 (3): die vollst\u00e4ndige Zeilenzahl bleibt bei 1/2/3/5/6 offenen Entscheidungen erhalten \u2013 keine Zeile entf\u00e4llt oder entsteht neu durch die Darstellung",
+    async () => {
+      const statuses = ["RETURNED", "READY_FOR_REVIEW", "BLOCKED", "READY_FOR_JAMAL_APPROVAL"];
+      for (const count of [1, 2, 3, 5, 6]) {
+        const orders = [];
+        for (let i = 0; i < count; i += 1) {
+          orders.push({
+            id: `v897-count-${count}-${i}`,
+            title: `Auftrag ${count}-${i}`,
+            status: statuses[i % statuses.length],
+            updatedAt: isoAtLocalDaysAgo(i),
+          });
+        }
+        setOrders(orders);
+        await reload();
+        assert.strictEqual(todayRowHtmlList().length, count, `bei ${count} offenen Entscheidungen m\u00fcssen genau ${count} Zeilen gerendert werden`);
+        assert.strictEqual(rowTitles("today").length, count);
+      }
+    },
+  );
+
+  await check(
+    "V8.9.7 (4): die Reihenfolge der Today-Titel bleibt exakt die bestehende Statusreihenfolge (RETURNED \u2192 READY_FOR_REVIEW \u2192 BLOCKED \u2192 READY_FOR_JAMAL_APPROVAL) \u2013 V8.9.7 sortiert nicht um",
+    async () => {
+      setOrders([
+        { id: "v897-order-approval", title: "D Freigabe", status: "READY_FOR_JAMAL_APPROVAL" },
+        { id: "v897-order-blocked", title: "C Blockiert", status: "BLOCKED" },
+        { id: "v897-order-review", title: "B Pr\u00fcfung", status: "READY_FOR_REVIEW" },
+        { id: "v897-order-returned", title: "A Zur\u00fcckgegeben", status: "RETURNED" },
+      ]);
+      await reload();
+      assert.deepStrictEqual(rowTitles("today"), ["A Zur\u00fcckgegeben", "B Pr\u00fcfung", "C Blockiert", "D Freigabe"]);
+    },
+  );
+
+  await check(
+    "V8.9.7 (5): keine neue Sortierungs-/Priorisierungslogik \u2013 renderTodayRow()/renderTodaySection() enthalten kein sort/score/weight/priorit, TODAY_STATUS_ORDER bleibt unver\u00e4ndert",
+    () => {
+      const renderTodayRowFn = js.match(/function renderTodayRow\(order\)\s*\{[\s\S]*?\n  \}/);
+      assert.ok(renderTodayRowFn, "renderTodayRow muss auffindbar sein");
+      assert.doesNotMatch(renderTodayRowFn[0], /sort|score|weight|priorit/i);
+      const renderTodaySectionFn = js.match(/function renderTodaySection\(orders\)\s*\{[\s\S]*?\n  \}/);
+      assert.ok(renderTodaySectionFn, "renderTodaySection muss auffindbar sein");
+      assert.doesNotMatch(renderTodaySectionFn[0], /sort|score|weight|priorit/i);
+      assert.match(
+        js,
+        /var TODAY_STATUS_ORDER = \["RETURNED", "READY_FOR_REVIEW", "BLOCKED", "READY_FOR_JAMAL_APPROVAL"\];/,
+        "TODAY_STATUS_ORDER bleibt unver\u00e4ndert",
+      );
+    },
+  );
+
+  await check(
+    "V8.9.7 (6/7): der vollst\u00e4ndige Informationsbestand (Kategorie, Titel, Zu entscheiden, Wartedauer, Entscheidung \u00f6ffnen) bleibt in JEDER Zeile erhalten \u2013 Blockier-/R\u00fcckgabegrund UND Empfehlung/Hinweis bleiben sichtbar, auch wenn sie in Zeile 2 bzw. 3 stehen (nicht in der ersten, hervorgehobenen Zeile)",
+    async () => {
+      setOrders([
+        { id: "v897-info-1", title: "Zeile 1: Zur\u00fcckgegeben", status: "RETURNED", updatedAt: isoAtLocalDaysAgo(0) },
+        { id: "v897-info-2", title: "Zeile 2: Pr\u00fcfung", status: "READY_FOR_REVIEW", updatedAt: isoAtLocalDaysAgo(3) },
+        { id: "v897-info-3", title: "Zeile 3: Blockiert", status: "BLOCKED", updatedAt: isoAtLocalDaysAgo(5) },
+      ]);
+      setCurrentDecisionReason("v897-info-1", makeDecisionReason({ kind: "RETURN", text: "Zeile 1 R\u00fcckgabegrund." }));
+      setCurrentDecisionReason("v897-info-3", makeDecisionReason({ kind: "BLOCK", text: "Zeile 3 Blockiergrund, nicht die erste Zeile." }));
+      setHandoffs("v897-info-2", [makeDocumentationHandoff({ resultOrRecommendation: "Zeile 2 Empfehlung, nicht die erste Zeile." })]);
+      setRisksAndLimits("v897-info-2", ["Zeile 2 Risiko, nicht die erste Zeile."]);
+      await reload();
+
+      const rows = todayRowHtmlList();
+      assert.strictEqual(rows.length, 3);
+      rows.forEach((rowHtml, index) => {
+        assert.match(rowHtml, /<span class="chef-today-row-meta">/, `Zeile ${index + 1} muss die Kategorie tragen`);
+        assert.match(rowHtml, /<span class="chef-today-row-title">/, `Zeile ${index + 1} muss den Titel tragen`);
+        assert.match(
+          rowHtml,
+          /<span class="chef-today-row-line chef-today-row-decision">/,
+          `Zeile ${index + 1} muss "Zu entscheiden" tragen`,
+        );
+        assert.match(rowHtml, /<span class="chef-today-row-wait">/, `Zeile ${index + 1} muss die Wartedauer tragen`);
+        assert.match(
+          rowHtml,
+          /<span class="chef-today-row-open">Entscheidung \u00f6ffnen<\/span>/,
+          `Zeile ${index + 1} muss "Entscheidung \u00f6ffnen" tragen`,
+        );
+      });
+
+      // Zeile 1 (RETURNED) tr\u00e4gt ihren eigenen R\u00fcckgabegrund.
+      assert.match(rows[0], /<span class="chef-today-row-line chef-today-row-reason">[\s\S]*Zeile 1 R\u00fcckgabegrund\.[\s\S]*?<\/span>/);
+
+      // Zeile 2 (READY_FOR_REVIEW) tr\u00e4gt Empfehlung UND "Hinweis vorhanden" \u2013
+      // ausdr\u00fccklich NICHT die erste, visuell hervorgehobene Zeile.
+      assert.match(
+        rows[1],
+        /<span class="chef-today-row-line chef-today-row-recommendation">[\s\S]*Zeile 2 Empfehlung, nicht die erste Zeile\.[\s\S]*?<\/span>/,
+      );
+      assert.match(rows[1], /<span class="chef-today-row-line chef-today-row-risk">[\s\S]*Hinweis vorhanden[\s\S]*?<\/span>/);
+      assert.doesNotMatch(rows[1], /chef-today-row-reason/, "READY_FOR_REVIEW zeigt keinen Blockier-/R\u00fcckgabegrund");
+
+      // Zeile 3 (BLOCKED) tr\u00e4gt ihren eigenen Blockiergrund \u2013 ausdr\u00fccklich
+      // NICHT die erste Zeile.
+      assert.match(
+        rows[2],
+        /<span class="chef-today-row-line chef-today-row-reason">[\s\S]*Zeile 3 Blockiergrund, nicht die erste Zeile\.[\s\S]*?<\/span>/,
+      );
+    },
+  );
+
+  await check(
+    "V8.9.7 (E): bei 6 offenen Entscheidungen bleibt auch Zeile 6 strukturell vollwertig \u2013 V8.9.7 f\u00fchrt keine zus\u00e4tzliche Reduktion jenseits der bereits bestehenden Abrufgrenze ein",
+    async () => {
+      const statuses = ["RETURNED", "READY_FOR_REVIEW", "BLOCKED", "READY_FOR_JAMAL_APPROVAL"];
+      const orders = [];
+      for (let i = 0; i < 6; i += 1) {
+        orders.push({ id: `v897-six-${i}`, title: `Sechs ${i + 1}`, status: statuses[i % statuses.length] });
+      }
+      setOrders(orders);
+      await reload();
+      const rows = todayRowHtmlList();
+      assert.strictEqual(rows.length, 6);
+      rows.forEach((rowHtml, index) => {
+        assert.match(rowHtml, /<span class="chef-today-row-meta">/, `Zeile ${index + 1}`);
+        assert.match(rowHtml, /<span class="chef-today-row-title">/, `Zeile ${index + 1}`);
+        assert.match(rowHtml, /<span class="chef-today-row-line chef-today-row-decision">/, `Zeile ${index + 1}`);
+        assert.match(rowHtml, /<span class="chef-today-row-open">Entscheidung \u00f6ffnen<\/span>/, `Zeile ${index + 1}`);
+      });
+      assert.match(sectionHtml("today"), /Weitere wichtige Vorg\u00e4nge vorhanden\./);
+    },
+  );
+
+  await check(
+    "V8.9.7 (8/9/10): jede Zeile bleibt ein echtes <button type=\"button\"> mit data-chef-today-action=\"open-order\" und data-order-id; ein delegierter Klick \u00f6ffnet real auch Zeile 2 UND Zeile 5 (nicht nur die erste, hervorgehobene Zeile) korrekt \u00fcber das unver\u00e4nderte openOrder()",
+    async () => {
+      setOrders([
+        { id: "v897-click-1", title: "Zeile A", status: "RETURNED" },
+        { id: "v897-click-2", title: "Zeile B", status: "READY_FOR_REVIEW" },
+        { id: "v897-click-3", title: "Zeile C", status: "BLOCKED" },
+        { id: "v897-click-4", title: "Zeile D", status: "READY_FOR_JAMAL_APPROVAL" },
+        { id: "v897-click-5", title: "Zeile E", status: "READY_FOR_JAMAL_APPROVAL" },
+      ]);
+      await reload();
+      assert.deepStrictEqual(rowTitles("today"), ["Zeile A", "Zeile B", "Zeile C", "Zeile D", "Zeile E"]);
+
+      const rows = todayRowHtmlList();
+      assert.strictEqual(rows.length, 5);
+      rows.forEach((rowHtml, index) => {
+        assert.match(rowHtml, /^<button type="button" class="chef-today-row"/, `Zeile ${index + 1} muss ein echtes <button type="button"> sein`);
+        assert.match(rowHtml, /data-chef-today-action="open-order"/, `Zeile ${index + 1} muss data-chef-today-action="open-order" tragen`);
+        assert.match(rowHtml, /data-order-id="v897-click-\d"/, `Zeile ${index + 1} muss data-order-id tragen`);
+      });
+
+      pilotControls = ui.getState().orders.map((order) => makePilotControl("select-order", order.id));
+
+      // Zeile 2 (Index 1) – real \u00fcber die bestehende Klick-Delegation.
+      pilotClicks.length = 0;
+      fetchCalls.length = 0;
+      clickChefTodayAction("open-order", "v897-click-2");
+      assert.deepStrictEqual(pilotClicks, [{ action: "select-order", orderId: "v897-click-2" }], "Zeile 2 muss den richtigen Auftrag \u00f6ffnen");
+      assert.deepStrictEqual(fetchCalls, [], "das \u00d6ffnen selbst l\u00f6st keinen weiteren Abruf aus");
+
+      // Zeile 5 (Index 4) – real \u00fcber dieselbe Klick-Delegation.
+      pilotClicks.length = 0;
+      fetchCalls.length = 0;
+      clickChefTodayAction("open-order", "v897-click-5");
+      assert.deepStrictEqual(pilotClicks, [{ action: "select-order", orderId: "v897-click-5" }], "Zeile 5 muss den richtigen Auftrag \u00f6ffnen");
+      assert.deepStrictEqual(fetchCalls, [], "das \u00d6ffnen selbst l\u00f6st keinen weiteren Abruf aus");
+    },
+  );
+
+  await check(
+    "V8.9.7 (11/12/13/14): keine neue opacity/pointer-events/disabled/filter/cursor:default, keine neue Akzent-/Statusfarbe, kein box-shadow/outline und keine neue @media-Regel in den neuen Regeln \u2013 der bestehende focus-visible-Ring bleibt unangetastet",
+    () => {
+      const v897CssIndex = css.indexOf('[data-chef-today-section="today"] .chef-today-list');
+      assert.ok(v897CssIndex > -1);
+      const v897Css = css.slice(v897CssIndex);
+      assert.doesNotMatch(v897Css, /opacity\s*:/, "keine neue opacity");
+      assert.doesNotMatch(v897Css, /pointer-events\s*:/, "keine neue pointer-events");
+      assert.doesNotMatch(v897Css, /disabled/, "kein disabled-Bezug");
+      assert.doesNotMatch(v897Css, /filter\s*:/, "kein neuer filter");
+      assert.doesNotMatch(v897Css, /cursor\s*:\s*default/, "kein cursor: default");
+      assert.doesNotMatch(v897Css, /box-shadow\s*:/, "kein neues box-shadow \u2013 der bestehende focus-visible-Ring bleibt unangetastet");
+      assert.doesNotMatch(v897Css, /outline\s*:/, "kein neues outline");
+      assert.doesNotMatch(v897Css, /color\s*:/, "keine neue eigene Textfarbe (keine neue Akzent-/Statusfarbe)");
+      assert.doesNotMatch(v897Css, /background/, "kein neuer eigener Hintergrund");
+      assert.doesNotMatch(v897Css, /var\(--accent/, "keine neue Verwendung der Akzentfarbe");
+      assert.doesNotMatch(v897Css, /@media/, "keine neue @media-Regel im ersten Versuch");
+    },
+  );
+
+  await check(
+    "V8.9.7 (15): Bestandsschutz V8.9.1\u2013V8.9.6 \u2013 R\u00fcckweg, \u00dcberschriftzahl, V8.9.3-Satz, Reload-Button, Recommendation-Sichtbarkeit und Fu\u00dfzone bleiben vollst\u00e4ndig unver\u00e4ndert",
+    async () => {
+      // V8.9.1 – sichtbarer Rückweg unverändert.
+      assert.match(html, /<a href="#chef-today-card" id="pilot-work-order-back-to-today"/);
+
+      // V8.9.2 – Überschrift trägt weiterhin die Anzahl.
+      setOrders([
+        { id: "v897-bestand-1", title: "Auftrag 1", status: "BLOCKED" },
+        { id: "v897-bestand-2", title: "Auftrag 2", status: "READY_FOR_REVIEW" },
+      ]);
+      await reload();
+      assert.match(sectionHtml("today"), /<h3>Heute wichtig \(2\)<\/h3>/);
+
+      // V8.9.3 – Leerzustand ohne zweite Verneinung, einziger Satz in der Empfehlung.
+      setOrders([]);
+      await reload();
+      assert.doesNotMatch(
+        sectionHtml("today"),
+        /chef-today-list|chef-today-empty/,
+        "V8.9.3: der Leerzustand von \u201eHeute wichtig\u201c bleibt ohne Zeilen und ohne Ersatztext",
+      );
+      assert.match(sectionHtml("recommendation"), /Im Moment wartet keine Entscheidung auf dich\./);
+
+      // V8.9.4 – der statische Reload-Button existiert unverändert in index.html.
+      assert.match(html, /data-chef-today-action="reload-today"/);
+
+      // V8.9.5 – Empfehlungsabschnitt entfällt weiterhin bei konkreter offener Entscheidung.
+      setOrders([{ id: "v897-bestand-3", title: "Auftrag 3", status: "BLOCKED" }]);
+      await reload();
+      assert.strictEqual(sectionExists("recommendation"), false, "V8.9.5: Empfehlungsabschnitt entf\u00e4llt weiterhin bei konkreter Entscheidung");
+
+      // V8.9.6 – die Fußzone bleibt genau einmal und immer zuletzt.
+      assert.strictEqual(footCount(), 1);
+      assert.ok(footIsLast());
+    },
+  );
+
+  await check(
+    "V8.9.7 (16/17): keine neue Route, kein neuer Fetch, kein POST/PATCH/DELETE, Exportanzahl unver\u00e4ndert \u2013 chef-today-ui.js bleibt bis auf den additiven Modulkopf-Kommentar funktional unver\u00e4ndert",
+    () => {
+      assert.deepStrictEqual(postCalls(), []);
+      const urls = Array.from(new Set(js.match(/"\/api\/[^"]*"/g) || []));
+      assert.deepStrictEqual(urls.sort(), ['"/api/pilot-work-order/orders"', '"/api/pilot-work-order/orders/"'].sort());
+      assert.doesNotMatch(js, /"POST"|'POST'|"PATCH"|'PATCH'|"DELETE"|'DELETE'/);
+      assert.strictEqual(Object.keys(ui).length, 30, "die Anzahl exportierter Namen bleibt unver\u00e4ndert");
+      assert.doesNotMatch(js, /setInterval|setTimeout\(load|requestAnimationFrame|visibilitychange/);
+    },
+  );
+
+  await check("V8.9.7: weiterhin kein schreibender Request \u00fcber den gesamten V8.9.7-Testlauf hinweg", () => {
     assert.deepStrictEqual(postCalls(), []);
   });
 

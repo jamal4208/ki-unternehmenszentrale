@@ -10519,3 +10519,48 @@ details.local-agent-assignment-details > summary {
 .chef-today-section .primary-button {
   justify-self: start;
 }
+
+/* V8.9.7 ("Zweistufige Zeilendarstellung in 'Heute wichtig'", CSS-only,
+   Jamals Produktentscheidung Variante A "Ruhiger, aber vollständig"): die
+   frühere V8.9-Planungsformulierung, nach der Zeilen 2+ fachlich weniger
+   Informationen tragen sollten, wird hier bewusst NICHT umgesetzt – "kompakt"
+   bedeutet für V8.9.7 verbindlich ausschließlich optisch kompakter, niemals
+   informationsreduziert. renderTodayRow(), renderTodaySection() und die
+   DOM-Struktur bleiben deshalb vollständig unverändert (chef-today-ui.js
+   bleibt für dieses Paket funktional bytegleich): jede Zeile trägt weiterhin
+   exakt dieselben Elemente (Kategorie, Titel, "Zu entscheiden", optionaler
+   Blockier-/Rückgabegrund, optionale Empfehlung, optionaler
+   "Hinweis vorhanden"-Text, Wartedauer, "Entscheidung öffnen"), ist weiterhin
+   EIN vollständiger <button> und löst weiterhin ausschließlich das
+   bestehende openOrder() aus.
+   Ausschließlich innerhalb der Today-Section gescoped
+   ([data-chef-today-section="today"]): "Läuft" und "Fertig" verwenden
+   dieselbe Basisklasse .chef-today-row unverändert und erhalten hier bewusst
+   keine eigene Regel. Innerhalb der Today-Liste unterscheidet ausschließlich
+   die bereits vorhandene DOM-Reihenfolge (:first-child/:not(:first-child))
+   zwischen der ersten, visuell etwas stärker geführten Zeile und den
+   weiteren, etwas ruhigeren Zeilen – keine neue Modifier-Klasse, kein
+   zusätzliches data-Attribut, kein Index-Parameter in renderTodayRow(). Der
+   Unterschied bleibt bewusst subtil (nur Innenabstand, Zeilenabstand und ein
+   minimal größerer Titel): V8.9.7 visualisiert ausschließlich die bereits
+   bestehende, unveränderte Statusreihenfolge (TODAY_STATUS_ORDER) – es
+   entsteht keine neue Priorisierung, kein Score, keine Gewichtung. Bewusst
+   KEINE neue Akzent- oder Statusfarbe, kein Icon, keine Ampelwirkung, kein
+   box-shadow/outline (der bestehende `button:focus-visible`-Fokusring bleibt
+   dadurch unangetastet), keine opacity, keine gedimmte Schrift, kein
+   disabled-Eindruck: "Entscheidung öffnen" bleibt in jeder Zeile gleich
+   sichtbar und jede Zeile bleibt gleich vollständig klickbar. Keine neue
+   @media-Regel im ersten Versuch (siehe Browserabnahme). */
+[data-chef-today-section="today"] .chef-today-list > .chef-today-row:first-child {
+  padding: 16px 18px;
+  gap: 6px;
+}
+
+[data-chef-today-section="today"] .chef-today-list > .chef-today-row:first-child .chef-today-row-title {
+  font-size: 1.05rem;
+}
+
+[data-chef-today-section="today"] .chef-today-list > .chef-today-row:not(:first-child) {
+  padding: 9px 14px;
+  gap: 3px;
+}
