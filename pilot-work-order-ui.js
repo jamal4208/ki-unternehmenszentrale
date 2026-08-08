@@ -2145,7 +2145,7 @@
     ];
     if (chainRoleProgress && chainRoleProgress.totalCount) {
       rows.push([
-        "Ketten-Rollenbuchung",
+        "Von der Agentenkette erledigte Rollen",
         chainRoleProgress.bookedCount + " von " + chainRoleProgress.totalCount + " Rollen über Kettenschritte erfolgreich verbucht",
       ]);
     }

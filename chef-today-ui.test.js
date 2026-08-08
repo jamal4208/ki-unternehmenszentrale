@@ -1266,22 +1266,30 @@ async function run() {
   // kl\u00e4ren.") und erkannten den Befund deshalb nicht. Die folgenden
   // Pr\u00fcfungen verwenden deshalb bewusst wortgleiche Texte aus dem echten
   // Dienst.
+  //
+  // Sprachpaket A: buildOverview() liefert diese beiden Wortlaute inzwischen
+  // nicht mehr; die Statuscodes sind bereits an der Quelle entfernt. Der
+  // Filter bleibt trotzdem bestehen und wird hier unver\u00e4ndert
+  // weitergepr\u00fcft, damit die Chefmodus-Ebene auch gegen einen sp\u00e4teren
+  // R\u00fcckfall technischer Zus\u00e4tze abgesichert bleibt. Die Konstanten hei\u00dfen
+  // deshalb jetzt LEGACY_*. Die neue Produktsprache wird direkt darunter
+  // zus\u00e4tzlich gepr\u00fcft.
   // -------------------------------------------------------------------
 
-  const REAL_OPEN_DECISION_COMPLETED =
+  const LEGACY_OPEN_DECISION_COMPLETED =
     "Jamal muss das Ergebnis abnehmen (COMPLETED) oder zur \u00dcberarbeitung zur\u00fcckgeben.";
-  const REAL_OPEN_DECISION_APPROVED =
+  const LEGACY_OPEN_DECISION_APPROVED =
     "Jamal muss die Ausf\u00fchrung freigeben (APPROVED_FOR_EXECUTION) oder den Auftrag zur\u00fcckgeben.";
 
   await check(
     "V8.4-Korrektur: sanitizeChefDecisionText() entfernt bekannte technische Zus\u00e4tze, l\u00e4sst normale Klammertexte und unbekannte Texte unver\u00e4ndert (isolierte Funktionspr\u00fcfung)",
     () => {
       assert.strictEqual(
-        ui.sanitizeChefDecisionText(REAL_OPEN_DECISION_COMPLETED),
+        ui.sanitizeChefDecisionText(LEGACY_OPEN_DECISION_COMPLETED),
         "Jamal muss das Ergebnis abnehmen oder zur \u00dcberarbeitung zur\u00fcckgeben.",
       );
       assert.strictEqual(
-        ui.sanitizeChefDecisionText(REAL_OPEN_DECISION_APPROVED),
+        ui.sanitizeChefDecisionText(LEGACY_OPEN_DECISION_APPROVED),
         "Jamal muss die Ausf\u00fchrung freigeben oder den Auftrag zur\u00fcckgeben.",
       );
       // normaler fachlicher Klammertext bleibt unangetastet (keine pauschale
@@ -1312,17 +1320,17 @@ async function run() {
       assert.strictEqual(ui.sanitizeChefDecisionText(" (COMPLETED) (APPROVED_FOR_EXECUTION) "), null);
       // das \u00fcbergebene Original wird nicht mutiert (Strings sind in
       // JavaScript ohnehin unver\u00e4nderlich, hier zus\u00e4tzlich real gepr\u00fcft)
-      const original = REAL_OPEN_DECISION_COMPLETED;
+      const original = LEGACY_OPEN_DECISION_COMPLETED;
       ui.sanitizeChefDecisionText(original);
-      assert.strictEqual(original, REAL_OPEN_DECISION_COMPLETED);
+      assert.strictEqual(original, LEGACY_OPEN_DECISION_COMPLETED);
     },
   );
 
   await check(
-    "V8.4-Korrektur: whyTextFor() zeigt reale openDecision-Texte mit (COMPLETED)/(APPROVED_FOR_EXECUTION) bereinigt an (isolierte Funktionspr\u00fcfung)",
+    "V8.4-Korrektur: whyTextFor() zeigt historische openDecision-Texte mit (COMPLETED)/(APPROVED_FOR_EXECUTION) bereinigt an (isolierte Funktionspr\u00fcfung)",
     () => {
       ui.getState().todayOverviewByOrderId["v84-fix-review-unit"] = {
-        openDecision: REAL_OPEN_DECISION_COMPLETED,
+        openDecision: LEGACY_OPEN_DECISION_COMPLETED,
         nextStep: null,
       };
       assert.strictEqual(
@@ -1332,7 +1340,7 @@ async function run() {
       delete ui.getState().todayOverviewByOrderId["v84-fix-review-unit"];
 
       ui.getState().todayOverviewByOrderId["v84-fix-approval-unit"] = {
-        openDecision: REAL_OPEN_DECISION_APPROVED,
+        openDecision: LEGACY_OPEN_DECISION_APPROVED,
         nextStep: null,
       };
       assert.strictEqual(
@@ -1344,14 +1352,14 @@ async function run() {
   );
 
   await check(
-    "V8.4-Korrektur: reale, wortgleiche openDecision-Texte aus dem Fake-Backend erscheinen in der Startkarte ohne technischen Statuscode, das technische Originalfeld bleibt unangetastet",
+    "V8.4-Korrektur: historische, wortgleiche openDecision-Texte aus dem Fake-Backend erscheinen in der Startkarte ohne technischen Statuscode, das technische Originalfeld bleibt unangetastet",
     async () => {
       setOrders([
         { id: "v84-fix-review", title: "Ergebnis liegt wirklich vor", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
         { id: "v84-fix-approval", title: "Freigabe wartet wirklich", status: "READY_FOR_JAMAL_APPROVAL", updatedAt: new Date().toISOString() },
       ]);
-      setOpenDecision("v84-fix-review", REAL_OPEN_DECISION_COMPLETED);
-      setOpenDecision("v84-fix-approval", REAL_OPEN_DECISION_APPROVED);
+      setOpenDecision("v84-fix-review", LEGACY_OPEN_DECISION_COMPLETED);
+      setOpenDecision("v84-fix-approval", LEGACY_OPEN_DECISION_APPROVED);
       fetchCalls.length = 0;
       await reload();
 
@@ -1373,17 +1381,74 @@ async function run() {
       // das zugrunde liegende, technische Originalfeld im Fake-Backend
       // (Stellvertreter f\u00fcr das unver\u00e4nderte Feld openDecision aus
       // buildOverview()) bleibt wortgleich erhalten
-      assert.strictEqual(backendOpenDecisionByOrderId["v84-fix-review"], REAL_OPEN_DECISION_COMPLETED);
-      assert.strictEqual(backendOpenDecisionByOrderId["v84-fix-approval"], REAL_OPEN_DECISION_APPROVED);
+      assert.strictEqual(backendOpenDecisionByOrderId["v84-fix-review"], LEGACY_OPEN_DECISION_COMPLETED);
+      assert.strictEqual(backendOpenDecisionByOrderId["v84-fix-approval"], LEGACY_OPEN_DECISION_APPROVED);
       // und ebenso das nachgeladene Overview im Client-Zustand
       assert.strictEqual(
         ui.getState().todayOverviewByOrderId["v84-fix-review"].openDecision,
-        REAL_OPEN_DECISION_COMPLETED,
+        LEGACY_OPEN_DECISION_COMPLETED,
       );
       assert.strictEqual(
         ui.getState().todayOverviewByOrderId["v84-fix-approval"].openDecision,
-        REAL_OPEN_DECISION_APPROVED,
+        LEGACY_OPEN_DECISION_APPROVED,
       );
+      assert.deepStrictEqual(postCalls(), [], "weiterhin kein schreibender Request");
+
+      clearOpenDecisionOverrides();
+    },
+  );
+
+  // -------------------------------------------------------------------
+  // Sprachpaket A – die bereinigte Produktsprache aus buildOverview() muss
+  // im Chefmodus unver\u00e4ndert und vollst\u00e4ndig ankommen. Die Wortlaute
+  // werden zus\u00e4tzlich gegen den echten Dienstquelltext verankert, damit
+  // diese Pr\u00fcfung nicht wie die urspr\u00fcnglichen V8.4-Tests von der Quelle
+  // abdriften kann.
+  // -------------------------------------------------------------------
+
+  const NEW_OPEN_DECISION_REVIEW =
+    "Du musst das Ergebnis abnehmen oder den Auftrag zur \u00dcberarbeitung zur\u00fcckgeben.";
+  const NEW_OPEN_DECISION_APPROVAL =
+    "Du musst die Ausf\u00fchrung freigeben oder den Auftrag zur \u00dcberarbeitung zur\u00fcckgeben.";
+  const NEW_OPEN_DECISION_BLOCKED =
+    "Du musst die Blockade kl\u00e4ren, bevor der Pilotlauf fortgesetzt werden kann.";
+
+  await check(
+    "Sprachpaket A: die drei bereinigten openDecision-Wortlaute stehen wortgleich im echten Dienst (Schutz gegen Abdriften dieser Testfixturen)",
+    () => {
+      for (const text of [NEW_OPEN_DECISION_REVIEW, NEW_OPEN_DECISION_APPROVAL, NEW_OPEN_DECISION_BLOCKED]) {
+        assert.ok(
+          pilotServiceJs.includes(text),
+          "pilot-work-order-service.js muss den Wortlaut wortgleich enthalten: " + text,
+        );
+      }
+    },
+  );
+
+  await check(
+    "Sprachpaket A: die bereinigten openDecision-Texte erscheinen im Chefmodus vollst\u00e4ndig, unver\u00e4ndert und ohne technische Reste",
+    async () => {
+      setOrders([
+        { id: "sprachpaket-a-review", title: "Ergebnis liegt vor", status: "READY_FOR_REVIEW", updatedAt: new Date().toISOString() },
+        { id: "sprachpaket-a-approval", title: "Freigabe wartet", status: "READY_FOR_JAMAL_APPROVAL", updatedAt: new Date().toISOString() },
+        { id: "sprachpaket-a-blocked", title: "Auftrag steht", status: "BLOCKED", updatedAt: new Date().toISOString() },
+      ]);
+      setOpenDecision("sprachpaket-a-review", NEW_OPEN_DECISION_REVIEW);
+      setOpenDecision("sprachpaket-a-approval", NEW_OPEN_DECISION_APPROVAL);
+      setOpenDecision("sprachpaket-a-blocked", NEW_OPEN_DECISION_BLOCKED);
+      fetchCalls.length = 0;
+      await reload();
+
+      const section = sectionHtml("today");
+      // der Filter darf die neue Sprache nicht anfassen: Wortlaut identisch
+      assert.ok(section.includes(NEW_OPEN_DECISION_REVIEW), "der READY_FOR_REVIEW-Satz muss wortgleich sichtbar sein");
+      assert.ok(section.includes(NEW_OPEN_DECISION_APPROVAL), "der READY_FOR_JAMAL_APPROVAL-Satz muss wortgleich sichtbar sein");
+      assert.ok(section.includes(NEW_OPEN_DECISION_BLOCKED), "der BLOCKED-Satz muss wortgleich sichtbar sein");
+
+      const visibleText = section.replace(/<[^>]*>/g, " ");
+      assert.doesNotMatch(visibleText, /APPROVED_FOR_EXECUTION/, "kein technischer Statuscode sichtbar");
+      assert.doesNotMatch(visibleText, /approveForExecution|approveCompletion|unblockOrder/, "kein interner Funktionsname sichtbar");
+      assert.doesNotMatch(visibleText, /confirmed:\s*true/, "keine interne Parameterschreibweise sichtbar");
       assert.deepStrictEqual(postCalls(), [], "weiterhin kein schreibender Request");
 
       clearOpenDecisionOverrides();

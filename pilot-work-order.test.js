@@ -599,8 +599,8 @@ async function run() {
     assert.strictEqual(review.status, "READY_FOR_REVIEW");
     assert.strictEqual(
       review.openDecision,
-      "Jamal muss das Ergebnis abnehmen (COMPLETED) oder zur Überarbeitung zurückgeben.",
-      "die explizite Abschlussentscheidung bleibt unverändert bestehen",
+      "Du musst das Ergebnis abnehmen oder den Auftrag zur Überarbeitung zurückgeben.",
+      "die explizite Abschlussentscheidung bleibt inhaltlich unverändert bestehen",
     );
 
     const completed = service.approveCompletion(tpDb, { pilotOrderId, confirmed: true });
@@ -660,8 +660,8 @@ async function run() {
     assert.strictEqual(readyForApproval.status, "READY_FOR_JAMAL_APPROVAL");
     assert.strictEqual(
       readyForApproval.openDecision,
-      "Jamal muss die Ausführung freigeben (APPROVED_FOR_EXECUTION) oder den Auftrag zurückgeben.",
-      "die explizite Freigabeentscheidung bleibt unverändert bestehen",
+      "Du musst die Ausführung freigeben oder den Auftrag zur Überarbeitung zurückgeben.",
+      "die explizite Freigabeentscheidung bleibt inhaltlich unverändert bestehen",
     );
 
     const approved = service.approveForExecution(tpDb, { pilotOrderId, confirmed: true });
@@ -684,8 +684,8 @@ async function run() {
     assert.strictEqual(blocked.status, "BLOCKED");
     assert.strictEqual(
       blocked.openDecision,
-      "Jamal muss den Blocker klären, bevor der Pilotlauf fortgesetzt werden kann.",
-      "die explizite Blockierentscheidung hat weiterhin Vorrang und bleibt wortgleich",
+      "Du musst die Blockade klären, bevor der Pilotlauf fortgesetzt werden kann.",
+      "die explizite Blockierentscheidung hat weiterhin Vorrang",
     );
     assert.ok(blocked.currentDecisionReason);
     assert.strictEqual(blocked.currentDecisionReason.kind, "BLOCK");
@@ -757,6 +757,135 @@ async function run() {
       assert.deepStrictEqual(Object.keys(metadata).sort(), ["pilotOrderId"]);
       assert.doesNotMatch(JSON.stringify(metadata), /confirmed|token|note|prompt|result/i);
     });
+  });
+
+  // -------------------------------------------------------------------
+  // Sprachpaket A ("technische Entwicklersprache aus der normalen
+  // Pilotauftragsoberfläche entfernen") – die beiden normal sichtbaren
+  // Textquellen des Dienstes (NEXT_STEP_BY_STATUS und openDecision) dürfen
+  // keine internen Funktionsnamen, Parameterschreibweisen oder Statuscodes
+  // mehr transportieren. Die Prüfung fährt dazu echte Aufträge über die
+  // regulären Dienstfunktionen durch alle acht Status; es wird nichts direkt
+  // in die Datenbank geschrieben.
+  // -------------------------------------------------------------------
+
+  const FORBIDDEN_IN_VISIBLE_TEXT = [
+    "markReadyForApproval",
+    "approveForExecution",
+    "startExecution",
+    "approveCompletion",
+    "reopenFromReturned",
+    "unblockOrder",
+    "submitForReview",
+    "confirmed: true",
+    "confirmed === true",
+    "(APPROVED_FOR_EXECUTION)",
+    "(COMPLETED)",
+  ];
+
+  function assertFreeOfDeveloperLanguage(text, where) {
+    if (text === null || text === undefined) return;
+    const value = String(text);
+    FORBIDDEN_IN_VISIBLE_TEXT.forEach((forbidden) => {
+      assert.ok(!value.includes(forbidden), `${where} darf "${forbidden}" nicht mehr enthalten: ${value}`);
+    });
+  }
+
+  await check("SPA-1. kein NEXT_STEP_BY_STATUS-Text enthält noch interne Entwicklersprache", () => {
+    assert.deepStrictEqual(
+      Object.keys(service.NEXT_STEP_BY_STATUS).sort(),
+      [...service.PILOT_WORK_ORDER_STATUS_VALUES].sort(),
+      "es muss für jeden der acht Status genau einen Text geben",
+    );
+    Object.keys(service.NEXT_STEP_BY_STATUS).forEach((status) => {
+      assertFreeOfDeveloperLanguage(service.NEXT_STEP_BY_STATUS[status], `NEXT_STEP_BY_STATUS.${status}`);
+    });
+  });
+
+  await check("SPA-2. die beiden bereits sauberen Texte IN_EXECUTION und COMPLETED bleiben wortgleich unverändert", () => {
+    assert.strictEqual(
+      service.NEXT_STEP_BY_STATUS.IN_EXECUTION,
+      "Rollenübergabe einreichen oder zur Abschlussprüfung vorlegen.",
+    );
+    assert.strictEqual(
+      service.NEXT_STEP_BY_STATUS.COMPLETED,
+      "Pilotlauf abgeschlossen – kein weiterer Schritt in diesem Lauf.",
+    );
+  });
+
+  await check("SPA-3. openDecision und nextStep enthalten in allen acht real durchlaufenen Status keine Entwicklersprache", () => {
+    const { db: spaDb } = makeIsolatedDb("pilot-work-order-test-sprachpaket-a-");
+
+    function assertVisibleTextsClean(overview, expectedStatus) {
+      assert.strictEqual(overview.status, expectedStatus);
+      assertFreeOfDeveloperLanguage(overview.openDecision, `openDecision in ${expectedStatus}`);
+      assertFreeOfDeveloperLanguage(overview.nextStep, `nextStep in ${expectedStatus}`);
+      assert.strictEqual(overview.nextStep, service.NEXT_STEP_BY_STATUS[expectedStatus]);
+    }
+
+    const created = service.createPilotOrder(spaDb, validCreateOrderInput({ title: "Sprachpaket A: Statusdurchlauf" }));
+    const pilotOrderId = created.order.id;
+    assertVisibleTextsClean(service.getPilotOrderOverview(spaDb, pilotOrderId), "DRAFT");
+    assertVisibleTextsClean(service.markReadyForApproval(spaDb, { pilotOrderId }), "READY_FOR_JAMAL_APPROVAL");
+    assertVisibleTextsClean(service.approveForExecution(spaDb, { pilotOrderId, confirmed: true }), "APPROVED_FOR_EXECUTION");
+    assertVisibleTextsClean(service.startExecution(spaDb, { pilotOrderId }), "IN_EXECUTION");
+    // submitForReview verlangt ein angenommenes Dokumentations-Ergebnis; der
+    // reguläre Weg dorthin bleibt unverändert.
+    service.submitHandoff(
+      spaDb,
+      validHandoffInput({ pilotOrderId, fromPilotRole: "RECHERCHE_ANALYSE", toPilotRole: "DOKUMENTATION" }),
+    );
+    assertVisibleTextsClean(service.submitForReview(spaDb, { pilotOrderId }), "READY_FOR_REVIEW");
+
+    // RETURNED und der erneute Entwurf im zweiten Durchlauf
+    assertVisibleTextsClean(
+      service.returnOrder(spaDb, { pilotOrderId, note: "Zurückgegeben: die Auftragsfrage ist noch offen." }),
+      "RETURNED",
+    );
+    assertVisibleTextsClean(service.reopenFromReturned(spaDb, { pilotOrderId }), "DRAFT");
+
+    // BLOCKED aus einem laufenden Auftrag heraus
+    service.markReadyForApproval(spaDb, { pilotOrderId });
+    service.approveForExecution(spaDb, { pilotOrderId, confirmed: true });
+    service.startExecution(spaDb, { pilotOrderId });
+    assertVisibleTextsClean(
+      service.blockOrder(spaDb, { pilotOrderId, reason: "Blockiert: die benötigte Quelle fehlt." }),
+      "BLOCKED",
+    );
+
+    // COMPLETED über einen zweiten, sauber abgeschlossenen Auftrag
+    const second = service.createPilotOrder(spaDb, validCreateOrderInput({ title: "Sprachpaket A: Abschlussdurchlauf" }));
+    const secondId = second.order.id;
+    service.markReadyForApproval(spaDb, { pilotOrderId: secondId });
+    service.approveForExecution(spaDb, { pilotOrderId: secondId, confirmed: true });
+    service.startExecution(spaDb, { pilotOrderId: secondId });
+    service.submitHandoff(
+      spaDb,
+      validHandoffInput({ pilotOrderId: secondId, fromPilotRole: "RECHERCHE_ANALYSE", toPilotRole: "DOKUMENTATION" }),
+    );
+    service.submitForReview(spaDb, { pilotOrderId: secondId });
+    assertVisibleTextsClean(service.approveCompletion(spaDb, { pilotOrderId: secondId, confirmed: true }), "COMPLETED");
+  });
+
+  await check("SPA-4. die Sicherheitsformulierungen mit „Jamal“ bleiben im Dienst wortgleich bestehen", () => {
+    const serviceSource = fs.readFileSync(path.join(__dirname, "pilot-work-order-service.js"), "utf8");
+    [
+      // die menschliche Kontrollgrenze bei den beiden Freigaben
+      "Die Freigabe zur Ausführung erfordert confirmed === true (Jamals ausdrückliche Bestätigung).",
+      "Der Abschluss erfordert confirmed === true (Jamals ausdrückliche Bestätigung).",
+      // die Autonomiegrenze des Pilotlaufs selbst
+      "Start ausschließlich nach Jamals ausdrücklicher Freigabe eines realen Arbeitsauftrags.",
+    ].forEach((phrase) => {
+      assert.ok(serviceSource.includes(phrase), `die Sicherheitsformulierung muss erhalten bleiben: ${phrase}`);
+    });
+  });
+
+  await check("SPA-5. die bewusste Einzelfreigabe-Formulierung in der Oberfläche bleibt erhalten", () => {
+    const uiSource = fs.readFileSync(path.join(__dirname, "pilot-work-order-ui.js"), "utf8");
+    assert.ok(
+      uiSource.includes("bewusste Einzelfreigabe durch Jamal"),
+      "die Sicherheitsformulierung zur bewussten Einzelfreigabe darf nicht auf „du“ umgestellt worden sein",
+    );
   });
 
   console.log(`pilot-work-order.test.js: ${passed} Prüfpunkte erfolgreich`);

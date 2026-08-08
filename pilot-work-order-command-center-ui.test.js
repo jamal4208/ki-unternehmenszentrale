@@ -1111,6 +1111,17 @@ async function run() {
       domElements["pilot-work-order-list-output"].innerHTML,
       /Daf\u00fcr kann ich noch keinen Kettenauftrag vorbereiten/,
     );
+    // Sprachpaket A: die fachliche Aussage bleibt vollständig erhalten, die
+    // interne Versionsbezeichnung erscheint nicht mehr im Nutzertext.
+    assert.match(
+      domElements["pilot-work-order-list-output"].innerHTML,
+      /Pr\u00fcfung der Unternehmenszentrale aus Nutzer- und Bedienperspektive/,
+    );
+    const unsupportedHint = /Daf\u00fcr kann ich noch keinen Kettenauftrag vorbereiten\.[^<]*/.exec(
+      domElements["pilot-work-order-list-output"].innerHTML,
+    );
+    assert.ok(unsupportedHint, "der Hinweistext muss als zusammenh\u00e4ngender Satz vorliegen");
+    assert.doesNotMatch(unsupportedHint[0], /V\d+\.\d+/, "keine interne Versionsnummer im sichtbaren Hinweistext");
   });
 
   await check("V8.0-10./11./12. der Vorschlagsweg löst niemals prepare-agent-chain, approve-for-execution oder start-chain-step aus", async () => {

@@ -721,7 +721,7 @@ async function run() {
   await check("H(unverändert). openDecision, risksAndLimits und nextStep bleiben unverändert abgeleitet", () => {
     const overview = service.getPilotOrderOverview(db, blockOrderId);
     assert.strictEqual(overview.status, "BLOCKED");
-    assert.strictEqual(overview.openDecision, "Jamal muss den Blocker klären, bevor der Pilotlauf fortgesetzt werden kann.");
+    assert.strictEqual(overview.openDecision, "Du musst die Blockade klären, bevor der Pilotlauf fortgesetzt werden kann.");
     assert.strictEqual(overview.nextStep, service.NEXT_STEP_BY_STATUS.BLOCKED);
     assert.ok(Array.isArray(overview.risksAndLimits));
     // Der Entscheidungsgrund darf NICHT in risksAndLimits einsickern.

@@ -95,8 +95,8 @@
     "Verständlichkeit, Übersichtlichkeit, Cockpit-Bedienung) – vollständig vorbereitend, ohne externe Aktion.";
 
   const UNSUPPORTED_REASON =
-    "Dafür kann ich noch keinen Kettenauftrag vorbereiten. V8.0 unterstützt zunächst ausschließlich die Prüfung der " +
-    "Unternehmenszentrale aus Nutzer- und Bedienperspektive. Du kannst einen anderen Satz eingeben oder das " +
+    "Dafür kann ich noch keinen Kettenauftrag vorbereiten. Vorbereitet werden kann zunächst ausschließlich die Prüfung " +
+    "der Unternehmenszentrale aus Nutzer- und Bedienperspektive. Du kannst einen anderen Satz eingeben oder das " +
     "bestehende Formular weiterhin manuell ausfüllen.";
 
   // Feste, nachvollziehbare Schlüsselwörter/Wortstämme (V8.0-Auftrag

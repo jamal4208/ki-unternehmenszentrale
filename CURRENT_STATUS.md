@@ -1,5 +1,35 @@
 # CURRENT STATUS
 
+## Sprachpaket A – technische Entwicklersprache aus der normalen Pilotauftragsoberfläche entfernt (lokal fertig, Browserabnahme durch den Agenten erfolgt, noch nicht committet)
+
+Erstes Paket der normalen Produktreife nach dem Betonfundament-Abschluss. Umgesetzt wurden ausschließlich die im Sprachkompass als **„A – reine Sprachverbesserung“** klassifizierten Punkte. Keine Produktentscheidung vorgezogen, keine Logik verändert.
+
+**Entfernte technische Sprache (sichtbare Texte):**
+
+- `NEXT_STEP_BY_STATUS` in `pilot-work-order-service.js`: die internen Funktionsnamen `markReadyForApproval`, `approveForExecution`, `startExecution`, `approveCompletion`, `reopenFromReturned` und `unblockOrder` sowie die Parameterschreibweise `confirmed: true` erscheinen nicht mehr im Nutzertext. Die fachliche Bedeutung je Status ist unverändert. `IN_EXECUTION` und `COMPLETED` waren bereits sauber und blieben wortgleich.
+- `openDecision` in `pilot-work-order-service.js`: die technischen Statuscodes `(APPROVED_FOR_EXECUTION)` und `(COMPLETED)` sind an der Quelle entfernt. In den drei Entscheidungsstatus lautet die Ansprache jetzt „Du musst …“ statt „Jamal muss …“.
+- `pilot-work-order-ui.js`: das Label „Ketten-Rollenbuchung“ heißt jetzt **„Von der Agentenkette erledigte Rollen“**. Nur das Label wurde geändert; `bookedCount`, `totalCount` und ihre Ableitung sind unverändert, und aus „3 von 3“ wird weiterhin kein Kettenabschluss abgeleitet.
+- `pilot-work-order-draft-profiles.js`: die interne Versionsbezeichnung „V8.0“ ist aus dem sichtbaren Hinweistext für einen nicht unterstützten Satz entfernt. Die fachliche Aussage (unterstützt wird zunächst ausschließlich die Prüfung der Unternehmenszentrale aus Nutzer- und Bedienperspektive) bleibt vollständig erhalten; Profil-, Daten- und Auswahlfunktion sind unverändert.
+
+**Bewusst erhaltene Sicherheitsformulierungen** – „Jamal“ wurde nicht pauschal ersetzt. Wo der Name die persönliche Freigabe- und Kontrollgrenze bezeichnet, bleibt er wortgleich stehen:
+
+- „Die Freigabe zur Ausführung erfordert confirmed === true (Jamals ausdrückliche Bestätigung).“
+- „Der Abschluss erfordert confirmed === true (Jamals ausdrückliche Bestätigung).“
+- „Start ausschließlich nach Jamals ausdrücklicher Freigabe eines realen Arbeitsauftrags.“
+- „bewusste Einzelfreigabe durch Jamal – niemals .env, .env.local oder andere Secrets …“
+
+**Bewusst NICHT vorgezogene Produktentscheidungen:** der Buttontext „Entsperren (zurückgeben)“, die Informationshierarchie zwischen „Nächster Schritt“, „Nächster sicherer Schritt“ und „Nächster erlaubter Schritt“, die Sichtbarkeit von Revision und Pilotauftrag-ID, die Struktur der „Technische Details“-Ebene, die Validierungsfeldnamen und die allgemeinen Server-Fehlermeldungen. Alle vier Punkte wurden in der Browserabnahme als unverändert bestätigt.
+
+**Chefmodus-Konsistenz:** `sanitizeChefDecisionText()` in `chef-today-ui.js` bleibt unverändert bestehen. Der Filter ist für die neue Produktsprache ein harmloser Leerlauf, schützt die Chefmodus-Ebene aber weiterhin gegen einen späteren Rückfall technischer Zusätze. Kein Chefmodus-Produktivcode wurde angefasst.
+
+**Keine Logikänderung:** Statusmaschine, Statuswerte, Statusübergänge, `applyStatusTransition`, `expectedRevision`, Revision, Freigabelogik, `confirmed`-Prüfung, Rückgabe, `unblockOrder`, Kettenlogik, Kettenstatus, Agentenläufe, Tokens, Datenbank, Migrationen, Routen, API, Audit und `deriveActiveRun` sind unverändert. Die bereits abgesicherte Regel „historisches `decisionNeeded` gilt nur in `IN_EXECUTION` als aktuelle offene Entscheidung“ ist erhalten und weiterhin durch TP1-1 bis TP1-7 abgedeckt.
+
+**Tests:** bestehende Wortlautprüfungen in `pilot-work-order.test.js`, `pilot-work-order-decision-reason.test.js` und `pilot-agent-execution-chain-ui.test.js` wurden auf die neue Produktsprache aktualisiert; in `chef-today-ui.test.js` wurden die beiden Fixturen zu `LEGACY_OPEN_DECISION_*` umbenannt, weil sie jetzt historische Eingaben prüfen. Additiv neu: SPA-1 bis SPA-5 in `pilot-work-order.test.js` (Negativprüfung aller acht Status gegen die Verbotsliste über einen echten Statusdurchlauf, Wortgleichheit von `IN_EXECUTION`/`COMPLETED`, Erhalt der Sicherheitsformulierungen), zwei neue Chefmodus-Prüfungen (die neue Sprache kommt wortgleich an und ist gegen den echten Dienstquelltext verankert), eine Negativprüfung gegen interne Versionsnummern im Hinweistext sowie eine Prüfung, dass das alte Label „Ketten-Rollenbuchung“ nicht mehr gerendert wird. Keine bestehende Prüfung wurde gelöscht oder gelockert. `npm run check` und `npm test` laufen vollständig grün (Exit-Code 0); der bekannte sandboxbedingte `EXECUTION_ENVIRONMENT_UNAVAILABLE`/HTTP-503-Fehler trat in der vollen Ausführungsumgebung nicht auf.
+
+**Browserabnahme:** auf einer isolierten Instanz (eigener freier Port, eigenes temporäres `HOME`, eigenes temporäres `KUZ_DATA_DIR`, eigene temporäre Datenbank; niemals Port 4173). Alle acht Auftragsstatus wurden real über die reguläre API erzeugt und einzeln angesehen. Kein interner Funktionsname, kein `confirmed: true` und kein Statuscode in `openDecision` sichtbar; die Bedienansprache ist durchgängig „du/deine“; „Von der Agentenkette erledigte Rollen“ erscheint korrekt mit unveränderten Zahlen; „Entsperren (zurückgeben)“ und die Nächster-Schritt-Labels sind unverändert; keine JS-Fehler, keine visuelle Regression, Historie vollständig erreichbar. Responsive geprüft bei 1440, 820, 390 und im 200-%-Zoom-Äquivalent ohne Abschneiden oder Überlappung. Die temporäre Instanz wurde danach beendet und ausschließlich ihre eigenen temporären Daten entfernt; die kanonische Instanz auf Port 4173 blieb durchgängig unangetastet.
+
+**Nächste Pakete (noch nicht begonnen):** B = Buttontext „Entsperren (zurückgeben)“, C = Informationshierarchie „Nächster Schritt“, D = Revision und technische Details.
+
 ## Betonfundament-Korrekturblock abgeschlossen – Rückkehr in die normale Produktentwicklung
 
 **Leitlinie ab hier: wir bauen wieder auf dem Fundament, wir reparieren es nicht mehr.**

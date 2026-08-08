@@ -1049,7 +1049,11 @@ async function run() {
     assert.match(html, /Gesamturteil: konsistent \(Testergebnis Schritt 3\)/);
     assert.match(html, /Vorgänger vollständig übernommen: ja/);
     assert.match(cardHtml, /Fortschritt<\/dt><dd>0 von 3 Pilotrollen mit angenommenem Ergebnis/);
-    assert.match(cardHtml, /Ketten-Rollenbuchung<\/dt><dd>/);
+    assert.match(cardHtml, /Von der Agentenkette erledigte Rollen<\/dt><dd>/);
+    // Sprachpaket A: nur das Label wurde verständlicher formuliert; die
+    // Zahlen und ihre Ableitung bleiben unverändert.
+    assert.match(cardHtml, /Von der Agentenkette erledigte Rollen<\/dt><dd>\d+ von \d+ Rollen über Kettenschritte erfolgreich verbucht/);
+    assert.doesNotMatch(cardHtml, /Ketten-Rollenbuchung/);
     // Kein "gesamte Kette starten"-Button existiert und keine Stufe der
     // abgeschlossenen Kette bietet noch eine aktive Schaltfläche an.
     assert.doesNotMatch(html, /data-action="start-agent-chain"/);

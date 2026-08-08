@@ -321,9 +321,9 @@ const PILOT_ORDER_TEXT_MAX_LENGTHS = Object.freeze({
 });
 
 const NEXT_STEP_BY_STATUS = Object.freeze({
-  DRAFT: "Pilotauftrag prüfen und für Jamals Freigabe vorbereiten (markReadyForApproval).",
-  READY_FOR_JAMAL_APPROVAL: "Jamal entscheidet über die Freigabe zur Ausführung (approveForExecution mit confirmed: true).",
-  APPROVED_FOR_EXECUTION: "Ausführung starten (startExecution) – Rollenübergaben können danach beginnen.",
+  DRAFT: "Pilotauftrag prüfen und für deine Freigabe vorbereiten.",
+  READY_FOR_JAMAL_APPROVAL: "Du entscheidest über die Freigabe zur Ausführung mit ausdrücklicher Bestätigung.",
+  APPROVED_FOR_EXECUTION: "Ausführung starten – Rollenübergaben können danach beginnen.",
   // V8.0.1 ("Rollenübergabe nach abgeschlossener Drei-Agenten-Kette bedienbar
   // machen"): dieser Text bleibt bewusst STATISCH je Status (keine zweite
   // Statusmaschine) und beschreibt deshalb neutral BEIDE möglichen nächsten
@@ -333,10 +333,10 @@ const NEXT_STEP_BY_STATUS = Object.freeze({
   // aus den bereits vorhandenen Overview-Feldern (handoffs) ab – kein
   // zusätzliches Serverfeld, keine neue Statusmaschine.
   IN_EXECUTION: "Rollenübergabe einreichen oder zur Abschlussprüfung vorlegen.",
-  READY_FOR_REVIEW: "Jamal entscheidet über den Abschluss (approveCompletion mit confirmed: true) oder gibt zur Überarbeitung zurück.",
+  READY_FOR_REVIEW: "Du entscheidest über den Abschluss mit ausdrücklicher Bestätigung oder gibst den Auftrag zur Überarbeitung zurück.",
   COMPLETED: "Pilotlauf abgeschlossen – kein weiterer Schritt in diesem Lauf.",
-  RETURNED: "Ursache klären, danach erneut in den Entwurf überführen (reopenFromReturned).",
-  BLOCKED: "Blocker mit Jamal klären, danach kontrolliert entsperren (unblockOrder).",
+  RETURNED: "Ursache klären, danach erneut als Entwurf starten.",
+  BLOCKED: "Blockade klären und danach kontrolliert aufheben.",
 });
 
 const AUTONOMY_BOUNDARIES_NOTICE = Object.freeze({
@@ -1046,11 +1046,11 @@ function buildOverview(db, orderRow) {
   const lastHandoff = handoffs.length > 0 ? handoffs[handoffs.length - 1] : null;
   let openDecision = null;
   if (order.status === "READY_FOR_JAMAL_APPROVAL") {
-    openDecision = "Jamal muss die Ausführung freigeben (APPROVED_FOR_EXECUTION) oder den Auftrag zurückgeben.";
+    openDecision = "Du musst die Ausführung freigeben oder den Auftrag zur Überarbeitung zurückgeben.";
   } else if (order.status === "READY_FOR_REVIEW") {
-    openDecision = "Jamal muss das Ergebnis abnehmen (COMPLETED) oder zur Überarbeitung zurückgeben.";
+    openDecision = "Du musst das Ergebnis abnehmen oder den Auftrag zur Überarbeitung zurückgeben.";
   } else if (order.status === "BLOCKED") {
-    openDecision = "Jamal muss den Blocker klären, bevor der Pilotlauf fortgesetzt werden kann.";
+    openDecision = "Du musst die Blockade klären, bevor der Pilotlauf fortgesetzt werden kann.";
   } else if (order.status === "IN_EXECUTION" && lastHandoff && lastHandoff.decisionNeeded) {
     openDecision = lastHandoff.decisionNeeded;
   }
