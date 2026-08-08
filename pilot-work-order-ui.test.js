@@ -263,6 +263,31 @@ check("57. die neuen deutschen Literale folgen der bestehenden \\uXXXX-Konventio
   assert.match(js, /G\\u00fcltig seit: /);
 });
 
+check("V8.11.2. der Ersatzhinweis behauptet keine Ursache mehr und folgt weiterhin der \\uXXXX-Konvention", () => {
+  // Die sachlich falsche Ursachenbehauptung darf nirgends zurückkehren –
+  // weder in \uXXXX-Schreibweise noch als Klartext.
+  assert.doesNotMatch(js, /automatisch gestoppten/);
+  assert.doesNotMatch(js, /Bei \\u00e4lteren/);
+  assert.match(js, /Angezeigt wird ausschlie\\u00dflich ein Grund, der zum aktuellen Stand dieses Auftrags geh\\u00f6rt\./);
+  // Der ehrliche Kernsatz bleibt unverändert Teil desselben Absatzes.
+  assert.match(js, /Es wird bewusst nichts erg\\u00e4nzt oder vermutet\./);
+  // Keine Herkunftsunterscheidung: der Ersatzzweig bleibt allgemein und
+  // wertet weder Grundart noch Vor-/Folgestatus noch Revisionsabstände aus.
+  const replacementBranch = js.slice(
+    js.indexOf("function renderDecisionReasonCard"),
+    js.indexOf("function isBlockedOrReturnedStatusForDecisionReason"),
+  );
+  assert.ok(replacementBranch.length > 0, "der Ersatzzweig muss auffindbar bleiben");
+  const replacementBranchCode = replacementBranch
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("//"))
+    .join("\n");
+  assert.doesNotMatch(replacementBranchCode, /toStatus/);
+  assert.doesNotMatch(replacementBranchCode, /fromStatus/);
+  assert.doesNotMatch(replacementBranchCode, /revision - 1|revision-1/);
+  assert.doesNotMatch(replacementBranchCode, /"BLOCK"|'BLOCK'/);
+});
+
 check("58. keine Änderung an dieser Detailansicht durch den Chefmodus (pilot-work-order-ui.js bleibt von chef-today-ui.js unberührt)", () => {
   // Diese Datei (pilot-work-order-ui.js) selbst darf durch den Chefmodus
   // nie berührt werden – das gilt unverändert seit V8.7 Stufe B und bleibt

@@ -747,6 +747,53 @@ async function run() {
     assert.strictEqual(untouched.status, "DRAFT");
   });
 
+  // ===================================================================
+  // V8.11.2 – die reale F3-Datenlage nach einer manuell aufgehobenen
+  // Blockade. Rein additiv und in einer eigenen Datenbank, damit die
+  // bestehende Prüfreihenfolge oben unberührt bleibt. Dieser Prüfpunkt
+  // ändert nichts am Verhalten – er hält ausschließlich fest, welche
+  // Datenlage die Oberfläche im Ersatzzweig tatsächlich vorfindet, und ist
+  // damit die Grundlage der DOM-Fixtur in
+  // pilot-work-order-command-center-ui.test.js.
+  // ===================================================================
+
+  await check("V8.11.2. nach aufgehobener Blockade: kein aktueller Grund, Blockiergrund unverändert historisch auf der unmittelbar vorherigen Revision", () => {
+    const { db: unblockDb } = makeIsolatedDb("pilot-decision-reason-unblock-");
+    const orderId = createOrder(unblockDb, { title: "Testauftrag: Blockade aufheben" });
+    driveToInExecution(unblockDb, orderId);
+
+    const blockReason = "Blockiergrund: externe Freigabe der Rechtsabteilung fehlt noch.";
+    const blockedOverview = service.blockOrder(unblockDb, { pilotOrderId: orderId, reason: blockReason });
+    const revisionWhileBlocked = blockedOverview.order.revision;
+    assert.strictEqual(blockedOverview.status, "BLOCKED");
+    assert.strictEqual(blockedOverview.currentDecisionReason.text, blockReason);
+
+    const overview = service.unblockOrder(unblockDb, { pilotOrderId: orderId });
+
+    // Genau die Lage, die den Ersatzzweig auslöst.
+    assert.strictEqual(overview.status, "RETURNED");
+    assert.strictEqual(overview.currentDecisionReason, null, "unblockOrder schreibt bewusst keinen neuen Grund");
+
+    // Der Blockiergrund bleibt vollständig erhalten – nur eben historisch.
+    assert.strictEqual(overview.decisionReasonHistory.length, 1);
+    const historic = overview.decisionReasonHistory[0];
+    assert.strictEqual(historic.kind, "BLOCK");
+    assert.strictEqual(historic.text, blockReason);
+    assert.strictEqual(historic.toStatus, "BLOCKED");
+    assert.strictEqual(historic.orderRevision, revisionWhileBlocked);
+    assert.strictEqual(historic.orderRevision, overview.order.revision - 1, "die Blockierung liegt genau eine Revision zurück");
+
+    // Auch datenbankseitig wurde nichts verändert oder ergänzt.
+    const rows = readReasonRows(unblockDb, orderId);
+    assert.strictEqual(rows.length, 1, "das Aufheben darf keine zweite Grundzeile erzeugen");
+    assert.strictEqual(rows[0].reasonText, blockReason);
+    assert.strictEqual(rows[0].toStatus, "BLOCKED");
+
+    // Der nächste Schritt bleibt wortgleich der bestehende RETURNED-Text.
+    assert.strictEqual(overview.nextStep, service.NEXT_STEP_BY_STATUS.RETURNED);
+    assert.strictEqual(service.NEXT_STEP_BY_STATUS.RETURNED, "Ursache klären, danach erneut als Entwurf starten.");
+  });
+
   console.log(`pilot-work-order-decision-reason.test.js: ${passed} Prüfpunkte erfolgreich`);
 }
 

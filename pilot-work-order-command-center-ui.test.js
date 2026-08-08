@@ -2598,7 +2598,12 @@ async function run() {
     const cardHtml = extractDecisionReasonCardHtml(html);
     assert.match(cardHtml, /<h4>Warum der Auftrag blockiert ist<\/h4>/);
     assert.match(cardHtml, /F\u00fcr diesen Auftrag wurde kein konkreter Grund gespeichert\./);
-    assert.match(cardHtml, /Bei \u00e4lteren oder automatisch gestoppten Auftr\u00e4gen kann diese Angabe fehlen\. Es wird bewusst nichts erg\u00e4nzt oder vermutet\./);
+    // V8.11.2: derselbe Ersatzzweig, nur ohne die frühere Ursachenbehauptung
+    // ("ältere oder automatisch gestoppte Aufträge"). Der Prüfpunkt bleibt
+    // inhaltlich unverändert – er bindet weiterhin den vollständigen
+    // Zusatzhinweis wortgenau, einschließlich "nichts ergänzt oder vermutet".
+    assert.match(cardHtml, /Angezeigt wird ausschlie\u00dflich ein Grund, der zum aktuellen Stand dieses Auftrags geh\u00f6rt\. Es wird bewusst nichts erg\u00e4nzt oder vermutet\./);
+    assert.doesNotMatch(cardHtml, /automatisch gestoppten/, "die sachlich falsche Ursachenbehauptung darf nicht zurückkehren");
     assert.doesNotMatch(cardHtml, /Fr\u00fchere Gr\u00fcnde findest du unten/, "ohne jede Historie darf kein Hinweis auf frühere Gründe erscheinen");
     // weiterhin die normale Kopfzeile/Fakten sichtbar – keine zerstörte Ansicht.
     assert.match(html, /Blockiert/);
@@ -2620,6 +2625,149 @@ async function run() {
     assert.match(cardHtml, /<h4>Warum der Auftrag zur\u00fcckgegeben wurde<\/h4>/);
     assert.match(cardHtml, /F\u00fcr diesen Auftrag wurde kein konkreter Grund gespeichert\./);
   });
+
+  // V8.11.2 – Testauftrag F3: die reale Konstellation nach einer manuell
+  // aufgehobenen Blockade. Diese Lage war bislang NICHT abgedeckt: die
+  // Testaufträge C und D bilden Altbestände ohne jede Historie ab, hier
+  // dagegen existiert der frühere Blockiergrund vollständig weiter, er ist
+  // nur nicht mehr der Grund der aktuellen Revision.
+  //
+  // Die Zahlen entsprechen exakt dem, was der echte Service erzeugt (in
+  // pilot-work-order-decision-reason.test.js gegen die reale Datenbank
+  // nachgewiesen): blockOrder() schreibt die Grundzeile auf die Revision der
+  // Blockierung, unblockOrder() erhöht danach die Auftragsrevision um genau
+  // eins, ohne eine neue Zeile zu schreiben.
+  idCounter += 1;
+  const returnedAfterUnblockId = `pilot-order-test-decision-reason-returned-after-unblock-${idCounter}`;
+  const historicBlockReasonText =
+    "Blockiergrund: externe Freigabe der Rechtsabteilung fehlt noch (Testfixtur).";
+  setRawOrder(returnedAfterUnblockId, {
+    title: "Zur\u00fcckgegebener Auftrag nach aufgehobener Blockade",
+    status: "RETURNED",
+    statusLabel: STATUS_LABELS.RETURNED,
+    revision: 5,
+    nextStep: "Ursache kl\u00e4ren, danach erneut als Entwurf starten.",
+    currentDecisionReason: null,
+    decisionReasonHistory: [
+      {
+        kind: "BLOCK",
+        text: historicBlockReasonText,
+        setAt: "2026-04-02T10:45:00.000Z",
+        setByUserId: secretActorId,
+        fromStatus: "IN_EXECUTION",
+        toStatus: "BLOCKED",
+        orderRevision: 4,
+      },
+    ],
+  });
+
+  await check(
+    "V8.11.2-A/B/C/D. RETURNED nach aufgehobener Blockade: neuer wahrheitsgemäßer Ersatzhinweis, kein Alt-/Automatik-Satz, ehrlicher Haupttext, und der historische Blockiergrund wird oben NICHT als aktueller Grund ausgegeben",
+    async () => {
+      fetchCalls.length = 0;
+      await ui.selectOrder(returnedAfterUnblockId);
+      const overview = ui.getState().overview;
+      assert.strictEqual(overview.currentDecisionReason, null, "die Fixtur muss genau die F3-Lage abbilden");
+      assert.strictEqual(
+        overview.decisionReasonHistory[0].orderRevision,
+        overview.order.revision - 1,
+        "der Blockiergrund muss unmittelbar vor der aktuellen Revision liegen",
+      );
+
+      const cardHtml = extractDecisionReasonCardHtml(domElements["pilot-work-order-output"].innerHTML);
+      assert.ok(cardHtml.length > 0, "der Ersatzzweig muss gerendert werden");
+
+      // A. der neue, in allen Fällen wahre Ersatzhinweis.
+      assert.match(
+        cardHtml,
+        /Angezeigt wird ausschlie\u00dflich ein Grund, der zum aktuellen Stand dieses Auftrags geh\u00f6rt\. Es wird bewusst nichts erg\u00e4nzt oder vermutet\./,
+      );
+
+      // B. die sachlich falsche Ursachenbehauptung ist verschwunden – dieser
+      // Auftrag ist weder alt noch automatisch gestoppt worden.
+      assert.doesNotMatch(cardHtml, /Bei \u00e4lteren oder automatisch gestoppten Auftr\u00e4gen/);
+      assert.doesNotMatch(cardHtml, /automatisch gestoppt/);
+      assert.doesNotMatch(cardHtml, /\u00e4lteren Auftr\u00e4gen/);
+
+      // C. der ehrliche Haupttext bleibt unverändert bestehen.
+      assert.match(cardHtml, /F\u00fcr diesen Auftrag wurde kein konkreter Grund gespeichert\./);
+
+      // D. der historische Blockiergrund darf oben an keiner Stelle
+      // auftauchen – weder als Text noch als Überschrift eines aktuellen
+      // Grundes ("Gültig seit" gehört ausschließlich zum aktuellen Zweig).
+      assert.ok(!cardHtml.includes(ui.escapeHtml(historicBlockReasonText)), "der frühere Blockiergrund darf nicht in die obere Karte hochgezogen werden");
+      assert.doesNotMatch(cardHtml, /G\u00fcltig seit/);
+      assert.doesNotMatch(cardHtml, /<h4>Warum der Auftrag blockiert ist<\/h4>/, "die Überschrift muss dem aktuellen Status RETURNED folgen");
+      assert.match(cardHtml, /<h4>Warum der Auftrag zur\u00fcckgegeben wurde<\/h4>/);
+    },
+  );
+
+  await check(
+    "V8.11.2-E/F/G/H/I. RETURNED nach aufgehobener Blockade: Historienhinweis sichtbar, Blockiergrund vollständig in der Historie, Karte unmittelbar vor der Primäraktion, „Erneut als Entwurf starten“ und der nächste Schritt unverändert",
+    async () => {
+      const html = domElements["pilot-work-order-output"].innerHTML;
+      const cardHtml = extractDecisionReasonCardHtml(html);
+
+      // E. der bestehende Hinweis auf frühere Gründe erscheint, weil
+      // tatsächlich einer existiert.
+      assert.match(cardHtml, /Fr\u00fchere Gr\u00fcnde findest du unten in den Details\./);
+
+      // F. der Blockiergrund bleibt vollständig und als früherer Grund
+      // gekennzeichnet in der Historienanzeige erhalten.
+      const historyHtml = extractDecisionReasonHistoryHtml(domElements["pilot-work-order-diagnostics-output"].innerHTML);
+      assert.ok(historyHtml.length > 0, "die Historienanzeige muss erscheinen");
+      assert.match(historyHtml, /Blockiert am 2026-04-02 10:45/);
+      assert.ok(historyHtml.includes(ui.escapeHtml(historicBlockReasonText)), "der vollständige Blockiergrund muss unten erhalten bleiben");
+      assert.match(historyHtml, /Diese Gr\u00fcnde geh\u00f6ren zu fr\u00fcheren Entscheidungen und gelten heute nicht mehr\./);
+
+      // G. unveränderte Position: Grundkarte unmittelbar vor der Primäraktion.
+      const cardIndex = html.indexOf('<div class="pilot-decision-reason-card">');
+      const primaryActionIndex = html.indexOf('<div class="pilot-work-order-primary-action">');
+      assert.ok(cardIndex >= 0 && primaryActionIndex > cardIndex, "die Grundkarte muss unmittelbar vor der Primäraktion stehen");
+
+      // H./I. bestehende RETURNED-Führung bleibt wortgleich.
+      assert.match(html, /data-action="reopen-from-returned">Erneut als Entwurf starten<\/button>/);
+      assert.match(html, /Ursache kl\u00e4ren, danach erneut als Entwurf starten\./);
+
+      // Reines Anzeigen bleibt schreibfrei.
+      assert.strictEqual(fetchCalls.filter((call) => call.options && call.options.method && call.options.method !== "GET").length, 0);
+    },
+  );
+
+  await check(
+    "V8.11.2-Gegenproben. derselbe allgemeine Ersatzhinweis erscheint auch ohne jede Historie und bei BLOCKED ohne Grund; ein echter aktueller Grund verdrängt den Ersatzzweig unverändert",
+    async () => {
+      const replacementHint = /Angezeigt wird ausschlie\u00dflich ein Grund, der zum aktuellen Stand dieses Auftrags geh\u00f6rt\. Es wird bewusst nichts erg\u00e4nzt oder vermutet\./;
+
+      // A. RETURNED ohne jegliche Grundhistorie.
+      await ui.selectOrder(returnedWithoutReasonId);
+      const returnedEmptyCard = extractDecisionReasonCardHtml(domElements["pilot-work-order-output"].innerHTML);
+      assert.match(returnedEmptyCard, replacementHint);
+      assert.doesNotMatch(returnedEmptyCard, /automatisch gestoppten/);
+      assert.doesNotMatch(returnedEmptyCard, /Fr\u00fchere Gr\u00fcnde findest du unten/, "ohne Historie bleibt der Historienhinweis weiterhin aus");
+
+      // B. BLOCKED ohne Grund nutzt denselben Zweig und damit denselben Satz.
+      await ui.selectOrder(blockedWithoutReasonId);
+      const blockedEmptyCard = extractDecisionReasonCardHtml(domElements["pilot-work-order-output"].innerHTML);
+      assert.match(blockedEmptyCard, replacementHint);
+      assert.doesNotMatch(blockedEmptyCard, /automatisch gestoppten/);
+      assert.match(blockedEmptyCard, /<h4>Warum der Auftrag blockiert ist<\/h4>/);
+
+      // C. echte Rückgabe mit Pflichtgrund: unverändert der echte Grund.
+      await ui.selectOrder(returnedWithReasonId);
+      const returnedWithReasonCard = extractDecisionReasonCardHtml(domElements["pilot-work-order-output"].innerHTML);
+      assert.doesNotMatch(returnedWithReasonCard, replacementHint, "ein echter aktueller Grund darf den Ersatzzweig nicht auslösen");
+      assert.doesNotMatch(returnedWithReasonCard, /F\u00fcr diesen Auftrag wurde kein konkreter Grund gespeichert\./);
+      assert.ok(returnedWithReasonCard.includes(ui.escapeHtml("Ergebnis entspricht noch nicht den Qualit\u00e4tskriterien (Testfixtur).")));
+
+      // D. BLOCKED mit aktuellem Blockiergrund: ebenfalls unverändert.
+      await ui.selectOrder(blockedWithReasonId);
+      const blockedWithReasonCard = extractDecisionReasonCardHtml(domElements["pilot-work-order-output"].innerHTML);
+      assert.doesNotMatch(blockedWithReasonCard, replacementHint);
+      assert.doesNotMatch(blockedWithReasonCard, /F\u00fcr diesen Auftrag wurde kein konkreter Grund gespeichert\./);
+      assert.ok(blockedWithReasonCard.includes(ui.escapeHtml(longDecisionReasonText)));
+    },
+  );
 
   await check("23. ein normaler Status ohne Grund zeigt keinen neuen Abschnitt", async () => {
     idCounter += 1;

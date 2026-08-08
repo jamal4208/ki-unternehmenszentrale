@@ -4362,11 +4362,28 @@
 
     if (isBlockedOrReturnedStatusForDecisionReason(overview.status)) {
       var statusHeading = decisionReasonHeadingForStatus(overview.status);
+      // V8.11.2 ("Fehlenden Rückgabegrund nach aufgehobener Blockade
+      // wahrheitsgemäß erklären"): der Hinweis nannte hier früher zwei
+      // Ursachen für die Leerstelle – ältere Aufträge und automatisch
+      // gestoppte Aufträge. Nach einem manuell aufgehobenen BLOCKED trifft
+      // keine davon zu: der Auftrag ist weder alt noch automatisch gestoppt,
+      // und Jamal hat den Blockiergrund kurz zuvor selbst als Pflichtfeld
+      // eingegeben. Er ist nur nicht mehr der Grund der AKTUELLEN Revision.
+      //
+      // Der Hinweis behauptet deshalb keine Ursache mehr, sondern benennt
+      // ausschließlich die Regel, nach der diese Karte auswählt. Das ist in
+      // jedem Fall wahr (Altbestand, systemseitiger Stopp, aufgehobene
+      // Blockade) und ordnet zugleich den Satz darüber ein: gemeint ist der
+      // Grund zum aktuellen Stand, nicht die gesamte Auftragshistorie.
+      //
+      // Bewusst NICHT ergänzt: ein Verweis auf frühere Gründe. Den trägt
+      // bereits historyHint unmittelbar darunter – und zwar nur dann, wenn
+      // wirklich frühere Gründe existieren.
       return (
         '<div class="pilot-decision-reason-card">' +
         "<h4>" + statusHeading + "</h4>" +
         '<p class="pilot-decision-reason-text">F\u00fcr diesen Auftrag wurde kein konkreter Grund gespeichert.</p>' +
-        '<p class="pilot-decision-reason-hint">Bei \u00e4lteren oder automatisch gestoppten Auftr\u00e4gen kann diese Angabe fehlen. Es wird bewusst nichts erg\u00e4nzt oder vermutet.</p>' +
+        '<p class="pilot-decision-reason-hint">Angezeigt wird ausschlie\u00dflich ein Grund, der zum aktuellen Stand dieses Auftrags geh\u00f6rt. Es wird bewusst nichts erg\u00e4nzt oder vermutet.</p>' +
         historyHint +
         "</div>"
       );
