@@ -1891,15 +1891,16 @@
       escapeHtml(order.title) +
       (isCanonical ? ' <span class="pilot-order-canonical-badge">Kanonisch</span>' : "") +
       "</span>" +
+      // V8.10.4 ("technische Auftragsmetadaten aus der normalen
+      // Bedienebene nehmen"): die technische Auftrags-ID und "Rev. n"
+      // werden hier nicht mehr als sichtbarer Text gerendert. Beide Werte
+      // bleiben vollständig erhalten – die ID funktional über
+      // data-order-id oben (Auswahl/Chefmodus-Navigation), ID und Revision
+      // sichtbar in der aufklappbaren technischen Ebene des Auftrags
+      // (renderMeta). Kein Datenmodell-, CAS- oder API-Bezug geändert.
       '<span class="pilot-order-row-meta">' +
-      '<span class="pilot-order-row-id">' +
-      escapeHtml(order.id) +
-      "</span>" +
       "<span>" +
       escapeHtml(order.statusLabel) +
-      "</span>" +
-      "<span>Rev. " +
-      escapeHtml(String(order.revision)) +
       "</span>" +
       "<span>" +
       escapeHtml(formatTimestamp(order.updatedAt)) +
@@ -2134,9 +2135,11 @@
   function renderFacts(overview) {
     var progress = overview.progress || { rolesPassed: 0, rolesTotal: 3 };
     var chainRoleProgress = overview.chainRoleProgress || null;
+    // V8.10.4: "Pilotauftrag-ID" und "Revision" stehen nicht mehr in der
+    // normalen Faktentabelle. Beide Werte bleiben unverändert erreichbar –
+    // im bereits vorhandenen, aufklappbaren technischen Detailbereich des
+    // Auftrags (renderMeta). Die fachlichen Zeilen bleiben unverändert.
     var rows = [
-      ["Pilotauftrag-ID", escapeHtml(overview.order.id)],
-      ["Revision", escapeHtml(String(overview.order.revision))],
       ["Auftraggeber", escapeHtml(overview.order.requestedBy)],
       ["Status", escapeHtml(overview.statusLabel)],
       ["Beteiligte Agenten", overview.involvedAgents.map(function (a) { return escapeHtml(a.pilotRoleLabel); }).join(", ")],
@@ -2167,21 +2170,45 @@
     );
   }
 
+  // V8.10.4: Ebene 1 des Konflikts sagt zuerst verständlich, was passiert
+  // ist und was zu tun ist. Der technische Begriff "Revisionskonflikt" und
+  // die Revisionszahlen stehen nicht mehr permanent offen, sondern in einem
+  // standardmäßig geschlossenen "Technische Details"-Bereich derselben
+  // Fläche. Alle Werte stammen unverändert aus dem bereits vorhandenen
+  // state.conflict (siehe die 409-Zweige oben) – keine neue Datenquelle,
+  // keine Änderung an expectedRevision/CAS, kein automatischer Retry.
+  var CONFLICT_HEADLINE_TEXT = "Der Auftrag wurde zwischenzeitlich ge\u00e4ndert.";
+  var CONFLICT_GUIDANCE_TEXT =
+    "Der aktuelle Stand wurde nicht \u00fcberschrieben. Bitte laden Sie den Auftrag neu und pr\u00fcfen Sie die n\u00e4chste Aktion.";
+
   function renderConflictBanner(conflict) {
     if (!conflict) return "";
-    var revisionInfo = "";
+    var technicalRows = [];
+    if (conflict.pilotOrderId) {
+      technicalRows.push("Pilotauftrag-ID: " + escapeHtml(String(conflict.pilotOrderId)));
+    }
     if (conflict.expectedRevision !== undefined && conflict.expectedRevision !== null) {
-      revisionInfo += " Erwartete Revision: " + escapeHtml(String(conflict.expectedRevision)) + ".";
+      technicalRows.push("Erwartete Revision: " + escapeHtml(String(conflict.expectedRevision)) + ".");
     }
     if (conflict.currentRevision !== undefined && conflict.currentRevision !== null) {
-      revisionInfo += " Aktuelle Revision: " + escapeHtml(String(conflict.currentRevision)) + ".";
+      technicalRows.push("Aktuelle Revision: " + escapeHtml(String(conflict.currentRevision)) + ".");
     }
-    return (
-      '<div class="pilot-work-order-conflict" role="alert">' +
-      "<p><strong>Revisionskonflikt.</strong> " + escapeHtml(conflict.message) + revisionInfo + "</p>" +
-      '<button type="button" data-action="reload-after-conflict">Aktuellen Stand neu laden</button>' +
-      "</div>"
-    );
+    var html = '<div class="pilot-work-order-conflict" role="alert">';
+    html += "<p><strong>" + escapeHtml(CONFLICT_HEADLINE_TEXT) + "</strong></p>";
+    html += "<p>" + escapeHtml(CONFLICT_GUIDANCE_TEXT) + "</p>";
+    html += '<button type="button" data-action="reload-after-conflict">Aktuellen Stand neu laden</button>';
+    if (technicalRows.length > 0) {
+      html +=
+        '<details class="pilot-work-order-details pilot-work-order-conflict-technical"><summary>Technische Details</summary>' +
+        technicalRows
+          .map(function (row) {
+            return "<p>" + row + "</p>";
+          })
+          .join("") +
+        "</details>";
+    }
+    html += "</div>";
+    return html;
   }
 
   // Rendert die Jamal-Bestätigungsfläche für GENAU einen Auftrag/GENAU eine
@@ -4377,9 +4404,17 @@
     return "<h4>Audit-Trail (auftragsbezogen)</h4><ol>" + items + "</ol>";
   }
 
+  // V8.10.4: die technische Auftragskennung (Pilotauftrag-ID) und die
+  // aktuelle Auftragsrevision werden hier – im bereits vorhandenen,
+  // standardmäßig eingeklappten Nachschaubereich (index.html:
+  // .pilot-work-order-details) – weiterhin vollständig gezeigt. Keine neue
+  // Karte, keine neue Datenquelle, keine Ableitung: exakt
+  // overview.order.id und overview.order.revision.
   function renderMeta(overview) {
     return (
-      "<h4>Erstellung/Aktualisierung</h4><p>Angelegt: " + escapeHtml(formatTimestamp(overview.createdAt)) +
+      "<h4>Erstellung/Aktualisierung</h4><p>Pilotauftrag-ID: " + escapeHtml(overview.order.id) +
+      "<br>Revision: " + escapeHtml(String(overview.order.revision)) +
+      "<br>Angelegt: " + escapeHtml(formatTimestamp(overview.createdAt)) +
       "<br>Zuletzt aktualisiert: " + escapeHtml(formatTimestamp(overview.updatedAt)) + "</p>"
     );
   }

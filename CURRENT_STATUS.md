@@ -1,5 +1,33 @@
 # CURRENT STATUS
 
+## V8.10.4 – technische Auftragsmetadaten richtig einordnen (lokal fertig, automatisiert getestet, isoliert browserabgenommen inklusive Responsive; nicht committet, `main` unverändert auf `cd79ae3`)
+
+**Produktentscheidung (durch Jamal getroffen, hier ausschließlich umgesetzt):** normal sichtbar ist, was der Nutzer verstehen, entscheiden oder als Nächstes tun muss. Technisch erreichbar bleibt, was Support, Audit, Diagnose oder Konfliktklärung braucht. Es wurde keine Information gelöscht. Dieses Paket verändert ausschließlich Sichtbarkeit und Einordnung bereits vorhandener Werte – keine ID-, Revisions- oder CAS-Logik.
+
+**Rev. aus der Auftragsliste entfernt:** `renderOrderListRow()` rendert `"Rev. " + order.revision` nicht mehr als sichtbaren Text. `order.revision` bleibt im Datenzustand jeder Zeile unverändert vorhanden; Datenmodell, `state`, `expectedRevision`, CAS, API, Datenbank und Audit sind unangetastet.
+
+**Sichtbare Auftrags-ID aus der Liste entfernt:** die Zeile `<span class="pilot-order-row-id">order.id</span>` entfällt. Sichtbar bleiben Titel, Status und Zeitstempel.
+
+**`data-order-id` vollständig erhalten:** jede Zeile bleibt ein echtes `<button type="button" class="pilot-order-row" data-action="select-order" data-order-id="…">`. Die funktionale ID-Bindung – und damit die Chefmodus-Navigation (`chef-today-ui.js`: `data-order-id` → `openOrder()` → `selectOrder()`) – ist unverändert.
+
+**ID in der Jamal-Freigabe erhalten:** die persönliche Freigabefläche (`renderJamalConfirmationPanel`) zeigt die Auftrags-ID weiterhin hinter dem Titel. Dort ist sie kein technisches Rauschen, sondern Teil der menschlichen Kontrollgrenze. Kein Wortlaut und keine Sicherheitsformulierung wurde verändert.
+
+**Pilotauftrag-ID/Revision aus der normalen Faktentabelle:** `renderFacts()` beginnt jetzt mit „Auftraggeber“. Entfernt wurden ausschließlich die beiden Zeilen „Pilotauftrag-ID“ und „Revision“; „Auftraggeber“, „Status“, „Beteiligte Agenten“, „Fortschritt“, „Offene Entscheidung“ und die additive Kettenrollen-Zeile bleiben unverändert.
+
+**Beide Werte technisch weiterhin erreichbar:** `renderMeta()` („Erstellung/Aktualisierung“) zeigt jetzt zusätzlich `Pilotauftrag-ID: <id>` und `Revision: <n>`. Bewusst der kleinste strukturelle Eingriff: `renderMeta()` liegt bereits im vorhandenen, standardmäßig eingeklappten Nachschaubereich (`index.html`: `<details class="pilot-work-order-details">`). Keine neue Karte, keine neue Datenquelle, keine Ableitung – exakt `overview.order.id` und `overview.order.revision`.
+
+**Konflikttext verständlicher:** die normale Ebene der Konfliktfläche lautet jetzt „Der Auftrag wurde zwischenzeitlich geändert.“ mit dem Handlungssatz „Der aktuelle Stand wurde nicht überschrieben. Bitte laden Sie den Auftrag neu und prüfen Sie die nächste Aktion.“ (inhaltlich die bestehende Aussage aus `state.conflict.message`, grammatisch an die neue Struktur angepasst). Der technische Begriff „Revisionskonflikt.“ steht dort nicht mehr. Der Button „Aktuellen Stand neu laden“ ist unverändert.
+
+**Revisionszahlen in die technische Unterebene verschoben:** „Erwartete Revision“, „Aktuelle Revision“ und zusätzlich „Pilotauftrag-ID“ stehen in derselben Konfliktfläche unter einem standardmäßig geschlossenen `<details><summary>Technische Details</summary>`. Die ID war ohne jede Backend-/API-Änderung verfügbar: alle drei bestehenden 409-Zweige setzen `pilotOrderId` bereits heute in `state.conflict`.
+
+**CAS/`expectedRevision` unverändert:** die UI liest und sendet `expectedRevision` exakt wie bisher, das 409-Verhalten (kein Überschreiben, kein automatischer Retry, kein stiller Statuswechsel) ist unangetastet. **Audit unverändert:** `renderAuditTrail()` nennt die Revision weiterhin („Aktueller Status: … (Revision n).“).
+
+**Geänderte Dateien:** `pilot-work-order-ui.js` (vier Renderstellen), `pilot-work-order-ui.test.js`, `pilot-work-order-command-center-ui.test.js`, `CURRENT_STATUS.md`. Keine CSS-Änderung – der Konflikt-`<details>`-Bereich nutzt die bestehende Klasse `pilot-work-order-details`. Kein `index.html`, kein Service, keine Route, keine DB, kein Chefmodus-Produktivcode.
+
+**Tests:** zwei bestehende Prüfpunkte wurden fachlich an die neue Informationshierarchie angepasst statt gelöscht oder gelockert – „6. Status und Revision …“ prüft jetzt Status auf Ebene 1, Revision im Datenzustand und in der technischen Ebene; „16./17./18./19./20.“ prüft die neue Ebene-1-Formulierung und weist die Revision nach dem Neuladen in der technischen Ebene nach. Additiv abgesichert: 10 neue Prüfpunkte in `pilot-work-order-ui.test.js` (Quelltextebene: A/B/C, E, F/G, H, I/J/K/L/M, N, O/P, Q, R/S/T, U, CSS) und 10 neue Prüfpunkte in `pilot-work-order-command-center-ui.test.js` (gerendertes Markup gegen das Fake-Backend). `npm test` vollständig grün (Exit 0, 3637 `ok`-Zeilen); `npm run check` und `git diff --check` ohne Befund.
+
+**Browserabnahme:** isolierte temporäre Instanz unter `/tmp` auf einem freien Port (50373), temporäres `HOME`/`KUZ_DATA_DIR`, rein statische Auslieferung der unveränderten Produktivdatei mit gemockten API-Antworten – keine Datenbank berührt, Port 4173 unangetastet. Geprüft: DRAFT, READY_FOR_JAMAL_APPROVAL, IN_EXECUTION und ein erzwungener 409-Revisionskonflikt. Listenzeilen ohne sichtbare ID und ohne „Rev. n“, Faktentabelle beginnt mit „Auftraggeber“, technische Ebene mit beiden Werten, Jamal-Freigabefläche mit ID, Konfliktfläche mit verständlicher Überschrift, unverändertem Button und geschlossenem „Technische Details“. Responsive bei 1440, 820, 390 px und 200-%-Zoom-Äquivalent (720 px bei DPR 2) ohne jeden horizontalen Überlauf; keine JS-Fehler. Die temporäre Instanz wurde danach beendet und ausschließlich ihre eigenen temporären Daten entfernt.
+
 ## V8.10.3 – technische Fehlermeldungen und Fehlercodes sicher darstellen (lokal fertig, automatisiert getestet, isoliert browserabgenommen inklusive Responsive; nicht committet, `main` unverändert auf `65f2e84`)
 
 Umgesetzt wurden ausschließlich die vier in der vorangegangenen Read-only-Analyse als **A – reine Informations-/Sicherheitsbereinigung** klassifizierten Punkte A1 bis A4. Keine Produktentscheidung zu Revision oder Auftrags-ID vorgezogen, keine Informationshierarchie umgebaut, keine neue Sicherheitsarchitektur erfunden.

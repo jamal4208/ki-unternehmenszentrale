@@ -751,10 +751,19 @@ async function run() {
     assert.match(domElements["pilot-work-order-output"].innerHTML, /Kanonischer Pilotauftrag/);
   });
 
-  await check("6. Status und Revision des kanonischen Auftrags werden angezeigt", () => {
+  // V8.10.4: der Prüfzweck dieses Tests bleibt vollständig erhalten
+  // (Status und Revision des kanonischen Auftrags sind korrekt und für den
+  // Nutzer erreichbar), wird aber an die beschlossene Informationshierarchie
+  // angepasst: der Status bleibt auf der normalen Bedienebene sichtbar, die
+  // Revision steht nicht mehr prominent dort, sondern unverändert im
+  // Datenzustand und in der aufklappbaren technischen Ebene.
+  await check("6. Status und Revision des kanonischen Auftrags werden angezeigt (Status normal, Revision technisch)", () => {
     const html = domElements["pilot-work-order-output"].innerHTML;
+    const diagnosticsHtml = domElements["pilot-work-order-diagnostics-output"].innerHTML;
     assert.match(html, /Entwurf/);
-    assert.match(html, />0</);
+    assert.strictEqual(ui.getState().overview.order.revision, 0, "die Revision bleibt im Datenzustand unverändert vorhanden");
+    assert.match(diagnosticsHtml, /Revision: 0/, "die Revision bleibt in der technischen Ebene sichtbar");
+    assert.doesNotMatch(html, /<dt>Revision<\/dt>/, "die Revision steht nicht mehr prominent in der normalen Faktentabelle");
   });
 
   // -------------------------------------------------------------------
@@ -1465,21 +1474,30 @@ async function run() {
     assert.strictEqual(state.conflict.pilotOrderId, orderAId);
     assert.strictEqual(state.conflict.expectedRevision, staleRevision);
     assert.notStrictEqual(state.overview.status, "IN_EXECUTION", "keine Erfolgsmeldung/Statuswechsel bei Konflikt");
-    assert.match(domElements["pilot-work-order-output"].innerHTML, /Revisionskonflikt/);
+    // V8.10.4: derselbe Prüfzweck (der 409 erzeugt eine verständliche,
+    // sichtbare Konfliktanzeige), nur mit der neuen Ebene-1-Formulierung –
+    // die Revisionszahlen bleiben in derselben Fläche unter "Technische
+    // Details" erreichbar (siehe die additiven V8.10.4-Prüfungen unten).
+    assert.match(domElements["pilot-work-order-output"].innerHTML, /Der Auftrag wurde zwischenzeitlich ge\u00e4ndert\./);
+    assert.match(domElements["pilot-work-order-output"].innerHTML, /Erwartete Revision: /);
     assert.doesNotMatch(domElements["pilot-work-order-output"].innerHTML, /In Ausf\u00fchrung/);
 
     // 18. kein automatischer Retry: genau ein POST-Aufruf für diese Aktion.
     const postCalls = fetchCalls.filter((call) => call.method === "POST");
     assert.strictEqual(postCalls.length, 1, "kein automatischer Retry nach Konflikt");
 
-    // 19./20. Neuladen zeigt die neue (aktuelle) Revision.
+    // 19./20. Neuladen zeigt die neue (aktuelle) Revision. V8.10.4: die
+    // Revision wird dafür in der technischen Ebene statt in der normalen
+    // Faktentabelle nachgewiesen – der Prüfzweck (nach dem Neuladen steht
+    // die tatsächlich aktuelle Revision sichtbar zur Verfügung) bleibt
+    // unverändert und wird nicht gelockert.
     fetchCalls.length = 0;
     await ui.reloadSelectedOrder();
     const afterReload = ui.getState();
     assert.strictEqual(afterReload.conflict, null, "Konfliktanzeige verschwindet nach explizitem Neuladen");
     assert.strictEqual(afterReload.overview.order.revision, order.revision);
-    const revisionMarkup = new RegExp(">" + String(order.revision) + "<");
-    assert.match(domElements["pilot-work-order-output"].innerHTML, revisionMarkup);
+    const revisionMarkup = new RegExp("Revision: " + String(order.revision) + "<");
+    assert.match(domElements["pilot-work-order-diagnostics-output"].innerHTML, revisionMarkup);
   });
 
   // -------------------------------------------------------------------
@@ -3353,6 +3371,167 @@ async function run() {
     assert.match(diagnostics, /KI ausgeführt: nein/);
     assert.match(diagnostics, /Gestartet: /);
     assert.match(diagnostics, /Beendet: /);
+  });
+
+  // -------------------------------------------------------------------
+  // V8.10.4 ("technische Auftragsmetadaten aus der normalen Bedienebene
+  // nehmen"): ausschließlich Sichtbarkeit und Einordnung bereits
+  // vorhandener Werte. Die folgenden Prüfpunkte belegen am tatsächlich
+  // gerenderten Markup, dass nichts verloren geht: die Werte wandern von
+  // Ebene 1 in die bereits bestehende technische Ebene, die funktionale
+  // ID-Bindung, die Jamal-Freigabegrenze, expectedRevision, das
+  // 409-/CAS-Verhalten und der Audit-Trail bleiben unverändert.
+  // -------------------------------------------------------------------
+
+  let v8104OrderCounter = 0;
+
+  function visibleText(htmlFragment) {
+    return htmlFragment.replace(/<[^>]*>/g, " ");
+  }
+
+  async function v8104SelectOrder(overrides) {
+    v8104OrderCounter += 1;
+    const orderId = `pilot-order-test-v8104-${v8104OrderCounter}`;
+    setRawOrder(orderId, Object.assign({ title: `V8.10.4-Testauftrag ${v8104OrderCounter}`, revision: 6 }, overrides || {}));
+    await ui.selectOrder(orderId);
+    return orderId;
+  }
+
+  await check("V8.10.4-A/B: die Auftragsliste zeigt weder „Rev. n“ noch die technische pilot-order-ID als sichtbaren Text", async () => {
+    const listHtml = domElements["pilot-work-order-list-output"].innerHTML;
+    const listedOrders = ui.getState().orders;
+    assert.ok(listedOrders.length >= 2, "die Prüfung braucht tatsächlich gerenderte Auftragszeilen");
+    assert.ok(listedOrders.every((order) => typeof order.revision === "number"), "die Revision bleibt im Datenzustand jeder Zeile vorhanden");
+    const text = visibleText(listHtml);
+    assert.doesNotMatch(text, /Rev\./, "„Rev. n“ darf in der Auftragszeile nicht mehr sichtbar sein");
+    assert.doesNotMatch(text, /pilot-order-/, "die technische ID darf in der Auftragszeile nicht mehr sichtbar sein");
+    assert.ok(text.includes(listedOrders[0].title), "der Titel bleibt sichtbar");
+    assert.ok(text.includes(listedOrders[0].statusLabel), "der Status bleibt sichtbar");
+  });
+
+  await check("V8.10.4-C/D: data-order-id bleibt unverändert vorhanden; ein Auftrag lässt sich weiterhin ausschließlich über diese funktionale Bindung öffnen", async () => {
+    const listHtml = domElements["pilot-work-order-list-output"].innerHTML;
+    assert.match(listHtml, /<button type="button" class="pilot-order-row[^"]*" data-action="select-order" data-order-id="/, "die Zeile bleibt ein auswählbarer Button mit ID-Bindung");
+    const bindings = [...listHtml.matchAll(/data-order-id="([^"]+)"/g)].map((match) => match[1]);
+    const listedOrders = ui.getState().orders;
+    assert.deepStrictEqual(bindings, listedOrders.map((order) => order.id), "jede Zeile trägt weiterhin genau ihre eigene ID");
+    // Chefmodus-Navigation: der Chefmodus öffnet einen Auftrag über exakt
+    // diese ID-Bindung (chef-today-ui.js: data-order-id -> openOrder ->
+    // selectOrder). Genau dieser Weg wird hier nachgestellt.
+    const targetId = bindings[bindings.length - 1];
+    await ui.selectOrder(ui.CANONICAL_PILOT_ORDER_ID);
+    assert.strictEqual(ui.getState().selectedPilotOrderId, ui.CANONICAL_PILOT_ORDER_ID);
+    await ui.selectOrder(targetId);
+    assert.strictEqual(ui.getState().selectedPilotOrderId, targetId, "der Auftrag lässt sich über die unveränderte ID-Bindung öffnen");
+    assert.strictEqual(ui.getState().overview.order.id, targetId);
+  });
+
+  await check("V8.10.4-E: die normale Faktentabelle führt „Pilotauftrag-ID“ und „Revision“ nicht mehr, alle fachlichen Zeilen bleiben unverändert", async () => {
+    await v8104SelectOrder({});
+    const factsHtml = /<dl class="pilot-work-order-facts">([\s\S]*?)<\/dl>/.exec(domElements["pilot-work-order-output"].innerHTML);
+    assert.ok(factsHtml, "die Faktentabelle muss weiterhin vorhanden sein");
+    assert.doesNotMatch(factsHtml[1], /<dt>Pilotauftrag-ID<\/dt>/);
+    assert.doesNotMatch(factsHtml[1], /<dt>Revision<\/dt>/);
+    ["Auftraggeber", "Status", "Beteiligte Agenten", "Fortschritt", "Offene Entscheidung"].forEach((label) => {
+      assert.ok(factsHtml[1].includes(`<dt>${label}</dt>`), `die fachliche Zeile „${label}“ muss erhalten bleiben`);
+    });
+    assert.ok(factsHtml[1].indexOf("<dt>Auftraggeber</dt>") === factsHtml[1].indexOf("<dt>"), "die Faktentabelle beginnt jetzt mit einer fachlichen Angabe");
+  });
+
+  await check("V8.10.4-F/G: die technische Ebene zeigt Pilotauftrag-ID und Revision weiterhin, exakt mit den Werten aus overview.order", async () => {
+    const orderId = await v8104SelectOrder({ revision: 9 });
+    const diagnostics = domElements["pilot-work-order-diagnostics-output"].innerHTML;
+    const overview = ui.getState().overview;
+    assert.strictEqual(overview.order.id, orderId);
+    assert.strictEqual(overview.order.revision, 9);
+    assert.ok(diagnostics.includes(`Pilotauftrag-ID: ${overview.order.id}`), "die ID bleibt technisch erreichbar");
+    assert.ok(diagnostics.includes(`Revision: ${overview.order.revision}`), "die Revision bleibt technisch erreichbar");
+    assert.match(diagnostics, /Angelegt: /, "die bestehenden Zeitangaben bleiben unverändert erhalten");
+  });
+
+  await check("V8.10.4-H: die persönliche Jamal-Freigabefläche zeigt die Auftrags-ID weiterhin als Verwechslungsschutz", async () => {
+    const orderId = await v8104SelectOrder({
+      status: "READY_FOR_JAMAL_APPROVAL",
+      statusLabel: STATUS_LABELS.READY_FOR_JAMAL_APPROVAL,
+    });
+    ui.openJamalConfirmationDialog("approve-for-execution");
+    const panel = /<div class="pilot-jamal-confirmation"[\s\S]*?<\/div>/.exec(domElements["pilot-work-order-output"].innerHTML);
+    assert.ok(panel, "die Bestätigungsfläche muss vorhanden sein");
+    assert.ok(panel[0].includes(orderId), "die Auftrags-ID bleibt in der Freigabefläche sichtbar");
+    assert.match(panel[0], /Jamal-Best\u00e4tigung erforderlich/, "die bestehende Sicherheitsformulierung bleibt unverändert");
+    ui.cancelJamalConfirmation();
+  });
+
+  // Erzeugt genau einen echten 409-Revisionskonflikt über den bestehenden
+  // Weg: eine externe Änderung erhöht die Revision am Backend, die bereits
+  // gelesene expectedRevision ist damit veraltet.
+  async function v8104ConflictHtml() {
+    const orderId = await v8104SelectOrder({});
+    const rawOrder = backend.orders.get(orderId);
+    rawOrder.revision += 1;
+    fetchCalls.length = 0;
+    await ui.runOrderAction("mark-ready-for-approval", {});
+    const conflictHtml = /<div class="pilot-work-order-conflict" role="alert">[\s\S]*?<\/details><\/div>/.exec(
+      domElements["pilot-work-order-output"].innerHTML,
+    );
+    assert.ok(conflictHtml, "die Konfliktfläche muss vollständig gerendert sein");
+    return { orderId, rawOrder, html: conflictHtml[0] };
+  }
+
+  await check("V8.10.4-I/J/K/L: die Konfliktfläche erklärt auf Ebene 1 verständlich, ohne technischen Begriff und ohne Revisionszahlen; der Reload-Button bleibt unverändert", async () => {
+    const conflict = await v8104ConflictHtml();
+    const level1 = conflict.html.slice(0, conflict.html.indexOf("<details"));
+    assert.doesNotMatch(level1, /Revisionskonflikt/, "kein technischer Begriff auf Ebene 1");
+    assert.doesNotMatch(level1, /Erwartete Revision/, "keine Revisionszahl permanent sichtbar");
+    assert.doesNotMatch(level1, /Aktuelle Revision/, "keine Revisionszahl permanent sichtbar");
+    assert.match(level1, /<p><strong>Der Auftrag wurde zwischenzeitlich ge\u00e4ndert\.<\/strong><\/p>/);
+    assert.match(level1, /Der aktuelle Stand wurde nicht \u00fcberschrieben\. Bitte laden Sie den Auftrag neu und pr\u00fcfen Sie die n\u00e4chste Aktion\./);
+    assert.match(level1, /<button type="button" data-action="reload-after-conflict">Aktuellen Stand neu laden<\/button>/);
+  });
+
+  await check("V8.10.4-M/N: dieselbe Konfliktfläche führt erwartete Revision, aktuelle Revision und Pilotauftrag-ID in einem standardmäßig geschlossenen „Technische Details“-Bereich", async () => {
+    const conflict = await v8104ConflictHtml();
+    const technical = /<details class="pilot-work-order-details pilot-work-order-conflict-technical"><summary>Technische Details<\/summary>([\s\S]*?)<\/details>/.exec(conflict.html);
+    assert.ok(technical, "der technische Bereich muss innerhalb der Konfliktfläche liegen");
+    assert.doesNotMatch(conflict.html, /<details[^>]*\sopen/, "der technische Bereich ist standardmäßig geschlossen");
+    const state = ui.getState().conflict;
+    assert.ok(technical[1].includes(`Erwartete Revision: ${state.expectedRevision}.`));
+    assert.ok(technical[1].includes(`Aktuelle Revision: ${state.currentRevision}.`));
+    assert.ok(technical[1].includes(`Pilotauftrag-ID: ${conflict.orderId}`), "die ID ist bereits im bestehenden Konfliktzustand vorhanden und wird dort gezeigt");
+  });
+
+  await check("V8.10.4-O/P: der Konflikt entsteht weiterhin über genau einen POST mit unverändert mitgesendeter expectedRevision; kein Retry, kein Statuswechsel", async () => {
+    const conflict = await v8104ConflictHtml();
+    const posts = fetchCalls.filter((call) => call.method === "POST");
+    assert.strictEqual(posts.length, 1, "kein automatischer Retry nach einem Konflikt");
+    assert.match(posts[0].url, /\/mark-ready-for-approval$/, "keine neue Route");
+    assert.strictEqual(posts[0].body.expectedRevision, conflict.rawOrder.revision - 1, "die zuletzt gelesene Revision wird unverändert als expectedRevision mitgesendet");
+    assert.strictEqual(conflict.rawOrder.status, "DRAFT", "der Serverzustand wurde nicht überschrieben");
+    assert.strictEqual(ui.getState().overview.status, "DRAFT", "kein stiller Statuswechsel");
+  });
+
+  await check("V8.10.4-Q: der auftragsbezogene Audit-Trail nennt die Revision unverändert", async () => {
+    await v8104SelectOrder({ revision: 12 });
+    const diagnostics = domElements["pilot-work-order-diagnostics-output"].innerHTML;
+    const auditTrail = /Audit-Trail \(auftragsbezogen\)<\/h4><ol>([\s\S]*?)<\/ol>/.exec(diagnostics);
+    assert.ok(auditTrail, "der Audit-Trail muss unverändert vorhanden sein");
+    assert.match(auditTrail[1], /\(Revision 12\)/, "die Revision bleibt im Audit-Trail erhalten");
+  });
+
+  await check("V8.10.4-R/S/T: die Darstellung kommt ohne neue Route, ohne neuen Fetch und ohne neuen Zustand aus", async () => {
+    const orderId = await v8104SelectOrder({});
+    const stateKeysBefore = Object.keys(ui.getState()).sort().join(",");
+    fetchCalls.length = 0;
+    // Ein reiner Auftragswechsel hin und zurück nutzt ausschließlich die
+    // bestehende Overview-Route; die neue Einordnung lädt nichts nach.
+    await ui.selectOrder(ui.CANONICAL_PILOT_ORDER_ID);
+    await ui.selectOrder(orderId);
+    assert.strictEqual(fetchCalls.filter((call) => call.method !== "GET").length, 0, "kein schreibender Request durch die reine Anzeige");
+    fetchCalls.forEach((call) => {
+      assert.match(call.url, /\/api\/pilot-work-order\/(orders|status)/, `keine neue Ressource: ${call.url}`);
+    });
+    assert.strictEqual(Object.keys(ui.getState()).sort().join(","), stateKeysBefore, "es entsteht kein neuer Zustandsschlüssel");
+    assert.ok(!stateKeysBefore.includes("conflictTechnical"), "die technische Konfliktebene braucht keinen eigenen Zustand");
   });
 
   console.log(`pilot-work-order-command-center-ui.test.js: ${passed} Prüfpunkte erfolgreich`);

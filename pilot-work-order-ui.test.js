@@ -774,4 +774,123 @@ check("V8.10.3-Bestandsschutz: Exit-Code, Signal, Diagnosehinweis und die besteh
   assert.match(js, /"<br>Modell: " \+ escapeHtml\(run\.modelLabel\)/);
 });
 
+// ---------------------------------------------------------------------------
+// V8.10.4 ("technische Auftragsmetadaten aus der normalen Bedienebene
+// nehmen"): reine Sichtbarkeits-/Einordnungsentscheidung. Auftrags-ID und
+// Revision verschwinden aus Auftragsliste und Faktentabelle und bleiben in
+// der bereits vorhandenen, aufklappbaren technischen Ebene vollständig
+// erreichbar. Die folgenden Quelltextprüfungen halten fest, dass dabei
+// keine Route, kein Fetch, kein Zustand und keine Sicherheitsregel
+// hinzugekommen ist.
+// ---------------------------------------------------------------------------
+
+function orderListRowSource() {
+  const match = js.match(/function renderOrderListRow\(order\)\s*\{[\s\S]*?\n {2}\}/);
+  assert.ok(match, "renderOrderListRow muss auffindbar sein");
+  return match[0];
+}
+
+function conflictBannerSource() {
+  const match = js.match(/function renderConflictBanner\(conflict\)\s*\{[\s\S]*?\n {2}\}/);
+  assert.ok(match, "renderConflictBanner muss auffindbar sein");
+  return match[0];
+}
+
+check("V8.10.4-A/B/C: die Auftragszeile rendert weder „Rev.“ noch die technische ID als sichtbaren Text, behält aber data-order-id unverändert", () => {
+  const source = orderListRowSource();
+  assert.doesNotMatch(source, /"<span>Rev\. "/, "„Rev. n“ darf nicht mehr gerendert werden");
+  assert.doesNotMatch(source, /pilot-order-row-id/, "die sichtbare ID-Zeile darf nicht mehr gerendert werden");
+  assert.match(source, /data-order-id="' \+\n\s*escapeHtml\(order\.id\)/, "die funktionale ID-Bindung bleibt unverändert");
+  assert.match(source, /escapeHtml\(order\.statusLabel\)/, "der Status bleibt sichtbar");
+  assert.match(source, /escapeHtml\(formatTimestamp\(order\.updatedAt\)\)/, "der Zeitstempel bleibt sichtbar");
+});
+
+check("V8.10.4-E: die normale Faktentabelle führt weder „Pilotauftrag-ID“ noch „Revision“ und behält alle fachlichen Zeilen", () => {
+  const match = js.match(/function renderFacts\(overview\)\s*\{[\s\S]*?\n {2}\}/);
+  assert.ok(match, "renderFacts muss auffindbar sein");
+  const source = match[0];
+  assert.doesNotMatch(source, /\["Pilotauftrag-ID"/, "die ID-Zeile ist aus der normalen Ebene entfernt");
+  assert.doesNotMatch(source, /\["Revision"/, "die Revisionszeile ist aus der normalen Ebene entfernt");
+  ["Auftraggeber", "Status", "Beteiligte Agenten", "Fortschritt", "Offene Entscheidung"].forEach((label) => {
+    assert.ok(source.includes(`["${label}"`), `die fachliche Zeile „${label}“ muss unverändert erhalten bleiben`);
+  });
+});
+
+check("V8.10.4-F/G: ID und Revision stehen unverändert in der bereits vorhandenen technischen Ebene (renderMeta), ohne neue Karte und ohne neue Ableitung", () => {
+  const match = js.match(/function renderMeta\(overview\)\s*\{[\s\S]*?\n {2}\}/);
+  assert.ok(match, "renderMeta muss auffindbar sein");
+  const source = match[0];
+  assert.match(source, /Pilotauftrag-ID: " \+ escapeHtml\(overview\.order\.id\)/);
+  assert.match(source, /Revision: " \+ escapeHtml\(String\(overview\.order\.revision\)\)/);
+  assert.match(source, /Angelegt: /, "die bestehenden Zeitangaben bleiben unverändert erhalten");
+  assert.match(source, /Zuletzt aktualisiert: /);
+  // renderMeta wird ausschließlich im bereits bestehenden, standardmäßig
+  // eingeklappten Nachschaubereich ausgegeben (index.html).
+  assert.match(js, /renderAuditTrail\(state\.overview\) \+\n\s*renderMeta\(state\.overview\)/);
+  assert.match(html, /<details class="pilot-work-order-details">/);
+});
+
+check("V8.10.4-H: die persönliche Jamal-Freigabefläche zeigt die Auftrags-ID unverändert als Verwechslungsschutz", () => {
+  assert.match(js, /<dt>Pilotauftrag<\/dt><dd>" \+ escapeHtml\(confirmation\.orderTitle\) \+ " \(" \+ escapeHtml\(confirmation\.pilotOrderId\) \+ "\)/);
+  assert.match(js, /Jamal-Best\\u00e4tigung erforderlich/);
+});
+
+check("V8.10.4-I/J/K/L/M: die Konfliktfläche erklärt zuerst verständlich und führt die Revisionszahlen in einem geschlossenen „Technische Details“-Bereich", () => {
+  const source = conflictBannerSource();
+  assert.doesNotMatch(source, /Revisionskonflikt/, "der technische Begriff steht nicht mehr auf der normalen Ebene");
+  assert.match(js, /var CONFLICT_HEADLINE_TEXT = "Der Auftrag wurde zwischenzeitlich ge\\u00e4ndert\.";/);
+  assert.match(js, /var CONFLICT_GUIDANCE_TEXT =\n\s*"Der aktuelle Stand wurde nicht \\u00fcberschrieben\. Bitte laden Sie den Auftrag neu und pr\\u00fcfen Sie die n\\u00e4chste Aktion\.";/);
+  assert.match(source, /<button type="button" data-action="reload-after-conflict">Aktuellen Stand neu laden<\/button>/, "der bestehende Button bleibt unverändert");
+  assert.match(source, /<summary>Technische Details<\/summary>/);
+  assert.doesNotMatch(source, /<details[^>]*open/, "der technische Bereich ist standardmäßig geschlossen");
+  ["Erwartete Revision: ", "Aktuelle Revision: "].forEach((label) => {
+    const index = source.indexOf(label);
+    assert.ok(index >= 0, `${label} muss erhalten bleiben`);
+    assert.ok(index < source.indexOf("<summary>Technische Details</summary>") || source.includes("technicalRows"), "die Zahlen werden über die technische Zeilenliste ausgegeben");
+  });
+});
+
+check("V8.10.4-N: die Pilotauftrag-ID im Konflikt stammt ausschließlich aus dem bereits vorhandenen Clientzustand (keine neue Datenquelle)", () => {
+  const source = conflictBannerSource();
+  assert.match(source, /conflict\.pilotOrderId/, "die ID kommt aus dem bestehenden state.conflict");
+  // Alle drei bestehenden 409-Zweige setzen pilotOrderId bereits heute.
+  assert.strictEqual((js.match(/pilotOrderId: details\.pilotOrderId \|\| pilotOrderId,/g) || []).length, 3);
+});
+
+check("V8.10.4-O/P: expectedRevision und das bestehende 409-/CAS-Verhalten sind unverändert", () => {
+  assert.match(js, /expectedRevision: /, "Aktionen senden weiterhin expectedRevision mit");
+  assert.strictEqual((js.match(/response\.statusCode === 409/g) || []).length, 3, "die drei bestehenden 409-Zweige bleiben unverändert bestehen");
+  assert.doesNotMatch(js, /assertExpectedRevision/, "die UI baut weiterhin keine eigene CAS-Prüfung nach");
+});
+
+check("V8.10.4-Q: der auftragsbezogene Audit-Trail nennt die Revision unverändert", () => {
+  assert.match(js, /"Aktueller Status: " \+ overview\.statusLabel \+ " \(Revision " \+ overview\.order\.revision \+ "\)\."/);
+});
+
+check("V8.10.4-R/S/T: keine neue Route, kein neuer Fetch, kein neuer Zustand", () => {
+  // Die Sichtbarkeitsentscheidung berührt keinen der drei Renderpfade mit
+  // Netzwerk- oder Zustandsbezug.
+  [orderListRowSource(), conflictBannerSource()].forEach((source) => {
+    assert.doesNotMatch(source, /fetch\(/, "eine Renderfunktion darf niemals selbst laden");
+    assert.doesNotMatch(source, /state\.[A-Za-z]+ =/, "eine Renderfunktion darf keinen Zustand setzen");
+  });
+  // renderConflictBanner liest ausschließlich das übergebene conflict-Objekt.
+  assert.doesNotMatch(conflictBannerSource(), /state\./, "die Konfliktfläche greift auf keinen zusätzlichen Zustand zu");
+  assert.doesNotMatch(js, /\/api\/pilot-work-order\/orders\/[^"']*\/(revision|metadata)/, "keine neue Ressource");
+  assert.strictEqual((js.match(/state\.conflict = \{/g) || []).length, 3, "es entsteht kein vierter/neuer Konfliktzustand");
+});
+
+check("V8.10.4-U: das V8.10.3-Sanitizing bleibt vollständig unverändert bestehen", () => {
+  assert.strictEqual((js.match(/function sanitizeErrorMessageForDisplay\(/g) || []).length, 1);
+  assert.match(js, /sanitizeErrorMessageForDisplay\(run\.errorMessage\)/);
+  assert.match(js, /sanitizeErrorMessageForDisplay\(run\.handoffErrorMessage\)/);
+  assert.match(js, /normalizeFailureReasonCode\(diag\.reasonCode, null\)/);
+  assert.match(js, /normalizeFailureReasonCode\(step\.failureReasonCode, null\)/);
+});
+
+check("V8.10.4-CSS: die Sichtbarkeitsentscheidung kommt ohne neue Stilregel aus", () => {
+  assert.match(css, /\.pilot-work-order-details summary \{/, "die bestehende Detailstruktur wird unverändert wiederverwendet");
+  assert.doesNotMatch(css, /pilot-work-order-conflict-technical/, "für V8.10.4 wurde keine neue CSS-Regel angelegt");
+});
+
 console.log(`pilot-work-order-ui.test.js: ${passed} Prüfpunkte erfolgreich`);
