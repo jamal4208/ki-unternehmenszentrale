@@ -4307,8 +4307,10 @@
     });
   }
 
-  // Obere Arbeitsebene, zwischen renderChainStatusCard() und
-  // renderPrimaryAction(): Grund verstehen → bestehende Aktion sehen.
+  // Obere Arbeitsebene, unmittelbar vor renderPrimaryAction(): Grund
+  // verstehen → bestehende Aktion sehen. Diese Nachbarschaft ist
+  // verbindlich und bleibt seit V8.7 Stufe B unverändert; welcher Baustein
+  // davor steht, hat V8.11.0 geändert (vorher die Kettenstatuskarte).
   // Rendert nichts, wenn weder ein aktueller Grund noch ein blockierter/
   // zurückgegebener Status ohne Grund vorliegt (kein neuer Abschnitt bei
   // einem normalen Auftrag ohne Grund).
@@ -4449,17 +4451,32 @@
         output.innerHTML = "<p>" + escapeHtml(state.overviewError) + "</p>";
       } else if (state.overview) {
         var overview = state.overview;
+        // V8.11.0 ("Führungsreihenfolge"): dieselben Bausteine wie zuvor, nur
+        // in der Lesereihenfolge, in der Jamal sie tatsächlich braucht –
+        // zuerst das, was eine normale Weiterarbeit verhindert (Konflikt),
+        // dann die Handlungsgrundlage (Risiken/Grenzen, gespeicherter Grund),
+        // dann die Handlung selbst, erst danach der Bestand (Kettenlage,
+        // Faktentabelle). Kein Baustein entfällt, kein Baustein kommt hinzu,
+        // keine Renderfunktion wird zweimal aufgerufen.
+        //
+        // Risiken/Grenzen bleiben bewusst VOR der Primäraktion: Jamal soll
+        // die Grenzen eines Auftrags gelesen haben, bevor er handelt. Diese
+        // Reihenfolge ist eine bestehende, testgeprüfte Invariante und darf
+        // auch bei künftigen Umsortierungen nicht gedreht werden.
         var html =
           renderHead(overview) +
-          renderFacts(overview) +
-          renderRisks(overview) +
           renderConflictBanner(state.conflict) +
-          renderChainStatusCard(overview) +
+          renderRisks(overview) +
           renderDecisionReasonCard(overview) +
           renderPrimaryAction(overview);
+        // Die Fehlermeldung einer abgelehnten Aktion bleibt unmittelbar bei
+        // der Aktion, zu der sie gehört – sie wandert mit ihr nach vorn.
         if (state.actionError) {
           html += '<p class="pilot-work-order-action-error">' + escapeHtml(state.actionError) + "</p>";
         }
+        html +=
+          renderChainStatusCard(overview) +
+          renderFacts(overview);
         html += renderDisclaimer(overview);
         output.innerHTML = html;
       } else {

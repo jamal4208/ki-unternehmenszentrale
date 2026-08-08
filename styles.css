@@ -1137,6 +1137,13 @@ button {
   cursor: pointer;
 }
 
+/* V8.11.0 (P4): eine deaktivierte Schaltfläche darf keinen Klick-Cursor
+   zeigen. Ausschließlich das Cursor-Verhalten – keine Farbe, keine opacity,
+   kein Hover, keine sonstige Buttoneigenschaft. */
+button:disabled {
+  cursor: default;
+}
+
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,

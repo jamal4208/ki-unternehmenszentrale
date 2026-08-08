@@ -228,7 +228,18 @@ check("56. keine neue Primäraktion: renderPrimaryAction() bleibt unverändert, 
   assert.doesNotMatch(cardFnMatch[0], /data-action/);
   assert.doesNotMatch(historyFnMatch[0], /<button/);
   assert.doesNotMatch(historyFnMatch[0], /data-action/);
-  assert.match(js, /renderChainStatusCard\(overview\) \+\s*\n\s*renderDecisionReasonCard\(overview\) \+\s*\n\s*renderPrimaryAction\(overview\);/);
+  // Die verbindliche Nachbarschaft der Grundkarte ist "unmittelbar vor der
+  // bestehenden Primäraktion" (Grund verstehen → Aktion sehen). V8.11.0 hat
+  // ausschließlich geändert, WELCHER Baustein davor steht: bis V8.10.x die
+  // Kettenstatuskarte, seither renderRisks(). Die Nachbarschaft selbst wird
+  // hier unverändert scharf geprüft, zusätzlich die neue Position der
+  // Kettenstatuskarte NACH der Primäraktion.
+  assert.match(js, /renderRisks\(overview\) \+\s*\n\s*renderDecisionReasonCard\(overview\) \+\s*\n\s*renderPrimaryAction\(overview\);/);
+  assert.match(
+    js,
+    /renderPrimaryAction\(overview\);[\s\S]*?html \+=\s*\n\s*renderChainStatusCard\(overview\) \+\s*\n\s*renderFacts\(overview\);/,
+    "die Kettenstatuskarte steht seit V8.11.0 nach der Primäraktion und vor der Faktentabelle",
+  );
 });
 
 check("57. die neuen deutschen Literale folgen der bestehenden \\uXXXX-Konvention", () => {
@@ -891,6 +902,186 @@ check("V8.10.4-U: das V8.10.3-Sanitizing bleibt vollständig unverändert besteh
 check("V8.10.4-CSS: die Sichtbarkeitsentscheidung kommt ohne neue Stilregel aus", () => {
   assert.match(css, /\.pilot-work-order-details summary \{/, "die bestehende Detailstruktur wird unverändert wiederverwendet");
   assert.doesNotMatch(css, /pilot-work-order-conflict-technical/, "für V8.10.4 wurde keine neue CSS-Regel angelegt");
+});
+
+// ---------------------------------------------------------------------------
+// V8.11.0 ("Führungsreihenfolge in der Pilotauftragsoberfläche"): eine reine
+// Umsortierung der bereits vorhandenen Ebene-1-Bausteine plus die kleine
+// disabled-Cursor-Korrektur (P4). Die folgenden Prüfungen halten fest, dass
+// dabei kein Baustein verloren geht, keiner doppelt gerendert wird und weder
+// Fachlogik noch Datenquelle, Zustand, Listener oder Route hinzugekommen sind.
+// ---------------------------------------------------------------------------
+
+// Die verbindliche Führungsreihenfolge der Ebene 1, in genau dieser Folge.
+const V8110_LEVEL1_ORDER = [
+  "renderHead",
+  "renderConflictBanner",
+  "renderRisks",
+  "renderDecisionReasonCard",
+  "renderPrimaryAction",
+  "renderChainStatusCard",
+  "renderFacts",
+  "renderDisclaimer",
+];
+
+function selectedOrderOutputSource() {
+  const match = js.match(/function renderSelectedOrderOutput\(\)\s*\{[\s\S]*?\n {2}\}/);
+  assert.ok(match, "renderSelectedOrderOutput muss auffindbar sein");
+  assert.ok(match[0].includes("diagnostics.innerHTML"), "die vollständige Funktion muss erfasst sein");
+  return match[0];
+}
+
+// Ausschließlich der Zusammenbau des oberen Ausgabecontainers
+// (#pilot-work-order-output) – der untere Nachschaubereich hat seine eigene,
+// unveränderte Renderkette und darf hier nicht mitgezählt werden.
+function level1AssemblySource() {
+  const source = selectedOrderOutputSource();
+  const start = source.indexOf("var html =");
+  const end = source.indexOf("output.innerHTML = html;");
+  assert.ok(start >= 0 && end > start, "der Ebene-1-Zusammenbau muss auffindbar sein");
+  return source.slice(start, end);
+}
+
+// Kommentarzeilen werden entfernt, damit ausschließlich echte Aufrufe gezählt
+// werden und eine erklärende Prosa die Reihenfolgeprüfung nicht verfälscht.
+function level1RendererCallOrder() {
+  const withoutComments = level1AssemblySource()
+    .split("\n")
+    .filter((line) => !/^\s*\/\//.test(line))
+    .join("\n");
+  return (withoutComments.match(/render[A-Za-z]+\(/g) || []).map((entry) => entry.slice(0, -1));
+}
+
+check("V8.11.0-A: renderSelectedOrderOutput() enthält weiterhin alle bisherigen Ebene-1-Bausteine", () => {
+  const calls = level1RendererCallOrder();
+  V8110_LEVEL1_ORDER.forEach((renderer) => {
+    assert.ok(calls.includes(renderer), `der bestehende Baustein ${renderer}() muss weiterhin auf Ebene 1 gerendert werden`);
+  });
+  assert.strictEqual(calls.length, V8110_LEVEL1_ORDER.length, "es kommt kein zusätzlicher Baustein hinzu");
+});
+
+check("V8.11.0-B: kein bestehender Renderer wurde entfernt (alle Definitionen sind unverändert vorhanden)", () => {
+  V8110_LEVEL1_ORDER.forEach((renderer) => {
+    assert.ok(js.includes(`function ${renderer}(`), `${renderer}() muss unverändert definiert sein`);
+  });
+});
+
+check("V8.11.0-C: kein Renderer wird auf Ebene 1 doppelt aufgerufen", () => {
+  const calls = level1RendererCallOrder();
+  const seen = new Set();
+  calls.forEach((renderer) => {
+    assert.ok(!seen.has(renderer), `${renderer}() darf im selben Ausgabecontainer nur einmal aufgerufen werden`);
+    seen.add(renderer);
+  });
+});
+
+check("V8.11.0-D/J: die Führungsreihenfolge steht exakt fest – Konflikt vor Handlung, Primärhandlung vor der Faktentabelle", () => {
+  assert.deepStrictEqual(level1RendererCallOrder(), V8110_LEVEL1_ORDER, "die Ebene-1-Reihenfolge muss exakt der Führungsreihenfolge entsprechen");
+  const calls = level1RendererCallOrder();
+  // J. die Konfliktfläche behält die höchste Handlungspriorität: sie steht
+  // vor jeder Handlungs- und jeder Bestandsfläche.
+  assert.ok(calls.indexOf("renderConflictBanner") < calls.indexOf("renderPrimaryAction"), "der Konflikt steht vor der Primäraktion");
+  assert.ok(calls.indexOf("renderConflictBanner") < calls.indexOf("renderFacts"), "der Konflikt steht vor der Faktentabelle");
+  assert.ok(calls.indexOf("renderConflictBanner") < calls.indexOf("renderChainStatusCard"), "der Konflikt steht vor der Kettenstatuskarte");
+  // D. die Primärhandlung steht vor der Bestandsinformation.
+  assert.ok(calls.indexOf("renderPrimaryAction") < calls.indexOf("renderFacts"), "die Primärhandlung steht vor der Faktentabelle");
+  assert.ok(calls.indexOf("renderPrimaryAction") < calls.indexOf("renderChainStatusCard"), "die Auftragshandlung steht vor der Kettenlage");
+  // Bestehende V8.7-Nachbarschaft: Grund verstehen → Aktion sehen.
+  assert.strictEqual(calls.indexOf("renderPrimaryAction") - calls.indexOf("renderDecisionReasonCard"), 1, "die Grundkarte bleibt unmittelbar vor der Primäraktion");
+  // Bestehende Invariante: Grenzen lesen, bevor gehandelt wird.
+  assert.ok(calls.indexOf("renderRisks") < calls.indexOf("renderPrimaryAction"), "Risiken/Grenzen bleiben vor der Primäraktion");
+  // Der Disclaimer bleibt der Abschluss der Ebene 1.
+  assert.strictEqual(calls[calls.length - 1], "renderDisclaimer", "der Hinweis bleibt zuletzt");
+});
+
+check("V8.11.0: die Aktionsfehlermeldung bleibt unmittelbar bei der Primäraktion, mit unverändertem Wortlaut und unveränderter Bedingung", () => {
+  const source = level1AssemblySource();
+  assert.match(
+    source,
+    /renderPrimaryAction\(overview\);\s*(?:\n\s*\/\/[^\n]*)*\s*\n\s*if \(state\.actionError\) \{\s*\n\s*html \+= '<p class="pilot-work-order-action-error">' \+ escapeHtml\(state\.actionError\) \+ "<\/p>";/,
+    "die Fehlermeldung folgt unverändert direkt auf die Primäraktion",
+  );
+});
+
+check("V8.11.0-M/N/O/P/Q: die Umsortierung bringt keine neue Datenquelle, keinen neuen Fetch, keinen neuen Zustand, keinen neuen Listener und keine neue Route", () => {
+  const source = level1AssemblySource();
+  assert.doesNotMatch(source, /fetch\(|fetchJson\(|postAction\(/, "der Zusammenbau lädt nichts nach");
+  assert.doesNotMatch(source, /state\.[A-Za-z]+ =[^=]/, "der Zusammenbau setzt keinen Zustand");
+  assert.doesNotMatch(source, /addEventListener/, "der Zusammenbau registriert keinen Listener");
+  assert.doesNotMatch(source, /\/api\//, "der Zusammenbau kennt keine Route");
+  // Die Ebene 1 liest ausschließlich die bereits vorhandenen Quellen.
+  const stateReads = [...source.matchAll(/state\.([A-Za-z]+)/g)].map((entry) => entry[1]);
+  stateReads.forEach((key) => {
+    assert.ok(["overview", "conflict", "actionError"].includes(key), `state.${key} ist keine der bestehenden Ebene-1-Quellen`);
+  });
+});
+
+check("V8.11.0: die Karteninvariante der Kettenstatuskarte bleibt unverändert (genau zwei Aufrufstellen, je Container höchstens eine)", () => {
+  assert.strictEqual((js.match(/renderChainStatusCard\(overview\)/g) || []).length, 3, "eine Definition und genau zwei Aufrufstellen");
+  assert.strictEqual((level1RendererCallOrder().filter((entry) => entry === "renderChainStatusCard")).length, 1, "genau eine Kettenstatuskarte je Ausgabecontainer");
+});
+
+check("V8.11.0: der untere Nachschaubereich bleibt in Reihenfolge und Umfang unverändert", () => {
+  assert.match(
+    js,
+    /diagnostics\.innerHTML =\s*\n\s*renderTeam\(state\.overview\) \+\s*\n\s*renderOrderDetails\(state\.overview\) \+\s*\n\s*renderAgentExecutionSection\(state\.overview\) \+\s*\n\s*renderAgentChainSection\(state\.overview\) \+\s*\n\s*renderHandoffs\(state\.overview\) \+\s*\n\s*renderDecisionReasonHistory\(state\.overview\) \+\s*\n\s*renderAuditTrail\(state\.overview\) \+\s*\n\s*renderMeta\(state\.overview\);/,
+    "die Diagnostik-Renderkette bleibt unangetastet",
+  );
+});
+
+check("V8.11.0: kein sichtbarer Wortlaut wurde durch die Umsortierung verändert", () => {
+  // Die Textquellen der umsortierten Flächen bleiben exakt dieselben
+  // Konstanten/Felder wie vor V8.11.0.
+  assert.match(js, /var ORDER_NEXT_STEP_LABEL = "N\\u00e4chster Schritt im Auftrag";/);
+  assert.match(js, /var NEXT_STEP_LABEL_SAFE = "N\\u00e4chster Schritt in der Agentenkette";/);
+  assert.match(js, /var NEXT_STEP_LABEL_ALLOWED = "M\\u00f6glicher n\\u00e4chster Schritt in der Agentenkette";/);
+  assert.match(js, /var CONFLICT_HEADLINE_TEXT = "Der Auftrag wurde zwischenzeitlich ge\\u00e4ndert\.";/);
+  assert.match(js, /\["Offene Entscheidung", overview\.openDecision \? escapeHtml\(overview\.openDecision\) : "Keine"\]/);
+  assert.match(js, /<strong>Risiken\/Grenzen:<\/strong>/);
+  assert.match(js, /escapeHtml\(boundaries\.disclaimer \|\| ""\)/);
+});
+
+// ---------------------------------------------------------------------------
+// V8.11.0 / P4: deaktivierte Schaltflächen zeigen keinen Klick-Cursor mehr.
+// Ausschließlich das Cursor-Verhalten – jede weitere Buttoneigenschaft bleibt
+// unangetastet.
+// ---------------------------------------------------------------------------
+
+function disabledButtonRuleBody() {
+  const matches = css.match(/(?:^|\n)button:disabled\s*\{([^}]*)\}/);
+  assert.ok(matches, "eine Regel für button:disabled muss existieren");
+  return matches[1];
+}
+
+check("V8.11.0-R: eine deaktivierte Schaltfläche verwendet nicht mehr cursor:pointer", () => {
+  const body = disabledButtonRuleBody();
+  assert.match(body, /cursor:\s*default;/, "der deaktivierte Zustand setzt den Standardcursor");
+  assert.doesNotMatch(body, /cursor:\s*pointer/, "der deaktivierte Zustand darf keinen Klick-Cursor setzen");
+  // Genau eine Regel – kein zweiter, konkurrierender disabled-Cursor.
+  assert.strictEqual((css.match(/(?:^|\n)button:disabled\s*\{/g) || []).length, 1, "es gibt genau eine disabled-Regel für Buttons");
+  // Die Regel steht nach der Basisregel und ist spezifischer als jede
+  // bestehende Einzelklassen-Regel mit cursor:pointer.
+  assert.ok(css.indexOf("button:disabled") > css.indexOf("button {\n  cursor: pointer;\n}"), "die disabled-Regel steht nach der Basisregel");
+});
+
+check("V8.11.0-S: eine aktive Schaltfläche verwendet weiterhin cursor:pointer", () => {
+  assert.match(css, /(?:^|\n)button \{\n {2}cursor: pointer;\n\}/, "die bestehende Basisregel bleibt unverändert bestehen");
+});
+
+check("V8.11.0-T: P4 verändert keine weitere visuelle Buttoneigenschaft", () => {
+  const body = disabledButtonRuleBody();
+  const declarations = body
+    .split(";")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0 && !entry.startsWith("/*"));
+  assert.deepStrictEqual(declarations, ["cursor: default"], "die Regel enthält ausschließlich die Cursor-Korrektur");
+  ["color", "background", "opacity", "border", "box-shadow", "outline", "font", "padding", "text-decoration"].forEach((property) => {
+    assert.ok(!body.includes(`${property}:`), `P4 darf ${property} nicht verändern`);
+  });
+  // Der bestehende Fokusring und die bestehenden Button-Grundregeln bleiben
+  // unangetastet.
+  assert.match(css, /button:focus-visible,\ninput:focus-visible,\nselect:focus-visible,\ntextarea:focus-visible \{\n {2}outline: none;\n {2}box-shadow: var\(--focus\);\n\}/);
+  assert.match(css, /button,\ninput,\nselect,\ntextarea \{\n {2}font: inherit;\n\}/);
 });
 
 console.log(`pilot-work-order-ui.test.js: ${passed} Prüfpunkte erfolgreich`);

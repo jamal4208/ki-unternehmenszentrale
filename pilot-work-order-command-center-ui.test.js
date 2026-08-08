@@ -320,9 +320,13 @@ function makeFakeBackend() {
       // Feldbehandlung in pilot-work-order-ui.js).
       currentDecisionReason: order.currentDecisionReason,
       decisionReasonHistory: order.decisionReasonHistory,
-      openDecision: null,
-      risksAndLimits: [],
-      nextStep: "Weiter im Ablauf.",
+      // V8.11.0: diese drei fachlichen Felder liefert der echte Dienst je
+      // Auftrag unterschiedlich. Das Fake-Backend übernimmt sie jetzt aus dem
+      // Rohauftrag, sofern ein Test sie ausdrücklich setzt – die bisherigen
+      // Vorgabewerte bleiben für jeden bestehenden Testauftrag unverändert.
+      openDecision: order.openDecision === undefined ? null : order.openDecision,
+      risksAndLimits: order.risksAndLimits || [],
+      nextStep: order.nextStep || "Weiter im Ablauf.",
       progress: { rolesPassed: 0, rolesTotal: 3 },
       autonomyBoundaries: { disclaimer: "Testfixtur." },
       createdAt: order.createdAt,
@@ -3532,6 +3536,214 @@ async function run() {
     });
     assert.strictEqual(Object.keys(ui.getState()).sort().join(","), stateKeysBefore, "es entsteht kein neuer Zustandsschlüssel");
     assert.ok(!stateKeysBefore.includes("conflictTechnical"), "die technische Konfliktebene braucht keinen eigenen Zustand");
+  });
+
+  // -------------------------------------------------------------------
+  // V8.11.0 – "Führungsreihenfolge in der Pilotauftragsoberfläche".
+  //
+  // Dieselben Bausteine wie bisher, ausschließlich in einer anderen
+  // Lesereihenfolge. Geprüft wird am echten Renderweg (ui.selectOrder ->
+  // render() -> renderSelectedOrderOutput), dass die Reihenfolge in JEDEM
+  // Status trägt, dass nichts verloren geht und dass nichts doppelt
+  // erscheint.
+  // -------------------------------------------------------------------
+
+  const V8110_MARKERS = {
+    head: '<div class="pilot-work-order-head">',
+    conflict: '<div class="pilot-work-order-conflict"',
+    risks: "<strong>Risiken/Grenzen:</strong>",
+    decisionCard: '<div class="pilot-decision-reason-card">',
+    primaryAction: '<div class="pilot-work-order-primary-action">',
+    chainCard: '<section class="pilot-chain-status-card',
+    facts: '<dl class="pilot-work-order-facts">',
+    disclaimer: '<p class="pilot-work-order-disclaimer">',
+  };
+  const V8110_ORDER_LABEL = "N\u00e4chster Schritt im Auftrag";
+  const V8110_CHAIN_LABELS = ["N\u00e4chster Schritt in der Agentenkette", "M\u00f6glicher n\u00e4chster Schritt in der Agentenkette"];
+  const V8110_RISK_TEXT = "Nur lesende Pr\u00fcfung, keine externe Wirkung.";
+  const V8110_DECISION_TEXT = "Soll die Auswertung auf zwei Quellen begrenzt bleiben?";
+
+  let v8110OrderCounter = 0;
+  async function v8110SelectOrder(overrides) {
+    v8110OrderCounter += 1;
+    const orderId = `pilot-order-test-v8110-${v8110OrderCounter}`;
+    setRawOrder(
+      orderId,
+      Object.assign(
+        {
+          title: `V8.11.0-Testauftrag ${v8110OrderCounter}`,
+          revision: 4,
+          risksAndLimits: [V8110_RISK_TEXT],
+          openDecision: V8110_DECISION_TEXT,
+        },
+        overrides || {},
+      ),
+    );
+    await ui.selectOrder(orderId);
+    return orderId;
+  }
+
+  function v8110Position(html, key) {
+    return html.indexOf(V8110_MARKERS[key]);
+  }
+
+  function v8110CountOccurrences(haystack, needle) {
+    let count = 0;
+    let index = haystack.indexOf(needle);
+    while (index !== -1) {
+      count += 1;
+      index = haystack.indexOf(needle, index + needle.length);
+    }
+    return count;
+  }
+
+  const V8110_STATUSES = [
+    "DRAFT",
+    "READY_FOR_JAMAL_APPROVAL",
+    "APPROVED_FOR_EXECUTION",
+    "IN_EXECUTION",
+    "READY_FOR_REVIEW",
+    "COMPLETED",
+    "RETURNED",
+    "BLOCKED",
+  ];
+
+  await check(
+    "V8.11.0-D/F/G/K: in jedem der acht Auftragsstatus steht die Führungsreihenfolge Kopf → Risiken → Handlung → Kettenlage → Fakten → Hinweis, jeweils genau einmal",
+    async () => {
+      for (const status of V8110_STATUSES) {
+        // eslint-disable-next-line no-await-in-loop
+        await v8110SelectOrder({ status, statusLabel: STATUS_LABELS[status] });
+        const html = domElements["pilot-work-order-output"].innerHTML;
+        const at = (key) => v8110Position(html, key);
+
+        ["head", "risks", "primaryAction", "chainCard", "facts", "disclaimer"].forEach((key) => {
+          assert.ok(at(key) >= 0, `${status}: der Baustein ${key} muss weiterhin sichtbar sein`);
+        });
+
+        assert.strictEqual(at("head"), 0, `${status}: der Auftragskopf steht zuerst`);
+        assert.ok(at("risks") < at("primaryAction"), `${status}: die Grenzen des Auftrags stehen vor der Handlung`);
+        assert.ok(at("primaryAction") < at("chainCard"), `${status}: die Auftragshandlung steht vor der Kettenlage`);
+        assert.ok(at("chainCard") < at("facts"), `${status}: die Kettenlage steht vor der Bestandsinformation`);
+        assert.ok(at("facts") < at("disclaimer"), `${status}: der Hinweis bleibt am Ende`);
+
+        // F. "Nächster Schritt im Auftrag" bleibt genau einmal sichtbar.
+        assert.strictEqual(v8110CountOccurrences(html, V8110_ORDER_LABEL), 1, `${status}: die Auftragsüberschrift darf genau einmal erscheinen`);
+        // G. genau eine Kettenstatuskarte je Ausgabecontainer.
+        assert.strictEqual(v8110CountOccurrences(html, V8110_MARKERS.chainCard), 1, `${status}: genau eine Kettenstatuskarte`);
+        // Keine Fläche erscheint doppelt.
+        ["head", "primaryAction", "facts", "disclaimer", "risks"].forEach((key) => {
+          assert.strictEqual(v8110CountOccurrences(html, V8110_MARKERS[key]), 1, `${status}: ${key} darf genau einmal erscheinen`);
+        });
+
+        // K. Bei den vier Entscheidungs-/Ausnahmestatus muss die
+        // handlungsrelevante Begründung unmittelbar vor der Handlung stehen.
+        if (["BLOCKED", "RETURNED"].includes(status)) {
+          assert.ok(at("decisionCard") >= 0, `${status}: die vorhandene Begründungsfläche muss sichtbar sein`);
+          assert.ok(at("risks") < at("decisionCard"), `${status}: die Begründung folgt auf die Grenzen`);
+          assert.ok(at("decisionCard") < at("primaryAction"), `${status}: die Begründung steht unmittelbar vor der Handlung`);
+          assert.strictEqual(v8110CountOccurrences(html, V8110_MARKERS.decisionCard), 1, `${status}: genau eine Begründungsfläche`);
+        }
+      }
+    },
+  );
+
+  await check("V8.11.0-L: COMPLETED zeigt weiterhin keine künstliche Aktion, behält aber die vollständige Lesereihenfolge", async () => {
+    await v8110SelectOrder({ status: "COMPLETED", statusLabel: STATUS_LABELS.COMPLETED });
+    const html = domElements["pilot-work-order-output"].innerHTML;
+    const start = v8110Position(html, "primaryAction");
+    const end = v8110Position(html, "chainCard");
+    assert.ok(start >= 0 && end > start, "die Primäraktionsfläche muss abgrenzbar sein");
+    const primaryBlock = html.slice(start, end);
+    assert.doesNotMatch(primaryBlock, /<button/i, "ein abgeschlossener Auftrag bekommt durch die Umsortierung keinen Knopf");
+    assert.doesNotMatch(primaryBlock, /data-action/, "ein abgeschlossener Auftrag bekommt keine neue Handlung");
+    assert.ok(primaryBlock.includes(V8110_ORDER_LABEL), "die bestehende Auftragsüberschrift bleibt erhalten");
+    assert.ok(v8110Position(html, "facts") > start, "die Faktentabelle bleibt nachgeordnet und vollständig erreichbar");
+  });
+
+  await check("V8.11.0-E: eine tatsächlich offene Entscheidung bleibt genau einmal sichtbar (eine fachliche Wahrheit, keine zweite Datenquelle)", async () => {
+    await v8110SelectOrder({ status: "READY_FOR_JAMAL_APPROVAL", statusLabel: STATUS_LABELS.READY_FOR_JAMAL_APPROVAL });
+    const html = domElements["pilot-work-order-output"].innerHTML;
+    assert.strictEqual(ui.getState().overview.openDecision, V8110_DECISION_TEXT, "die Testfixtur muss eine echte offene Entscheidung liefern");
+    assert.strictEqual(v8110CountOccurrences(html, "<dt>Offene Entscheidung</dt>"), 1, "die Zeile „Offene Entscheidung“ existiert genau einmal");
+    assert.strictEqual(v8110CountOccurrences(html, V8110_DECISION_TEXT), 1, "der Entscheidungstext erscheint genau einmal");
+    assert.match(html, /<dt>Offene Entscheidung<\/dt><dd>Soll die Auswertung auf zwei Quellen begrenzt bleiben\?<\/dd>/, "der Wortlaut bleibt unverändert");
+  });
+
+  await check("V8.11.0-I: die Faktentabelle enthält weiterhin sämtliche bisherigen fachlichen Fakten, unverändert benannt", async () => {
+    await v8110SelectOrder({ status: "IN_EXECUTION", statusLabel: STATUS_LABELS.IN_EXECUTION });
+    const html = domElements["pilot-work-order-output"].innerHTML;
+    const factsHtml = /<dl class="pilot-work-order-facts">([\s\S]*?)<\/dl>/.exec(html);
+    assert.ok(factsHtml, "die Faktentabelle muss vollständig vorhanden sein");
+    ["Auftraggeber", "Status", "Beteiligte Agenten", "Fortschritt", "Offene Entscheidung"].forEach((label) => {
+      assert.ok(factsHtml[1].includes(`<dt>${label}</dt>`), `die fachliche Zeile „${label}“ muss erhalten bleiben`);
+    });
+    assert.strictEqual((factsHtml[1].match(/<dt>/g) || []).length, 5, "es kommt keine Zeile hinzu und keine fällt weg");
+    assert.ok(factsHtml[1].includes("Jamal"), "der Auftraggeber bleibt sichtbar");
+    assert.ok(factsHtml[1].includes(STATUS_LABELS.IN_EXECUTION), "der Statuslabel bleibt unverändert sichtbar");
+    assert.ok(factsHtml[1].includes("0 von 3 Pilotrollen mit angenommenem Ergebnis"), "der Fortschrittstext bleibt unverändert");
+    // Risiken bleiben vollständig erhalten, nur an anderer Stelle.
+    assert.ok(html.includes(V8110_RISK_TEXT), "die Risiken/Grenzen bleiben vollständig sichtbar");
+  });
+
+  await check("V8.11.0-H: Auftragsebene und Kettenebene bleiben getrennt – keine Überschrift wandert in die jeweils andere Fläche", async () => {
+    await v8110SelectOrder({ status: "IN_EXECUTION", statusLabel: STATUS_LABELS.IN_EXECUTION });
+    const html = domElements["pilot-work-order-output"].innerHTML;
+    const chainCard = /<section class="pilot-chain-status-card[\s\S]*?<\/section>/.exec(html);
+    assert.ok(chainCard, "die Kettenstatuskarte muss vorhanden sein");
+    assert.ok(!chainCard[0].includes(V8110_ORDER_LABEL), "die Auftragsüberschrift gehört nicht in die Kettenkarte");
+    const primaryBlock = html.slice(v8110Position(html, "primaryAction"), v8110Position(html, "chainCard"));
+    V8110_CHAIN_LABELS.forEach((label) => {
+      assert.ok(!primaryBlock.includes(label), "eine Kettenüberschrift gehört nicht in die Primäraktion");
+    });
+    const chainLabelCount = V8110_CHAIN_LABELS.reduce((total, label) => total + v8110CountOccurrences(html, label), 0);
+    assert.strictEqual(chainLabelCount, 1, "die Kettenebene benennt sich genau einmal");
+  });
+
+  await check("V8.11.0-J: bei einem echten Revisionskonflikt behält die Konfliktfläche die höchste Handlungspriorität", async () => {
+    const orderId = await v8110SelectOrder({ status: "DRAFT", statusLabel: STATUS_LABELS.DRAFT });
+    const rawOrder = backend.orders.get(orderId);
+    rawOrder.revision += 1;
+    fetchCalls.length = 0;
+    await ui.runOrderAction("mark-ready-for-approval", {});
+    const html = domElements["pilot-work-order-output"].innerHTML;
+    const at = (key) => v8110Position(html, key);
+    assert.ok(at("conflict") >= 0, "die Konfliktfläche muss sichtbar sein");
+    assert.ok(at("head") < at("conflict"), "der Auftragskopf bleibt davor");
+    assert.ok(at("conflict") < at("risks"), "der Konflikt steht vor jeder Bestandsinformation");
+    assert.ok(at("conflict") < at("primaryAction"), "der Konflikt steht vor der Primäraktion");
+    assert.ok(at("conflict") < at("chainCard"), "der Konflikt steht vor der Kettenlage");
+    assert.ok(at("conflict") < at("facts"), "der Konflikt steht vor der Faktentabelle");
+    assert.strictEqual(v8110CountOccurrences(html, V8110_MARKERS.conflict), 1, "genau eine Konfliktfläche");
+    // Der bestehende Wortlaut und der bestehende Knopf bleiben unverändert.
+    assert.match(html, /<p><strong>Der Auftrag wurde zwischenzeitlich ge\u00e4ndert\.<\/strong><\/p>/);
+    assert.match(html, /<button type="button" data-action="reload-after-conflict">Aktuellen Stand neu laden<\/button>/);
+    assert.strictEqual(fetchCalls.filter((call) => call.method === "POST").length, 1, "kein automatischer Retry durch die Umsortierung");
+    assert.strictEqual(rawOrder.status, "DRAFT", "der Serverzustand bleibt unangetastet");
+  });
+
+  await check("V8.11.0-M/N/O/P/Q: die neue Reihenfolge lädt nichts nach, erzeugt keinen neuen Zustand und keine neue Route", async () => {
+    const stateKeysBefore = Object.keys(ui.getState()).sort().join(",");
+    const orderId = await v8110SelectOrder({ status: "IN_EXECUTION", statusLabel: STATUS_LABELS.IN_EXECUTION });
+    fetchCalls.length = 0;
+    ui.render();
+    ui.render();
+    assert.deepStrictEqual(fetchCalls, [], "reines Neuzeichnen in der neuen Reihenfolge löst keinen Request aus");
+    await ui.selectOrder(ui.CANONICAL_PILOT_ORDER_ID);
+    await ui.selectOrder(orderId);
+    assert.strictEqual(fetchCalls.filter((call) => call.method !== "GET").length, 0, "kein schreibender Request durch die reine Anzeige");
+    fetchCalls.forEach((call) => {
+      assert.match(call.url, /\/api\/pilot-work-order\/(orders|status)/, `keine neue Ressource: ${call.url}`);
+    });
+    assert.strictEqual(Object.keys(ui.getState()).sort().join(","), stateKeysBefore, "es entsteht kein neuer Zustandsschlüssel");
+  });
+
+  await check("V8.11.0: zweimaliges Rendern erzeugt exakt dieselbe Ausgabe (die Umsortierung ist zustandsfrei)", async () => {
+    await v8110SelectOrder({ status: "BLOCKED", statusLabel: STATUS_LABELS.BLOCKED });
+    const first = domElements["pilot-work-order-output"].innerHTML;
+    ui.render();
+    const second = domElements["pilot-work-order-output"].innerHTML;
+    assert.strictEqual(first, second, "die Reihenfolge darf zwischen zwei Renderdurchläufen nicht schwanken");
   });
 
   console.log(`pilot-work-order-command-center-ui.test.js: ${passed} Prüfpunkte erfolgreich`);
