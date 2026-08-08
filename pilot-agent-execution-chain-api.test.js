@@ -605,6 +605,159 @@ async function run() {
     assert.strictEqual(jsonContainsSensitiveField(result.json), false);
   });
 
+  // -------------------------------------------------------------------
+  // V8.8 – "Kettenaktionen vor Beginn an IN_EXECUTION binden": das
+  // fachlich durchsetzende Gate liegt in
+  // pilot-agent-execution-chain-service.js#assertOrderAllowsChainAction.
+  // Hier wird ausschließlich geprüft, dass es über die ECHTE HTTP-Schicht
+  // (Routing, Auth, CSRF, Fehlerabbildung) unverändert als sauberer
+  // 409-Konflikt ankommt – ohne Änderung an Route oder Body.
+  // -------------------------------------------------------------------
+  async function prepareOpenChainInExecution(title) {
+    const createResult = await invoke({
+      method: "POST",
+      url: "/api/pilot-work-order/orders",
+      headers: authedJsonHeaders(ownerSession),
+      bodyObj: testOrderInput({ title }),
+    });
+    const gateOrderId = createResult.json.overview.order.id;
+    const inExecution = await driveOrderToInExecutionViaHttp(gateOrderId, ownerSession);
+    assert.strictEqual(inExecution.json.overview.status, "IN_EXECUTION");
+
+    const prepared = await invoke({
+      method: "POST",
+      url: `/api/pilot-work-order/orders/${gateOrderId}/prepare-agent-chain`,
+      headers: authedJsonHeaders(ownerSession),
+      bodyObj: { selectedFiles: SINGLE_CHAIN_FILE_SELECTION.slice() },
+    });
+    assert.strictEqual(prepared.statusCode, 200, "der IN_EXECUTION-Happy-Path muss unverändert funktionieren");
+    const gateChainId = prepared.json.chain.id;
+
+    const approval = await invoke({
+      method: "POST",
+      url: `/api/pilot-work-order/orders/${gateOrderId}/request-chain-step-approval`,
+      headers: authedJsonHeaders(ownerSession),
+      bodyObj: { chainId: gateChainId, chainStep: 1 },
+    });
+    assert.strictEqual(approval.statusCode, 200, "der IN_EXECUTION-Happy-Path muss unverändert funktionieren");
+    assert.ok(typeof approval.json.approvalToken === "string" && approval.json.approvalToken.length > 0);
+    return { gateOrderId, gateChainId, approvalToken: approval.json.approvalToken };
+  }
+
+  async function driveInExecutionOrderToViaHttp(gateOrderId, targetStatus) {
+    if (targetStatus === "RETURNED") {
+      return invoke({
+        method: "POST",
+        url: `/api/pilot-work-order/orders/${gateOrderId}/return-order`,
+        headers: authedJsonHeaders(ownerSession),
+        bodyObj: { note: "Testbedingte Rueckgabe fuer das Auftragsstatus-Gate." },
+      });
+    }
+    if (targetStatus === "BLOCKED") {
+      return invoke({
+        method: "POST",
+        url: `/api/pilot-work-order/orders/${gateOrderId}/block-order`,
+        headers: authedJsonHeaders(ownerSession),
+        bodyObj: { reason: "Testbedingte Blockierung fuer das Auftragsstatus-Gate." },
+      });
+    }
+    // COMPLETED ist ausschließlich über die reguläre Auftragslogik
+    // erreichbar: angenommene Dokumentations-Übergabe, Vorlage zur
+    // Abschlussprüfung, ausdrückliche Abnahme.
+    await invoke({
+      method: "POST",
+      url: `/api/pilot-work-order/orders/${gateOrderId}/submit-handoff`,
+      headers: authedJsonHeaders(ownerSession),
+      bodyObj: {
+        fromPilotRole: "RECHERCHE_ANALYSE",
+        toPilotRole: "DOKUMENTATION",
+        shortFinding: "Dokumentationsergebnis liegt vollstaendig vor.",
+        resultOrRecommendation: "Das dokumentierte Ergebnis passt zum Auftrag und kann vorgelegt werden.",
+        basisUsed: "Auftragstext und Qualitaetskriterien des Pilotauftrags.",
+        riskOrLimit: "Keine bekannten Blocker fuer diesen Testauftrag.",
+        nextStep: "Zur Abschlusspruefung vorlegen.",
+      },
+    });
+    await invoke({
+      method: "POST",
+      url: `/api/pilot-work-order/orders/${gateOrderId}/submit-for-review`,
+      headers: authedJsonHeaders(ownerSession),
+      bodyObj: {},
+    });
+    return invoke({
+      method: "POST",
+      url: `/api/pilot-work-order/orders/${gateOrderId}/approve-completion`,
+      headers: authedJsonHeaders(ownerSession),
+      bodyObj: { confirmed: true },
+    });
+  }
+
+  for (const gateStatus of ["COMPLETED", "RETURNED", "BLOCKED"]) {
+    await check(
+      `V8.8-API/${gateStatus}: prepare-agent-chain, request-chain-step-approval und start-chain-step werden über die echte HTTP-Schicht mit 409 abgelehnt – ohne Token, ohne Prompt, ohne Ergebnistext`,
+      async () => {
+        const { gateOrderId, gateChainId, approvalToken } = await prepareOpenChainInExecution(`Gate ${gateStatus} über HTTP`);
+        const reachedTarget = await driveInExecutionOrderToViaHttp(gateOrderId, gateStatus);
+        assert.strictEqual(reachedTarget.statusCode, 200);
+        assert.strictEqual(reachedTarget.json.overview.status, gateStatus, `Testfixtur: der Auftrag muss tatsächlich ${gateStatus} sein`);
+
+        const attempts = [
+          { action: "prepare-agent-chain", bodyObj: { selectedFiles: SINGLE_CHAIN_FILE_SELECTION.slice() } },
+          { action: "request-chain-step-approval", bodyObj: { chainId: gateChainId, chainStep: 1 } },
+          { action: "start-chain-step", bodyObj: { chainId: gateChainId, chainStep: 1, approvalToken } },
+        ];
+        for (const attempt of attempts) {
+          const result = await invoke({
+            method: "POST",
+            url: `/api/pilot-work-order/orders/${gateOrderId}/${attempt.action}`,
+            headers: authedJsonHeaders(ownerSession),
+            bodyObj: attempt.bodyObj,
+          });
+          assert.strictEqual(result.statusCode, 409, `${gateStatus}/${attempt.action} muss mit 409 abgelehnt werden`);
+          assert.notStrictEqual(result.json.ok, true, `${gateStatus}/${attempt.action}: ok darf niemals true sein`);
+          assert.strictEqual(result.json.currentStatus, gateStatus, `${gateStatus}/${attempt.action}: currentStatus muss korrekt gemeldet werden`);
+          assert.strictEqual(result.json.pilotOrderId, gateOrderId);
+          assert.strictEqual(result.json.reasonCode, "ORDER_NOT_IN_EXECUTION");
+          assert.match(result.json.message, /nur möglich, während der Pilotauftrag in Ausführung ist/);
+          assert.strictEqual(result.json.approvalToken, undefined, `${gateStatus}/${attempt.action}: eine Ablehnung darf niemals einen Token liefern`);
+          assert.strictEqual(result.json.chain, undefined, `${gateStatus}/${attempt.action}: eine Ablehnung darf keinen Kettenzustand mitliefern`);
+          assert.strictEqual(jsonContainsSensitiveField(result.json), false, `${gateStatus}/${attempt.action}: keine sensiblen Felder`);
+          assert.ok(!result.body.includes("Testbefund Schritt 1"), "kein Ergebnistext in der Ablehnung");
+          assert.ok(!result.body.includes("technische ID:"), "kein Prompttext in der Ablehnung");
+        }
+
+        // Zustandslos gescheitert: die Kette steht unverändert bei genau
+        // einer Kette, Schritt 1 weiterhin PENDING/REQUESTED, kein Lauf.
+        const overviewResult = await invoke({ method: "GET", url: `/api/pilot-work-order/orders/${gateOrderId}`, headers: authedJsonHeaders(ownerSession) });
+        assert.strictEqual(overviewResult.json.overview.agentChains.length, 1, "kein abgewiesener Versuch darf eine zweite Kette angelegt haben");
+        const gateChain = overviewResult.json.overview.agentChains[0];
+        assert.strictEqual(gateChain.chainStatus, "WAITING_FOR_RESEARCH_APPROVAL");
+        assert.strictEqual(gateChain.steps[0].stepStatus, "PENDING");
+        assert.strictEqual(gateChain.steps[0].approvalStatus, "REQUESTED");
+        assert.strictEqual(gateChain.steps[0].startedAt, null);
+        assert.strictEqual(overviewResult.json.overview.agentExecutionRuns.length, 0, "kein abgewiesener Versuch darf einen Agentenlauf erzeugt haben");
+      },
+    );
+  }
+
+  await check(
+    "V8.8-API: der IN_EXECUTION-Happy-Path der drei Kettenaktionen bleibt über HTTP unverändert grün (Vorbereiten, Freigabe anfordern, Stufe starten)",
+    async () => {
+      const { gateOrderId, gateChainId, approvalToken } = await prepareOpenChainInExecution("Gate IN_EXECUTION Happy Path über HTTP");
+      await withFakeCodexHttp(async () => {
+        const started = await invoke({
+          method: "POST",
+          url: `/api/pilot-work-order/orders/${gateOrderId}/start-chain-step`,
+          headers: authedJsonHeaders(ownerSession),
+          bodyObj: { chainId: gateChainId, chainStep: 1, approvalToken },
+        });
+        assert.strictEqual(started.statusCode, 200);
+        assert.strictEqual(started.json.chain.chainStatus, "WAITING_FOR_DOCUMENTATION_APPROVAL");
+        assert.strictEqual(started.json.chain.steps.find((entry) => entry.stepNumber === 1).stepStatus, "SUCCEEDED");
+      });
+    },
+  );
+
   console.log(`pilot-agent-execution-chain-api.test.js: ${passed} Prüfpunkte erfolgreich`);
 }
 

@@ -2903,6 +2903,139 @@ async function run() {
     timerHarness.clearAll();
   });
 
+  // -------------------------------------------------------------------------
+  // V8.8 – "Kettenaktionen vor Beginn an IN_EXECUTION binden", Bediengrenze.
+  //
+  // Die Sicherheit liegt ausschließlich im Kettenservice (siehe
+  // pilot-agent-execution-chain-service.js#assertOrderAllowsChainAction und
+  // pilot-agent-execution-chain.test.js). Die Oberfläche darf lediglich keine
+  // Aktion mehr anbieten, die der Server verlässlich mit 409 ablehnen würde.
+  //
+  // Der Ausgangszustand wird bewusst über den ECHTEN Bedienweg hergestellt
+  // (Kette vorbereiten, Freigabe für Schritt 1 anfordern) – erst dadurch ist
+  // die Start-Schaltfläche überhaupt bedienbar und der Test aussagekräftig.
+  // Anschließend wird ausschließlich der Auftragsstatus der Fixtur gewechselt;
+  // nichts anderes ändert sich.
+  // -------------------------------------------------------------------------
+  const pilotWorkOrderService = require("./pilot-work-order-service");
+  const V88_STATUSES_WITHOUT_CHAIN_ACTIONS = [
+    "DRAFT",
+    "READY_FOR_JAMAL_APPROVAL",
+    "APPROVED_FOR_EXECUTION",
+    "READY_FOR_REVIEW",
+    "COMPLETED",
+    "RETURNED",
+    "BLOCKED",
+  ];
+
+  let v88OrderId;
+  let v88ChainId;
+
+  function v88StepButton(html, action, stepNumber) {
+    const match = html.match(new RegExp(`data-action="${action}" data-chain-id="${v88ChainId}" data-chain-step="${stepNumber}"[^>]*`));
+    assert.ok(match, `die Schaltfläche ${action} für Schritt ${stepNumber} muss weiterhin gerendert werden`);
+    return match[0];
+  }
+
+  async function v88SetOrderStatus(status) {
+    const order = backend.orders.get(v88OrderId);
+    order.status = status;
+    order.statusLabel = pilotWorkOrderService.PILOT_STATUS_LABELS_DE[status];
+    order.revision += 1;
+    fetchCalls.length = 0;
+    await ui.reloadSelectedOrder();
+    ui.render();
+    assert.strictEqual(ui.getState().overview.status, status, `Testfixtur: der Auftrag muss tatsächlich ${status} sein`);
+  }
+
+  await check(
+    "V8.8-UI-Setup: ein IN_EXECUTION-Auftrag mit vorbereiteter Kette und tatsächlich angeforderter Freigabe – beide Kettenaktionen für Schritt 1 sind bedienbar",
+    async () => {
+      assert.deepStrictEqual(
+        pilotWorkOrderService.PILOT_WORK_ORDER_STATUS_VALUES.slice().sort(),
+        V88_STATUSES_WITHOUT_CHAIN_ACTIONS.concat(["IN_EXECUTION"]).sort(),
+        "die UI-Matrix muss exakt der echten Auftragsstatusmaschine entsprechen",
+      );
+
+      v88OrderId = "pilot-order-v88-auftragsstatus-gate";
+      backend.createOrder(v88OrderId, {
+        title: "V8.8 Auftragsstatus-Gate (Bediengrenze)",
+        status: "IN_EXECUTION",
+        statusLabel: "In Ausführung",
+        revision: 0,
+        agentChains: [],
+        agentExecutionRuns: [],
+      });
+      await ui.selectOrder(v88OrderId);
+      await ui.prepareAgentChain();
+      v88ChainId = newestChainId();
+      assert.ok(v88ChainId, "die Kette muss über den echten Bedienweg vorbereitet worden sein");
+
+      // Vor der Freigabeanforderung: die Freigabe-Schaltfläche ist im
+      // zulässigen Status tatsächlich bedienbar (sonst wäre die spätere
+      // "deaktiviert"-Prüfung wertlos).
+      assert.ok(
+        !v88StepButton(diagnosticsHtml(), "request-chain-step-approval", 1).includes("disabled"),
+        "Ausgangszustand: die Freigabe-Schaltfläche muss in IN_EXECUTION bedienbar sein",
+      );
+
+      await ui.requestChainStepApproval(v88ChainId, 1);
+      assert.ok(
+        !v88StepButton(diagnosticsHtml(), "start-chain-step", 1).includes("disabled"),
+        "Ausgangszustand: die Start-Schaltfläche muss in IN_EXECUTION mit gültiger Freigabe tatsächlich bedienbar sein",
+      );
+    },
+  );
+
+  for (const gateStatus of V88_STATUSES_WITHOUT_CHAIN_ACTIONS) {
+    await check(
+      `V8.8-UI/${gateStatus}: weder die Freigabe- noch die Start-Schaltfläche ist bedienbar; die Kettenhistorie bleibt vollständig sichtbar`,
+      async () => {
+        await v88SetOrderStatus(gateStatus);
+        const html = diagnosticsHtml();
+
+        assert.ok(
+          v88StepButton(html, "request-chain-step-approval", 1).includes("disabled"),
+          `${gateStatus}: die Freigabe-Schaltfläche darf nicht bedienbar sein`,
+        );
+        assert.ok(
+          v88StepButton(html, "start-chain-step", 1).includes("disabled"),
+          `${gateStatus}: die Start-Schaltfläche darf nicht bedienbar sein, obwohl lokal noch ein Freigabetoken vorliegt`,
+        );
+        [2, 3].forEach((stepNumber) => {
+          assert.ok(v88StepButton(html, "request-chain-step-approval", stepNumber).includes("disabled"));
+          assert.ok(v88StepButton(html, "start-chain-step", stepNumber).includes("disabled"));
+        });
+
+        // Historie unverändert vollständig lesbar (keine neue Warnbox, keine
+        // neue Karte, keine neue Statusanzeige – nur keine bedienbare Aktion).
+        assert.match(html, /Schritt 1 \u2013 Recherche\/Analyse/, `${gateStatus}: die Kettenhistorie muss sichtbar bleiben`);
+        assert.match(html, /Schritt 2 \u2013 Dokumentation/);
+        assert.match(html, /Schritt 3 \u2013 Projektmanager-Bewertung/);
+        assert.ok(html.includes(v88ChainId), `${gateStatus}: die Kette selbst muss weiterhin ausgewiesen sein`);
+
+        assert.strictEqual(
+          fetchCalls.filter((entry) => entry.method === "POST").length,
+          0,
+          `${gateStatus}: reines Rendern in diesem Status darf keine Kettenaktion auslösen`,
+        );
+      },
+    );
+  }
+
+  await check(
+    "V8.8-UI/IN_EXECUTION: nach Rückkehr in den zulässigen Status sind Freigabe- und Startaktion unverändert wie zuvor bedienbar (der Auftragsstatus ist der einzige Unterschied)",
+    async () => {
+      await v88SetOrderStatus("IN_EXECUTION");
+      const html = diagnosticsHtml();
+      assert.ok(
+        !v88StepButton(html, "start-chain-step", 1).includes("disabled"),
+        "die bestehende Startaktion muss im zulässigen Status unverändert funktionieren",
+      );
+      assert.strictEqual(fetchCalls.filter((entry) => entry.method === "POST").length, 0);
+    },
+  );
+
   console.log(`pilot-agent-execution-chain-ui.test.js: ${passed} Prüfpunkte erfolgreich`);
 }
 

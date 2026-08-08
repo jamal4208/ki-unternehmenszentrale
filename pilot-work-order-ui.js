@@ -3576,8 +3576,18 @@
     var tokenKey = chainStepTokenKey(chain.id, step.stepNumber);
     var hasToken = Boolean(state.chainStepApprovalTokens[tokenKey]);
     var pendingPredecessorTooLarge = step.pendingPredecessorTooLarge === true;
+    // Bediengrenze zum fail-closed Auftragsstatus-Gate in
+    // pilot-agent-execution-chain-service.js#assertOrderAllowsChainAction:
+    // neue Kettenarbeit (Freigabe anfordern, Stufe starten) beginnt
+    // ausschließlich während "In Ausführung". Die Oberfläche bietet deshalb
+    // keine Aktion an, die der Server verlässlich mit 409 ablehnen würde.
+    // Rein additive Bediengrenze – die Sicherheit liegt ausschließlich im
+    // Kettenservice; die Historie unten bleibt unverändert vollständig
+    // sichtbar.
+    var orderAllowsNewChainWork = overview.status === "IN_EXECUTION";
 
     var canRequestApproval =
+      orderAllowsNewChainWork &&
       isCurrentStep &&
       chainIsOpen &&
       !anyStepRunning &&
@@ -3589,6 +3599,7 @@
       !state.chainActionInFlight &&
       !orderChainLocked;
     var canStart =
+      orderAllowsNewChainWork &&
       isCurrentStep &&
       chainIsOpen &&
       !anyStepRunning &&

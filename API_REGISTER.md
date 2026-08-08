@@ -215,6 +215,8 @@ Erweiterte read-only Rückgabefelder in Overview-/Ketten-/Run-Views (ohne Prompt
 
 Sicherheitsgrenze: wenn ein Vorgängertext die echte Read-only-Grenze überschreitet, wird der Schritt kontrolliert mit Konfliktfehler beendet (kein stilles Kürzen, kein Laufstart).
 
+Auftragsstatus-Gate (fail-closed, ergänzt im Arbeitspaket „Kettenaktionen vor Beginn an IN_EXECUTION binden“): alle drei Routen setzen voraus, dass der Pilotauftrag aktuell den Status `IN_EXECUTION` hat. In jedem anderen Auftragsstatus – `DRAFT`, `READY_FOR_JAMAL_APPROVAL`, `APPROVED_FOR_EXECUTION`, `READY_FOR_REVIEW`, `COMPLETED`, `RETURNED`, `BLOCKED` – antworten sie mit **HTTP 409** und `ok: false`; die Fehlerdetails führen `pilotOrderId`, `currentStatus` und `reasonCode` = `ORDER_NOT_IN_EXECUTION`. `APPROVED_FOR_EXECUTION` reicht ausdrücklich nicht. Die Ablehnung ist zustandslos: keine Kette, keine Schrittzeile, kein Audit, kein Freigabetoken, kein Tokenverbrauch, kein Laufstart. Route, Body-Whitelist und Rückgabefelder bleiben unverändert; es gibt keine `expectedRevision` für diese drei Aktionen. Die Terminalisierung bereits gestarteter Arbeit ist bewusst **nicht** an dieses Gate gebunden, damit ein laufender Schritt unabhängig vom späteren Auftragsstatus sauber zu Ende protokolliert werden kann.
+
 ## V7.6.3 – Health Upgrade Kompass als ersten echten Referenz-Arbeitslauf verankern (lokal umgesetzt, ungesichert – Commit/Push stehen aus)
 
 Eine neue GET-Route auf oberster Ebene plus ein neuer POST-Präfix (alle `OWNER_ONLY`, kein Kunden-/Supportzugriff): **89 GET, 52 POST, 8 GET-Präfixe, 8 POST-Präfixe, 32 statische Assets** (+1 GET/+1 POST-Präfix/+1 statisches Asset gegenüber dem V7.6.1-Ausgangsstand 88/52/8/7/31).

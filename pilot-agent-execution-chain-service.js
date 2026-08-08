@@ -199,6 +199,52 @@ function requireStep(db, chainId, stepNumber) {
 }
 
 // ---------------------------------------------------------------------------
+// Fail-closed Auftragsstatus-Gate für den BEGINN neuer Kettenarbeit.
+//
+// Kontrolllücke davor: prepareChain/requestStepApproval/startStep prüften
+// ausschließlich Ketten- und Schrittzustände, niemals den Status des
+// Pilotauftrags selbst. Eine Kette konnte deshalb in einem Auftrag
+// vorbereitet, freigegeben und – bis zur erst SPÄT greifenden Prüfung in
+// pilot-agent-execution-service.js#startAgentExecutionRun – bis unmittelbar
+// vor den Runnerstart getrieben werden, obwohl der Auftrag längst RETURNED,
+// BLOCKED, COMPLETED oder noch gar nicht gestartet war. Bis dorthin waren
+// bereits ein Freigabetoken verbraucht, Kette und Schritt auf RUNNING
+// gesetzt und CHAIN_STEP_STARTED auditiert.
+//
+// Verbindliche Fachregel: NEUE Agenten-/Kettenarbeit darf ausschließlich
+// beginnen, während der Pilotauftrag tatsächlich IN_EXECUTION ist.
+// APPROVED_FOR_EXECUTION reicht ausdrücklich NICHT – zwischen "Ausführung
+// freigegeben" und "Ausführung tatsächlich gestartet" liegt bewusst ein
+// eigener Schritt.
+//
+// Bewusste Asymmetrie (Sicherheitsinvariante): dieses Gate schützt
+// AUSSCHLIESSLICH den Beginn neuer Arbeit. Die Terminalisierung bereits
+// begonnener Arbeit (finalizeChainStepSuccess/finalizeChainStepFailure/
+// blockChain/emergencyFinalizeChainStepAfterError) bleibt bewusst
+// statusunabhängig – sonst könnte ein Auftragsstatuswechsel WÄHREND eines
+// laufenden Schrittes die Kette dauerhaft in RUNNING hängen lassen
+// (Fail-Stuck). Diese Funktion darf deshalb niemals in einen
+// Terminalisierungspfad eingebaut werden.
+//
+// Rein prüfend: kein Zustandswechsel, kein Audit, kein Token.
+const ORDER_STATUS_REQUIRED_FOR_CHAIN_ACTION = "IN_EXECUTION";
+const CHAIN_ACTION_ORDER_STATUS_REASON_CODE = "ORDER_NOT_IN_EXECUTION";
+
+function assertOrderAllowsChainAction(db, pilotOrderId, alreadyLoadedOrderRow) {
+  const orderRow = alreadyLoadedOrderRow || authDb.getPilotWorkOrderById(db, pilotOrderId);
+  if (!orderRow) {
+    throw notFound(`Der Pilotauftrag "${pilotOrderId}" wurde nicht gefunden.`, { pilotOrderId });
+  }
+  if (orderRow.status !== ORDER_STATUS_REQUIRED_FOR_CHAIN_ACTION) {
+    throw conflict(
+      `Neue Kettenarbeit ist nur möglich, während der Pilotauftrag in Ausführung ist (aktuell ${orderRow.status}).`,
+      { pilotOrderId, currentStatus: orderRow.status, reasonCode: CHAIN_ACTION_ORDER_STATUS_REASON_CODE },
+    );
+  }
+  return orderRow;
+}
+
+// ---------------------------------------------------------------------------
 // Views
 // ---------------------------------------------------------------------------
 function stepRowToView(row) {
@@ -393,10 +439,9 @@ function clearChainApprovalTokensForTests() {
 // ---------------------------------------------------------------------------
 function prepareChain(db, options = {}) {
   const pilotOrderId = requireNonEmptyString(options.pilotOrderId, "pilotOrderId");
-  const orderRow = authDb.getPilotWorkOrderById(db, pilotOrderId);
-  if (!orderRow) {
-    throw notFound(`Der Pilotauftrag "${pilotOrderId}" wurde nicht gefunden.`, { pilotOrderId });
-  }
+  // Fail-closed Auftragsstatus-Gate: greift, BEVOR eine Kette, Schrittzeilen
+  // oder ein CHAIN_PREPARED-Audit entstehen könnten.
+  const orderRow = assertOrderAllowsChainAction(db, pilotOrderId);
   const selectedFiles = pilotAgentExecutionService.resolveChainSelectedFiles(options.selectedFiles);
   const coreMandate = buildCoreMandateFromOrderRow(orderRow);
   const mandateDigest = sha256Hex(
@@ -475,6 +520,10 @@ function requestStepApproval(db, options = {}) {
   const actorUserId = options.actorUserId ?? null;
 
   const chain = requireChain(db, chainId, options.expectedPilotOrderId);
+  // Fail-closed Auftragsstatus-Gate: greift, BEVOR approvalStatus/
+  // approvalRequestedAt/waitingForJamal/Kettenrevision verändert, ein
+  // Freigabetoken erzeugt oder CHAIN_STEP_APPROVAL_REQUESTED auditiert wird.
+  assertOrderAllowsChainAction(db, chain.pilotOrderId);
   const step = requireStep(db, chainId, stepNumber);
 
   if (chain.currentStep !== stepNumber) {
@@ -833,6 +882,14 @@ async function startStep(db, options = {}) {
   const actorUserId = options.actorUserId ?? null;
 
   const chain = requireChain(db, chainId, options.expectedPilotOrderId);
+  // Fail-closed Auftragsstatus-Gate, bewusst als ALLERERSTE fachliche Prüfung
+  // dieses Startpfades: greift vor consumeChainApprovalToken, vor jedem
+  // blockChain-Schreibvorgang der Vorgänger-/Digestprüfungen unten, vor dem
+  // RUNNING-Übergang, vor CHAIN_STEP_STARTED, vor der internen
+  // Codex-Einzellauf-Freigabe und vor jeder pilot_agent_execution_runs-Zeile.
+  // Ein abgelehnter Versuch bleibt dadurch vollständig zustandslos: der Token
+  // bleibt unverbraucht und gültig, Kette und Schritt bleiben unverändert.
+  const orderRow = assertOrderAllowsChainAction(db, chain.pilotOrderId);
   const step = requireStep(db, chainId, stepNumber);
 
   if (chain.currentStep !== stepNumber) {
@@ -858,10 +915,8 @@ async function startStep(db, options = {}) {
     });
   }
 
-  const orderRow = authDb.getPilotWorkOrderById(db, chain.pilotOrderId);
-  if (!orderRow) {
-    throw notFound(`Der Pilotauftrag "${chain.pilotOrderId}" wurde nicht gefunden.`, { pilotOrderId: chain.pilotOrderId });
-  }
+  // `orderRow` wurde bereits vom Auftragsstatus-Gate oben geladen und geprüft
+  // (dort auch der Fall "Auftrag nicht gefunden").
   const selectedFilesFixed = typeof chain.selectedFilesJson === "string" && chain.selectedFilesJson.trim().length > 0;
   const parsedSelectedFiles = selectedFilesFixed ? parseJsonArrayOrEmpty(chain.selectedFilesJson) : [];
   const selectedFilesForChain = selectedFilesFixed

@@ -79,6 +79,118 @@ function driveOrderToInExecution(db, orderId) {
   return pilotService.startExecution(db, { pilotOrderId: orderId });
 }
 
+// V8.8 ("Kettenaktionen vor Beginn an IN_EXECUTION binden"): die vollständige,
+// verbindliche Auftragsstatusmaschine (auth-db-migrations.js#
+// PILOT_WORK_ORDER_STATUS_VALUES). Wird unten gegen die echte Konstante
+// abgeglichen, damit diese Liste nicht davon abdriften kann.
+const ALL_PILOT_ORDER_STATUSES = Object.freeze([
+  "DRAFT",
+  "READY_FOR_JAMAL_APPROVAL",
+  "APPROVED_FOR_EXECUTION",
+  "IN_EXECUTION",
+  "READY_FOR_REVIEW",
+  "COMPLETED",
+  "RETURNED",
+  "BLOCKED",
+]);
+
+// Eine vollständige, vom deterministischen Projektmanager-Filter angenommene
+// Dokumentations-Übergabe – fachliche Voraussetzung von submitForReview.
+function submitPassingDocumentationHandoff(db, orderId) {
+  const result = pilotService.submitHandoff(db, {
+    pilotOrderId: orderId,
+    fromPilotRole: "RECHERCHE_ANALYSE",
+    toPilotRole: "DOKUMENTATION",
+    shortFinding: "Dokumentationsergebnis liegt vollstaendig vor.",
+    resultOrRecommendation: "Das dokumentierte Ergebnis passt zum Auftrag und kann vorgelegt werden.",
+    basisUsed: "Auftragstext und Qualitaetskriterien des Pilotauftrags.",
+    riskOrLimit: "Keine bekannten Blocker fuer diesen Testauftrag.",
+    nextStep: "Zur Abschlusspruefung vorlegen.",
+    actorUserId: "owner-1",
+  });
+  assert.strictEqual(result.handoff.pmFilterStatus, "PASSED");
+}
+
+// Bringt einen bereits IN_EXECUTION stehenden Auftrag ausschließlich über die
+// ECHTEN, unveränderten Servicefunktionen (pilot-work-order-service.js) in den
+// gewünschten Zielstatus – niemals über direkte Datenbankmanipulation (siehe
+// Auftrag Abschnitt 14: die Race-Tests dürfen nicht trivialisiert werden).
+function driveInExecutionOrderTo(db, orderId, targetStatus) {
+  if (targetStatus === "IN_EXECUTION") return;
+  if (targetStatus === "READY_FOR_REVIEW" || targetStatus === "COMPLETED") {
+    submitPassingDocumentationHandoff(db, orderId);
+    pilotService.submitForReview(db, { pilotOrderId: orderId, actorUserId: "owner-1" });
+    if (targetStatus === "COMPLETED") {
+      pilotService.approveCompletion(db, { pilotOrderId: orderId, confirmed: true, actorUserId: "owner-1" });
+    }
+  } else if (targetStatus === "BLOCKED") {
+    pilotService.blockOrder(db, { pilotOrderId: orderId, reason: "Testbedingte Blockierung fuer das Auftragsstatus-Gate.", actorUserId: "owner-1" });
+  } else {
+    // DRAFT / READY_FOR_JAMAL_APPROVAL / APPROVED_FOR_EXECUTION / RETURNED
+    // sind aus IN_EXECUTION ausschließlich über die Rückgabe erreichbar.
+    pilotService.returnOrder(db, { pilotOrderId: orderId, note: "Testbedingte Rueckgabe fuer das Auftragsstatus-Gate.", actorUserId: "owner-1" });
+    if (targetStatus === "RETURNED") return;
+    pilotService.reopenFromReturned(db, { pilotOrderId: orderId, actorUserId: "owner-1" });
+    if (targetStatus === "DRAFT") return;
+    pilotService.markReadyForApproval(db, { pilotOrderId: orderId, actorUserId: "owner-1" });
+    if (targetStatus === "READY_FOR_JAMAL_APPROVAL") return;
+    pilotService.approveForExecution(db, { pilotOrderId: orderId, confirmed: true, actorUserId: "owner-1" });
+  }
+}
+
+// Legt einen frischen Auftrag an und führt ihn ausschließlich über die echten
+// Servicefunktionen in genau diesen Auftragsstatus.
+function makeOrderInStatus(db, targetStatus, title) {
+  const orderId = pilotService.createPilotOrder(db, orderInput({ title })).order.id;
+  if (targetStatus !== "DRAFT") {
+    driveOrderToInExecution(db, orderId);
+    driveInExecutionOrderTo(db, orderId, targetStatus);
+  }
+  const actual = pilotService.getPilotOrderOverview(db, orderId).status;
+  assert.strictEqual(actual, targetStatus, `Testfixtur: der Auftrag muss tatsaechlich ${targetStatus} sein (ist ${actual})`);
+  return orderId;
+}
+
+function chainAuditEventTypesForChain(db, chainId) {
+  return authDb
+    .listAuditEvents(db, { limit: 8000 })
+    .filter((event) => typeof event.eventType === "string" && event.eventType.startsWith("CHAIN_"))
+    .filter((event) => {
+      if (!event.metadata) return false;
+      try {
+        return JSON.parse(event.metadata).chainId === chainId;
+      } catch (_error) {
+        return false;
+      }
+    })
+    .map((event) => event.eventType);
+}
+
+function countChainPreparedAuditEventsForOrder(db, orderId) {
+  const chainIds = new Set(authDb.listPilotAgentExecutionChainsForOrder(db, orderId).map((row) => row.id));
+  return authDb
+    .listAuditEvents(db, { limit: 8000 })
+    .filter((event) => event.eventType === "CHAIN_PREPARED")
+    .filter((event) => {
+      if (!event.metadata) return false;
+      try {
+        return chainIds.has(JSON.parse(event.metadata).chainId);
+      } catch (_error) {
+        return false;
+      }
+    }).length;
+}
+
+// Ein vollständiger, unveränderter Abzug des Ketten- und Schrittzustands –
+// Grundlage für "vollständig unverändert"-Nachweise nach einem abgelehnten
+// Versuch.
+function chainStateSnapshot(db, chainId) {
+  return JSON.stringify({
+    chain: authDb.getPilotAgentExecutionChainById(db, chainId),
+    steps: authDb.listPilotAgentExecutionChainStepsForChain(db, chainId),
+  });
+}
+
 const AVAILABLE_AUTHENTICATED_EXEC = (file, args) => {
   if (args.includes("--version")) return "codex-cli 0.999.0-test\n";
   if (args.includes("login")) return "Logged in using ChatGPT\n";
@@ -1919,6 +2031,404 @@ async function run() {
       const finalHandoffs = authDb.listPilotHandoffs(e2eDb, e2eOrderId);
       assert.strictEqual(finalHandoffs.length, 1, "über den gesamten Ablauf darf nur diese eine klassische Rollenübergabe entstanden sein");
       assert.strictEqual(finalHandoffs[0].executionRunId, null, "die manuell eingereichte Übergabe ist keine automatische Agentenlauf-Übergabe");
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // V8.8 – "Kettenaktionen vor Beginn an IN_EXECUTION binden".
+  //
+  // Kontrolllücke davor: prepareChain/requestStepApproval/startStep prüften
+  // ausschließlich Ketten- und Schrittzustände, niemals den Status des
+  // Pilotauftrags. Die einzige Auftragsstatusprüfung lag in
+  // pilot-agent-execution-service.js#startAgentExecutionRun und griff damit
+  // erst NACH Tokenverbrauch, RUNNING-Übergang und CHAIN_STEP_STARTED-Audit.
+  //
+  // Neue, fail-closed Regel: neue Kettenarbeit beginnt ausschließlich in
+  // IN_EXECUTION. Die Terminalisierung bereits begonnener Arbeit bleibt
+  // ausdrücklich statusunabhängig (siehe Race-Tests D/E/F unten).
+  // -------------------------------------------------------------------------
+  const GATE_FILES = ["pilot-work-order-service.js"];
+  const GATE_REASON_CODE = "ORDER_NOT_IN_EXECUTION";
+
+  function assertChainActionRejectedByOrderStatusGate(error, { orderId, expectedStatus }) {
+    assert.ok(error, `bei Auftragsstatus ${expectedStatus} muss die Kettenaktion abgelehnt werden`);
+    assert.strictEqual(error.name, "PilotAgentExecutionChainError", "die Ablehnung muss der bestehenden Fehlerarchitektur folgen");
+    assert.strictEqual(error.statusCode, 409, `bei Auftragsstatus ${expectedStatus} muss mit 409 abgelehnt werden`);
+    assert.ok(error.details, "die Ablehnung muss die bestehenden Fehlerdetails mitführen");
+    assert.strictEqual(error.details.pilotOrderId, orderId);
+    assert.strictEqual(error.details.currentStatus, expectedStatus);
+    assert.strictEqual(error.details.reasonCode, GATE_REASON_CODE);
+    assert.match(error.message, /nur möglich, während der Pilotauftrag in Ausführung ist/);
+    assert.ok(error.message.includes(expectedStatus), "die Meldung muss den tatsächlichen Auftragsstatus benennen");
+  }
+
+  function captureThrown(fn) {
+    try {
+      fn();
+      return null;
+    } catch (error) {
+      return error;
+    }
+  }
+
+  async function captureThrownAsync(fn) {
+    try {
+      await fn();
+      return null;
+    } catch (error) {
+      return error;
+    }
+  }
+
+  // Zerstörungsfreier Nachweis, dass ein Ketten-Freigabetoken weiterhin
+  // existiert, NICHT verbraucht und NICHT abgelaufen ist: die Bindungsprüfung
+  // auf chainId läuft in consumeChainApprovalToken erst NACH der Prüfung auf
+  // "unbekannt", "bereits verbraucht" und "abgelaufen" und löscht den
+  // Tokeneintrag bei einer reinen Bindungsabweichung ausdrücklich nicht.
+  function assertChainApprovalTokenStillUnconsumed(token, label) {
+    const probe = chainService.consumeChainApprovalToken(token, { chainId: "pilot-agent-chain-absichtlich-andere-kette" });
+    assert.strictEqual(probe.ok, false);
+    assert.strictEqual(
+      probe.reason,
+      "TOKEN_BINDING_MISMATCH",
+      `${label}: der Freigabetoken muss unverbraucht und gültig geblieben sein (erhalten: ${probe.reason})`,
+    );
+  }
+
+  await check(
+    "V8.8-1./Gate: prepareChain gelingt ausschließlich in IN_EXECUTION – alle sieben anderen Auftragsstatus werden mit 409 abgelehnt, ohne Kette, ohne Schrittzeile, ohne CHAIN_PREPARED",
+    async () => {
+      assert.deepStrictEqual(
+        pilotService.PILOT_WORK_ORDER_STATUS_VALUES.slice(),
+        ALL_PILOT_ORDER_STATUSES.slice(),
+        "die Testmatrix muss exakt der echten Auftragsstatusmaschine entsprechen",
+      );
+
+      const { db: gateDb } = makeIsolatedDb("pilot-chain-gate-prepare-");
+      for (const status of ALL_PILOT_ORDER_STATUSES) {
+        const orderId = makeOrderInStatus(gateDb, status, `Gate prepareChain ${status}`);
+        const attempt = () => chainService.prepareChain(gateDb, { pilotOrderId: orderId, selectedFiles: GATE_FILES.slice(), actorUserId: "owner-1" });
+
+        if (status === "IN_EXECUTION") {
+          const chain = attempt();
+          assert.strictEqual(chain.chainStatus, "PREPARED", "der bestehende Happy Path muss unverändert funktionieren");
+          assert.strictEqual(chain.steps.length, 3);
+          assert.strictEqual(authDb.listPilotAgentExecutionChainsForOrder(gateDb, orderId).length, 1);
+          assert.strictEqual(countChainPreparedAuditEventsForOrder(gateDb, orderId), 1);
+          continue;
+        }
+
+        assertChainActionRejectedByOrderStatusGate(captureThrown(attempt), { orderId, expectedStatus: status });
+        assert.strictEqual(authDb.listPilotAgentExecutionChainsForOrder(gateDb, orderId).length, 0, `${status}: es darf keine Kette entstanden sein`);
+        assert.strictEqual(countChainPreparedAuditEventsForOrder(gateDb, orderId), 0, `${status}: es darf kein CHAIN_PREPARED auditiert worden sein`);
+      }
+    },
+  );
+
+  await check(
+    "V8.8-2./Gate: requestStepApproval gelingt ausschließlich in IN_EXECUTION – bei allen sieben anderen Auftragsstatus bleiben Kette, Schritt und Kettenrevision vollständig unverändert, ohne Token und ohne Audit",
+    async () => {
+      const { db: gateDb } = makeIsolatedDb("pilot-chain-gate-approval-");
+      for (const status of ALL_PILOT_ORDER_STATUSES) {
+        // Die Kette wird IMMER zunächst legal in IN_EXECUTION vorbereitet;
+        // erst danach wird der Auftrag kontrolliert in den Zielstatus geführt.
+        const orderId = pilotService.createPilotOrder(gateDb, orderInput({ title: `Gate requestStepApproval ${status}` })).order.id;
+        driveOrderToInExecution(gateDb, orderId);
+        const chainId = chainService.prepareChain(gateDb, { pilotOrderId: orderId, selectedFiles: GATE_FILES.slice(), actorUserId: "owner-1" }).id;
+        driveInExecutionOrderTo(gateDb, orderId, status);
+        assert.strictEqual(pilotService.getPilotOrderOverview(gateDb, orderId).status, status);
+
+        const before = chainStateSnapshot(gateDb, chainId);
+        const attempt = () => chainService.requestStepApproval(gateDb, { chainId, chainStep: 1, actorUserId: "owner-1" });
+
+        if (status === "IN_EXECUTION") {
+          const granted = attempt();
+          assert.ok(typeof granted.approvalToken === "string" && granted.approvalToken.length > 0, "der bestehende Happy Path muss unverändert funktionieren");
+          assert.strictEqual(granted.chain.chainStatus, "WAITING_FOR_RESEARCH_APPROVAL");
+          assert.ok(chainAuditEventTypesForChain(gateDb, chainId).includes("CHAIN_STEP_APPROVAL_REQUESTED"));
+          continue;
+        }
+
+        assertChainActionRejectedByOrderStatusGate(captureThrown(attempt), { orderId, expectedStatus: status });
+
+        const chainRow = authDb.getPilotAgentExecutionChainById(gateDb, chainId);
+        const stepRow = authDb.getPilotAgentExecutionChainStepByNumber(gateDb, chainId, 1);
+        assert.strictEqual(stepRow.stepStatus, "PENDING", `${status}: der Schritt muss PENDING bleiben`);
+        assert.strictEqual(stepRow.approvalStatus, "NOT_REQUESTED", `${status}: approvalStatus muss unverändert bleiben`);
+        assert.strictEqual(stepRow.approvalRequestedAt, null, `${status}: approvalRequestedAt darf nicht geschrieben werden`);
+        assert.strictEqual(chainRow.chainStatus, "PREPARED", `${status}: der Kettenstatus muss unverändert bleiben`);
+        assert.strictEqual(chainRow.revision, 1, `${status}: die Kettenrevision darf nicht erhöht werden`);
+        assert.strictEqual(Boolean(chainRow.waitingForJamal), false, `${status}: waitingForJamal darf nicht verändert werden`);
+        assert.strictEqual(chainStateSnapshot(gateDb, chainId), before, `${status}: Kette und Schritte müssen byteidentisch unverändert bleiben`);
+        assert.deepStrictEqual(
+          chainAuditEventTypesForChain(gateDb, chainId),
+          ["CHAIN_PREPARED"],
+          `${status}: außer der ursprünglichen Vorbereitung darf kein weiteres Kettenaudit entstanden sein`,
+        );
+      }
+    },
+  );
+
+  await check(
+    "V8.8-3./Gate: startStep gelingt ausschließlich in IN_EXECUTION – bei allen sieben anderen Auftragsstatus bleibt der Token unverbraucht, die Kette WAITING_*, ohne CHAIN_STEP_STARTED, ohne CHAIN_STEP_FAILED und ohne jede pilot_agent_execution_runs-Zeile",
+    async () => {
+      const { db: gateDb } = makeIsolatedDb("pilot-chain-gate-start-");
+      for (const status of ALL_PILOT_ORDER_STATUSES) {
+        // Der Token wird IMMER legal in IN_EXECUTION erzeugt; erst danach
+        // wechselt der Auftragsstatus kontrolliert.
+        const orderId = pilotService.createPilotOrder(gateDb, orderInput({ title: `Gate startStep ${status}` })).order.id;
+        driveOrderToInExecution(gateDb, orderId);
+        const chainId = chainService.prepareChain(gateDb, { pilotOrderId: orderId, selectedFiles: GATE_FILES.slice(), actorUserId: "owner-1" }).id;
+        const approvalToken = chainService.requestStepApproval(gateDb, { chainId, chainStep: 1, actorUserId: "owner-1" }).approvalToken;
+        driveInExecutionOrderTo(gateDb, orderId, status);
+        assert.strictEqual(pilotService.getPilotOrderOverview(gateDb, orderId).status, status);
+
+        const before = chainStateSnapshot(gateDb, chainId);
+        const adapter = fakeSuccessfulCodexAdapter(buildStageResultText(RESEARCH_STEP1_MARKER_LINES));
+        const attempt = () =>
+          chainService.startStep(gateDb, {
+            chainId,
+            chainStep: 1,
+            actorUserId: "owner-1",
+            approvalToken,
+            codexAvailabilityOptions: { execFileSyncImpl: AVAILABLE_AUTHENTICATED_EXEC, forceRefresh: true },
+            codexAdapterImpl: adapter,
+          });
+
+        if (status === "IN_EXECUTION") {
+          const chainAfter = await attempt();
+          assert.strictEqual(chainAfter.chainStatus, "WAITING_FOR_DOCUMENTATION_APPROVAL", "der bestehende Happy Path muss unverändert funktionieren");
+          assert.strictEqual(chainAfter.steps[0].stepStatus, "SUCCEEDED");
+          assert.strictEqual(adapter.calls.length, 1, "im zulässigen Status muss der Agentenlauf tatsächlich stattfinden");
+          continue;
+        }
+
+        assertChainActionRejectedByOrderStatusGate(await captureThrownAsync(attempt), { orderId, expectedStatus: status });
+
+        // Der kritischste Nachweis: das Gate greift VOR dem Tokenverbrauch.
+        assertChainApprovalTokenStillUnconsumed(approvalToken, status);
+
+        const chainRow = authDb.getPilotAgentExecutionChainById(gateDb, chainId);
+        const stepRow = authDb.getPilotAgentExecutionChainStepByNumber(gateDb, chainId, 1);
+        assert.strictEqual(stepRow.stepStatus, "PENDING", `${status}: der Schritt muss PENDING bleiben`);
+        assert.strictEqual(stepRow.approvalStatus, "REQUESTED", `${status}: approvalStatus muss REQUESTED bleiben (kein Wechsel auf GRANTED)`);
+        assert.strictEqual(stepRow.startedAt, null, `${status}: startedAt darf nicht gesetzt werden`);
+        assert.strictEqual(chainRow.chainStatus, "WAITING_FOR_RESEARCH_APPROVAL", `${status}: die Kette muss WAITING_* bleiben und darf nicht FAILED werden`);
+        assert.strictEqual(chainRow.revision, 2, `${status}: die Kettenrevision darf nicht erhöht werden`);
+        assert.strictEqual(chainStateSnapshot(gateDb, chainId), before, `${status}: Kette und Schritte müssen byteidentisch unverändert bleiben`);
+        assert.strictEqual(adapter.calls.length, 0, `${status}: es darf kein Agentenprozess angestoßen worden sein`);
+        assert.strictEqual(
+          authDb.listPilotAgentExecutionRunsForOrder(gateDb, orderId).length,
+          0,
+          `${status}: es darf keine pilot_agent_execution_runs-Zeile entstanden sein`,
+        );
+        const auditTypes = chainAuditEventTypesForChain(gateDb, chainId);
+        assert.deepStrictEqual(
+          auditTypes,
+          ["CHAIN_PREPARED", "CHAIN_STEP_APPROVAL_REQUESTED"],
+          `${status}: weder CHAIN_STEP_STARTED noch CHAIN_STEP_FAILED noch CHAIN_BLOCKED darf entstanden sein`,
+        );
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // Race A/B/C – Statuswechsel ZWISCHEN Tokenerzeugung und Startversuch.
+  // -------------------------------------------------------------------------
+  for (const raceStatus of ["RETURNED", "BLOCKED"]) {
+    await check(
+      `V8.8-Race ${raceStatus}: Token in IN_EXECUTION erzeugt, Auftrag wechselt auf ${raceStatus}, startStep wird mit 409 abgelehnt – der Token bleibt so gültig, dass derselbe Schritt nach Rückkehr in IN_EXECUTION unverändert damit startet`,
+      async () => {
+        const { db: raceDb } = makeIsolatedDb(`pilot-chain-race-${raceStatus.toLowerCase()}-`);
+        const orderId = pilotService.createPilotOrder(raceDb, orderInput({ title: `Race ${raceStatus}` })).order.id;
+        driveOrderToInExecution(raceDb, orderId);
+        const chainId = chainService.prepareChain(raceDb, { pilotOrderId: orderId, selectedFiles: GATE_FILES.slice(), actorUserId: "owner-1" }).id;
+        const approvalToken = chainService.requestStepApproval(raceDb, { chainId, chainStep: 1, actorUserId: "owner-1" }).approvalToken;
+
+        driveInExecutionOrderTo(raceDb, orderId, raceStatus);
+        const before = chainStateSnapshot(raceDb, chainId);
+        const blockedAdapter = fakeSuccessfulCodexAdapter(buildStageResultText(RESEARCH_STEP1_MARKER_LINES));
+        const rejected = await captureThrownAsync(() =>
+          chainService.startStep(raceDb, {
+            chainId,
+            chainStep: 1,
+            actorUserId: "owner-1",
+            approvalToken,
+            codexAvailabilityOptions: { execFileSyncImpl: AVAILABLE_AUTHENTICATED_EXEC, forceRefresh: true },
+            codexAdapterImpl: blockedAdapter,
+          }),
+        );
+        assertChainActionRejectedByOrderStatusGate(rejected, { orderId, expectedStatus: raceStatus });
+        assert.strictEqual(blockedAdapter.calls.length, 0, "kein Codex-Lauf während des abgelehnten Versuchs");
+        assert.strictEqual(chainStateSnapshot(raceDb, chainId), before, "die Kette muss vollständig intakt geblieben sein");
+        assertChainApprovalTokenStillUnconsumed(approvalToken, raceStatus);
+
+        // Zurück nach IN_EXECUTION ausschließlich über die echte
+        // Auftragsstatusmaschine – der GLEICHE, nie verbrauchte Token startet
+        // den Schritt danach unverändert.
+        if (raceStatus === "BLOCKED") pilotService.unblockOrder(raceDb, { pilotOrderId: orderId, actorUserId: "owner-1" });
+        pilotService.reopenFromReturned(raceDb, { pilotOrderId: orderId, actorUserId: "owner-1" });
+        driveOrderToInExecution(raceDb, orderId);
+        assert.strictEqual(pilotService.getPilotOrderOverview(raceDb, orderId).status, "IN_EXECUTION");
+
+        const adapter = fakeSuccessfulCodexAdapter(buildStageResultText(RESEARCH_STEP1_MARKER_LINES));
+        const chainAfter = await chainService.startStep(raceDb, {
+          chainId,
+          chainStep: 1,
+          actorUserId: "owner-1",
+          approvalToken,
+          codexAvailabilityOptions: { execFileSyncImpl: AVAILABLE_AUTHENTICATED_EXEC, forceRefresh: true },
+          codexAdapterImpl: adapter,
+        });
+        assert.strictEqual(adapter.calls.length, 1, "erst im zulässigen Status läuft der Agent tatsächlich");
+        assert.strictEqual(chainAfter.steps[0].stepStatus, "SUCCEEDED", "der zuvor abgelehnte Schritt läuft mit demselben Token unverändert durch");
+        assert.strictEqual(chainAfter.chainStatus, "WAITING_FOR_DOCUMENTATION_APPROVAL");
+      },
+    );
+  }
+
+  await check(
+    "V8.8-Race COMPLETED: ein über die reguläre Auftragslogik abgeschlossener Auftrag lehnt einen Start mit zuvor legal erzeugtem Token mit 409 ab; der Token bleibt unverbraucht und die Kette unverändert",
+    async () => {
+      const { db: raceDb } = makeIsolatedDb("pilot-chain-race-completed-");
+      const orderId = pilotService.createPilotOrder(raceDb, orderInput({ title: "Race COMPLETED" })).order.id;
+      driveOrderToInExecution(raceDb, orderId);
+      const chainId = chainService.prepareChain(raceDb, { pilotOrderId: orderId, selectedFiles: GATE_FILES.slice(), actorUserId: "owner-1" }).id;
+      const approvalToken = chainService.requestStepApproval(raceDb, { chainId, chainStep: 1, actorUserId: "owner-1" }).approvalToken;
+
+      driveInExecutionOrderTo(raceDb, orderId, "COMPLETED");
+      const before = chainStateSnapshot(raceDb, chainId);
+      const adapter = fakeSuccessfulCodexAdapter(buildStageResultText(RESEARCH_STEP1_MARKER_LINES));
+      const rejected = await captureThrownAsync(() =>
+        chainService.startStep(raceDb, {
+          chainId,
+          chainStep: 1,
+          actorUserId: "owner-1",
+          approvalToken,
+          codexAvailabilityOptions: { execFileSyncImpl: AVAILABLE_AUTHENTICATED_EXEC, forceRefresh: true },
+          codexAdapterImpl: adapter,
+        }),
+      );
+      assertChainActionRejectedByOrderStatusGate(rejected, { orderId, expectedStatus: "COMPLETED" });
+      assert.strictEqual(adapter.calls.length, 0);
+      assert.strictEqual(chainStateSnapshot(raceDb, chainId), before);
+      assertChainApprovalTokenStillUnconsumed(approvalToken, "COMPLETED");
+      assert.strictEqual(authDb.listPilotAgentExecutionRunsForOrder(raceDb, orderId).length, 0);
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // Race D/E/F – Statuswechsel WÄHREND eines bereits laufenden Schrittes.
+  //
+  // Der Auftragsstatus wechselt hier zum spätestmöglichen Zeitpunkt: der
+  // kontrollierte Runner-Fake wird erst aufgerufen, nachdem startStep den
+  // Token bereits verbraucht, Schritt und Kette auf RUNNING gesetzt und
+  // CHAIN_STEP_STARTED auditiert hat. Genau dieser Zustand darf durch das
+  // neue Gate NICHT dauerhaft hängen bleiben (Fail-Stuck).
+  // -------------------------------------------------------------------------
+  function codexAdapterThatChangesOrderStatusMidRun(db, orderId, targetStatus, outcome) {
+    const calls = [];
+    const observedStepStatuses = [];
+    return {
+      calls,
+      observedStepStatuses,
+      runCodexReadOnlyAnalysis: async (options) => {
+        calls.push(options);
+        driveInExecutionOrderTo(db, orderId, targetStatus);
+        if (outcome === "FAILED") {
+          return {
+            ok: false,
+            cancelled: false,
+            timedOut: false,
+            resultText: null,
+            errors: ["Simulierter technischer Codex-Fehler nach dem Auftragsstatuswechsel."],
+            reasonCode: "CODEX_PROCESS_EXIT_NONZERO",
+          };
+        }
+        return {
+          ok: true,
+          cancelled: false,
+          timedOut: false,
+          resultText: buildStageResultText(RESEARCH_STEP1_MARKER_LINES),
+          secretRedactionApplied: false,
+          secretRedactionNotice: null,
+          errors: [],
+        };
+      },
+    };
+  }
+
+  for (const midRunStatus of ["RETURNED", "BLOCKED"]) {
+    await check(
+      `V8.8-Race ${midRunStatus} während RUNNING: wechselt der Auftragsstatus erst NACH dem tatsächlichen Start, terminalisiert der erfolgreiche Lauf trotzdem sauber (Schritt SUCCEEDED, Kette fortgeschrieben, kein dauerhaftes RUNNING)`,
+      async () => {
+        const { db: midDb } = makeIsolatedDb(`pilot-chain-midrun-${midRunStatus.toLowerCase()}-`);
+        const orderId = pilotService.createPilotOrder(midDb, orderInput({ title: `Mid-Run ${midRunStatus}` })).order.id;
+        driveOrderToInExecution(midDb, orderId);
+        const chainId = chainService.prepareChain(midDb, { pilotOrderId: orderId, selectedFiles: GATE_FILES.slice(), actorUserId: "owner-1" }).id;
+        const approvalToken = chainService.requestStepApproval(midDb, { chainId, chainStep: 1, actorUserId: "owner-1" }).approvalToken;
+
+        const adapter = codexAdapterThatChangesOrderStatusMidRun(midDb, orderId, midRunStatus, "SUCCEEDED");
+        const chainAfter = await chainService.startStep(midDb, {
+          chainId,
+          chainStep: 1,
+          actorUserId: "owner-1",
+          approvalToken,
+          codexAvailabilityOptions: { execFileSyncImpl: AVAILABLE_AUTHENTICATED_EXEC, forceRefresh: true },
+          codexAdapterImpl: adapter,
+        });
+
+        assert.strictEqual(adapter.calls.length, 1, "der Lauf muss tatsächlich stattgefunden haben");
+        assert.strictEqual(pilotService.getPilotOrderOverview(midDb, orderId).status, midRunStatus, "der Auftragsstatus muss während des Laufs tatsächlich gewechselt haben");
+        assert.strictEqual(chainAfter.steps[0].stepStatus, "SUCCEEDED", "die Finalisierung bereits begonnener Arbeit darf niemals am Auftragsstatus scheitern");
+        assert.strictEqual(chainAfter.chainStatus, "WAITING_FOR_DOCUMENTATION_APPROVAL", "die Kette muss korrekt fortgeschrieben werden");
+        assert.strictEqual(chainAfter.currentStep, 2);
+        assert.ok(chainAfter.steps[0].completedAt, "der Schritt muss einen Abschlusszeitpunkt tragen");
+
+        const stepRow = authDb.getPilotAgentExecutionChainStepByNumber(midDb, chainId, 1);
+        assert.notStrictEqual(stepRow.stepStatus, "RUNNING", "es darf kein dauerhaftes RUNNING zurückbleiben");
+        const runRow = authDb.getPilotAgentExecutionRunById(midDb, stepRow.executionRunId);
+        assert.strictEqual(runRow.status, "SUCCEEDED", "das bereits erzeugte Laufergebnis bleibt vollständig erhalten");
+        const auditTypes = chainAuditEventTypesForChain(midDb, chainId);
+        assert.ok(auditTypes.includes("CHAIN_STEP_STARTED"));
+        assert.ok(auditTypes.includes("CHAIN_STEP_SUCCEEDED"));
+
+        // Und die Gegenprobe: NEUE Kettenarbeit bleibt im gewechselten
+        // Auftragsstatus weiterhin fail-closed gesperrt.
+        assertChainActionRejectedByOrderStatusGate(
+          captureThrown(() => chainService.requestStepApproval(midDb, { chainId, chainStep: 2, actorUserId: "owner-1" })),
+          { orderId, expectedStatus: midRunStatus },
+        );
+      },
+    );
+  }
+
+  await check(
+    "V8.8-Race F: schlägt der Runner NACH dem Auftragsstatuswechsel fehl, gelingt die Fehlerfinalisierung unverändert – die Kette wird sauber FAILED, ohne Fail-Stuck",
+    async () => {
+      const { db: failDb } = makeIsolatedDb("pilot-chain-midrun-failure-");
+      const orderId = pilotService.createPilotOrder(failDb, orderInput({ title: "Mid-Run Fehler nach Rückgabe" })).order.id;
+      driveOrderToInExecution(failDb, orderId);
+      const chainId = chainService.prepareChain(failDb, { pilotOrderId: orderId, selectedFiles: GATE_FILES.slice(), actorUserId: "owner-1" }).id;
+      const approvalToken = chainService.requestStepApproval(failDb, { chainId, chainStep: 1, actorUserId: "owner-1" }).approvalToken;
+
+      const adapter = codexAdapterThatChangesOrderStatusMidRun(failDb, orderId, "RETURNED", "FAILED");
+      const chainAfter = await chainService.startStep(failDb, {
+        chainId,
+        chainStep: 1,
+        actorUserId: "owner-1",
+        approvalToken,
+        codexAvailabilityOptions: { execFileSyncImpl: AVAILABLE_AUTHENTICATED_EXEC, forceRefresh: true },
+        codexAdapterImpl: adapter,
+      });
+
+      assert.strictEqual(adapter.calls.length, 1);
+      assert.strictEqual(pilotService.getPilotOrderOverview(failDb, orderId).status, "RETURNED");
+      assert.strictEqual(chainAfter.steps[0].stepStatus, "FAILED", "der Schritt muss kontrolliert terminalisiert werden");
+      assert.strictEqual(chainAfter.chainStatus, "FAILED", "die Kette muss sauber FAILED werden");
+      const stepRow = authDb.getPilotAgentExecutionChainStepByNumber(failDb, chainId, 1);
+      assert.notStrictEqual(stepRow.stepStatus, "RUNNING", "es darf kein Fail-Stuck-RUNNING zurückbleiben");
+      assert.ok(chainAuditEventTypesForChain(failDb, chainId).includes("CHAIN_STEP_FAILED"));
     },
   );
 
