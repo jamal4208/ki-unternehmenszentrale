@@ -48,7 +48,13 @@ check("die Karte steht nach der bestehenden Health-Referenzlauf-Karte (additiv, 
 
 check("Details sind über <details>/<summary> aufklappbar, keine Textwand auf der ersten Ebene", () => {
   assert.match(html, /<details class="pilot-work-order-details">/);
-  assert.match(html, /<summary>Agentenzuordnung, Qualitätskriterien, Werkzeuge, Freigaben, Rollenübergaben<\/summary>/);
+  // V8.11.1 – F2: die Beschriftung nennt zusätzlich die Agentenkette, weil die
+  // Kettenstatuskarte für deren Bedienung und Nachlese auf "unten" verweist.
+  // Sämtliche bisher genannten Inhalte bleiben unverändert enthalten.
+  assert.match(
+    html,
+    /<summary>Agentenkette, Agentenzuordnung, Qualitätskriterien, Werkzeuge, Freigaben und Rollenübergaben<\/summary>/,
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -229,16 +235,23 @@ check("56. keine neue Primäraktion: renderPrimaryAction() bleibt unverändert, 
   assert.doesNotMatch(historyFnMatch[0], /<button/);
   assert.doesNotMatch(historyFnMatch[0], /data-action/);
   // Die verbindliche Nachbarschaft der Grundkarte ist "unmittelbar vor der
-  // bestehenden Primäraktion" (Grund verstehen → Aktion sehen). V8.11.0 hat
-  // ausschließlich geändert, WELCHER Baustein davor steht: bis V8.10.x die
-  // Kettenstatuskarte, seither renderRisks(). Die Nachbarschaft selbst wird
-  // hier unverändert scharf geprüft, zusätzlich die neue Position der
-  // Kettenstatuskarte NACH der Primäraktion.
-  assert.match(js, /renderRisks\(overview\) \+\s*\n\s*renderDecisionReasonCard\(overview\) \+\s*\n\s*renderPrimaryAction\(overview\);/);
+  // bestehenden Primäraktion" (Grund verstehen → Aktion sehen). Sie gilt
+  // unverändert und ausnahmslos – auch in der V8.11.1-Ausnahme steht kein
+  // Baustein zwischen Grundkarte und Primäraktion.
+  assert.match(js, /html \+= renderDecisionReasonCard\(overview\) \+ renderPrimaryAction\(overview\);/);
+  // V8.11.1: die Kettenstatuskarte wird genau einmal erzeugt und an genau
+  // zwei einander ausschließenden Stellen ausgegeben – vor der Handlung, wenn
+  // ein Kettenschritt läuft, sonst unverändert danach und vor der
+  // Faktentabelle (V8.11.0-Normalfall).
   assert.match(
     js,
-    /renderPrimaryAction\(overview\);[\s\S]*?html \+=\s*\n\s*renderChainStatusCard\(overview\) \+\s*\n\s*renderFacts\(overview\);/,
-    "die Kettenstatuskarte steht seit V8.11.0 nach der Primäraktion und vor der Faktentabelle",
+    /var chainStatusCardHtml = renderChainStatusCard\(overview\);\s*\n\s*if \(chainStepActive\) \{\s*\n\s*html \+= chainStatusCardHtml;\s*\n\s*\}/,
+    "bei laufendem Kettenschritt steht die Kettenstatuskarte vor der Primäraktion",
+  );
+  assert.match(
+    js,
+    /if \(!chainStepActive\) \{\s*\n\s*html \+= chainStatusCardHtml;\s*\n\s*\}\s*\n\s*html \+= renderFacts\(overview\);/,
+    "im Normalfall bleibt die Kettenstatuskarte nach der Primäraktion und vor der Faktentabelle",
   );
 });
 
@@ -669,8 +682,18 @@ check("TP2-UI-7. die neue Ableitung „vorbereitet, aber nie gestartet“ ist re
 check("TP2-UI-8. die Karteninvariante bleibt: genau zwei Aufrufstellen, keine dritte Karte", () => {
   const calls = js.match(/renderChainStatusCard\(overview\)/g) || [];
   assert.strictEqual(calls.length, 3, "genau eine Definition und genau zwei Aufrufstellen");
-  assert.match(js, /html \+= renderChainStatusCard\(overview\);/, "obere Arbeitskarte");
-  assert.match(js, /\n\s*renderChainStatusCard\(overview\) \+\n/, "Detailbereich");
+  // V8.11.1: die obere Arbeitskarte wird weiterhin genau einmal erzeugt, seit
+  // V8.11.1 in eine lokale Variable, weil sie je nach Kettenlage an einer von
+  // zwei einander ausschließenden Stellen ausgegeben wird. Die untere Karte im
+  // Detailbereich bleibt unverändert.
+  assert.match(js, /var chainStatusCardHtml = renderChainStatusCard\(overview\);/, "obere Arbeitskarte");
+  assert.match(js, /html \+= renderChainStatusCard\(overview\);/, "Detailbereich");
+  // Je Container genau eine Karte – die obere im Ebene-1-Zusammenbau, die
+  // untere in der Kettensektion des Nachschaubereichs.
+  assert.strictEqual((level1AssemblySource().match(/renderChainStatusCard\(/g) || []).length, 1, "genau eine obere Karte");
+  const chainSection = js.match(/function renderAgentChainSection\(overview\)\s*\{[\s\S]*?\n {2}\}/);
+  assert.ok(chainSection, "renderAgentChainSection muss auffindbar sein");
+  assert.strictEqual((chainSection[0].match(/renderChainStatusCard\(/g) || []).length, 1, "genau eine untere Karte");
 });
 
 check("TP2-UI-9. reine Darstellungsänderung: kein neuer Fetch, kein neuer Zustand, kein neuer Eventlistener, keine neue Route", () => {
@@ -912,14 +935,23 @@ check("V8.10.4-CSS: die Sichtbarkeitsentscheidung kommt ohne neue Stilregel aus"
 // Fachlogik noch Datenquelle, Zustand, Listener oder Route hinzugekommen sind.
 // ---------------------------------------------------------------------------
 
-// Die verbindliche Führungsreihenfolge der Ebene 1, in genau dieser Folge.
+// Die Ebene-1-Bausteine in genau der Folge, in der sie ERZEUGT werden.
+//
+// Bis V8.11.0 war diese Folge zugleich die Ausgabereihenfolge. Seit V8.11.1
+// wird die Kettenstatuskarte weiterhin genau einmal erzeugt, aber an einer von
+// zwei einander ausschließenden Stellen ausgegeben (vor der Handlung bei
+// laufendem Kettenschritt, sonst unverändert danach). Die tatsächliche
+// AUSGABEreihenfolge wird deshalb nicht mehr hier, sondern am echten Renderweg
+// geprüft – vollständig und für beide Fälle in
+// pilot-work-order-command-center-ui.test.js ("V8.11.0-D/F/G/K…" für den
+// Normalfall, "V8.11.1-E/F…" für die Ausnahme).
 const V8110_LEVEL1_ORDER = [
   "renderHead",
   "renderConflictBanner",
   "renderRisks",
+  "renderChainStatusCard",
   "renderDecisionReasonCard",
   "renderPrimaryAction",
-  "renderChainStatusCard",
   "renderFacts",
   "renderDisclaimer",
 ];
@@ -942,14 +974,17 @@ function level1AssemblySource() {
   return source.slice(start, end);
 }
 
-// Kommentarzeilen werden entfernt, damit ausschließlich echte Aufrufe gezählt
-// werden und eine erklärende Prosa die Reihenfolgeprüfung nicht verfälscht.
-function level1RendererCallOrder() {
-  const withoutComments = level1AssemblySource()
+// Kommentarzeilen werden entfernt, damit ausschließlich echter Code geprüft
+// wird und eine erklärende Prosa das Ergebnis nicht verfälscht.
+function level1AssemblyCodeOnly() {
+  return level1AssemblySource()
     .split("\n")
     .filter((line) => !/^\s*\/\//.test(line))
     .join("\n");
-  return (withoutComments.match(/render[A-Za-z]+\(/g) || []).map((entry) => entry.slice(0, -1));
+}
+
+function level1RendererCallOrder() {
+  return (level1AssemblyCodeOnly().match(/render[A-Za-z]+\(/g) || []).map((entry) => entry.slice(0, -1));
 }
 
 check("V8.11.0-A: renderSelectedOrderOutput() enthält weiterhin alle bisherigen Ebene-1-Bausteine", () => {
@@ -975,21 +1010,26 @@ check("V8.11.0-C: kein Renderer wird auf Ebene 1 doppelt aufgerufen", () => {
   });
 });
 
-check("V8.11.0-D/J: die Führungsreihenfolge steht exakt fest – Konflikt vor Handlung, Primärhandlung vor der Faktentabelle", () => {
-  assert.deepStrictEqual(level1RendererCallOrder(), V8110_LEVEL1_ORDER, "die Ebene-1-Reihenfolge muss exakt der Führungsreihenfolge entsprechen");
+check("V8.11.0-D/J: die Führungsreihenfolge steht exakt fest – Konflikt vor Handlung, Primärhandlung vor der Bestandsinformation", () => {
+  assert.deepStrictEqual(level1RendererCallOrder(), V8110_LEVEL1_ORDER, "die Ebene-1-Erzeugungsreihenfolge muss exakt feststehen");
   const calls = level1RendererCallOrder();
   // J. die Konfliktfläche behält die höchste Handlungspriorität: sie steht
   // vor jeder Handlungs- und jeder Bestandsfläche.
   assert.ok(calls.indexOf("renderConflictBanner") < calls.indexOf("renderPrimaryAction"), "der Konflikt steht vor der Primäraktion");
   assert.ok(calls.indexOf("renderConflictBanner") < calls.indexOf("renderFacts"), "der Konflikt steht vor der Faktentabelle");
   assert.ok(calls.indexOf("renderConflictBanner") < calls.indexOf("renderChainStatusCard"), "der Konflikt steht vor der Kettenstatuskarte");
-  // D. die Primärhandlung steht vor der Bestandsinformation.
+  // D. die Primärhandlung steht vor der Bestandsinformation. Das gilt in
+  // beiden Ausgabefällen unverändert, weil die Faktentabelle in beiden Fällen
+  // nach der Handlung ausgegeben wird.
   assert.ok(calls.indexOf("renderPrimaryAction") < calls.indexOf("renderFacts"), "die Primärhandlung steht vor der Faktentabelle");
-  assert.ok(calls.indexOf("renderPrimaryAction") < calls.indexOf("renderChainStatusCard"), "die Auftragshandlung steht vor der Kettenlage");
-  // Bestehende V8.7-Nachbarschaft: Grund verstehen → Aktion sehen.
+  // Bestehende V8.7-Nachbarschaft: Grund verstehen → Aktion sehen. Sie gilt
+  // ausnahmslos; die V8.11.1-Ausnahme schiebt die Kettenkarte ausdrücklich
+  // VOR die Grundkarte und niemals zwischen Grundkarte und Handlung.
   assert.strictEqual(calls.indexOf("renderPrimaryAction") - calls.indexOf("renderDecisionReasonCard"), 1, "die Grundkarte bleibt unmittelbar vor der Primäraktion");
-  // Bestehende Invariante: Grenzen lesen, bevor gehandelt wird.
+  // Bestehende Sicherheitsinvariante: Grenzen lesen, bevor gehandelt wird –
+  // in jedem Fall, auch in der Ausnahme.
   assert.ok(calls.indexOf("renderRisks") < calls.indexOf("renderPrimaryAction"), "Risiken/Grenzen bleiben vor der Primäraktion");
+  assert.ok(calls.indexOf("renderRisks") < calls.indexOf("renderChainStatusCard"), "auch in der Ausnahme werden die Grenzen zuerst gelesen");
   // Der Disclaimer bleibt der Abschluss der Ebene 1.
   assert.strictEqual(calls[calls.length - 1], "renderDisclaimer", "der Hinweis bleibt zuletzt");
 });
@@ -1082,6 +1122,116 @@ check("V8.11.0-T: P4 verändert keine weitere visuelle Buttoneigenschaft", () =>
   // unangetastet.
   assert.match(css, /button:focus-visible,\ninput:focus-visible,\nselect:focus-visible,\ntextarea:focus-visible \{\n {2}outline: none;\n {2}box-shadow: var\(--focus\);\n\}/);
   assert.match(css, /button,\ninput,\nselect,\ntextarea \{\n {2}font: inherit;\n\}/);
+});
+
+// ---------------------------------------------------------------------------
+// V8.11.1 ("Auftragsebene und Agentenkette im laufenden Auftrag
+// widerspruchsfrei führen"). Zwei eng begrenzte Eingriffe:
+//
+// F1 – läuft in IN_EXECUTION tatsächlich ein Kettenschritt (oder ist er lokal
+//      bereits als laufend angenommen), rückt die bestehende Kettenstatuskarte
+//      vor die Primäraktion. Ausschließlich Reihenfolge.
+// F2 – die bestehende Nachschaufläche nennt die Agentenkette in ihrer
+//      Beschriftung.
+//
+// Die tatsächliche Ausgabereihenfolge beider Fälle wird am echten Renderweg in
+// pilot-work-order-command-center-ui.test.js geprüft; hier steht ausschließlich
+// das, was statisch am Quelltext belegbar ist.
+// ---------------------------------------------------------------------------
+
+check("V8.11.1-M: die Ausnahme führt keinen neuen Zustand ein und nutzt ausschließlich die bestehenden Ableitungen", () => {
+  const fnMatch = js.match(/function isChainStepRunningOrAssumedRunning\(overview\)\s*\{[\s\S]*?\n {2}\}/);
+  assert.ok(fnMatch, "die Erkennungsfunktion muss existieren");
+  const fn = fnMatch[0];
+  // Ausschließlich die beiden Ableitungen, die die Kettenstatuskarte selbst
+  // schon benutzt – keine zweite Kettenzustandslogik.
+  assert.match(fn, /hasServerRunningState\(overview\)/, "der serverseitig bestätigte Lauf stammt aus der bestehenden Ableitung");
+  assert.match(fn, /hasLocalStartBridgeForOrder\(overview\.order\.id\)/, "der lokal angenommene Start stammt aus der bestehenden Ableitung");
+  assert.match(fn, /overview\.status !== "IN_EXECUTION"/, "die Ausnahme ist auf IN_EXECUTION begrenzt");
+  // M. kein neuer Zustand, N. kein neuer Fetch, O. kein neuer Listener,
+  // P. keine neue Route.
+  assert.doesNotMatch(fn, /state\.[A-Za-z]+ =[^=]/, "die Erkennung schreibt keinen Zustand");
+  assert.doesNotMatch(fn, /fetch\(|fetchJson\(|postAction\(/, "die Erkennung lädt nichts nach");
+  assert.doesNotMatch(fn, /addEventListener/, "die Erkennung registriert keinen Listener");
+  assert.doesNotMatch(fn, /\/api\//, "die Erkennung kennt keine Route");
+  // Sie liest ausschließlich bereits vorhandene Overview-Felder.
+  assert.doesNotMatch(fn, /agentChains|agentExecutionRuns|chainStatus|stepStatus/, "die Erkennung leitet den Kettenzustand nicht selbst ab");
+  // Die beiden benutzten Ableitungen bleiben unverändert vorhanden.
+  assert.ok(js.includes("function hasServerRunningState(overview) {"));
+  assert.ok(js.includes("function hasLocalStartBridgeForOrder(orderId) {"));
+  // Die Erkennung wird ausschließlich für die Reihenfolge verwendet – genau
+  // eine Aufrufstelle, und die liegt im Ebene-1-Zusammenbau.
+  assert.strictEqual((js.match(/isChainStepRunningOrAssumedRunning\(/g) || []).length, 2, "eine Definition und genau eine Aufrufstelle");
+  assert.match(level1AssemblySource(), /var chainStepActive = isChainStepRunningOrAssumedRunning\(overview\);/);
+});
+
+check("V8.11.1-K/L: die Ausnahme ändert die Bedienbarkeit der Primäraktion nicht", () => {
+  // K./L. Die Reihenfolgeentscheidung darf nirgends in die Knopferzeugung
+  // hineinwirken: renderPrimaryAction() kennt die Ausnahme gar nicht.
+  const primaryFn = js.match(/function renderPrimaryAction\(overview\)\s*\{[\s\S]*?\n {2}\}/);
+  assert.ok(primaryFn, "renderPrimaryAction muss auffindbar sein");
+  assert.doesNotMatch(primaryFn[0], /isChainStepRunningOrAssumedRunning|chainStepActive/, "die Primäraktion kennt die Reihenfolgeausnahme nicht");
+  assert.doesNotMatch(primaryFn[0], /hasServerRunningState|hasLocalStartBridgeForOrder/, "die Primäraktion wertet keinen Kettenlaufzustand aus");
+  // Die bestehende, einzige disabled-Bedingung der Primäraktion bleibt
+  // unverändert genau der laufende eigene Request.
+  assert.match(primaryFn[0], /var disabledAttr = state\.actionInFlight \? " disabled" : "";/, "die disabled-Bedingung bleibt unverändert");
+  assert.strictEqual((primaryFn[0].match(/disabledAttr = /g) || []).length, 1, "es kommt keine zweite disabled-Bedingung hinzu");
+  // Der Zusammenbau selbst deaktiviert, versteckt oder ersetzt nichts.
+  const assembly = level1AssemblyCodeOnly();
+  assert.doesNotMatch(assembly, /disabled/, "der Zusammenbau deaktiviert nichts");
+  assert.doesNotMatch(assembly, /display\s*:|hidden|aria-disabled/, "der Zusammenbau versteckt nichts");
+});
+
+check("V8.11.1-J: die Aktionsfehlermeldung bleibt in beiden Fällen unmittelbar bei der Primäraktion", () => {
+  const assembly = level1AssemblySource();
+  // Die Fehlermeldung folgt direkt auf die Primäraktion und steht damit VOR
+  // der nachgelagerten Kettenkarte des Normalfalls.
+  assert.match(
+    assembly,
+    /html \+= renderDecisionReasonCard\(overview\) \+ renderPrimaryAction\(overview\);\s*(?:\n\s*\/\/[^\n]*)*\s*\n\s*if \(state\.actionError\) \{\s*\n\s*html \+= '<p class="pilot-work-order-action-error">' \+ escapeHtml\(state\.actionError\) \+ "<\/p>";\s*\n\s*\}/,
+    "die Fehlermeldung folgt unverändert direkt auf die Primäraktion",
+  );
+  const errorIndex = assembly.indexOf("pilot-work-order-action-error");
+  const lateCardIndex = assembly.indexOf("if (!chainStepActive)");
+  assert.ok(errorIndex >= 0 && lateCardIndex > errorIndex, "die nachgelagerte Kettenkarte trennt die Meldung nicht von ihrer Aktion");
+});
+
+check("V8.11.1-T: die Karteninvariante bleibt unverändert – genau eine Erzeugung, zwei einander ausschließende Ausgabestellen", () => {
+  const assembly = level1AssemblySource();
+  assert.strictEqual((assembly.match(/renderChainStatusCard\(/g) || []).length, 1, "die Kettenstatuskarte wird genau einmal erzeugt");
+  assert.strictEqual((assembly.match(/html \+= chainStatusCardHtml;/g) || []).length, 2, "sie wird an genau zwei Stellen ausgegeben");
+  assert.match(assembly, /if \(chainStepActive\) \{/, "die frühe Ausgabe hängt an der Ausnahmebedingung");
+  assert.match(assembly, /if \(!chainStepActive\) \{/, "die späte Ausgabe hängt an deren Negation");
+  // Die beiden Ausgabestellen schließen einander aus – dieselbe Bedingung,
+  // einmal bejaht, einmal verneint. Damit kann die Karte niemals doppelt und
+  // niemals gar nicht erscheinen.
+  assert.strictEqual((assembly.match(/chainStepActive/g) || []).length, 3, "genau eine Zuweisung und genau zwei einander ausschließende Prüfungen");
+});
+
+check("V8.11.1-Q/R/S: die bestehende Nachschaufläche nennt die Agentenkette und behält alle bisherigen Inhalte", () => {
+  const summaryMatch = html.match(/<details class="pilot-work-order-details">[\s\S]*?<summary>([^<]*)<\/summary>/);
+  assert.ok(summaryMatch, "die bestehende Nachschaufläche muss auffindbar sein");
+  const summary = summaryMatch[1];
+  // Q. die Agentenkette ist benannt.
+  assert.ok(summary.includes("Agentenkette"), "die Beschriftung muss die Agentenkette ausdrücklich nennen");
+  // R. sämtliche bisher genannten Inhalte bleiben erhalten.
+  ["Agentenzuordnung", "Qualitätskriterien", "Werkzeuge", "Freigaben", "Rollenübergaben"].forEach((entry) => {
+    assert.ok(summary.includes(entry), `der bisherige Inhalt „${entry}“ bleibt in der Beschriftung erhalten`);
+  });
+  // S. keine neue Nachschaufläche, kein Link, kein Auto-Open, kein Anker.
+  assert.strictEqual((html.match(/<div id="pilot-work-order-diagnostics-output"/g) || []).length, 1, "es gibt weiterhin genau einen Nachschaubereich");
+  assert.doesNotMatch(html, /<details class="pilot-work-order-details" open/, "der Bereich bleibt standardmäßig geschlossen");
+  assert.ok(!summary.includes("<a "), "die Beschriftung bekommt keinen Link");
+  assert.doesNotMatch(js, /scrollIntoView|location\.hash\s*=/, "es gibt keinen Scroll- oder Ankerautomatismus");
+  assert.doesNotMatch(js, /\.open = true/, "es gibt kein automatisches Aufklappen");
+});
+
+check("V8.11.1: die bestehenden „unten“-Verweise der Kettenkarte bleiben unverändert", () => {
+  // Bewusst kleinster Scope: die neue Beschriftung macht den Zielbereich
+  // auffindbar, die vorhandenen Formulierungen bleiben deshalb unangetastet.
+  assert.ok(js.includes('nextStepText = "unten den vollständigen Kettenstand nachlesen.";'));
+  assert.ok(js.includes('nextStepText = "unten eine neue Agentenkette vorbereiten.";'));
+  assert.ok(js.includes('var nextStepText = "Oben arbeiten. Unten nachschauen.";'));
 });
 
 console.log(`pilot-work-order-ui.test.js: ${passed} Prüfpunkte erfolgreich`);

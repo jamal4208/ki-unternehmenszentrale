@@ -3746,10 +3746,331 @@ async function run() {
     assert.strictEqual(first, second, "die Reihenfolge darf zwischen zwei Renderdurchläufen nicht schwanken");
   });
 
+  // -------------------------------------------------------------------
+  // V8.11.1 – "Auftragsebene und Agentenkette im laufenden Auftrag
+  // widerspruchsfrei führen".
+  //
+  // Läuft in IN_EXECUTION tatsächlich ein Kettenschritt (oder ist er lokal
+  // bereits als laufend angenommen), sagt die Kettenstatuskarte "Bitte nicht
+  // erneut klicken." bzw. "auf den Abschluss dieses Schritts warten" – die
+  // aktuellere Aussage. Sie rückt deshalb VOR die Primäraktion, damit der
+  // Wartehinweis gelesen ist, bevor der weiterhin fachlich erlaubte
+  // Auftragsknopf erscheint.
+  //
+  // Ausschließlich Reihenfolge: der Knopf bleibt unverändert vorhanden und
+  // unverändert bedienbar. In jeder anderen Lage bleibt die
+  // V8.11.0-Reihenfolge unverändert. Geprüft wird durchgängig am echten
+  // Renderweg.
+  // -------------------------------------------------------------------
+
+  // Kettenfixturen aus bereits vorhandenen Feldern – exakt die Form, die
+  // pilot-work-order-routes.js#withAgentChains liefert.
+  function v8111Chain(chainStatus, steps) {
+    return [{ id: "chain-v8111", chainStatus, steps }];
+  }
+  function v8111Step(stepNumber, stepStatus, extra) {
+    return Object.assign({ stepNumber, stepStatus, approvalStatus: "NOT_REQUESTED", executionRunId: null }, extra || {});
+  }
+
+  // Genau die Primäraktionsfläche, unabhängig davon, was vor oder nach ihr
+  // steht – nur so lassen sich Normalfall und Ausnahme direkt vergleichen.
+  function v8111PrimaryActionBlock(html) {
+    const start = v8110Position(html, "primaryAction");
+    assert.ok(start >= 0, "die Primäraktionsfläche muss vorhanden sein");
+    const end = html.indexOf("</div>", start);
+    assert.ok(end > start, "die Primäraktionsfläche muss abgeschlossen sein");
+    return html.slice(start, end + "</div>".length);
+  }
+
+  // Der Normalfall (V8.11.0) und die Ausnahme (V8.11.1) werden mit exakt
+  // derselben Messung geprüft – nur die erwartete Reihenfolge unterscheidet
+  // sich. Beides sind harte, vollständige Reihenfolgeaussagen.
+  function v8111AssertGuidanceOrder(label, expectation) {
+    const html = domElements["pilot-work-order-output"].innerHTML;
+    const at = (key) => v8110Position(html, key);
+    ["head", "risks", "primaryAction", "chainCard", "facts", "disclaimer"].forEach((key) => {
+      assert.ok(at(key) >= 0, `${label}: der Baustein ${key} muss sichtbar bleiben`);
+      assert.strictEqual(v8110CountOccurrences(html, V8110_MARKERS[key]), 1, `${label}: ${key} darf genau einmal erscheinen`);
+    });
+    assert.strictEqual(at("head"), 0, `${label}: der Auftragskopf steht zuerst`);
+    // Sicherheitsinvariante, in JEDEM Fall: Grenzen lesen, bevor gehandelt wird.
+    assert.ok(at("risks") < at("primaryAction"), `${label}: die Grenzen stehen vor der Handlung`);
+    assert.ok(at("facts") < at("disclaimer"), `${label}: der Hinweis bleibt am Ende`);
+    assert.ok(at("primaryAction") < at("facts"), `${label}: die Handlung steht vor der Bestandsinformation`);
+    if (expectation === "chain-before-action") {
+      assert.ok(at("chainCard") < at("primaryAction"), `${label}: die Kettenlage steht vor der Auftragshandlung`);
+      assert.ok(at("risks") < at("chainCard"), `${label}: auch in der Ausnahme werden zuerst die Grenzen gelesen`);
+    } else {
+      assert.ok(at("primaryAction") < at("chainCard"), `${label}: die Auftragshandlung steht vor der Kettenlage`);
+      assert.ok(at("chainCard") < at("facts"), `${label}: die Kettenlage steht vor der Bestandsinformation`);
+    }
+    return html;
+  }
+
+  await check("V8.11.1-A: IN_EXECUTION ohne jede Kette behält die V8.11.0-Reihenfolge unverändert", async () => {
+    await v8110SelectOrder({ status: "IN_EXECUTION", statusLabel: STATUS_LABELS.IN_EXECUTION, agentChains: [] });
+    v8111AssertGuidanceOrder("ohne Kette", "action-before-chain");
+  });
+
+  await check("V8.11.1-B: eine vorbereitete, nie gestartete Kette ändert die Reihenfolge nicht", async () => {
+    await v8110SelectOrder({
+      status: "IN_EXECUTION",
+      statusLabel: STATUS_LABELS.IN_EXECUTION,
+      agentChains: v8111Chain("PREPARED", [v8111Step(1, "PENDING"), v8111Step(2, "PENDING"), v8111Step(3, "PENDING")]),
+    });
+    const html = v8111AssertGuidanceOrder("vorbereitete Kette", "action-before-chain");
+    assert.ok(html.includes("Es läuft aktuell kein Agent.") || html.includes("wartet auf Freigabe"), "die Karte meldet keinen Lauf");
+  });
+
+  await check("V8.11.1-C: ein auf Freigabe wartender Kettenschritt ändert die Reihenfolge nicht", async () => {
+    await v8110SelectOrder({
+      status: "IN_EXECUTION",
+      statusLabel: STATUS_LABELS.IN_EXECUTION,
+      agentChains: v8111Chain("WAITING_FOR_RESEARCH_APPROVAL", [
+        v8111Step(1, "PENDING", { approvalStatus: "REQUESTED" }),
+        v8111Step(2, "PENDING"),
+        v8111Step(3, "PENDING"),
+      ]),
+    });
+    const html = v8111AssertGuidanceOrder("wartender Schritt", "action-before-chain");
+    assert.ok(html.includes("wartet auf Freigabe"), "die bestehende Warteaussage bleibt unverändert");
+  });
+
+  await check("V8.11.1-D: ein freigegebener, aber noch nicht als laufend gemeldeter Schritt bleibt im Normalfall (bestehende Semantik)", async () => {
+    // Bewusst dokumentiert: die Ausnahme greift erst, wenn die bestehende
+    // Oberfläche selbst einen Lauf annimmt – also bei einem serverseitig
+    // bestätigten RUNNING oder bei einer lokal angenommenen Startanforderung.
+    // Eine erteilte Freigabe allein ist noch kein Lauf; bis zum Startklick
+    // bleibt die Auftragshandlung die aktuellere Aussage.
+    await v8110SelectOrder({
+      status: "IN_EXECUTION",
+      statusLabel: STATUS_LABELS.IN_EXECUTION,
+      agentChains: v8111Chain("WAITING_FOR_RESEARCH_APPROVAL", [
+        v8111Step(1, "PENDING", { approvalStatus: "GRANTED" }),
+        v8111Step(2, "PENDING"),
+        v8111Step(3, "PENDING"),
+      ]),
+    });
+    v8111AssertGuidanceOrder("freigegeben, nicht gestartet", "action-before-chain");
+    assert.strictEqual(ui.getState().chainStartBridge, null, "ohne Startklick existiert kein lokal angenommener Lauf");
+  });
+
+  await check("V8.11.1-E: ein serverseitig bestätigter laufender Kettenschritt stellt die Kettenlage vor die Auftragshandlung", async () => {
+    await v8110SelectOrder({
+      status: "IN_EXECUTION",
+      statusLabel: STATUS_LABELS.IN_EXECUTION,
+      agentChains: v8111Chain("RESEARCH_RUNNING", [
+        v8111Step(1, "RUNNING", { approvalStatus: "GRANTED", executionRunId: "run-v8111-1" }),
+        v8111Step(2, "PENDING"),
+        v8111Step(3, "PENDING"),
+      ]),
+    });
+    const html = v8111AssertGuidanceOrder("laufender Schritt", "chain-before-action");
+    // Der Nutzer liest den Wartehinweis vor dem Knopf – das ist der Zweck.
+    const waitIndex = html.indexOf("Bitte nicht erneut klicken.");
+    const buttonIndex = html.indexOf('<div class="pilot-work-order-primary-action">');
+    assert.ok(waitIndex >= 0, "der bestehende Wartehinweis muss sichtbar sein");
+    assert.ok(waitIndex < buttonIndex, "der Wartehinweis steht vor der Auftragshandlung");
+    assert.ok(html.includes("auf den Abschluss dieses Schritts warten."), "die bestehende Kettenempfehlung bleibt unverändert");
+    assert.ok(html.includes("Schritt 1 wird gerade ausgeführt."), "die bestehende Laufaussage bleibt unverändert");
+  });
+
+  await check("V8.11.1-E2: auch ein laufender Agentenlauf ohne laufenden Kettenschritt gilt als Lauf (bestehende Ableitung)", async () => {
+    await v8110SelectOrder({
+      status: "IN_EXECUTION",
+      statusLabel: STATUS_LABELS.IN_EXECUTION,
+      agentChains: v8111Chain("RESEARCH_RUNNING", [v8111Step(1, "PENDING"), v8111Step(2, "PENDING"), v8111Step(3, "PENDING")]),
+    });
+    v8111AssertGuidanceOrder("laufende Kette über chainStatus", "chain-before-action");
+  });
+
+  await check("V8.11.1-F: ein lokal angenommener Startzustand hat dieselbe Führungspriorität", async () => {
+    const orderId = await v8110SelectOrder({
+      status: "IN_EXECUTION",
+      statusLabel: STATUS_LABELS.IN_EXECUTION,
+      agentChains: v8111Chain("WAITING_FOR_RESEARCH_APPROVAL", [
+        v8111Step(1, "PENDING", { approvalStatus: "REQUESTED" }),
+        v8111Step(2, "PENDING"),
+        v8111Step(3, "PENDING"),
+      ]),
+    });
+    v8111AssertGuidanceOrder("vor dem Start", "action-before-chain");
+    // Exakt der bestehende lokale Zwischenzustand zwischen Startklick und
+    // erster bestätigter Serverantwort (state.chainStartBridge) – dieselbe
+    // Form, die startChainStep() setzt.
+    ui.getState().chainStartBridge = {
+      pilotOrderId: orderId,
+      chainId: "chain-v8111",
+      chainStep: 1,
+      acceptedAtMs: Date.now(),
+      connectionInterrupted: false,
+    };
+    ui.render();
+    const html = v8111AssertGuidanceOrder("lokal angenommener Start", "chain-before-action");
+    assert.ok(html.includes("Start wurde angenommen."), "die bestehende Startaussage bleibt unverändert");
+    assert.ok(html.indexOf("Bitte nicht erneut klicken.") < html.indexOf('<div class="pilot-work-order-primary-action">'));
+    ui.getState().chainStartBridge = null;
+    ui.render();
+    v8111AssertGuidanceOrder("nach Verwerfen des lokalen Starts", "action-before-chain");
+  });
+
+  await check("V8.11.1-G: nach Abschluss des Schritts greift die allgemeine Reihenfolge wieder", async () => {
+    await v8110SelectOrder({
+      status: "IN_EXECUTION",
+      statusLabel: STATUS_LABELS.IN_EXECUTION,
+      agentChains: v8111Chain("WAITING_FOR_DOCUMENTATION_APPROVAL", [
+        v8111Step(1, "SUCCEEDED", { approvalStatus: "GRANTED", executionRunId: "run-v8111-1" }),
+        v8111Step(2, "PENDING"),
+        v8111Step(3, "PENDING"),
+      ]),
+    });
+    const html = v8111AssertGuidanceOrder("abgeschlossener Schritt", "action-before-chain");
+    assert.ok(html.includes("Schritt 1 erfolgreich abgeschlossen."), "die bestehende Abschlussaussage bleibt unverändert");
+  });
+
+  await check("V8.11.1-H: bei einem Kettenfehler bleibt die bestehende Fehlerpriorität unverändert", async () => {
+    await v8110SelectOrder({
+      status: "IN_EXECUTION",
+      statusLabel: STATUS_LABELS.IN_EXECUTION,
+      agentChains: v8111Chain("FAILED", [
+        v8111Step(1, "FAILED", { approvalStatus: "GRANTED", executionRunId: "run-v8111-1" }),
+        v8111Step(2, "PENDING"),
+        v8111Step(3, "PENDING"),
+      ]),
+    });
+    const html = v8111AssertGuidanceOrder("fehlgeschlagene Kette", "action-before-chain");
+    assert.ok(html.includes("pilot-chain-status-card--failure"), "die bestehende Fehlerdarstellung bleibt erhalten");
+  });
+
+  await check("V8.11.1: die Ausnahme greift ausschließlich in IN_EXECUTION", async () => {
+    // Derselbe laufende Kettenzustand in jedem anderen Status ändert nichts.
+    for (const status of V8110_STATUSES.filter((entry) => entry !== "IN_EXECUTION")) {
+      // eslint-disable-next-line no-await-in-loop
+      await v8110SelectOrder({
+        status,
+        statusLabel: STATUS_LABELS[status],
+        agentChains: v8111Chain("RESEARCH_RUNNING", [
+          v8111Step(1, "RUNNING", { approvalStatus: "GRANTED", executionRunId: "run-v8111-1" }),
+          v8111Step(2, "PENDING"),
+          v8111Step(3, "PENDING"),
+        ]),
+      });
+      v8111AssertGuidanceOrder(`Status ${status}`, "action-before-chain");
+    }
+  });
+
+  await check("V8.11.1-K/L: die Auftragshandlung bleibt im laufenden Zustand fachlich unverändert bedienbar", async () => {
+    const running = v8111Chain("RESEARCH_RUNNING", [
+      v8111Step(1, "RUNNING", { approvalStatus: "GRANTED", executionRunId: "run-v8111-1" }),
+      v8111Step(2, "PENDING"),
+      v8111Step(3, "PENDING"),
+    ]);
+    await v8110SelectOrder({ status: "IN_EXECUTION", statusLabel: STATUS_LABELS.IN_EXECUTION, agentChains: [] });
+    const idleAction = v8111PrimaryActionBlock(domElements["pilot-work-order-output"].innerHTML);
+    await v8110SelectOrder({ status: "IN_EXECUTION", statusLabel: STATUS_LABELS.IN_EXECUTION, agentChains: running });
+    const runningHtml = domElements["pilot-work-order-output"].innerHTML;
+    const runningAction = v8111PrimaryActionBlock(runningHtml);
+    // K. exakt derselbe Knopf, exakt dasselbe data-action, exakt derselbe Text.
+    assert.strictEqual(runningAction, idleAction, "die Primäraktionsfläche ist im laufenden Zustand identisch");
+    assert.ok(runningAction.includes('data-action="prepare-handoff-draft"'), "der bestehende Auftragsknopf bleibt vorhanden");
+    // L. kein neuer disabled-Zustand wegen laufender Kette.
+    assert.doesNotMatch(runningAction, /disabled/, "die laufende Kette deaktiviert die Auftragshandlung nicht");
+    assert.doesNotMatch(runningAction, /aria-disabled|hidden/, "die laufende Kette versteckt die Auftragshandlung nicht");
+  });
+
+  await check("V8.11.1-I/J: Risiken bleiben vor der Handlung und die Aktionsfehlermeldung bleibt bei ihr – auch im laufenden Zustand", async () => {
+    const orderId = await v8110SelectOrder({
+      status: "IN_EXECUTION",
+      statusLabel: STATUS_LABELS.IN_EXECUTION,
+      agentChains: v8111Chain("RESEARCH_RUNNING", [
+        v8111Step(1, "RUNNING", { approvalStatus: "GRANTED", executionRunId: "run-v8111-1" }),
+        v8111Step(2, "PENDING"),
+        v8111Step(3, "PENDING"),
+      ]),
+    });
+    // Geprüft wird hier ausschließlich die POSITION der Meldung im laufenden
+    // Zustand; dass sie überhaupt entsteht, deckt der bestehende Prüfpunkt zur
+    // abgelehnten Aktion ab. Der Zustand wird deshalb direkt gesetzt – dasselbe
+    // etablierte Muster, das diese Datei bereits für chainStartBridge nutzt.
+    // Über die Statusübergänge des Fake-Backends ist eine Ablehnung aus
+    // IN_EXECUTION heraus nicht erreichbar: sie wäre stets ein 409 und damit
+    // die Konfliktfläche, nicht die Aktionsfehlermeldung.
+    ui.getState().actionError = "Die Aktion wurde abgelehnt (Testfixtur).";
+    ui.render();
+    const html = domElements["pilot-work-order-output"].innerHTML;
+    const errorIndex = html.indexOf('<p class="pilot-work-order-action-error">');
+    const actionIndex = v8110Position(html, "primaryAction");
+    const chainIndex = v8110Position(html, "chainCard");
+    const risksIndex = v8110Position(html, "risks");
+    assert.ok(errorIndex >= 0, "die Fehlermeldung muss sichtbar sein");
+    // J. Die Meldung folgt unmittelbar auf ihre Aktion und wird nicht durch
+    // die vorgezogene Kettenkarte von ihr getrennt.
+    assert.ok(actionIndex < errorIndex, "die Meldung steht hinter ihrer Aktion");
+    assert.ok(chainIndex < actionIndex, "die Kettenkarte steht davor, nicht dazwischen");
+    // I. Risiken bleiben vor der Handlung.
+    assert.ok(risksIndex < actionIndex, "die Grenzen bleiben vor der Handlung");
+    assert.strictEqual(v8110CountOccurrences(html, '<p class="pilot-work-order-action-error">'), 1, "genau eine Meldung");
+    // Zwischen der Handlung und ihrer Meldung steht nichts.
+    const between = html.slice(v8111PrimaryActionBlock(html).length + actionIndex, errorIndex);
+    assert.strictEqual(between.trim(), "", "kein Baustein trennt die Meldung von ihrer Aktion");
+    ui.getState().actionError = null;
+    ui.render();
+  });
+
+  await check("V8.11.1-M/N/O/P: die Ausnahme bringt keinen neuen Zustand, keinen Fetch, keinen Listener und keine Route", async () => {
+    const stateKeysBefore = Object.keys(ui.getState()).sort().join(",");
+    await v8110SelectOrder({
+      status: "IN_EXECUTION",
+      statusLabel: STATUS_LABELS.IN_EXECUTION,
+      agentChains: v8111Chain("RESEARCH_RUNNING", [
+        v8111Step(1, "RUNNING", { approvalStatus: "GRANTED", executionRunId: "run-v8111-1" }),
+        v8111Step(2, "PENDING"),
+        v8111Step(3, "PENDING"),
+      ]),
+    });
+    assert.strictEqual(Object.keys(ui.getState()).sort().join(","), stateKeysBefore, "es entsteht kein neuer Zustandsschlüssel");
+    fetchCalls.length = 0;
+    const first = domElements["pilot-work-order-output"].innerHTML;
+    ui.render();
+    ui.render();
+    const second = domElements["pilot-work-order-output"].innerHTML;
+    assert.deepStrictEqual(fetchCalls, [], "die Reihenfolgeentscheidung lädt nichts nach");
+    assert.strictEqual(first, second, "die Ausnahme ist zustandsfrei und stabil über mehrere Renderdurchläufe");
+  });
+
+  await check("V8.11.1-T: in beiden Fällen erscheint genau eine Kettenstatuskarte je Ausgabecontainer", async () => {
+    const running = v8111Chain("RESEARCH_RUNNING", [
+      v8111Step(1, "RUNNING", { approvalStatus: "GRANTED", executionRunId: "run-v8111-1" }),
+      v8111Step(2, "PENDING"),
+      v8111Step(3, "PENDING"),
+    ]);
+    for (const chains of [[], running]) {
+      // eslint-disable-next-line no-await-in-loop
+      await v8110SelectOrder({ status: "IN_EXECUTION", statusLabel: STATUS_LABELS.IN_EXECUTION, agentChains: chains });
+      const html = domElements["pilot-work-order-output"].innerHTML;
+      const diagnostics = domElements["pilot-work-order-diagnostics-output"].innerHTML;
+      assert.strictEqual(v8110CountOccurrences(html, V8110_MARKERS.chainCard), 1, "genau eine obere Kettenstatuskarte");
+      assert.strictEqual(v8110CountOccurrences(diagnostics, V8110_MARKERS.chainCard), 1, "genau eine untere Kettenstatuskarte");
+    }
+  });
+
   console.log(`pilot-work-order-command-center-ui.test.js: ${passed} Prüfpunkte erfolgreich`);
 }
 
-run().catch((error) => {
-  console.error("pilot-work-order-command-center-ui.test.js FEHLGESCHLAGEN:", error);
-  process.exitCode = 1;
-});
+// Diese Testdatei besitzt keine Zeitgeber-Fixtur (anders als
+// pilot-agent-execution-chain-ui.test.js). Eine Fixtur mit laufendem
+// Kettenschritt startet deshalb das bestehende, kontrollierte Status-Polling
+// mit einem echten setTimeout – dessen Timer hielte den Prozess nach dem
+// letzten Prüfpunkt offen. Der Poller wird am Ende in beiden Fällen angehalten;
+// das ist reine Testabschaltung und ändert nichts am Produktivverhalten.
+function stopPollingAfterTests() {
+  ui.stopStatusPolling("test-teardown");
+}
+
+run()
+  .then(stopPollingAfterTests)
+  .catch((error) => {
+    stopPollingAfterTests();
+    console.error("pilot-work-order-command-center-ui.test.js FEHLGESCHLAGEN:", error);
+    process.exitCode = 1;
+  });

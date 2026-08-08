@@ -2424,6 +2424,28 @@
     return true;
   }
 
+  // V8.11.1 ("Auftragsebene und Agentenkette im laufenden Auftrag
+  // widerspruchsfrei führen"): wahr genau dann, wenn renderChainStatusCard()
+  // unten einen seiner beiden GEGENWARTSZWEIGE nimmt – den serverseitig
+  // bestätigten Lauf (hasServerRunningState) oder die lokal bereits
+  // angenommene Startanforderung (hasLocalStartBridgeForOrder). Genau in
+  // dieser Lage sagt die Karte "Bitte nicht erneut klicken." bzw. "auf den
+  // Abschluss dieses Schritts warten", während die Auftragsebene weiterhin
+  // eine fachlich erlaubte Handlung anbietet.
+  //
+  // Es werden ausschließlich die beiden Ableitungen verwendet, die die Karte
+  // selbst schon benutzt (siehe hasRunning/bridge unten): keine zweite
+  // Kettenzustandslogik, kein neuer Zustand, keine neue Serverangabe.
+  //
+  // Zusätzlich auf IN_EXECUTION begrenzt, weil nur dort der Auftragsebene
+  // überhaupt eine Handlung offensteht, die mit einem laufenden Kettenschritt
+  // konkurrieren kann.
+  function isChainStepRunningOrAssumedRunning(overview) {
+    if (!overview || !overview.order) return false;
+    if (overview.status !== "IN_EXECUTION") return false;
+    return hasServerRunningState(overview) || hasLocalStartBridgeForOrder(overview.order.id);
+  }
+
   function renderChainStatusCard(overview) {
     if (!overview || !overview.order) return "";
     var orderId = overview.order.id;
@@ -4462,21 +4484,42 @@
         // Risiken/Grenzen bleiben bewusst VOR der Primäraktion: Jamal soll
         // die Grenzen eines Auftrags gelesen haben, bevor er handelt. Diese
         // Reihenfolge ist eine bestehende, testgeprüfte Invariante und darf
-        // auch bei künftigen Umsortierungen nicht gedreht werden.
+        // auch bei künftigen Umsortierungen nicht gedreht werden – auch nicht
+        // in der V8.11.1-Ausnahme unten.
         var html =
           renderHead(overview) +
           renderConflictBanner(state.conflict) +
-          renderRisks(overview) +
-          renderDecisionReasonCard(overview) +
-          renderPrimaryAction(overview);
+          renderRisks(overview);
+        // V8.11.1: die eine, eng begrenzte Ausnahme von dieser Reihenfolge.
+        // Läuft in IN_EXECUTION tatsächlich ein Kettenschritt (oder ist er
+        // lokal bereits als laufend angenommen), dann ist die Kettenkarte die
+        // AKTUELLERE Aussage: sie sagt, dass gerade gearbeitet wird und nicht
+        // erneut geklickt werden soll. Sie rückt deshalb vor die Handlung,
+        // damit der Wartehinweis GELESEN ist, bevor der weiterhin fachlich
+        // erlaubte Auftragsknopf erscheint.
+        //
+        // Ausschließlich Reihenfolge: der Knopf bleibt unverändert vorhanden,
+        // unverändert bedienbar und behält seine bestehenden
+        // disabled-Bedingungen. Es wird nichts deaktiviert, versteckt oder
+        // abgestuft. In jeder anderen Lage bleibt die V8.11.0-Reihenfolge
+        // unverändert – die Karte wird dann wie bisher nach der Handlung
+        // ausgegeben. Die Karte wird in beiden Fällen genau einmal gerendert.
+        var chainStepActive = isChainStepRunningOrAssumedRunning(overview);
+        var chainStatusCardHtml = renderChainStatusCard(overview);
+        if (chainStepActive) {
+          html += chainStatusCardHtml;
+        }
+        html += renderDecisionReasonCard(overview) + renderPrimaryAction(overview);
         // Die Fehlermeldung einer abgelehnten Aktion bleibt unmittelbar bei
-        // der Aktion, zu der sie gehört – sie wandert mit ihr nach vorn.
+        // der Aktion, zu der sie gehört – sie wandert mit ihr, auch in der
+        // Ausnahme oben.
         if (state.actionError) {
           html += '<p class="pilot-work-order-action-error">' + escapeHtml(state.actionError) + "</p>";
         }
-        html +=
-          renderChainStatusCard(overview) +
-          renderFacts(overview);
+        if (!chainStepActive) {
+          html += chainStatusCardHtml;
+        }
+        html += renderFacts(overview);
         html += renderDisclaimer(overview);
         output.innerHTML = html;
       } else {

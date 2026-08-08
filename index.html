@@ -232,7 +232,16 @@
             -->
             <a href="#chef-today-card" id="pilot-work-order-back-to-today" class="pilot-work-order-back-to-today">Zurück zu Heute</a>
             <details class="pilot-work-order-details">
-              <summary>Agentenzuordnung, Qualitätskriterien, Werkzeuge, Freigaben, Rollenübergaben</summary>
+              <!--
+                V8.11.1 – F2: die Kettenstatuskarte verweist mehrfach auf
+                "unten", wenn die Agentenkette hier bedient oder nachgelesen
+                werden soll. Die Beschriftung nennt sie deshalb ausdrücklich.
+                Reine Beschriftung: keine neue Fläche, kein Link, kein
+                Auto-Open, kein Scroll, kein Anker. Der Bereich bleibt
+                standardmäßig geschlossen, alle bisher genannten Inhalte
+                bleiben erhalten.
+              -->
+              <summary>Agentenkette, Agentenzuordnung, Qualitätskriterien, Werkzeuge, Freigaben und Rollenübergaben</summary>
               <div id="pilot-work-order-diagnostics-output" aria-live="polite">Keine Details verfügbar.</div>
             </details>
           </section>
