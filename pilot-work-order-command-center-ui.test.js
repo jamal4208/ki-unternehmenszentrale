@@ -2429,8 +2429,9 @@ async function run() {
       assert.doesNotMatch(cardHtml, /<button/i);
       assert.doesNotMatch(cardHtml, /data-action/);
 
-      // 37. bestehende BLOCKED-Primäraktion bleibt unverändert (unmittelbar danach).
-      assert.match(html, /data-action="unblock-order">Entsperren \(zur\u00fcckgeben\)<\/button>/);
+      // 37. bestehende BLOCKED-Primäraktion bleibt unmittelbar danach bedienbar
+      // (V8.10.1: gleiche data-action, verständlicher Wortlaut).
+      assert.match(html, /data-action="unblock-order">Blockade aufheben<\/button>/);
 
       // 41. kein Grundtext in der Risikoanzeige (renderRisks steht VOR der Grundkarte).
       const risksHtmlPortion = html.slice(0, cardIndex);
@@ -3031,11 +3032,18 @@ async function run() {
     assert.strictEqual(ui.getState().overview.status, "COMPLETED");
   });
 
-  await check("RÜCK-21. unblock-order bleibt unverändert bedienbar und behält seinen bestehenden Wortlaut", async () => {
+  await check("RÜCK-21. unblock-order bleibt unverändert bedienbar; V8.10.1 ändert ausschließlich den sichtbaren Wortlaut", async () => {
     const orderId = makeReturnTestOrder("BLOCKED");
     await ui.selectOrder(orderId);
     const html = domElements["pilot-work-order-output"].innerHTML;
-    assert.match(html, /data-action="unblock-order">Entsperren \(zur\u00fcckgeben\)<\/button>/);
+    assert.match(html, /data-action="unblock-order">Blockade aufheben<\/button>/);
+    // V8.10.1: der Folgehinweis steht unmittelbar hinter dem Knopf und
+    // beschreibt die unveränderte Statusfolge, ohne sie zur Aktion zu machen.
+    assert.match(
+      html,
+      /data-action="unblock-order"[^>]*>Blockade aufheben<\/button><p>Der Auftrag geht danach zur\u00fcck in die \u00dcberarbeitung\.<\/p>/,
+    );
+    assert.doesNotMatch(html, /Entsperren/, "der alte, missverständliche Buttontext darf nicht mehr gerendert werden");
     assert.doesNotMatch(html, /data-action="open-return-draft"/);
     fetchCalls.length = 0;
     await ui.runOrderAction("unblock-order", {});
@@ -3064,6 +3072,85 @@ async function run() {
       0,
       "block-order darf über den gesamten Testlauf nie aufgerufen werden",
     );
+  });
+
+  // -------------------------------------------------------------------
+  // V8.10.1 ("BLOCKED-Aktion verständlich und eindeutig benennen"): der
+  // Knopf heißt jetzt nach der Handlung ("Blockade aufheben") statt nach
+  // ihrer Statusfolge; die Folge selbst steht als ruhiger Hinweis daneben.
+  // Die begründungspflichtige Rückgabe bleibt davon vollständig getrennt.
+  // Rein sichtbare Änderung – data-action, Route und Statusfolge sind
+  // unverändert und werden hier ausdrücklich mitgeprüft.
+  // -------------------------------------------------------------------
+
+  await check("V8.10.1-1./2. BLOCKED zeigt exakt „Blockade aufheben“; der alte Wortlaut wird nirgends mehr gerendert", async () => {
+    const orderId = makeReturnTestOrder("BLOCKED");
+    await ui.selectOrder(orderId);
+    const html = domElements["pilot-work-order-output"].innerHTML;
+    assert.match(html, /<button type="button" data-action="unblock-order"[^>]*>Blockade aufheben<\/button>/);
+    assert.doesNotMatch(html, /Entsperren/);
+    assert.doesNotMatch(html, /zur\u00fcckgeben\)/, "die alte Klammerform darf nicht mehr vorkommen");
+  });
+
+  await check("V8.10.1-3. der Folgehinweis steht unmittelbar bei der Aktion und nennt die unveränderte Statusfolge", async () => {
+    const orderId = makeReturnTestOrder("BLOCKED");
+    await ui.selectOrder(orderId);
+    const html = domElements["pilot-work-order-output"].innerHTML;
+    assert.match(html, /Der Auftrag geht danach zur\u00fcck in die \u00dcberarbeitung\./);
+    const buttonIndex = html.indexOf('data-action="unblock-order"');
+    const hintIndex = html.indexOf("Der Auftrag geht danach zur\u00fcck in die \u00dcberarbeitung.");
+    assert.ok(buttonIndex >= 0 && hintIndex > buttonIndex, "der Hinweis muss unmittelbar hinter dem Knopf stehen");
+    // kleinste Darstellungsform: der Hinweis lebt in der bestehenden
+    // Primäraktion und bringt weder eine neue Karte noch eine Warnbox mit.
+    const primaryAction = /<div class="pilot-work-order-primary-action">([\s\S]*?)<\/div>/.exec(html);
+    assert.ok(primaryAction, "die bestehende Primäraktion muss weiterhin die tragende Struktur sein");
+    assert.ok(primaryAction[1].includes("Der Auftrag geht danach zur\u00fcck in die \u00dcberarbeitung."));
+    assert.doesNotMatch(primaryAction[1], /class="[^"]*(warn|alert|banner|callout)[^"]*"/i, "keine neue Warnbox");
+    assert.doesNotMatch(primaryAction[1], /pilot-work-order-action-error/, "der Hinweis ist kein Fehlertext");
+  });
+
+  await check("V8.10.1-4./7. die echte, begründungspflichtige Rückgabe bleibt wortgleich und sprachlich getrennt", async () => {
+    const orderId = makeReturnTestOrder("READY_FOR_REVIEW");
+    await ui.selectOrder(orderId);
+    const html = domElements["pilot-work-order-output"].innerHTML;
+    assert.match(html, /data-action="open-return-draft"[^>]*>Zur \u00dcberarbeitung zur\u00fcckgeben<\/button>/);
+    // die beiden Handlungen dürfen niemals gemeinsam in einem Status stehen
+    assert.doesNotMatch(html, /data-action="unblock-order"/);
+    assert.doesNotMatch(html, /Blockade aufheben/);
+  });
+
+  await check("V8.10.1-5./6./8./9. Statusfolge, Rückgabegrund und Statusmaschine bleiben unverändert", async () => {
+    const orderId = makeReturnTestOrder("BLOCKED");
+    await ui.selectOrder(orderId);
+    fetchCalls.length = 0;
+    await ui.runOrderAction("unblock-order", {});
+    // 5. BLOCKED -> RETURNED über die unveränderte bestehende Route
+    const posts = fetchCalls.filter((c) => c.method === "POST");
+    assert.strictEqual(posts.length, 1);
+    assert.match(posts[0].url, /\/unblock-order$/);
+    assert.strictEqual(ui.getState().overview.status, "RETURNED");
+    // 6. kein künstlicher Rückgabegrund: das Aufheben schickt keinen Grundtext
+    assert.strictEqual(posts[0].body.note, undefined, "die Blockadeaufhebung darf keinen Rückgabegrund mitsenden");
+    assert.strictEqual(posts[0].body.reason, undefined, "die Blockadeaufhebung darf keinen Grund erfinden");
+    // 8. RETURNED bietet unverändert den bestehenden Neustart an
+    const returnedHtml = domElements["pilot-work-order-output"].innerHTML;
+    assert.match(returnedHtml, /data-action="reopen-from-returned"[^>]*>Erneut als Entwurf starten<\/button>/);
+    // 9. keine neue Statusaktion: der Klick erzeugte genau einen POST auf die
+    // bestehende Route, und der Folgestatus bietet keinen neuen Bedienweg an.
+    assert.doesNotMatch(returnedHtml, /data-action="unblock/, "nach dem Aufheben darf keine Blockadeaktion zurückbleiben");
+    assert.strictEqual(fetchCalls.filter((c) => c.method === "POST").length, 1, "genau ein schreibender Request");
+  });
+
+  await check("V8.10.1-10. der neue Wortlaut führt in der Primäraktion keine technische Sprache ein", async () => {
+    const orderId = makeReturnTestOrder("BLOCKED");
+    await ui.selectOrder(orderId);
+    const html = domElements["pilot-work-order-output"].innerHTML;
+    const primaryAction = /<div class="pilot-work-order-primary-action">([\s\S]*?)<\/div>/.exec(html);
+    assert.ok(primaryAction, "die Primäraktion muss vorhanden sein");
+    const visibleText = primaryAction[1].replace(/<[^>]*>/g, " ");
+    ["unblockOrder", "returnOrder", "reopenFromReturned", "BLOCKED", "RETURNED", "DRAFT"].forEach((technical) => {
+      assert.ok(!visibleText.includes(technical), `kein technischer Begriff in der Primäraktion sichtbar: ${technical}`);
+    });
   });
 
   console.log(`pilot-work-order-command-center-ui.test.js: ${passed} Prüfpunkte erfolgreich`);

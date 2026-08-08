@@ -888,6 +888,73 @@ async function run() {
     );
   });
 
+  // -------------------------------------------------------------------
+  // V8.10.1 ("BLOCKED-Aktion verständlich und eindeutig benennen"): das
+  // Paket ist eine reine Oberflächenänderung. Der folgende Prüfpunkt hält
+  // deshalb genau die Fachgarantien fest, auf die sich der neue Wortlaut
+  // beruft – wenn eine davon je bräche, wäre die neue Bediensprache falsch.
+  // -------------------------------------------------------------------
+
+  await check("V8.10.1-Fachgarantien: Blockadeaufhebung und begründungspflichtige Rückgabe bleiben zwei getrennte Handlungen", () => {
+    const { db: v8101Db } = makeIsolatedDb("pilot-work-order-test-v8101-");
+
+    function driveToInExecution(title) {
+      const created = service.createPilotOrder(v8101Db, validCreateOrderInput({ title }));
+      const pilotOrderId = created.order.id;
+      service.markReadyForApproval(v8101Db, { pilotOrderId });
+      service.approveForExecution(v8101Db, { pilotOrderId, confirmed: true });
+      service.startExecution(v8101Db, { pilotOrderId });
+      return pilotOrderId;
+    }
+
+    // Weg A – Blockade aufheben: BLOCKED -> RETURNED, ohne jeden neuen Grund.
+    const blockedId = driveToInExecution("V8.10.1: blockierter Auftrag");
+    const blockReason = "Blockiert: die benötigte Quelle ist derzeit nicht zugänglich.";
+    const blocked = service.blockOrder(v8101Db, { pilotOrderId: blockedId, reason: blockReason });
+    assert.strictEqual(blocked.status, "BLOCKED");
+    const historyLengthBefore = blocked.decisionReasonHistory.length;
+
+    const unblocked = service.unblockOrder(v8101Db, { pilotOrderId: blockedId });
+    assert.strictEqual(unblocked.status, "RETURNED", "die Statusfolge des Aufhebens bleibt BLOCKED -> RETURNED");
+    assert.strictEqual(unblocked.currentDecisionReason, null, "das Aufheben darf keinen Rückgabegrund erfinden");
+    assert.strictEqual(
+      unblocked.decisionReasonHistory.length,
+      historyLengthBefore,
+      "das Aufheben darf keinen zusätzlichen Eintrag in die Entscheidungshistorie schreiben",
+    );
+    assert.strictEqual(unblocked.decisionReasonHistory[0].text, blockReason, "der ursprüngliche Blockiergrund bleibt historisch erhalten");
+
+    // Der Neustart aus RETURNED bleibt unverändert möglich.
+    assert.strictEqual(service.reopenFromReturned(v8101Db, { pilotOrderId: blockedId }).status, "DRAFT");
+
+    // Weg B – echte Rückgabe: bleibt begründungspflichtig und schreibt Historie.
+    const reviewId = driveToInExecution("V8.10.1: Auftrag zur Abschlussprüfung");
+    service.submitHandoff(
+      v8101Db,
+      validHandoffInput({ pilotOrderId: reviewId, fromPilotRole: "RECHERCHE_ANALYSE", toPilotRole: "DOKUMENTATION" }),
+    );
+    service.submitForReview(v8101Db, { pilotOrderId: reviewId });
+    assert.throws(
+      () => service.returnOrder(v8101Db, { pilotOrderId: reviewId }),
+      /note ist erforderlich/,
+      "die echte Rückgabe bleibt ohne Grund unmöglich",
+    );
+    const returnNote = "Zurückgegeben: die Quellenangaben im Ergebnis sind noch nicht belastbar.";
+    const returned = service.returnOrder(v8101Db, { pilotOrderId: reviewId, note: returnNote });
+    assert.strictEqual(returned.status, "RETURNED");
+    assert.strictEqual(returned.currentDecisionReason.kind, "RETURN");
+    assert.strictEqual(returned.currentDecisionReason.text, returnNote);
+
+    // Beide Wege enden im selben Status, sind aber an der Historie
+    // unterscheidbar – genau darauf beruht die getrennte Benennung.
+    assert.strictEqual(unblocked.status, returned.status);
+    assert.strictEqual(unblocked.currentDecisionReason, null);
+    assert.ok(returned.currentDecisionReason, "nur die echte Rückgabe hinterlässt einen aktuellen Grund");
+
+    // Das Aufheben bleibt ausschließlich aus BLOCKED heraus möglich.
+    assert.throws(() => service.unblockOrder(v8101Db, { pilotOrderId: reviewId }), /Nur ein blockierter Auftrag/);
+  });
+
   console.log(`pilot-work-order.test.js: ${passed} Prüfpunkte erfolgreich`);
 }
 

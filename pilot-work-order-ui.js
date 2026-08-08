@@ -2320,7 +2320,16 @@
     } else if (status === "RETURNED") {
       button = '<button type="button" data-action="reopen-from-returned"' + disabledAttr + ">Erneut als Entwurf starten</button>";
     } else if (status === "BLOCKED") {
-      button = '<button type="button" data-action="unblock-order"' + disabledAttr + ">Entsperren (zur\u00fcckgeben)</button>";
+      // V8.10.1: "zurückgeben" darf hier NICHT mehr als Aktionsverb stehen –
+      // die begründungspflichtige Rückgabe ist eine andere, eigenständige
+      // Handlung (renderReturnActionButton). Die Statusfolge selbst ist
+      // unverändert BLOCKED -> RETURNED und wird deshalb als Folge des Klicks
+      // beschrieben, nicht als Name der Aktion. Der Hinweis nutzt die
+      // bestehende Absatzregel der Primäraktion – keine neue Karte, keine
+      // Warnbox, keine neue CSS-Klasse.
+      button =
+        '<button type="button" data-action="unblock-order"' + disabledAttr + ">Blockade aufheben</button>" +
+        "<p>Der Auftrag geht danach zur\u00fcck in die \u00dcberarbeitung.</p>";
     }
     return (
       '<div class="pilot-work-order-primary-action">' +
