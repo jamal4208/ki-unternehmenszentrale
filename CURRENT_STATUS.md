@@ -1,5 +1,35 @@
 # CURRENT STATUS
 
+## V8.10.1 – BLOCKED-Aktion verständlich benennen (lokal fertig, automatisiert getestet, isoliert browserabgenommen inklusive Responsive-Nachprüfung; committet auf dem Arbeitsbranch `cursor/v8-10-1-blocked-aktion-benennen` als `7476c5b`, nicht gepusht, `main` unverändert auf `a4fe28c`)
+
+Paket B des Sprachkompasses. Es macht ausschließlich die bereits bestehende BLOCKED-Aktion verständlich. Keine Workflowänderung, keine Statusänderung, keine neue Funktion.
+
+**Alter Wortlaut:** „Entsperren (zurückgeben)“. Der Knopf war damit sprachlich kaum von der eigenständigen, begründungspflichtigen Rückgabe „Zur Überarbeitung zurückgeben“ zu unterscheiden, obwohl es zwei verschiedene Handlungen mit verschiedener Beweislage sind.
+
+**Neuer Wortlaut:** **„Blockade aufheben“**. Der Knopf heißt jetzt nach der Handlung, nicht nach ihrer Statusfolge. „zurückgeben“ ist kein Aktionsverb des BLOCKED-Knopfes mehr.
+
+**Folgehinweis:** unmittelbar bei der Aktion steht **„Der Auftrag geht danach zurück in die Überarbeitung.“** Der Hinweis ist ein schlichter Absatz innerhalb der bestehenden `.pilot-work-order-primary-action` und nutzt deren bereits vorhandene Absatzregel – keine neue Karte, keine Warnbox, keine neue CSS-Klasse, keine Änderung an `styles.css`.
+
+**Keine Workflowänderung:** `data-action="unblock-order"` und die bestehende Route sind unverändert; das Paket ist eine reine Text- und Darstellungsänderung in `pilot-work-order-ui.js`.
+
+**`BLOCKED` → `RETURNED` unverändert:** `unblockOrder` prüft weiterhin ausschließlich den Ausgangsstatus `BLOCKED` und führt über `applyStatusTransition` nach `RETURNED`.
+
+**`unblockOrder` erzeugt keinen künstlichen Rückgabegrund:** die Aufhebung schreibt keinen Entscheidungsgrund. Der ursprüngliche Blockiergrund bleibt historisch erhalten; als aktueller Grund erscheint danach nichts, und es wird bewusst nichts ergänzt oder vermutet.
+
+**Echte Rückgabe bleibt getrennt und begründungspflichtig:** „Zur Überarbeitung zurückgeben“ wurde nicht umbenannt. Sie bleibt die bewertende Handlung mit Pflichtgrund über `returnOrder`, schreibt ihren Grund in die Entscheidungshistorie und ist nur aus `READY_FOR_JAMAL_APPROVAL`, `READY_FOR_REVIEW` und `IN_EXECUTION` möglich. Beide Wege enden im selben Status, bleiben aber an der Historie unterscheidbar – genau darauf beruht die getrennte Benennung.
+
+**`RETURNED` → `DRAFT` unverändert:** „Erneut als Entwurf starten“ führt weiterhin über `reopenFromReturned` zurück in den Entwurf.
+
+**Keine Logikänderung:** `unblockOrder`, `returnOrder`, `reopenFromReturned`, Statusmaschine, Statuswerte, Statusübergänge, `applyStatusTransition`, Revision, `expectedRevision`, Entscheidungsgründe, Audit, Routen, API, Datenbank, Migrationen, Freigabelogik, Kettenlogik, Agentenläufe und Chefmodus-Logik sind unverändert. Produktiv wurde ausschließlich `pilot-work-order-ui.js` angefasst.
+
+**Tests:** die bestehenden Wortlautprüfungen in `pilot-work-order-command-center-ui.test.js` wurden fachlich auf den neuen Text aktualisiert; keine bestehende Prüfung wurde gelöscht oder gelockert. Additiv neu: fünf Prüfpunkte V8.10.1-1 bis V8.10.1-10 in `pilot-work-order-command-center-ui.test.js` (exakter Buttontext, Abwesenheit des alten Wortlauts, Folgehinweis unmittelbar hinter dem Knopf, keine Warnbox und kein Fehlertext, unveränderte echte Rückgabe ohne sprachliche Vermischung, `BLOCKED` → `RETURNED` über genau einen POST auf die bestehende Route, kein mitgesendeter Grund, „Erneut als Entwurf starten“ danach vorhanden, keine technische Sprache in der Primäraktion) sowie ein Fachgarantie-Prüfpunkt in `pilot-work-order.test.js`, der über einen echten Statusdurchlauf beide Wege gegeneinander absichert. `npm run check` Exit 0, `git diff --check` Exit 0, `npm test` Exit 0 mit 3595 grünen Prüfpunkten; der bekannte sandboxbedingte `EXECUTION_ENVIRONMENT_UNAVAILABLE`/HTTP-503-Fall trat nicht auf.
+
+**Browserabnahme:** auf einer isolierten Instanz (eigener freier Port, eigenes temporäres `HOME`, eigenes temporäres `KUZ_DATA_DIR`, eigene temporäre Datenbank; niemals Port 4173). Vorbereitet wurden ein blockierter, ein bereits zurückgegebener und ein zur Abschlussprüfung vorgelegter Auftrag. Im blockierten Zustand war die geforderte Abfolge wörtlich sichtbar: Status „Blockiert“, offene Entscheidung „Du musst die Blockade klären, bevor der Pilotlauf fortgesetzt werden kann.“, „Nächster Schritt: Blockade klären und danach kontrolliert aufheben.“, Aktion „Blockade aufheben“, Folgehinweis „Der Auftrag geht danach zurück in die Überarbeitung.“ Der alte Wortlaut war nirgends mehr auffindbar, technische Begriffe waren nicht sichtbar. Die Aktion wurde real ausgeführt: der Status wurde „Zurückgegeben“, es entstand kein neuer Rückgabegrund, „Erneut als Entwurf starten“ war vorhanden und der historische Blockiergrund blieb korrekt erhalten. Beim Auftrag zur Abschlussprüfung war „Zur Überarbeitung zurückgeben“ unverändert vorhanden und verlangte weiterhin einen Pflichtgrund („Bitte einen Grund angeben.“); „Blockade aufheben“ erschien dort nicht. Keine JS-Fehler, keine zusätzliche Karte, keine neue Warnbox, keine visuelle Regression.
+
+**Responsive-Nachprüfung des neuen BLOCKED-Zustands:** gezielt an einem eigens vorbereiteten blockierten Auftrag auf einer zweiten isolierten Instanz nachgeholt, weil der erste Durchlauf die Breiten an einem Auftrag ohne den neuen Hinweistext geprüft hatte. Gemessen wurden die Rechtecke von Knopf und Hinweis sowie der horizontale Seitenüberlauf. Bei **1440** stehen Knopf und Hinweis mit 10 px Abstand versetzt, Kasten 1034 px breit innerhalb des Viewports. Bei **820** dasselbe Bild, Kasten 733 px. Bei **390** stapeln sich Knopf und Hinweis sauber untereinander, der Hinweis bricht auf zwei Zeilen um (38 px statt 19 px), Kasten 320 px. Im **200-%-Zoom-Äquivalent** (720 × 450 bei `deviceScaleFactor` 2) stehen Knopf und Hinweis nebeneinander in einer Zeile. In allen vier Fällen: nichts abgeschnitten, keine Überlappung, der Kasten ragt nicht über den Viewport hinaus und **die Seite läuft nirgends horizontal über** – Knopf und Hinweis verursachen damit nachweislich keine Regression, auch keinen anteiligen. Keine JS-Fehler. Beide temporären Instanzen wurden beendet und ausschließlich ihre eigenen temporären Daten entfernt; die kanonische Instanz auf Port 4173 blieb durchgängig unangetastet.
+
+**Nächste Pakete (noch nicht begonnen):** C = Informationshierarchie „Nächster Schritt“, D = Revision und technische Details.
+
 ## Sprachpaket A – technische Entwicklersprache aus der normalen Pilotauftragsoberfläche entfernt (lokal fertig, Browserabnahme durch den Agenten erfolgt, noch nicht committet)
 
 Erstes Paket der normalen Produktreife nach dem Betonfundament-Abschluss. Umgesetzt wurden ausschließlich die im Sprachkompass als **„A – reine Sprachverbesserung“** klassifizierten Punkte. Keine Produktentscheidung vorgezogen, keine Logik verändert.
