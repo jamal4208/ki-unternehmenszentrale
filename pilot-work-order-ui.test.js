@@ -403,8 +403,13 @@ check("RÜCK-Q11. die neuen deutschen Literale folgen der bestehenden \\uXXXX-Ko
 // "Nächster sicherer Schritt: Nächster erlaubter Schritt: …" entstand.
 // ---------------------------------------------------------------------------
 
-const NEXT_STEP_LABEL_SAFE_SOURCE = 'var NEXT_STEP_LABEL_SAFE = "N\\u00e4chster sicherer Schritt";';
-const NEXT_STEP_LABEL_ALLOWED_SOURCE = 'var NEXT_STEP_LABEL_ALLOWED = "N\\u00e4chster erlaubter Schritt";';
+// V8.10.2: die beiden Überschriften benennen jetzt ausdrücklich die Ebene
+// (Agentenkette statt Auftrag). Die Struktur – genau eine Konstante je
+// Überschrift, Label und Text strikt getrennt – ist unverändert und wird von
+// DARST-Q1 bis DARST-Q5 weiterhin unverändert scharf geprüft.
+const NEXT_STEP_LABEL_SAFE_SOURCE = 'var NEXT_STEP_LABEL_SAFE = "N\\u00e4chster Schritt in der Agentenkette";';
+const NEXT_STEP_LABEL_ALLOWED_SOURCE =
+  'var NEXT_STEP_LABEL_ALLOWED = "M\\u00f6glicher n\\u00e4chster Schritt in der Agentenkette";';
 
 function chainStatusCardSource() {
   const match = js.match(/function renderChainStatusCard\(overview\)\s*\{[\s\S]*?\n {2}\}/);
@@ -423,10 +428,19 @@ check("DARST-Q1. beide sichtbaren Überschriften existieren genau einmal als Kon
   assert.ok(js.includes(NEXT_STEP_LABEL_ALLOWED_SOURCE), "NEXT_STEP_LABEL_ALLOWED muss als Konstante existieren");
   // Die Überschrift darf nirgends sonst als Literal auftauchen – weder als
   // Klartext noch in \uXXXX-Schreibweise. Genau diese Doppelung war der Fehler.
-  const safeLiterals = js.match(/N(?:ä|\\u00e4)chster sicherer Schritt/g) || [];
-  const allowedLiterals = js.match(/N(?:ä|\\u00e4)chster erlaubter Schritt/g) || [];
-  assert.strictEqual(safeLiterals.length, 1, "„Nächster sicherer Schritt“ darf ausschließlich in NEXT_STEP_LABEL_SAFE stehen");
-  assert.strictEqual(allowedLiterals.length, 1, "„Nächster erlaubter Schritt“ darf ausschließlich in NEXT_STEP_LABEL_ALLOWED stehen");
+  const safeLiterals = js.match(/N(?:ä|\\u00e4)chster Schritt in der Agentenkette/g) || [];
+  const allowedLiterals = js.match(/M(?:ö|\\u00f6)glicher n(?:ä|\\u00e4)chster Schritt in der Agentenkette/g) || [];
+  assert.strictEqual(safeLiterals.length, 1, "„Nächster Schritt in der Agentenkette“ darf ausschließlich in NEXT_STEP_LABEL_SAFE stehen");
+  assert.strictEqual(
+    allowedLiterals.length,
+    1,
+    "„Möglicher nächster Schritt in der Agentenkette“ darf ausschließlich in NEXT_STEP_LABEL_ALLOWED stehen",
+  );
+  // V8.10.2: die beiden alten Überschriften sind vollständig verschwunden –
+  // auch aus Kommentaren, damit kein späterer Zweig sie versehentlich
+  // wiederbelebt.
+  assert.strictEqual((js.match(/N(?:ä|\\u00e4)chster sicherer Schritt/g) || []).length, 0, "die alte Überschrift „sicher“ ist entfernt");
+  assert.strictEqual((js.match(/N(?:ä|\\u00e4)chster erlaubter Schritt/g) || []).length, 0, "die alte Überschrift „erlaubt“ ist entfernt");
 });
 
 check("DARST-Q2. genau eine Stelle setzt die sichtbare Überschrift: die Renderzeile der Kettenstatuskarte", () => {
@@ -609,7 +623,15 @@ check("TP2-UI-5. im Rückblick erscheint keine Zukunfts-/Handlungsaufforderung u
   assert.doesNotMatch(branch, /failurePresentation\.action|historicFailure\.action/, "kein Zukunftssatz aus der Fehlerdarstellung im Rückblick");
   // Die Kettenkarte wiederholt die Auftragsentscheidung nicht mehr.
   assert.doesNotMatch(cardSource, /overview\.nextStep/, "der Auftrags-Nächster-Schritt gehört in die Primäraktion, nicht in die Kettenkarte");
-  assert.match(js, /"<p><strong>N\\u00e4chster Schritt:<\/strong> " \+ escapeHtml\(overview\.nextStep\) \+ "<\/p>"/, "der Auftrags-Nächster-Schritt bleibt an seiner bisherigen Stelle sichtbar");
+  // V8.10.2: die Stelle ist unverändert, nur die Überschrift benennt jetzt die
+  // Ebene und kommt aus einer einzigen Konstante statt aus vier Literalen.
+  assert.match(
+    js,
+    /"<p><strong>" \+ escapeHtml\(ORDER_NEXT_STEP_LABEL\) \+ ":<\/strong> " \+ escapeHtml\(overview\.nextStep\) \+ "<\/p>"/,
+    "der Auftrags-Nächster-Schritt bleibt an seiner bisherigen Stelle sichtbar",
+  );
+  assert.match(js, /var ORDER_NEXT_STEP_LABEL = "N\\u00e4chster Schritt im Auftrag";/, "die Auftragsebene hat genau eine Überschriftsquelle");
+  assert.doesNotMatch(cardSource, /ORDER_NEXT_STEP_LABEL/, "die Auftragsüberschrift gehört nicht in die Kettenkarte");
 });
 
 check("TP2-UI-6. die bestehende Fehlerdarstellung bleibt auch im Rückblick vollständig erreichbar", () => {
@@ -673,6 +695,45 @@ check("TP1-UI-3. die Darstellung leitet die offene Entscheidung weiterhin allein
   // Fundstellen gehören zum Übergabe-Entwurfsformular (Eingaberichtung).
   const factsSection = js.slice(js.indexOf('["Offene Entscheidung"'), js.indexOf('["Offene Entscheidung"') + 400);
   assert.doesNotMatch(factsSection, /decisionNeeded/, "die Faktenzeile darf niemals selbst auf einen Handofftext zurückgreifen");
+});
+
+// ---------------------------------------------------------------------------
+// V8.10.2 ("Nächster Schritt: Auftrag und Agentenkette klar trennen"):
+// Auftragsebene und Kettenebene beantworten zwei verschiedene Fragen. Beide
+// Überschriften benennen deshalb jetzt ihre Ebene. Das Paket ist eine reine
+// Umbenennung von drei Konstantenwerten – die folgenden Prüfungen halten
+// genau das fest.
+// ---------------------------------------------------------------------------
+
+check("V8.10.2-10./15./16./17./18. reine Umbenennung: keine neue Kettenlogik, kein neuer Fetch, kein neuer Zustand, kein neuer Listener, keine neue Route", () => {
+  // Die drei sichtbaren Überschriften kommen aus genau drei Konstanten.
+  assert.match(js, /var ORDER_NEXT_STEP_LABEL = "N\\u00e4chster Schritt im Auftrag";/);
+  assert.match(js, /var NEXT_STEP_LABEL_SAFE = "N\\u00e4chster Schritt in der Agentenkette";/);
+  assert.match(js, /var NEXT_STEP_LABEL_ALLOWED = "M\\u00f6glicher n\\u00e4chster Schritt in der Agentenkette";/);
+  // Die Ableitung der Kettenlage bleibt vollständig unangetastet.
+  ["deriveActiveRun", "findLatestChain", "hasServerRunningState", "waitingStepNumberForChain", "nextChainStepHint"].forEach((fn) => {
+    assert.ok(js.includes(`function ${fn}(`), `${fn} muss unverändert vorhanden sein`);
+  });
+  // Karteninvariante, Präfixschutz, Fetch-/Listener-/Zustandsfreiheit prüfen
+  // unverändert TP2-UI-8 sowie DARST-Q5/Q6; V8.10.2 fügt dort nichts hinzu und
+  // lockert nichts.
+});
+
+check("V8.10.2 Ebenentrennung: die Auftragsüberschrift steht ausschließlich in der Primäraktion, die Kettenüberschriften ausschließlich in der Kettenkarte", () => {
+  const cardSource = chainStatusCardSource();
+  const hintSource = nextChainStepHintSource();
+  // Die Auftragsüberschrift darf niemals in die Kettenebene wandern.
+  assert.doesNotMatch(cardSource, /ORDER_NEXT_STEP_LABEL/, "die Auftragsüberschrift gehört nicht in die Kettenkarte");
+  assert.doesNotMatch(hintSource, /ORDER_NEXT_STEP_LABEL/, "die Auftragsüberschrift gehört nicht in nextChainStepHint");
+  // Und umgekehrt: die Kettenüberschriften nicht in die Primäraktion.
+  const primarySource = js.match(/function renderPrimaryAction\(overview\)\s*\{[\s\S]*?\n {2}\}/);
+  assert.ok(primarySource, "renderPrimaryAction muss auffindbar sein");
+  assert.doesNotMatch(primarySource[0], /NEXT_STEP_LABEL_(SAFE|ALLOWED)/, "die Kettenüberschriften gehören nicht in die Primäraktion");
+  assert.strictEqual(
+    (primarySource[0].match(/ORDER_NEXT_STEP_LABEL/g) || []).length,
+    4,
+    "alle vier Ausgabewege der Primäraktion nutzen dieselbe Überschriftsquelle",
+  );
 });
 
 console.log(`pilot-work-order-ui.test.js: ${passed} Prüfpunkte erfolgreich`);

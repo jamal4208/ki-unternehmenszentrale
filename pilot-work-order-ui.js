@@ -2230,6 +2230,14 @@
     return html;
   }
 
+  // V8.10.2: die Primäraktion beschreibt die AUFTRAGSEBENE – was mit dem
+  // gesamten Auftrag als Nächstes sinnvoll ist. Die Kettenstatuskarte
+  // beantwortet eine andere Frage (siehe NEXT_STEP_LABEL_SAFE weiter unten).
+  // Beide Aussagen können gleichzeitig sichtbar sein, deshalb benennt jedes
+  // Label seit V8.10.2 ausdrücklich seine Ebene. Der Text selbst
+  // (overview.nextStep) ist unverändert.
+  var ORDER_NEXT_STEP_LABEL = "N\u00e4chster Schritt im Auftrag";
+
   function renderPrimaryAction(overview) {
     var status = overview.status;
     var confirmation = state.jamalConfirmation;
@@ -2241,7 +2249,7 @@
     if (confirmationMatchesHere) {
       return (
         '<div class="pilot-work-order-primary-action">' +
-        "<p><strong>N\u00e4chster Schritt:</strong> " + escapeHtml(overview.nextStep) + "</p>" +
+        "<p><strong>" + escapeHtml(ORDER_NEXT_STEP_LABEL) + ":</strong> " + escapeHtml(overview.nextStep) + "</p>" +
         renderJamalConfirmationPanel(confirmation) +
         "</div>"
       );
@@ -2254,7 +2262,7 @@
     if (status === "IN_EXECUTION" && isHandoffDraftOpenForOrder(overview.order.id)) {
       return (
         '<div class="pilot-work-order-primary-action">' +
-        "<p><strong>N\u00e4chster Schritt:</strong> " + escapeHtml(overview.nextStep) + "</p>" +
+        "<p><strong>" + escapeHtml(ORDER_NEXT_STEP_LABEL) + ":</strong> " + escapeHtml(overview.nextStep) + "</p>" +
         renderHandoffDraftPanel(state.handoffDraft) +
         "</div>"
       );
@@ -2268,7 +2276,7 @@
     if (isReturnDraftStatus(status) && isReturnDraftOpenForOrder(overview.order.id)) {
       return (
         '<div class="pilot-work-order-primary-action">' +
-        "<p><strong>N\u00e4chster Schritt:</strong> " + escapeHtml(overview.nextStep) + "</p>" +
+        "<p><strong>" + escapeHtml(ORDER_NEXT_STEP_LABEL) + ":</strong> " + escapeHtml(overview.nextStep) + "</p>" +
         renderReturnDraftPanel(state.returnDraft) +
         "</div>"
       );
@@ -2333,7 +2341,7 @@
     }
     return (
       '<div class="pilot-work-order-primary-action">' +
-      "<p><strong>N\u00e4chster Schritt:</strong> " + escapeHtml(overview.nextStep) + "</p>" +
+      "<p><strong>" + escapeHtml(ORDER_NEXT_STEP_LABEL) + ":</strong> " + escapeHtml(overview.nextStep) + "</p>" +
       button +
       "</div>"
     );
@@ -2355,13 +2363,21 @@
   // keine Hilfsfunktion darf sie zusätzlich in den eigenen Text schreiben –
   // sonst erscheint sie doppelt.
   //
-  // "erlaubt" statt "sicher" ist eine bewusste fachliche Abschwächung: der
-  // Schritt ist zulässig, aber nicht der empfohlene Weg (heute genutzt, wenn
-  // die Kette vollständig durchgelaufen ist und ein Vorlegen zur
-  // Abschlussprüfung nur noch "bei Bedarf" sinnvoll ist). Diese Unterscheidung
-  // wird über nextStepLabel getragen, nicht über den Textinhalt.
-  var NEXT_STEP_LABEL_SAFE = "N\u00e4chster sicherer Schritt";
-  var NEXT_STEP_LABEL_ALLOWED = "N\u00e4chster erlaubter Schritt";
+  // "Möglicher" statt schlicht "Nächster" ist eine bewusste fachliche
+  // Abschwächung: der Schritt ist zulässig, aber nicht der empfohlene Weg
+  // (heute genutzt, wenn die Kette vollständig durchgelaufen ist und ein
+  // Vorlegen zur Abschlussprüfung nur noch "bei Bedarf" sinnvoll ist). Diese
+  // Unterscheidung wird über nextStepLabel getragen, nicht über den
+  // Textinhalt.
+  //
+  // V8.10.2 ("Nächster Schritt: Auftrag und Agentenkette klar trennen"): beide
+  // Labels benennen jetzt ausdrücklich die Ebene, auf die sie sich beziehen.
+  // Zuvor sprachen sie nur von einem "sicheren" bzw. "erlaubten" Schritt und
+  // standen damit sprachlich zu nah an der Auftragsebene
+  // (ORDER_NEXT_STEP_LABEL oben), obwohl sie eine andere Frage beantworten.
+  // Welcher Zweig welches Label wählt, ist unverändert.
+  var NEXT_STEP_LABEL_SAFE = "N\u00e4chster Schritt in der Agentenkette";
+  var NEXT_STEP_LABEL_ALLOWED = "M\u00f6glicher n\u00e4chster Schritt in der Agentenkette";
 
   // Vor der Ausführung ist eine Drei-Agenten-Kette noch möglich; nur dort darf
   // die Kettenstatuskarte überhaupt nach vorn blicken. In jeder anderen Lage

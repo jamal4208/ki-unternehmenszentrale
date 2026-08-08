@@ -2463,15 +2463,19 @@ async function run() {
   // (.pilot-chain-status-card__next) setzt ausschließlich
   // renderChainStatusCard. Vorher setzten sieben Textzweige und
   // nextChainStepHint() dieselbe Überschrift zusätzlich in ihren eigenen Text –
-  // sichtbar entstand dadurch "Nächster sicherer Schritt: Nächster sicherer
-  // Schritt: …" bzw. die Präfixkollision mit "Nächster erlaubter Schritt:".
+  // sichtbar entstand dadurch eine doppelte Überschrift bzw. eine
+  // Präfixkollision zwischen der normalen und der abgeschwächten Variante.
   //
   // Geprüft wird am tatsächlich gerenderten HTML beider Ausgabecontainer über
   // alle Kettenzustände, die die Fixtur bis hierher real aufgebaut hat.
+  //
+  // V8.10.2: die beiden Überschriften benennen jetzt ausdrücklich die Ebene
+  // (Agentenkette statt Auftrag). Die Prüfungen selbst sind unverändert scharf –
+  // nur die erwarteten Wortlaute sind nachgezogen.
   // -------------------------------------------------------------------------
 
-  const NEXT_LABEL_SAFE = "Nächster sicherer Schritt";
-  const NEXT_LABEL_ALLOWED = "Nächster erlaubter Schritt";
+  const NEXT_LABEL_SAFE = "Nächster Schritt in der Agentenkette";
+  const NEXT_LABEL_ALLOWED = "Möglicher nächster Schritt in der Agentenkette";
 
   function chainStatusCardSections(html) {
     return html.match(/<section class="pilot-chain-status-card[\s\S]*?<\/section>/g) || [];
@@ -2535,7 +2539,7 @@ async function run() {
   );
 
   await check(
-    "DARST-4./5.: die fachliche Abschwächung „Nächster erlaubter Schritt“ bleibt bei vollständig durchgelaufener Kette sichtbar erhalten",
+    "DARST-4./5.: die fachliche Abschwächung „Möglicher nächster Schritt in der Agentenkette“ bleibt bei vollständig durchgelaufener Kette sichtbar erhalten",
     async () => {
       const order = backend.orders.get(v81CompletedOrderId);
       assert.ok(order, "Testfixtur: der Auftrag mit vollständig abgeschlossener Kette muss vorhanden sein");
@@ -2560,7 +2564,7 @@ async function run() {
         new RegExp(`<strong>${NEXT_LABEL_ALLOWED}:</strong> bei Bedarf oben manuell zur Abschlussprüfung vorlegen\\.`),
         "die Abschwächung „erlaubt“ muss sichtbar bleiben",
       );
-      assert.doesNotMatch(card, new RegExp(NEXT_LABEL_SAFE), "hier darf ausdrücklich NICHT „sicher“ stehen");
+      assert.doesNotMatch(card, new RegExp(NEXT_LABEL_SAFE), "hier darf ausdrücklich NICHT die uneingeschränkte Variante stehen");
       assertNextStepLineIsClean(card, "abgeschlossene Kette");
       assert.match(card, /Der Pilotauftrag selbst ist damit noch nicht automatisch abgenommen\./);
       assert.match(card, /Es wurde nichts automatisch weitergestartet\./);
@@ -3037,6 +3041,133 @@ async function run() {
         "die bestehende Startaktion muss im zulässigen Status unverändert funktionieren",
       );
       assert.strictEqual(fetchCalls.filter((entry) => entry.method === "POST").length, 0);
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // V8.10.2 ("Nächster Schritt: Auftrag und Agentenkette klar trennen").
+  //
+  // Auftragsebene und Kettenebene beantworten zwei verschiedene Fragen und
+  // können gleichzeitig sichtbar sein. Bis V8.10.1 hießen sie "Nächster
+  // Schritt" und "Nächster sicherer Schritt" und standen damit sprachlich zu
+  // nah beieinander. Geprüft wird am echten gerenderten HTML über alle
+  // Kettenzustände, die die Fixtur real aufgebaut hat.
+  // -------------------------------------------------------------------------
+
+  const ORDER_LABEL = "Nächster Schritt im Auftrag";
+
+  await check(
+    "V8.10.2-1./2./4./5./8.: über alle real vorhandenen Kettenzustände benennt jede Ebene sichtbar sich selbst; die beiden alten Überschriften erscheinen nirgends mehr",
+    async () => {
+      const orderIds = Array.from(backend.orders.keys());
+      assert.ok(orderIds.length >= 5, "Testfixtur: mehrere Aufträge mit unterschiedlichen Kettenzuständen müssen vorliegen");
+      let orderLevelSeen = 0;
+      let chainLevelSeen = 0;
+      for (const orderId of orderIds) {
+        forcedOrderReadFailureCount = 0;
+        // eslint-disable-next-line no-await-in-loop
+        await ui.selectOrder(orderId);
+        ui.render();
+        [
+          ["obere Karte", orderHtml()],
+          ["Detailbereich", diagnosticsHtml()],
+        ].forEach(([where, html]) => {
+          // 4./5. die alten Überschriften sind vollständig verschwunden.
+          assert.doesNotMatch(html, /Nächster sicherer Schritt/, `${orderId} / ${where}: die alte Überschrift „sicher“ darf nicht mehr erscheinen`);
+          assert.doesNotMatch(html, /Nächster erlaubter Schritt/, `${orderId} / ${where}: die alte Überschrift „erlaubt“ darf nicht mehr erscheinen`);
+          // 2./3. die Kettenebene benennt sich selbst.
+          const card = chainStatusCardSections(html)[0];
+          assert.ok(card, `${orderId} / ${where}: die Kettenstatuskarte muss vorhanden bleiben`);
+          const chainLine = card.match(/<p class="pilot-chain-status-card__next"><strong>([^<]+):<\/strong>/);
+          assert.ok(chainLine, `${orderId} / ${where}: die Schritt-Empfehlung muss Überschrift und Text getrennt tragen`);
+          assert.ok(
+            chainLine[1] === NEXT_LABEL_SAFE || chainLine[1] === NEXT_LABEL_ALLOWED,
+            `${orderId} / ${where}: unerwartete Kettenüberschrift „${chainLine[1]}“`,
+          );
+          chainLevelSeen += 1;
+          // 8. kein doppeltes Label und kein Präfix im Text.
+          assertNextStepLineIsClean(card, `${orderId} / ${where} (V8.10.2)`);
+          // 1. wo die Primäraktion sichtbar ist, benennt sie die Auftragsebene.
+          if (html.includes('<div class="pilot-work-order-primary-action">')) {
+            assert.match(html, new RegExp(`<strong>${ORDER_LABEL}:</strong> \\S`), `${orderId} / ${where}: die Auftragsebene muss sich selbst benennen`);
+            orderLevelSeen += 1;
+          }
+        });
+      }
+      assert.ok(chainLevelSeen >= 8, `die Kettenebene muss mehrfach geprüft worden sein (geprüft: ${chainLevelSeen})`);
+      assert.ok(orderLevelSeen >= 1, "die Auftragsebene muss mindestens einmal mitgeprüft worden sein");
+      timerHarness.clearAll();
+    },
+  );
+
+  await check(
+    "V8.10.2-6./7./9.: beide Ebenen sind gleichzeitig sichtbar, tragen unterschiedliche Texte, und der Auftragstext gelangt nicht in die Kettenkarte",
+    async () => {
+      const orderIds = Array.from(backend.orders.keys());
+      let bothLevelsSeen = 0;
+      for (const orderId of orderIds) {
+        forcedOrderReadFailureCount = 0;
+        // eslint-disable-next-line no-await-in-loop
+        await ui.selectOrder(orderId);
+        ui.render();
+        const html = orderHtml();
+        const card = chainStatusCardSections(html)[0] || "";
+        const orderLine = html.match(new RegExp(`<strong>${ORDER_LABEL}:</strong> ([^<]+)`));
+        const chainLine = card.match(/<p class="pilot-chain-status-card__next"><strong>[^<]+:<\/strong> ([^<]+)<\/p>/);
+        if (!orderLine || !chainLine) continue;
+        bothLevelsSeen += 1;
+        // 6. beide Ebenen gleichzeitig sichtbar.
+        assert.ok(html.indexOf(ORDER_LABEL) >= 0 && card.length > 0, `${orderId}: beide Ebenen müssen nebeneinander bestehen können`);
+        // 7. sie tragen verschiedene Aussagen.
+        assert.notStrictEqual(
+          orderLine[1].trim(),
+          chainLine[1].trim(),
+          `${orderId}: Auftragstext und Kettentext dürfen nicht auf denselben Wert zusammenfallen`,
+        );
+        // 9. der Auftragstext taucht nicht in der Kettenkarte auf.
+        assert.ok(!card.includes(orderLine[1].trim()), `${orderId}: der Auftrags-Nächster-Schritt gehört nicht in die Kettenkarte`);
+        assert.ok(!card.includes(ORDER_LABEL), `${orderId}: die Auftragsüberschrift gehört nicht in die Kettenkarte`);
+      }
+      assert.ok(bothLevelsSeen >= 1, `mindestens ein Auftrag muss beide Ebenen gleichzeitig gezeigt haben (gesehen: ${bothLevelsSeen})`);
+      timerHarness.clearAll();
+    },
+  );
+
+  await check(
+    "V8.10.2-3./11./12.: die abgeschwächte Kettenvariante lautet exakt „Möglicher nächster Schritt in der Agentenkette“; Karteninvariante und Gleichlauf beider Container bleiben erhalten",
+    async () => {
+      const order = backend.orders.get(v81CompletedOrderId);
+      assert.ok(order, "Testfixtur: der Auftrag mit vollständig abgeschlossener Kette muss vorhanden sein");
+      const originalStatus = order.status;
+      const originalStatusLabel = order.statusLabel;
+      order.status = "IN_EXECUTION";
+      order.statusLabel = "In Ausführung";
+      order.revision += 1;
+      ui.getState().chainStartBridge = null;
+      await ui.selectOrder(v81CompletedOrderId);
+      await ui.reloadSelectedOrder();
+      ui.render();
+
+      const upper = chainStatusCardSections(orderHtml());
+      const lower = chainStatusCardSections(diagnosticsHtml());
+      // 11. genau eine Kettenstatuskarte je Ausgabecontainer.
+      assert.strictEqual(upper.length, 1, "genau eine Kettenstatuskarte in der oberen Karte");
+      assert.strictEqual(lower.length, 1, "genau eine Kettenstatuskarte im Detailbereich");
+      // 3. exakter Wortlaut der Abschwächung.
+      assert.match(
+        upper[0],
+        new RegExp(`<strong>${NEXT_LABEL_ALLOWED}:</strong> bei Bedarf oben manuell zur Abschlussprüfung vorlegen\\.`),
+        "die abgeschwächte Variante muss die Ebene benennen und die Abschwächung behalten",
+      );
+      // 12. beide Karten sagen fachlich dasselbe.
+      const nextLineOf = (card) => (card.match(/<p class="pilot-chain-status-card__next">[\s\S]*?<\/p>/) || [""])[0];
+      assert.strictEqual(nextLineOf(upper[0]), nextLineOf(lower[0]), "beide Kettenkarten müssen dieselbe Aussage tragen");
+
+      order.status = originalStatus;
+      order.statusLabel = originalStatusLabel;
+      order.revision += 1;
+      await ui.reloadSelectedOrder();
+      assert.strictEqual(ui.getState().overview.status, originalStatus, "der Auftragsstatus der Fixtur ist wieder zurückgestellt");
     },
   );
 

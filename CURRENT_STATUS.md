@@ -1,5 +1,53 @@
 # CURRENT STATUS
 
+## V8.10.2 – Auftrag und Agentenkette bei „Nächster Schritt“ klar trennen (lokal fertig, automatisiert getestet, isoliert browserabgenommen inklusive Responsive; nicht committet, `main` unverändert auf `94e39b9`)
+
+Paket C des Sprachkompasses. Die Oberfläche zeigt an zwei Stellen einen „nächsten Schritt“. Beide beantworten unterschiedliche Fragen, hießen aber fast gleich. V8.10.2 benennt deshalb jede der beiden Ebenen sichtbar beim Namen. Reine Umbenennung von drei Stringkonstanten – keine Logikänderung, keine entfernte Information.
+
+**Bisherige drei Überschriften**
+
+- Auftragsebene, Primäraktion: „Nächster Schritt:“
+- Kettenebene, Normalfall: „Nächster sicherer Schritt:“
+- Kettenebene, bewusst abgeschwächt: „Nächster erlaubter Schritt:“
+
+**Neue drei Überschriften**
+
+- Auftragsebene, Primäraktion: „Nächster Schritt im Auftrag:“
+- Kettenebene, Normalfall: „Nächster Schritt in der Agentenkette:“
+- Kettenebene, bewusst abgeschwächt: „Möglicher nächster Schritt in der Agentenkette:“
+
+**Zwei Informationsebenen bleiben zwei Informationsebenen**
+
+Die Auftragsebene beantwortet „was ist mit dem gesamten Auftrag als Nächstes sinnvoll?“, die Kettenebene „was ist innerhalb der Drei-Agenten-Kette als Nächstes möglich?“. Beide Aussagen bleiben vollständig erhalten, werden nicht zusammengeführt und können gleichzeitig sichtbar sein. Die Abschwächung „möglich“ statt schlicht „nächster“ trägt weiterhin dieselbe fachliche Bedeutung wie zuvor „erlaubt“ statt „sicher“: der Schritt ist zulässig, aber nicht der empfohlene Weg.
+
+**Keine Information entfernt, keine Logik geändert**
+
+`overview.nextStep`, `NEXT_STEP_BY_STATUS`, `openDecision`, die Primäraktionen, sämtliche Buttontexte und der V8.10.1-Folgehinweis sind wortgleich unverändert. Ebenso unverändert: Statusmaschine, Statuswerte und -übergänge, Revision, Freigabelogik, Kettenstatusmaschine, Freigabetokens, Agentenläufe, Datenbank, Migrationen, Routen, API, Audit sowie `deriveActiveRun`, `findLatestChain`, `hasServerRunningState`, `waitingStepNumberForChain` und `nextChainStepHint`. Welcher Zweig die normale und welcher die abgeschwächte Variante wählt, ist unverändert.
+
+**Strukturschutz bleibt unverändert scharf**
+
+Label und Text bleiben strukturell getrennt: die Überschrift wird ausschließlich beim Zusammenbau von `.pilot-chain-status-card__next` gesetzt, kein Textzweig schreibt sie in den eigenen Text. Die Auftragsebene setzt ihre Überschrift analog aus einer einzigen Konstante (`ORDER_NEXT_STEP_LABEL`) statt aus vier Literalen. Es gibt keine Laufzeitreparatur per `replace()`, `startsWith()`, `indexOf()` oder Stringabschneiden. Die bestehenden Prüfungen DARST-Q1 bis DARST-Q6, DARST-1./2./3./6./9., DARST-4./5. und TP2-UI-8 wurden nur in ihren erwarteten Wortlauten nachgezogen, nicht gelockert.
+
+**Geänderte Dateien**
+
+Produktiv genau eine Datei: `pilot-work-order-ui.js`. Tests: `pilot-work-order-ui.test.js`, `pilot-agent-execution-chain-ui.test.js`. Dazu diese Dokumentation.
+
+**Testergebnisse**
+
+`node --check` auf allen drei geänderten JS-Dateien fehlerfrei. Einzeltests: `pilot-work-order-ui.test.js` 61 Prüfpunkte (vorher 59), `pilot-agent-execution-chain-ui.test.js` 101 Prüfpunkte (vorher 98), `pilot-work-order-command-center-ui.test.js` 110 Prüfpunkte unverändert. `npm run check` Exit 0, `git diff --check` Exit 0, `npm test` Exit 0 mit 3600 bestandenen Prüfpunkten (vorher 3595). Kein sandboxbedingter 503-Fall aufgetreten.
+
+**Additive Prüfungen**
+
+Fünf neue Prüfpunkte decken ab: exakter Wortlaut aller drei Überschriften, vollständiges Verschwinden der beiden alten Überschriften auch aus Kommentaren, gleichzeitige Sichtbarkeit beider Ebenen mit unterschiedlichen Texten, `overview.nextStep` gelangt weiterhin nicht in die Kettenkarte, genau eine Kettenstatuskarte je Ausgabecontainer, gleiche Aussage in beiden Kettenkarten, kein doppeltes Präfix sowie kein neuer Fetch, Zustand, Eventlistener oder Route. Die Kettenprüfungen laufen am echten gerenderten HTML über alle Kettenzustände der Fixtur, einschließlich laufender Schritte, abgeschlossener Kette und Fehlerzustand.
+
+**Browserabnahme**
+
+Isolierte Instanz auf eigenem freien Port mit temporärem HOME, temporärem `KUZ_DATA_DIR` und eigener temporärer Datenbank; Port 4173 unangetastet. Vorbereitet und geprüft wurden: Auftrag in Ausführung ohne Kette, in Ausführung mit vorbereiteter Kette, mit freigegebenem Kettenschritt und zurückgegeben mit historischer Kette. Beide Ebenen waren jeweils gleichzeitig sichtbar und verständlich, beide Kettenstatuskarten trugen messbar dieselbe Aussage, keine alte Überschrift, kein doppeltes Präfix, keine verlorene Information, keine neue technische Sprache, keine neue Karte, keine JS-Fehler.
+
+Ein laufender Kettenschritt und eine vollständig abgeschlossene Kette erfordern echte Codex-Läufe und wurden deshalb nicht im Browser, sondern am echten Renderer im automatisierten Test geprüft – dort inklusive des exakten Wortlauts der abgeschwächten Variante.
+
+Responsive geprüft bei 1440 px, 820 px, 390 px sowie einem 200-Prozent-Zoom-Äquivalent (720 px bei `deviceScaleFactor` 2). In allen vier Lagen `scrollWidth` gleich `clientWidth`, also kein horizontaler Überlauf; die längeren neuen Überschriften brechen sauber um, nichts wird abgeschnitten oder überlappt. Keine visuelle Regression.
+
 ## V8.10.1 – BLOCKED-Aktion verständlich benennen (lokal fertig, automatisiert getestet, isoliert browserabgenommen inklusive Responsive-Nachprüfung; committet auf dem Arbeitsbranch `cursor/v8-10-1-blocked-aktion-benennen` als `7476c5b`, nicht gepusht, `main` unverändert auf `a4fe28c`)
 
 Paket B des Sprachkompasses. Es macht ausschließlich die bereits bestehende BLOCKED-Aktion verständlich. Keine Workflowänderung, keine Statusänderung, keine neue Funktion.
