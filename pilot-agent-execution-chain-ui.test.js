@@ -1647,6 +1647,41 @@ async function run() {
     assert.match(details, /Code: STEP_EXECUTION_FAILED/, "unbekannte Rohwerte fallen sicher auf den benannten Sammelcode zurück");
   });
 
+  // V8.10.3 (A3): die Kettenfehlerkarte (V7.9.4-4b) schützte bereits gegen
+  // unbekannte Rohwerte – die Schrittkarte selbst gab step.failureReasonCode
+  // dagegen unverändert in Klammern aus. Beide Renderpfade müssen dieselbe
+  // bestehende Normalisierung verwenden.
+  await check("V8.10.3-A3: ein unbekannter step.failureReasonCode erscheint auch in der Schrittkarte nicht mehr roh, sondern als benannter Rückfall UNKNOWN", async () => {
+    const { chain, step } = v794ChainAndStep();
+    step.stepStatus = "FAILED";
+    step.failureReasonCode = "STEP_GARBAGE_CODE_V8103";
+    step.executionRunId = null;
+    chain.chainStatus = "FAILED";
+    chain.blockReason = null;
+    chain.revision += 1;
+    await ui.reloadSelectedOrder();
+    const diagnostics = diagnosticsHtml();
+    assert.doesNotMatch(diagnostics, /STEP_GARBAGE_CODE_V8103/, "ein unbekannter interner Rohwert darf nirgends sichtbar werden");
+    assert.match(diagnostics, /Dieser Kettenschritt ist fehlgeschlagen \(UNKNOWN\)/, "die bestehende fachliche Aussage bleibt erhalten");
+    assert.match(
+      diagnostics,
+      /Die Kette wird dadurch nicht automatisch fortgesetzt\./,
+      "die bestehende Kettenaussage bleibt unverändert erhalten",
+    );
+  });
+
+  await check("V8.10.3-A3b: ein bekannter step.failureReasonCode bleibt in der Schrittkarte unverändert sichtbar", async () => {
+    const { chain, step } = v794ChainAndStep();
+    step.stepStatus = "FAILED";
+    step.failureReasonCode = "STEP_EXECUTION_FAILED";
+    step.executionRunId = null;
+    chain.chainStatus = "FAILED";
+    chain.blockReason = null;
+    chain.revision += 1;
+    await ui.reloadSelectedOrder();
+    assert.match(diagnosticsHtml(), /Dieser Kettenschritt ist fehlgeschlagen \(STEP_EXECUTION_FAILED\)/);
+  });
+
   await check("V7.9.4-5: fehlender executionRun bzw. fehlende executionRunId führt kontrolliert zum Sammelcode, ohne Absturz", async () => {
     const { chain, step } = v794ChainAndStep();
     step.stepStatus = "FAILED";

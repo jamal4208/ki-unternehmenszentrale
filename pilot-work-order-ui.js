@@ -3788,9 +3788,16 @@
         "</details>";
     }
     if (step.stepStatus === "FAILED") {
+      // V8.10.3 (A3): derselbe Wert läuft in der Kettenstatuskarte bereits
+      // durch normalizeFailureReasonCode und kann dort niemals roh
+      // erscheinen; hier wurde er bisher unverändert durchgereicht. Ein dem
+      // UI unbekannter Server-Code wird jetzt auch an dieser Stelle
+      // kontrolliert auf den benannten Rückfall UNKNOWN abgebildet. Die
+      // Bedingung selbst bleibt unverändert: ohne failureReasonCode
+      // erscheint wie bisher gar keine Klammer.
       html +=
         '<br><span class="pilot-work-order-action-error">Dieser Kettenschritt ist fehlgeschlagen' +
-        (step.failureReasonCode ? " (" + escapeHtml(step.failureReasonCode) + ")" : "") +
+        (step.failureReasonCode ? " (" + escapeHtml(normalizeFailureReasonCode(step.failureReasonCode, null)) + ")" : "") +
         ". Die Kette wird dadurch nicht automatisch fortgesetzt.</span>";
     }
     html += "</li>";
@@ -3976,8 +3983,22 @@
     if (run.status === "SUCCEEDED" && run.resultRawText) {
       lines.push("<br>Ergebnis:<br><pre class=\"pilot-agent-execution-result\">" + escapeHtml(run.resultRawText) + "</pre>");
     }
-    if (run.status === "FAILED" && run.errorMessage) {
-      lines.push('<br><span class="pilot-work-order-action-error">Technischer Fehler: ' + escapeHtml(run.errorMessage) + "</span>");
+    // V8.10.3 (A1): run.errorMessage stammt aus derselben Quelle wie im
+    // Kettenpfad (pilot-agent-execution-service.js#persistFailedAgentExecutionRun,
+    // bis zu 2000 Zeichen) und konnte hier bisher als einziger Renderpfad
+    // ungefiltert erscheinen – einschließlich absoluter Systempfade aus
+    // Node-Fehlermeldungen (z. B. pilot-agent-codex-runner.js#710
+    // "Isolierter Read-Only-Workspace konnte nicht erstellt werden: …").
+    // Es gilt jetzt exakt dieselbe, bereits bestehende Regel wie in
+    // buildChainFailureTechnicalDetailsHtml – keine zweite Sanitizing-
+    // Funktion, keine eigene Musterliste. sanitizeErrorMessageForDisplay
+    // liefert für eine fehlende/leere Meldung null und ersetzt damit die
+    // bisherige Wahrheitsprüfung unverändert.
+    if (run.status === "FAILED") {
+      var sanitizedRunErrorMessage = sanitizeErrorMessageForDisplay(run.errorMessage);
+      if (sanitizedRunErrorMessage) {
+        lines.push('<br><span class="pilot-work-order-action-error">Technischer Fehler: ' + escapeHtml(sanitizedRunErrorMessage) + "</span>");
+      }
     }
     // Phase 7, Korrekturlauf ("Codex-Fehlerdiagnose gezielt verbessern"):
     // zusätzlich zum bereits oben angezeigten errorMessage-Fließtext werden
@@ -3995,8 +4016,14 @@
       if (diag.signal) {
         diagFacts.push("Signal: " + escapeHtml(String(diag.signal)));
       }
+      // V8.10.3 (A2): bekannte Codes bleiben unverändert diagnostisch
+      // sichtbar; ein dem UI unbekannter Rohwert wird über die bereits
+      // bestehende geschlossene Allowlist (CHAIN_STATUS_FAILURE_COPY) auf
+      // UNKNOWN abgebildet, statt als beliebiger interner String zu
+      // erscheinen. Die Bedingung bleibt unverändert: ohne reasonCode
+      // entsteht wie bisher keine Zeile.
       if (diag.reasonCode) {
-        diagFacts.push("Ursache: " + escapeHtml(String(diag.reasonCode)));
+        diagFacts.push("Ursache: " + escapeHtml(normalizeFailureReasonCode(diag.reasonCode, null)));
       }
       if (diagFacts.length > 0) {
         lines.push("<br>" + diagFacts.join(" \u00b7 "));
@@ -4012,10 +4039,18 @@
     // getrennt vom Runstatus dargestellt. Ein Handoff-Fehlschlag ist NIEMALS
     // ein technischer Runner-Fehler – der Runner-Erfolg (Status oben,
     // Ergebnis) bleibt davon unberührt sichtbar.
+    //
+    // V8.10.3 (A4): die fachliche Aussage "Rollenübergabe fehlgeschlagen"
+    // und die Trennung vom Runner-Erfolg bleiben unverändert sichtbar.
+    // Ausschließlich die technische Zusatzmeldung läuft jetzt durch
+    // dieselbe bestehende Regel wie A1; der bisherige Ersatztext
+    // "unbekannter Grund" gilt unverändert, wenn keine anzeigbare Meldung
+    // vorliegt.
     if (run.status === "SUCCEEDED" && run.handoffStatus === "FAILED") {
+      var sanitizedHandoffErrorMessage = sanitizeErrorMessageForDisplay(run.handoffErrorMessage);
       lines.push(
         '<br><span class="pilot-work-order-action-error">Rollen\u00fcbergabe fehlgeschlagen (technischer Runner-Lauf bleibt erfolgreich): ' +
-          escapeHtml(run.handoffErrorMessage || "unbekannter Grund") +
+          escapeHtml(sanitizedHandoffErrorMessage || "unbekannter Grund") +
           "</span>",
       );
     }

@@ -3153,6 +3153,208 @@ async function run() {
     });
   });
 
+  // -------------------------------------------------------------------
+  // V8.10.3 ("technische Fehlermeldungen und Fehlercodes sicher
+  // darstellen"): der Direktlaufpfad (renderAgentExecutionRun) war der
+  // einzige Renderpfad, der run.errorMessage, run.handoffErrorMessage und
+  // diagnostics.reasonCode ungefiltert ausgab – die bereits bestehende
+  // Regel (sanitizeErrorMessageForDisplay/UNSAFE_ERROR_MESSAGE_PATTERNS/
+  // normalizeFailureReasonCode) galt bisher ausschließlich im Kettenpfad.
+  // Die folgenden Prüfpunkte sichern genau diesen Pfad ab. Ausschließlich
+  // synthetische Testwerte, niemals ein echtes Secret.
+  // -------------------------------------------------------------------
+
+  const V8103_UNSAFE_FALLBACK_TEXT =
+    "Eine zusätzliche technische Meldung liegt vor, wurde aus Sicherheitsgründen jedoch nicht vollständig angezeigt.";
+  const V8103_DIAGNOSTIC_NOTICE = "Sichere technische Diagnose – möglicherweise gekürzt und redigiert.";
+  let v8103OrderCounter = 0;
+
+  // Erzeugt genau einen Direktlauf (KEINE der drei kettenverwalteten
+  // presetIds, siehe pilot-work-order-ui.js#CHAIN_MANAGED_PRESET_IDS),
+  // damit dieser Lauf tatsächlich renderAgentExecutionRun im
+  // Diagnosebereich trifft und nicht in die Kettenansicht ausgefiltert wird.
+  async function v8103DiagnosticsHtml(runOverrides) {
+    v8103OrderCounter += 1;
+    const orderId = `pilot-order-test-v8103-${v8103OrderCounter}`;
+    setRawOrder(orderId, {
+      title: `V8.10.3-Testauftrag ${v8103OrderCounter}`,
+      status: "IN_EXECUTION",
+      statusLabel: STATUS_LABELS.IN_EXECUTION,
+      revision: 4,
+      agentChains: [],
+      agentExecutionRuns: [
+        Object.assign(
+          {
+            id: `pilot-agent-run-v8103-${v8103OrderCounter}`,
+            presetId: "analyze-pilot-structure",
+            pilotRole: "RECHERCHE_ANALYSE",
+            pilotRoleLabel: "Recherche-/Analyse-Agent",
+            taskTitle: "Technische Pilotstruktur analysieren",
+            runnerId: "local-read-only-repo-analysis",
+            runnerLabel: "Lokaler deterministischer Read-Only-Repository-Analyse-Runner",
+            requestedRunnerKind: "LOCAL_DETERMINISTIC_READ_ONLY",
+            actualRunnerKind: "LOCAL_DETERMINISTIC_READ_ONLY",
+            aiExecuted: false,
+            fallbackUsed: false,
+            status: "FAILED",
+            resultRawText: null,
+            errorMessage: null,
+            handoffStatus: "PENDING",
+            handoffErrorMessage: null,
+            startedAt: new Date().toISOString(),
+            finishedAt: new Date().toISOString(),
+          },
+          runOverrides || {},
+        ),
+      ],
+    });
+    await ui.selectOrder(orderId);
+    return domElements["pilot-work-order-diagnostics-output"].innerHTML;
+  }
+
+  await check("V8.10.3-A1a: Pfad- und Tokenmuster aus run.errorMessage erscheinen im Direktlaufpfad nicht mehr roh, sondern als bestehender Sicherheitshinweis", async () => {
+    const diagnostics = await v8103DiagnosticsHtml({
+      errorMessage: "Fehler bei /Users/jamal/geheim/config mit TOKEN=abcdefghijklmnopqrst",
+    });
+    assert.doesNotMatch(diagnostics, /\/Users\/jamal/, "ein absoluter Systempfad darf nicht sichtbar werden");
+    assert.doesNotMatch(diagnostics, /TOKEN=abcdefghijklmnopqrst/, "ein Tokenmuster darf nicht sichtbar werden");
+    assert.ok(diagnostics.includes(V8103_UNSAFE_FALLBACK_TEXT), "der bestehende Ersatzhinweis muss erscheinen");
+    assert.match(diagnostics, /Technischer Fehler:/, "die fachliche Aussage bleibt erhalten");
+    assert.match(diagnostics, /Fehlgeschlagen/, "der Fehlerzustand des Laufs bleibt sichtbar");
+  });
+
+  await check("V8.10.3-A1b: eine kurze, unauffällige Fehlermeldung bleibt vollständig sichtbar und wird unverändert HTML-escaped", async () => {
+    const diagnostics = await v8103DiagnosticsHtml({
+      errorMessage: "Kurzer Hinweis <script>alert(1)</script> ohne sensible Inhalte.",
+    });
+    assert.doesNotMatch(diagnostics, /<script>alert\(1\)<\/script>/, "kein ausführbares Markup");
+    assert.match(
+      diagnostics,
+      /Technischer Fehler: Kurzer Hinweis &lt;script&gt;alert\(1\)&lt;\/script&gt; ohne sensible Inhalte\./,
+      "eine sichere Meldung darf nicht unnötig unterdrückt werden",
+    );
+    assert.ok(!diagnostics.includes(V8103_UNSAFE_FALLBACK_TEXT), "für eine sichere Meldung darf kein Ersatzhinweis erscheinen");
+  });
+
+  await check("V8.10.3-A1c: eine Meldung oberhalb der bestehenden Längengrenze wird nicht vollständig gerendert", async () => {
+    const longMessage = `Sehr lange, an sich unauffällige Testmeldung. ${"Fuellsatz zur Testlaenge. ".repeat(30)}`;
+    assert.ok(longMessage.length > 300, "die Testmeldung muss die bestehende Grenze tatsächlich überschreiten");
+    const diagnostics = await v8103DiagnosticsHtml({ errorMessage: longMessage });
+    assert.ok(!diagnostics.includes(longMessage.trim()), "die vollständige Rohmeldung darf nicht erscheinen");
+    assert.ok(diagnostics.includes(V8103_UNSAFE_FALLBACK_TEXT), "stattdessen erscheint der bestehende Ersatzhinweis");
+  });
+
+  await check("V8.10.3-A1d: eine fehlende Fehlermeldung erzeugt wie bisher keine leere Fehlerzeile", async () => {
+    const diagnostics = await v8103DiagnosticsHtml({ errorMessage: null });
+    assert.doesNotMatch(diagnostics, /Technischer Fehler:/, "ohne Meldung darf keine Zeile entstehen");
+    assert.match(diagnostics, /Fehlgeschlagen/, "der Laufstatus bleibt unabhängig davon sichtbar");
+  });
+
+  await check("V8.10.3-A2a: ein bekannter reasonCode bleibt diagnostisch sichtbar; Exit-Code, Signal und Diagnosehinweis bleiben unverändert erhalten", async () => {
+    const diagnostics = await v8103DiagnosticsHtml({
+      errorMessage: "Der Codex-Prozess wurde mit einem Fehler beendet.",
+      resultSummary: {
+        diagnostics: {
+          exitCode: 1,
+          signal: "SIGTERM",
+          reasonCode: "CODEX_PROCESS_EXIT_NONZERO",
+          stderrSample: null,
+          stdoutSample: null,
+          timedOut: false,
+          cancelled: false,
+        },
+        diagnosticNotice: V8103_DIAGNOSTIC_NOTICE,
+      },
+    });
+    assert.match(diagnostics, /Exit-Code: 1/);
+    assert.match(diagnostics, /Signal: SIGTERM/);
+    assert.match(diagnostics, /Ursache: CODEX_PROCESS_EXIT_NONZERO/);
+    assert.ok(diagnostics.includes(V8103_DIAGNOSTIC_NOTICE), "der bestehende Diagnosehinweis bleibt erhalten");
+  });
+
+  await check("V8.10.3-A2b: ein dem UI unbekannter reasonCode erscheint nicht mehr roh, sondern als benannter Rückfall UNKNOWN", async () => {
+    const diagnostics = await v8103DiagnosticsHtml({
+      errorMessage: "Der Lauf ist fehlgeschlagen.",
+      resultSummary: {
+        diagnostics: {
+          exitCode: 3,
+          signal: null,
+          reasonCode: "VOELLIG_UNBEKANNTER_CODE",
+          stderrSample: null,
+          stdoutSample: null,
+        },
+        diagnosticNotice: V8103_DIAGNOSTIC_NOTICE,
+      },
+    });
+    assert.doesNotMatch(diagnostics, /VOELLIG_UNBEKANNTER_CODE/, "ein unbekannter interner Rohwert darf nicht erscheinen");
+    assert.match(diagnostics, /Ursache: UNKNOWN/, "stattdessen erscheint der bereits bestehende, benannte Rückfall");
+    assert.match(diagnostics, /Exit-Code: 3/, "der Exit-Code bleibt davon unberührt sichtbar");
+  });
+
+  await check("V8.10.3-A4a: eine unsichere Zusatzmeldung einer fehlgeschlagenen Rollenübergabe wird sicher dargestellt, die fachliche Aussage bleibt sichtbar", async () => {
+    const diagnostics = await v8103DiagnosticsHtml({
+      status: "SUCCEEDED",
+      resultRawText: "# Bestandsaufnahme\n\nBeobachtung 1: Testergebnis.",
+      errorMessage: null,
+      handoffStatus: "FAILED",
+      handoffErrorMessage: "Übergabe scheiterte in /Users/jamal/geheim/handoff.json mit TOKEN=zyxwvutsrqponmlkjihg",
+    });
+    assert.doesNotMatch(diagnostics, /\/Users\/jamal/);
+    assert.doesNotMatch(diagnostics, /TOKEN=zyxwvutsrqponmlkjihg/);
+    assert.match(
+      diagnostics,
+      /Rollenübergabe fehlgeschlagen \(technischer Runner-Lauf bleibt erfolgreich\)/,
+      "die fachliche Aussage und die Trennung vom Runner-Erfolg bleiben erhalten",
+    );
+    assert.ok(diagnostics.includes(V8103_UNSAFE_FALLBACK_TEXT), "der bestehende Ersatzhinweis muss erscheinen");
+    assert.match(diagnostics, /Erfolgreich abgeschlossen/, "der technische Runner-Erfolg bleibt unverändert sichtbar");
+  });
+
+  await check("V8.10.3-A4b: ohne anzeigbare Zusatzmeldung bleibt der bestehende Ersatztext „unbekannter Grund“ unverändert", async () => {
+    const diagnostics = await v8103DiagnosticsHtml({
+      status: "SUCCEEDED",
+      resultRawText: "# Bestandsaufnahme\n\nBeobachtung 1: Testergebnis.",
+      errorMessage: null,
+      handoffStatus: "FAILED",
+      handoffErrorMessage: null,
+    });
+    assert.match(diagnostics, /Rollenübergabe fehlgeschlagen \(technischer Runner-Lauf bleibt erfolgreich\): unbekannter Grund/);
+  });
+
+  await check("V8.10.3-I: stderrSample und stdoutSample erscheinen auch im Diagnosebereich niemals als sichtbarer Rohtext", async () => {
+    const diagnostics = await v8103DiagnosticsHtml({
+      errorMessage: "Der Lauf ist fehlgeschlagen.",
+      resultSummary: {
+        diagnostics: {
+          exitCode: 1,
+          signal: null,
+          reasonCode: "CODEX_PROCESS_EXIT_NONZERO",
+          stderrSample: "GEHEIM_STDERR_V8103 mit TOKEN=qqqqwwwweeeerrrrtttt",
+          stdoutSample: "GEHEIM_STDOUT_V8103_DARF_NIE_ERSCHEINEN",
+        },
+        diagnosticNotice: V8103_DIAGNOSTIC_NOTICE,
+      },
+    });
+    assert.doesNotMatch(diagnostics, /GEHEIM_STDERR_V8103/);
+    assert.doesNotMatch(diagnostics, /GEHEIM_STDOUT_V8103_DARF_NIE_ERSCHEINEN/);
+    assert.doesNotMatch(diagnostics, /TOKEN=qqqqwwwweeeerrrrtttt/);
+  });
+
+  await check("V8.10.3-Bestandsschutz: Lauf-, Runner-, Modell- und Zeitangaben eines fehlgeschlagenen Direktlaufs bleiben unverändert erhalten", async () => {
+    const diagnostics = await v8103DiagnosticsHtml({
+      errorMessage: "Der Lauf ist fehlgeschlagen.",
+      modelLabel: "Codex (ChatGPT)",
+      runnerVersion: "codex-cli 0.999.0-test",
+    });
+    assert.match(diagnostics, /Angeforderter Runner: LOCAL_DETERMINISTIC_READ_ONLY/);
+    assert.match(diagnostics, /Tatsächlicher Runner: LOCAL_DETERMINISTIC_READ_ONLY/);
+    assert.match(diagnostics, /Runner: Lokaler deterministischer Read-Only-Repository-Analyse-Runner/);
+    assert.match(diagnostics, /Modell: Codex \(ChatGPT\) \(codex-cli 0\.999\.0-test\)/);
+    assert.match(diagnostics, /KI ausgeführt: nein/);
+    assert.match(diagnostics, /Gestartet: /);
+    assert.match(diagnostics, /Beendet: /);
+  });
+
   console.log(`pilot-work-order-command-center-ui.test.js: ${passed} Prüfpunkte erfolgreich`);
 }
 

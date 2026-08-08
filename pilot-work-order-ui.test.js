@@ -736,4 +736,42 @@ check("V8.10.2 Ebenentrennung: die Auftragsüberschrift steht ausschließlich in
   );
 });
 
+// ---------------------------------------------------------------------------
+// V8.10.3 ("technische Fehlermeldungen und Fehlercodes sicher darstellen"):
+// die bereits für Kettenfehler bestehende Regel gilt jetzt auch im
+// Direktlauf-/Übergabepfad. Entscheidend ist, dass dabei GENAU EINE
+// Sicherheitsregel existiert – die folgenden Prüfungen halten fest, dass
+// keine zweite Sanitizing-Funktion und keine zweite Musterliste entstanden ist.
+// ---------------------------------------------------------------------------
+
+check("V8.10.3-J: es gibt weiterhin genau eine Sanitizing-Funktion, eine Musterliste, einen Ersatztext und eine Längengrenze", () => {
+  assert.strictEqual((js.match(/function sanitizeErrorMessageForDisplay\(/g) || []).length, 1);
+  assert.strictEqual((js.match(/var UNSAFE_ERROR_MESSAGE_PATTERNS = /g) || []).length, 1);
+  assert.strictEqual((js.match(/var UNSAFE_ERROR_MESSAGE_FALLBACK_TEXT =/g) || []).length, 1);
+  assert.strictEqual((js.match(/var MAX_SAFE_ERROR_MESSAGE_CHARS = /g) || []).length, 1);
+  assert.strictEqual((js.match(/function normalizeFailureReasonCode\(/g) || []).length, 1);
+});
+
+check("V8.10.3-A1/A4: run.errorMessage und run.handoffErrorMessage werden nirgends mehr ungefiltert gerendert", () => {
+  assert.doesNotMatch(js, /escapeHtml\(run\.errorMessage\)/, "die Rohmeldung darf nicht direkt escaped ausgegeben werden");
+  assert.doesNotMatch(js, /escapeHtml\(run\.handoffErrorMessage/, "die Rohmeldung darf nicht direkt escaped ausgegeben werden");
+  assert.match(js, /sanitizeErrorMessageForDisplay\(run\.errorMessage\)/);
+  assert.match(js, /sanitizeErrorMessageForDisplay\(run\.handoffErrorMessage\)/);
+});
+
+check("V8.10.3-A2/A3: diag.reasonCode und step.failureReasonCode laufen durch die bestehende Failure-Reason-Code-Normalisierung", () => {
+  assert.doesNotMatch(js, /escapeHtml\(String\(diag\.reasonCode\)\)/, "ein unbekannter Rohwert darf nicht durchgereicht werden");
+  assert.doesNotMatch(js, /escapeHtml\(step\.failureReasonCode\)/, "ein unbekannter Rohwert darf nicht durchgereicht werden");
+  assert.match(js, /normalizeFailureReasonCode\(diag\.reasonCode, null\)/);
+  assert.match(js, /normalizeFailureReasonCode\(step\.failureReasonCode, null\)/);
+});
+
+check("V8.10.3-Bestandsschutz: Exit-Code, Signal, Diagnosehinweis und die bestehenden Runner-/Modellangaben bleiben unverändert im Quelltext", () => {
+  assert.match(js, /"Exit-Code: " \+ escapeHtml\(String\(diag\.exitCode\)\)/);
+  assert.match(js, /"Signal: " \+ escapeHtml\(String\(diag\.signal\)\)/);
+  assert.match(js, /run\.resultSummary\.diagnosticNotice/);
+  assert.match(js, /"<br>Runner: " \+ escapeHtml\(run\.runnerLabel \|\| run\.runnerId\)/);
+  assert.match(js, /"<br>Modell: " \+ escapeHtml\(run\.modelLabel\)/);
+});
+
 console.log(`pilot-work-order-ui.test.js: ${passed} Prüfpunkte erfolgreich`);
